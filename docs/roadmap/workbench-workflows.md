@@ -31,7 +31,7 @@ Two specific confusions are worth naming:
 | Group | The question it answers | Pages |
 |---|---|---|
 | **Observe** | What is the truck doing right now? | Charts, Trip, Alarms, Builder |
-| **Engine Tuning** | How is it fuelled and sparked, and what should change? | Logging, Logs, Analysis, ROM Maps, Calibration — see below |
+| **Engine Tuning** | How is it fuelled and sparked, and what should change? | Logging, Logs, Analysis, ROM Library, Calibration, ROM Editor (it absorbed ROM Maps, 2026-10-26) — see below |
 | **Diagnose** | Is something wrong? | Anomalies, Trouble Codes, Monitors, Drift Trends, TPMS, LLM Assist |
 | **Model** | How are the detectors doing? | Overview, Behavior, Training, **Alert Thresholds**, Drift / Health, Dataset Health |
 | **System** | Plumbing and reusable configuration | Data Sources, Sessions, Export, Custom PIDs, Vehicle Profiles, Capture Profiles, Power / UPS, Control Plane, System |
@@ -62,7 +62,7 @@ One strip across the top of every Engine Tuning page:
   `0x21 10` returns the calibration id as ASCII (`1ZS44A00000`). Shown beside
   the registry's newest flash, with a mismatch called out.
 - **Selected log** and **loaded ROM** persist across the group's pages, so
-  Logs → Analysis → ROM Maps keeps the same subject without re-picking it.
+  Logs → Analysis → ROM Editor keeps the same subject without re-picking it.
 - **Readiness lives here as status, not as a gate**: UPS SOC, storage
   headroom, memory-channel verify results, capture-profile rates
   achieved. Red items say what fixes them. Nothing blocks navigation.
@@ -102,7 +102,10 @@ gates removed everything" and "the channel was never captured" are different
 answers.
 
 **ROM Maps** — load a ROM, view its tables, and watch the live cell trace. This
-page exists today under Live › ROM Maps and moves here. Two changes:
+page existed under Live › ROM Maps and moved here. *Merged into the ROM Editor on
+2026-10-26* (one page views and edits ROM tables; the trace and coverage below
+are the editor's Live overlay, and `#wb/tuning-rom-maps` opens the editor). Two
+changes:
 
 - The trace is currently an *inferred geometric lookup* from RPM and BFS. The
   ECM's own coordinates are now readable — `ECM_FUEL_TARGET_MAP_X_TRACE`,

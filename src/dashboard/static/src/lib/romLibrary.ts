@@ -203,7 +203,7 @@ export function refusalText(err: unknown): string {
 }
 
 /** The on-screen warning for a table whose axes a tuning editor labels
- *  differently from the ECM's code. Shared by the ROM Library and ROM Maps,
+ *  differently from the ECM's code. Shared by the ROM Library and the ROM Editor,
  *  so both say the same thing: whether a cell may be matched by position,
  *  and how to read the editor's labels. */
 export function describeEditorDisagreement(d: RomEditorDisagreement): string {

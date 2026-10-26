@@ -1,13 +1,22 @@
-import { cssVar } from "../lib/chartTheme";
 import { TableScroll } from "../components/TableScroll";
 import { mapColor } from "../lib/romMaps";
 import type { RomTable } from "../lib/romMaps";
-import { coverageClass, coverageColor, THIN_COVERAGE_SAMPLES } from "../lib/romTrace";
 import type { CellPosition, CoverageGrid } from "../lib/romTrace";
+import {
+  CoverageLegend,
+  HeatLegend,
+  OverlayMarks,
+  inkClass,
+  overlayLabel,
+  overlayState,
+  overlayStyle,
+  overlayTitle,
+} from "./cellOverlay";
 
-/** One ROM table as a grid (R08.8, moved out of RomMapsPanel): values or
- *  coverage shading, the inferred cell (solid/dashed outlines) and the ECM
- *  cell (double ring). */
+/** One ROM table as a grid (R08.8): values or coverage shading, the inferred
+ *  cell (solid/dashed outlines) and the ECM cell (double ring). The ROM
+ *  Library draws Fuel Targets with it; the ROM Editor's `CellGrid` carries the
+ *  same overlay marks (`cellOverlay`) on an editable grid. */
 export function MapTable({
   table,
   position,
@@ -74,53 +83,25 @@ export function MapTable({
                       {table.y_axis[r]}
                     </th>
                     {row.map((value, c) => {
-                      const nearby = !!position?.rows.includes(r) && !!position.columns.includes(c);
-                      const primary = position?.row === r && position.column === c;
-                      const ecmCell = ecm?.row === r && ecm.column === c;
-                      const count = coverage?.[r]?.[c];
-                      const covered = count === undefined ? null : coverageClass(count);
-                      const coverageText =
-                        count === undefined
-                          ? ""
-                          : `, ${count} samples${dwell ? `, ${(dwell[r]?.[c] ?? 0).toFixed(1)} s dwell` : ""}${covered === "unvisited" ? " (never visited)" : covered === "thin" ? " (thin)" : ""}`;
+                      const state = overlayState({ position, ecm, coverage, dwell }, r, c);
+                      const style = overlayStyle(state, {
+                        heat: mapColor(value, min, max),
+                        maxCount,
+                      });
                       return (
                         <td
                           key={c}
-                          data-trace={primary ? "nearest" : nearby ? "neighbor" : undefined}
-                          data-ecm={ecmCell ? "cell" : undefined}
-                          data-coverage={covered ?? undefined}
-                          aria-label={`${table.y_axis[r]} RPM, ${table.x_axis[c]} ${table.x_unit}: ${value.toFixed(2)} ${table.unit}${primary ? ", nearest inferred cell" : nearby ? ", surrounding cell" : ""}${ecmCell ? ", ECM cell" : ""}${coverageText}`}
-                          title={`Raw ${table.raw[r][c]} · ${value.toFixed(6)} ${table.unit}${count === undefined ? "" : ` · ${count} samples${dwell ? ` · ${(dwell[r]?.[c] ?? 0).toFixed(1)} s` : ""}`}`}
-                          className={`relative rounded text-bg ${large ? "min-w-24 p-5" : "min-w-16 p-3"}`}
-                          style={{
-                            backgroundColor:
-                              count === undefined
-                                ? mapColor(value, min, max)
-                                : coverageColor(count, maxCount),
-                            backgroundImage:
-                              covered === "unvisited"
-                                ? "repeating-linear-gradient(45deg, transparent 0 6px, rgba(100,116,139,0.25) 6px 8px)"
-                                : undefined,
-                            outline: nearby
-                              ? `${primary ? 3 : 2}px ${primary ? "solid" : "dashed"} ${cssVar("bg")}`
-                              : undefined,
-                            outlineOffset: -3,
-                            boxShadow: ecmCell
-                              ? `inset 0 0 0 4px ${cssVar("series-5")}, inset 0 0 0 6px ${cssVar("fg")}`
-                              : undefined,
-                            fontWeight: primary || ecmCell ? 800 : 500,
-                          }}
+                          data-trace={
+                            state.primary ? "nearest" : state.nearby ? "neighbor" : undefined
+                          }
+                          data-ecm={state.ecmCell ? "cell" : undefined}
+                          data-coverage={state.covered ?? undefined}
+                          aria-label={`${table.y_axis[r]} RPM, ${table.x_axis[c]} ${table.x_unit}: ${value.toFixed(2)} ${table.unit}${overlayLabel(state)}`}
+                          title={`Raw ${table.raw[r][c]} · ${value.toFixed(6)} ${table.unit}${overlayTitle(state)}`}
+                          className={`relative rounded ${inkClass(style.backgroundColor)} ${large ? "min-w-24 p-5" : "min-w-16 p-3"}`}
+                          style={style}
                         >
-                          {primary && (
-                            <span aria-hidden="true" className="absolute left-1 top-0 text-[10px]">
-                              ●
-                            </span>
-                          )}
-                          {ecmCell && (
-                            <span aria-hidden="true" className="absolute right-1 top-0 text-[10px]">
-                              ECM
-                            </span>
-                          )}
+                          <OverlayMarks state={state} />
                           {value.toFixed(2)}
                         </td>
                       );
@@ -131,57 +112,9 @@ export function MapTable({
             </table>
           </TableScroll>
           {coverage ? (
-            <div className="flex flex-wrap items-center gap-3 text-xs text-fg-dim">
-              <span className="inline-flex items-center gap-1">
-                <span
-                  aria-hidden="true"
-                  className="inline-block h-3 w-5 rounded"
-                  style={{
-                    backgroundColor: coverageColor(0, maxCount),
-                    backgroundImage:
-                      "repeating-linear-gradient(45deg, transparent 0 3px, rgba(100,116,139,0.35) 3px 4px)",
-                  }}
-                />
-                never visited
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span
-                  aria-hidden="true"
-                  className="inline-block h-3 w-5 rounded"
-                  style={{ backgroundColor: coverageColor(1, maxCount) }}
-                />
-                thin (&lt; {THIN_COVERAGE_SAMPLES} samples)
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span
-                  aria-hidden="true"
-                  className="inline-block h-3 w-5 rounded"
-                  style={{
-                    backgroundColor: coverageColor(
-                      Math.max(maxCount, THIN_COVERAGE_SAMPLES),
-                      maxCount,
-                    ),
-                  }}
-                />
-                visited (up to {maxCount})
-              </span>
-              <span>Shading is sample count; hover a cell for its count.</span>
-            </div>
+            <CoverageLegend maxCount={maxCount} />
           ) : (
-            <div className="flex items-center gap-3 text-xs text-fg-dim">
-              <span>{min.toFixed(2)}</span>
-              <span
-                aria-hidden="true"
-                className="h-2 w-40 rounded"
-                style={{
-                  background: `linear-gradient(to right, ${mapColor(min, min, max)}, ${mapColor(min + (max - min) / 3, min, max)}, ${mapColor(min + (2 * (max - min)) / 3, min, max)}, ${mapColor(max, min, max)})`,
-                }}
-              />
-              <span>
-                {max.toFixed(2)} {table.unit}
-              </span>
-              <span>Low → high; not a safety rating</span>
-            </div>
+            <HeatLegend min={min} max={max} unit={table.unit} />
           )}
         </>
       )}

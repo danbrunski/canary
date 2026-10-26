@@ -9,7 +9,8 @@ const OLD_ITEM_ROUTES = {
   "live-alarms": "observe-alarms",
   "live-builder": "observe-builder",
   "live-trip": "observe-trip",
-  "live-rom-maps": "tuning-rom-maps",
+  "live-rom-maps": "tuning-rom-editor",
+  "tuning-rom-maps": "tuning-rom-editor",
   "diag-anomalies": "diag-anomalies",
   "diag-data": "system-data-sources",
   "diag-dtc": "diag-dtc",
@@ -84,6 +85,18 @@ describe("useHashRoute", () => {
       expect(result.current.item).toBe(expected);
     },
   );
+
+  it("sends the retired ROM Maps page to the ROM Editor and rewrites the hash", () => {
+    // 2026-10-26: ROM Maps was merged into the ROM Editor. A bookmark to either
+    // of its old ids lands on the editor, and the address bar says so.
+    for (const old of ["tuning-rom-maps", "live-rom-maps"]) {
+      window.history.replaceState(null, "", `#wb/${old}`);
+      const { result, unmount } = renderHook(() => useHashRoute());
+      expect(result.current.item).toBe("tuning-rom-editor");
+      expect(window.location.hash).toBe("#wb/tuning-rom-editor");
+      unmount();
+    }
+  });
 });
 
 describe("useTheme", () => {

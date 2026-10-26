@@ -2,22 +2,42 @@
 
 ## Dashboard viewer
 
-Open **Workbench → Engine Tuning → ROM Maps** (`#wb/tuning-rom-maps`), enter the
-dashboard control token, and pick the current `.OsirisROM` file. The file is
-sent to the daemon for bounded in-memory inspection; it is not saved there.
-Only the independently verified source hashes are accepted. The parsed view
-is held while the panel is open, not persisted across reloads/navigation.
+Open **Workbench → Engine Tuning → ROM Editor** (`#wb/tuning-rom-editor`), enter
+the dashboard control token, and pick a stored image or open a `.OsirisROM` or
+plain 1 MiB image. Opening a file adds it to the ROM library, kept by its
+plain-image hash. The library accepts any valid image (a plain image of the
+vehicle's exact size, or an `.OsirisROM`; the UpRev encrypted backup and
+anything else are refused by name), so a historical or experimental image can
+be looked at and edited. What is gated is the live overlay: its confirmation and
+its trace are available only for the image the flash history records as
+running now (`matches_recorded_revision`), and any other image is view-only
+there.
+(The page that used to do this, **ROM Maps** at `#wb/tuning-rom-maps`, was merged
+into the editor on 2026-10-26: `#wb/tuning-rom-maps` and `#wb/live-rom-maps`
+still open the editor. The old upload-without-saving flow is not in the
+dashboard any more; `POST /control/rom/inspect` still decodes an `.OsirisROM`
+in memory without storing it, for scripts.)
 
-The Map 1–5 dropdown switches both Target AFR and Fuel Compensation sections.
-Currently only **Map 1 Target AFR** has a fully verified extraction layout.
-Fuel Compensation and slots 2–5 explicitly show TBD instead of guessed or
-copied values. Titles/axes follow UpRev's tuning guide pp. 9–10. Viewer
-metadata lives in the vehicle profile's `rom_viewer.yaml`.
+The editor shows every two-dimensional table the image's map declares, in every
+map slot: Fuel Targets, Fuel Compensation, both ignition timing trims (Timing
+Main trim A, Timing High Det trim B), the base timing maps and the like. The
+**Map slot** dropdown switches the slot. Map 1 is the editable slot: edits and
+the simulator cover Map 1 only, and the other slots are for looking at. A table
+whose decode is unconfirmed is shown by its raw counts, with its confidence
+and evidence named. Titles and axes follow UpRev's tuning guide pp. 9–10; the
+axis labels the editor shows are labels only, and every edit and the simulator
+still read the raw axis bytes.
 
 The numeric gradient runs green (low) through yellow/orange to red (high),
-with numbers, axes and a legend; it is not a safety rating. Hover a cell for
-its raw count and full-precision value.
+with numbers, axes and a legend; it is not a safety rating. A scalar or a
+table whose cells are all equal has no range to shade and is left plain.
+Hover a cell for its raw count and full-precision value.
 
+The **Live overlay** checkbox (off by default; nothing is fetched until it is
+on) puts the live marks on the tables the vehicle maps a trace to (Fuel
+Targets on the Xterra, in Map 1). It reads `GET /control/rom/library/{sha}/trace`,
+which carries the vehicle's `rom_viewer.yaml` trace definitions and live
+providers. A vehicle without one has no overlay and the editor works as before.
 To trace, confirm that the selected ROM **and selected slot** are active in
 the ECU. This assertion is not an ECU map-switch command or automatic slot
 detection. Historical/mismatched ROMs remain view-only. The nearest RPM/BFS
@@ -25,8 +45,11 @@ breakpoint gets a solid outline/dot; surrounding cells get dashed outlines.
 This is an **inferred geometric lookup**, not proof of ECU interpolation or
 active cell selection. Pedal enrichment and other overrides are not modeled;
 the independently read final commanded AFR is shown separately when fresh.
+The lookup compares live BFS (ms) and rpm with the table's displayed axes, so
+a table whose axes are not labeled in those units gets no cell and the page
+says why.
 
-Beside it the page draws the **ECM cell** (double ring) from the map-trace
+Beside it the overlay draws the **ECM cell** (double ring) from the map-trace
 memory channels — the ECM's own coordinates — and states any disagreement
 with the inferred cell in rows/columns. Each table's trace channels and
 whether their mapping onto the axes is established live in `rom_viewer.yaml`
@@ -36,7 +59,7 @@ compared with (`axis_units`). Since 2026-10-04 (W05.1) both fuel-target axes
 are verified from the ECM program: the X byte's raw count, with its catalog
 decode (raw × 0.250859) undone, lands on the ROM's raw BFS axis bytes, and the
 rpm word lands on the rpm axis in rpm. The lookup clamps past either end
-(`trace.out_of_range`), so there the ECM cell is the edge cell and the page
+(`trace.out_of_range`), so there the ECM cell is the edge cell and the overlay
 says so. Pedal-switch enrichment moves the ECM's read to the last load column
 without moving the X trace, so neither marker shows it. The ECM trace greys out after
 3 s without samples and names why: no ECM data, not polled by the active
@@ -45,7 +68,8 @@ polled but not answering (per-request counters). Tracing is also refused when
 `/status` reports an ECU calibration id that contradicts the flash history.
 A per-table **coverage overlay** shades cells by sample count for the log
 selected on Logs (`GET /control/sessions/{id}/cell-residency`) or, during a
-capture, accumulates live; "Drive presentation" shows one table full-screen.
+capture, accumulates live (while it is on, shading is by sample count in place
+of value); "Drive presentation" shows one table full-screen.
 
 Tracing clears on stale/missing inputs (>2.5 s), RPM/BFS skew >750 ms,
 out-of-axis points, fuel-cut sentinel, replay, or missing/stale (>15 s)
@@ -54,7 +78,7 @@ vehicle-scoped tuning providers, not hardcoded frontend guesses. Fuel
 Compensation must not use throttle, calculated load, or BFS in place of its
 unresolved Volumetric Flow Ratio input.
 
-The upload route has no writer or flash integration.
+The library routes have no writer or flash integration.
 
 This tool exports or edits **Map 1 Fuel Targets only** for the independently
 verified ROM hashes recorded in the vehicle's AFR calibration file. It has

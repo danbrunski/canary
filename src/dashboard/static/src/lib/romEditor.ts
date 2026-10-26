@@ -56,6 +56,23 @@ export function isEditableTable(table: RomTableValues): boolean {
   );
 }
 
+/** Whether the page shows this table: every two-dimensional table the map
+ *  declares (the editable ones, and the base timing maps and the like to look
+ *  at), and the editable scalar K. An axis table is never a table to show, and
+ *  a one-dimensional curve is not a grid. Showing a table is not editing it:
+ *  only `isEditableTable` ones take an edit. */
+export function isViewableTable(table: RomTableValues): boolean {
+  if (table.role === "axis") return false;
+  if (isEditableTable(table)) return true;
+  return table.raw.length > 1 && (table.raw[0]?.length ?? 0) > 1;
+}
+
+/** One table of one slot, for picking between them: a table id is shared by
+ *  the copies in Maps 2-5, so the slot is part of the identity. */
+export function tableChoice(table: RomTableValues): string {
+  return `${table.slot ?? "-"}:${table.id ?? table.name}`;
+}
+
 // -- decode ---------------------------------------------------------------------------------
 
 interface DecodeParams {

@@ -57,6 +57,7 @@ def test_every_route_requires_the_token(client: TestClient) -> None:
         ("get", f"/control/rom/library/{sha}"),
         ("get", f"/control/rom/library/{sha}/download"),
         ("get", f"/control/rom/library/{sha}/tables"),
+        ("get", f"/control/rom/library/{sha}/trace"),
         ("patch", f"/control/rom/library/{sha}"),
         ("delete", f"/control/rom/library/{sha}"),
         ("get", f"/control/rom/compare?a={sha}&b={sha}"),
@@ -196,6 +197,78 @@ def test_tables_and_compare_routes(client: TestClient) -> None:
         client.get("/control/rom/compare", params={"a": a, "b": "f" * 64}, headers=AUTH).status_code
         == 404
     )
+
+
+def test_trace_context_serves_the_vehicles_trace_definitions_for_a_library_image(
+    client: TestClient,
+) -> None:
+    """The ROM Editor's live overlay (merged from ROM Maps): the viewer's trace
+    definitions and live providers for a plain library image, and the honest
+    answer that an image nobody flashed is not the running revision."""
+    sha = _upload(client, synthetic_image(k=27089), "a.bin").json()["sha256"]
+    response = client.get(f"/control/rom/library/{sha}/trace", headers=AUTH)
+    assert response.status_code == 200
+    context = response.json()
+    assert context["sha256"] == sha
+    assert context["map_slot"] == 1
+    assert context["afr_stoich"] == pytest.approx(14.7)
+    assert context["matches_recorded_revision"] is False
+    kinds = {table["kind"]: table for table in context["tables"]}
+    assert set(kinds) == {"fuel_targets", "fuel_compensation"}
+    trace = kinds["fuel_targets"]["trace"]
+    assert trace["x"]["channel"] == "mem:ECM_FUEL_TARGET_MAP_X_TRACE"
+    assert trace["x"]["axis_mapping"] == "verified" and trace["x"]["axis_units"] == "raw"
+    assert trace["x"]["stored_decode"] is not None and trace["x"]["request_channel"]
+    assert trace["out_of_range"]["behaviour"] == "clamp"
+    # No trace is mapped to Fuel Compensation; the page says so rather than guess.
+    assert kinds["fuel_compensation"]["trace"] is None
+    assert kinds["fuel_targets"]["x_unit"] == "ms" and kinds["fuel_targets"]["y_unit"] == "rpm"
+    assert context["live"]["rpm"] is not None
+    assert "x_axis" not in kinds["fuel_targets"]  # axes are the image's, from /tables
+
+
+def test_trace_context_unknown_image_is_404(client: TestClient) -> None:
+    assert client.get(f"/control/rom/library/{'a' * 64}/trace", headers=AUTH).status_code == 404
+    assert client.get("/control/rom/library/ABC/trace", headers=AUTH).status_code == 404
+
+
+def test_trace_context_says_when_the_image_is_the_running_revision() -> None:
+    """``matches_recorded_revision`` is the plain-image hash the flash history
+    names the running revision by, not a container hash."""
+    from types import SimpleNamespace
+
+    from src.dashboard.routes.rom_maps import library_trace_context
+
+    sha = "c" * 64
+    running = SimpleNamespace(revision="ZS44A-20260920", image_sha256=sha)
+    other = SimpleNamespace(revision="ZS04C", image_sha256="d" * 64)
+    for current, matches in [(running, True), (other, False), (None, False)]:
+        registry = SimpleNamespace(at=lambda _when, current=current: current)
+        context = library_trace_context(
+            PROFILE,
+            sha=sha,
+            revisions=registry,  # type: ignore[arg-type]
+        )
+        assert context["matches_recorded_revision"] is matches
+        assert context["recorded_revision"] == (current.revision if current else None)
+    assert library_trace_context(PROFILE, sha=sha, revisions=None)["recorded_revision"] is None
+
+
+def test_trace_context_is_409_for_a_vehicle_without_a_viewer_definition(tmp_path: Path) -> None:
+    """A vehicle with a ROM map but no ``rom_viewer.yaml`` still edits its
+    tables; only the live overlay is unavailable, and it says so."""
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    for name in ["rom_map.yaml", "rom_targets.yaml", "afr_calibration.yaml"]:
+        (profile / name).write_text((PROFILE / name).read_text())
+    config = isolated_config(tmp_path, daemon={"afr_calibration": profile / "afr_calibration.yaml"})
+    app = FastAPI()
+    register_rom_library_routes(app, config=config, resolved_control_token="secret")
+    with TestClient(app) as client:
+        sha = _upload(client, synthetic_image(k=27089), "a.bin").json()["sha256"]
+        response = client.get(f"/control/rom/library/{sha}/trace", headers=AUTH)
+        assert response.status_code == 409
+        assert "rom_viewer.yaml" in response.json()["detail"]
 
 
 def test_nothing_is_written_under_the_repo(tmp_path: Path) -> None:

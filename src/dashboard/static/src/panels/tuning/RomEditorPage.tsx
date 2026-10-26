@@ -10,18 +10,23 @@ import {
 import { Notice } from "../../components/Notice";
 import { Panel } from "../../components/Panel";
 import { describeError, useControlResource } from "../../hooks/useControlResource";
+import type { ChannelSnapshot } from "../../hooks/useTelemetryStream";
+import type { LoadedRom } from "../../hooks/useTuningContext";
 import {
+  SIM_SLOT,
   SIMULATE_REASON_TEXT,
   buildEdits,
   describeOperation,
   duplicateCells,
   isEditableTable,
+  isViewableTable,
   loadEditorState,
   pendingCellSet,
   previewRefusal,
   saveEditorState,
   simulateReason,
   specFileName,
+  tableChoice,
   valueMask,
 } from "../../lib/romEditor";
 import {
@@ -30,6 +35,7 @@ import {
   describeEditorDisagreement,
   entryTitle,
   refusalText,
+  tableSlots,
 } from "../../lib/romLibrary";
 import {
   SIM_BLOCK_TEXT,
@@ -40,8 +46,8 @@ import {
 } from "../../lib/romSim";
 import { editsTouchWotColumn } from "../../lib/romSim";
 import { expectedRun, fineReference, loadTimings, recordTiming } from "../../lib/romSimSize";
-import { buttonClass, cn } from "../../styles";
-import type { StatusResponse } from "../../types";
+import { buttonClass, cn, inputClass } from "../../styles";
+import type { StatusResponse, WorkbenchItem } from "../../types";
 import type {
   CellSelection,
   PendingEdit,
@@ -56,7 +62,9 @@ import type {
 import type { RomLibraryEntry } from "../../types/romLibrary";
 import { downloadText } from "../../util/browser";
 import { BasePicker, SimulateChip } from "./romEditor/BasePicker";
+import type { GridOverlay } from "../cellOverlay";
 import { CellGrid } from "./romEditor/CellGrid";
+import { LiveOverlay } from "./romEditor/LiveOverlay";
 import { OpenRom } from "./romEditor/OpenRom";
 import { OperationPanel } from "./romEditor/OperationPanel";
 import { PendingEdits } from "./romEditor/PendingEdits";
@@ -87,11 +95,36 @@ function writeShaToUrl(sha: string) {
   }
 }
 
-/** Engine Tuning ▸ ROM Editor (W09.3): pick a stored image, edit the fuel
- *  chain in Map 1, preview the result, download the edit spec. The edited
- *  image never leaves the server: it is not stored, not downloadable, and not
- *  flashable. A flash is the Flash page's explicit act. */
-export function RomEditorPage({ token }: { token: string; status: StatusResponse | null }) {
+/** No live telemetry: the editor works without it (the overlay then has no
+ *  inputs, and says so). */
+const NO_CHANNELS = new Map<string, ChannelSnapshot>();
+
+/** Engine Tuning ▸ ROM Editor (W09.3), and since 2026-10-26 the one page for
+ *  viewing ROM tables too (it absorbed ROM Maps): pick a stored image, look at
+ *  every two-dimensional table its map declares shaded low to high, edit the
+ *  fuel chain and timing trims in Map 1, preview the result, download the edit
+ *  spec. The live overlay (inferred cell, ECM cell, log coverage) sits behind a
+ *  toggle on the tables the vehicle maps a trace to. The edited image never
+ *  leaves the server: it is not stored, not downloadable, and not flashable. A
+ *  flash is the Flash page's explicit act. */
+export function RomEditorPage({
+  token,
+  channels = NO_CHANNELS,
+  status,
+  selectedLogId = null,
+  onNavigate,
+  onLoadedChange,
+}: {
+  token: string;
+  status: StatusResponse | null;
+  /** Live telemetry, for the overlay's inferred and ECM cells. */
+  channels?: Map<string, ChannelSnapshot>;
+  /** The log picked on Logs: the coverage overlay's subject. */
+  selectedLogId?: string | null;
+  onNavigate?: (item: WorkbenchItem) => void;
+  /** The Engine Tuning group's record of the image in view (its context bar). */
+  onLoadedChange?: (rom: LoadedRom | null) => void;
+}) {
   const enabled = Boolean(token);
   const library = useControlResource(
     useCallback((signal: AbortSignal) => getRomLibrary(token, signal), [token]),
@@ -165,6 +198,9 @@ export function RomEditorPage({ token }: { token: string; status: StatusResponse
     selected && opened?.entry.sha256 === selected.sha256
       ? opened.name
       : selected && entryTitle(selected);
+  useEffect(() => {
+    onLoadedChange?.(selectedSha && name ? { sha256: selectedSha, name } : null);
+  }, [onLoadedChange, selectedSha, name]);
   return (
     <section className="space-y-4">
       <Panel
@@ -173,10 +209,11 @@ export function RomEditorPage({ token }: { token: string; status: StatusResponse
       >
         <div className="space-y-4">
           <p className="text-sm text-fg-dim">
-            Edit the fuel chain (Fuel Targets, Fuel Compensation and K) and the ignition timing
-            trims (A and B) in Map 1 of a ROM and see the tables after the edits. The edited image
-            is never stored or offered: you get an edit spec, a reviewable file that reproduces the
-            edit from its base. Nothing here writes the ECU.
+            Look at every table in a ROM, shaded from low to high, and edit the fuel chain (Fuel
+            Targets, Fuel Compensation and K) and the ignition timing trims (A and B) in Map 1, then
+            see the tables after the edits. The edited image is never stored or offered: you get an
+            edit spec, a reviewable file that reproduces the edit from its base. Opening a file adds
+            it to the ROM library, kept by its hash. Nothing here writes the ECU.
           </p>
           {!token && <p role="status">Enter the control token to use the ROM Editor.</p>}
           {library.error && <Notice notice={{ kind: "error", text: library.error }} />}
@@ -232,7 +269,17 @@ export function RomEditorPage({ token }: { token: string; status: StatusResponse
           )}
         </div>
       </Panel>
-      {selected && <Workspace key={selected.sha256} token={token} entry={selected} />}
+      {selected && (
+        <Workspace
+          key={selected.sha256}
+          token={token}
+          entry={selected}
+          channels={channels}
+          status={status}
+          selectedLogId={selectedLogId}
+          onNavigate={onNavigate}
+        />
+      )}
     </section>
   );
 }
@@ -265,15 +312,45 @@ type SimState =
   | { kind: "ok"; result: RomSimResult; run: SimRunContext }
   | { kind: "failed"; failure: SimFailure };
 
-function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) {
+function Workspace({
+  token,
+  entry,
+  channels,
+  status,
+  selectedLogId,
+  onNavigate,
+}: {
+  token: string;
+  entry: RomLibraryEntry;
+  channels: Map<string, ChannelSnapshot>;
+  status: StatusResponse | null;
+  selectedLogId: string | null;
+  onNavigate?: (item: WorkbenchItem) => void;
+}) {
   const sha = entry.sha256;
   const tables = useControlResource(
     useCallback((signal: AbortSignal) => getRomTables(token, sha, signal), [token, sha]),
     { enabled: Boolean(token), intervalMs: null },
   );
-  const editable = (tables.data?.tables ?? []).filter(isEditableTable);
-  const [tableId, setTableId] = useState<string | null>(null);
-  const table = editable.find((item) => item.id === tableId) ?? editable[0] ?? null;
+  // Every table the map declares that is worth a grid; Map 1 until another
+  // slot is chosen (it is the one the editor edits and the simulator runs).
+  const viewable = useMemo(
+    () => (tables.data?.tables ?? []).filter(isViewableTable),
+    [tables.data],
+  );
+  const slots = tableSlots(viewable);
+  const [slotChoice, setSlotChoice] = useState<number | null>(null);
+  const slot =
+    slotChoice !== null && slots.includes(slotChoice)
+      ? slotChoice
+      : slots.includes(SIM_SLOT)
+        ? SIM_SLOT
+        : (slots[0] ?? null);
+  const inSlot = viewable.filter((item) => item.slot === null || item.slot === slot);
+  const [choice, setChoice] = useState<string | null>(null);
+  const table = inSlot.find((item) => tableChoice(item) === choice) ?? inSlot[0] ?? null;
+  const editable = table !== null && isEditableTable(table);
+  const [overlayOn, setOverlayOn] = useState(false);
 
   const [selection, setSelection] = useState<CellSelection | null>(null);
   const [saved] = useState(() => loadEditorState(sha));
@@ -431,7 +508,7 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
     return (
       <Panel title="Edit">
         <p className="text-fg-dim">
-          {tables.data?.reason ?? "This image has no editable fuel table in Map 1."}
+          {tables.data?.reason ?? "This image has no two-dimensional table to show or edit."}
         </p>
       </Panel>
     );
@@ -461,19 +538,54 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
       }
     : null;
 
+  const grid = (overlay: GridOverlay | null) => (
+    <CellGrid
+      key={`grid-${tableChoice(table)}`}
+      table={table}
+      label={`${table.label ?? table.name} cells`}
+      selection={editable ? selection : null}
+      onSelect={editable ? setSelection : undefined}
+      pendingCells={pendingCellSet(pending, table.id ?? "")}
+      overlay={overlay}
+    />
+  );
+
   return (
     <div className="space-y-4">
       <Panel title="Edit">
         <div className="space-y-4">
+          {slots.length > 1 && (
+            <label className="flex items-center gap-2 text-sm">
+              Map slot
+              <select
+                aria-label="Map slot"
+                className={inputClass}
+                value={slot ?? ""}
+                onChange={(event) => {
+                  setSlotChoice(Number(event.target.value));
+                  setChoice(null);
+                  setSelection(null);
+                  setOpRefusal(null);
+                }}
+              >
+                {slots.map((number) => (
+                  <option key={number} value={number}>
+                    Map {number}
+                    {number === SIM_SLOT ? " (editable)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <div role="group" aria-label="Table" className="flex flex-wrap gap-2">
-            {editable.map((item) => (
+            {inSlot.map((item) => (
               <button
-                key={item.id}
+                key={tableChoice(item)}
                 type="button"
-                className={cn(buttonClass, item.id === table.id && "border-accent-2")}
-                aria-pressed={item.id === table.id}
+                className={cn(buttonClass, item === table && "border-accent-2")}
+                aria-pressed={item === table}
                 onClick={() => {
-                  setTableId(item.id ?? null);
+                  setChoice(tableChoice(item));
                   setSelection(null);
                   setOpRefusal(null);
                 }}
@@ -498,34 +610,61 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
               {describeEditorDisagreement(table.editor_disagreement)}
             </p>
           )}
-          <p className="text-xs text-fg-faint">
-            Click a cell, shift-click or drag for a range; arrows move, shift+arrows extend. Dashed
-            cells are in a pending edit.
-          </p>
+          {editable ? (
+            <p className="text-xs text-fg-faint">
+              Click a cell, shift-click or drag for a range; arrows move, shift+arrows extend.
+              Dashed cells are in a pending edit.
+            </p>
+          ) : (
+            <p role="note" className="text-xs text-fg-dim">
+              Viewing only:{" "}
+              {table.slot !== null && table.slot !== SIM_SLOT
+                ? `edits and the simulator cover Map ${SIM_SLOT} only.`
+                : `${table.name} is not one of the tables edited here.`}
+            </p>
+          )}
           {maskBits !== null && (
             <p role="note" className="text-xs text-fg-dim">
               The ECM reads {maskBits} of each cell and strips the rest as a flag (decode mask{" "}
               <span className="font-num">0x{mask?.toString(16).toUpperCase()}</span>). The grid
-              shows the value; the raw count, flag included, is on hover. Add and Scale act on the
-              value and keep each cell&apos;s flag; Set to value keeps it too. A raw count may not
-              change it.
+              shows the value; the raw count, flag included, is on hover.
+              {editable &&
+                " Add and Scale act on the value and keep each cell's flag; Set to value keeps it too. A raw count may not change it."}
             </p>
           )}
-          <CellGrid
-            key={`grid-${table.id}`}
-            table={table}
-            label={`${table.label ?? table.name} cells`}
-            selection={selection}
-            onSelect={setSelection}
-            pendingCells={pendingCellSet(pending, table.id ?? "")}
-          />
-          <OperationPanel
-            key={`operation-${table.id}`}
-            table={table}
-            selection={selection}
-            refusal={opRefusal}
-            onApply={apply}
-          />
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={overlayOn}
+              onChange={(event) => setOverlayOn(event.target.checked)}
+            />
+            Live overlay: inferred cell, ECM cell and log coverage
+          </label>
+          {overlayOn ? (
+            <LiveOverlay
+              token={token}
+              sha={sha}
+              channels={channels}
+              status={status}
+              selectedLogId={selectedLogId}
+              onNavigate={onNavigate}
+              table={table}
+              tables={viewable}
+            >
+              {(overlay) => grid(overlay)}
+            </LiveOverlay>
+          ) : (
+            grid(null)
+          )}
+          {editable && (
+            <OperationPanel
+              key={`operation-${table.id}`}
+              table={table}
+              selection={selection}
+              refusal={opRefusal}
+              onApply={apply}
+            />
+          )}
         </div>
       </Panel>
 

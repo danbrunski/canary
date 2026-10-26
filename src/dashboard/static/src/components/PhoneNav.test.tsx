@@ -63,7 +63,8 @@ describe("phone navigation model (P2.2)", () => {
   it("maps a route to its bar entry; a More page has none", () => {
     expect(phoneTabFor("driving", "diag-explore")?.id).toBe("drive");
     expect(phoneTabFor("parked", "diag-anomalies")?.id).toBe("alerts");
-    expect(phoneTabFor("parked", "tuning-rom-maps")?.id).toBe("rom");
+    expect(phoneTabFor("parked", "tuning-rom-library")?.id).toBe("rom");
+    expect(phoneTabFor("parked", "tuning-rom-editor")?.id).toBe("rom");
     expect(phoneTabFor("parked", "diag-explore")).toBeNull();
   });
 });

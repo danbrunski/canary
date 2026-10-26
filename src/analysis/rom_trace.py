@@ -1,10 +1,11 @@
 """Which cell of a ROM table the ECM is reading, and which cells a log visited.
 
-The ROM Maps page (W05) draws two operating points on a table. The *inferred*
-lookup puts rpm and BFS on the table's axes; the *ECM* cell comes from the
-map-trace memory channels (``data/dids.yaml`` ``memory:``), which are the
-ECM's own coordinates into its tables. Keeping both makes a wrong axis decode,
-a wrong BFS scale, or unmodelled interpolation visible as a disagreement.
+The ROM Editor's live overlay (W05, once the ROM Maps page) draws two operating
+points on a table. The *inferred* lookup puts rpm and BFS on the table's axes;
+the *ECM* cell comes from the map-trace memory channels (``data/dids.yaml``
+``memory:``), which are the ECM's own coordinates into its tables. Keeping both
+makes a wrong axis decode, a wrong BFS scale, or unmodelled interpolation
+visible as a disagreement.
 
 A trace channel is only useful once it is known how its value lands on the
 table's breakpoints. That is a measured constraint, so it lives in the vehicle

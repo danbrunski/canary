@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 from src.analysis.ecu_application import coverage_report, load_application_model
-from src.analysis.rom_targets import TargetEditor, sha256
+from src.analysis.rom_targets import Definition, TargetEditor, sha256
 from src.analysis.rom_trace import (
     load_viewer_definition,
     trace_payload,
@@ -24,6 +24,7 @@ from src.paths import DIDS_YAML
 from src.vehicle.profiles import active_registry
 from src.vehicle.profiles import profile_dir as vehicle_profile_dir
 from src.vehicle.tune_revisions import TuneRevisionRegistry
+from src.yaml_load import load_yaml
 
 MAX_ROM_UPLOAD = 2 * 1024 * 1024
 
@@ -71,13 +72,6 @@ def inspect_rom(
                     "raw": target["raw"] if available else [],
                 }
             )
-    providers = load_provider_registry(profile_dir / "tuning_providers.yaml")
-    live = {}
-    for role in ("rpm", "base_fuel_schedule", "commanded_afr"):
-        provider = next((p for p in providers.providers if p.role == role), None)
-        live[role] = (
-            provider.model_dump() if provider and provider.confidence == "confirmed" else None
-        )
     current = revisions.at(datetime.now(UTC)) if revisions else None
     return {
         "source_sha256": sha256(data),
@@ -86,9 +80,64 @@ def inspect_rom(
         "matches_recorded_revision": bool(current and current.rom_sha256 == sha256(data)),
         "map_slots": definition.map_slots,
         "tables": tables,
-        "live": live,
+        "live": live_providers(profile_dir),
         "warnings": definition.warnings,
         "afr_stoich": editor.definition.afr_numerator / 128,
+    }
+
+
+def live_providers(profile_dir: Path) -> dict[str, Any]:
+    """The live-channel providers the map lookup reads, by role. A role whose
+    provider is not ``confirmed`` is ``None``: the page then has no input for
+    it and says so, rather than reading an unconfirmed channel."""
+    providers = load_provider_registry(profile_dir / "tuning_providers.yaml")
+    live: dict[str, Any] = {}
+    for role in ("rpm", "base_fuel_schedule", "commanded_afr"):
+        provider = next((p for p in providers.providers if p.role == role), None)
+        live[role] = (
+            provider.model_dump() if provider and provider.confidence == "confirmed" else None
+        )
+    return live
+
+
+def library_trace_context(
+    profile_dir: Path,
+    dids_path: Path = DIDS_YAML,
+    *,
+    sha: str,
+    revisions: TuneRevisionRegistry | None,
+) -> dict[str, Any]:
+    """What the ROM Editor's live overlay needs beyond a library image's own
+    tables: the vehicle's trace definitions, the live providers, and whether
+    the image is the revision recorded as running now.
+
+    Everything here comes from the vehicle profile and the flash history; the
+    image's cells and axes come from ``GET .../tables``. It is the part of
+    :func:`inspect_rom` that does not depend on a ``.OsirisROM`` container, so
+    the editor reads it for a plain library image (``image_sha256`` is what the
+    flash history names an image by). The overlay is only meaningful on the
+    revision running now, and the page refuses it otherwise; this states which
+    that is.
+    """
+    definition = load_viewer_definition(profile_dir)
+    targets = Definition.model_validate(
+        load_yaml((profile_dir / definition.target_definition).read_text())
+    )
+    current = revisions.at(datetime.now(UTC)) if revisions else None
+    return {
+        "sha256": sha,
+        # The slot the trace definitions apply to: the one the target
+        # definition (and so the ECM's active-slot check) is written for.
+        "map_slot": targets.map_slot,
+        "afr_stoich": targets.afr_numerator / 128,
+        "recorded_revision": current.revision if current else None,
+        "matches_recorded_revision": bool(current and current.image_sha256 == sha),
+        "live": live_providers(profile_dir),
+        "warnings": definition.warnings,
+        "tables": [
+            {**info.model_dump(exclude={"trace"}), "trace": trace_payload(info.trace, dids_path)}
+            for info in definition.tables
+        ],
     }
 
 

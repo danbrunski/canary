@@ -340,6 +340,12 @@ describe("coverage (W05.7/W05.8)", () => {
     };
     expect(residencyMatchesTable(residency, table)).toBe(true);
     expect(residencyMatchesTable({ ...residency, x_axis: [8, 12, 17] }, table)).toBe(false);
+    // The calibration records breakpoints at the two decimals the editor displays;
+    // the image's own labels differ by rounding only, and that is the same axis.
+    expect(residencyMatchesTable({ ...residency, x_axis: [8.003, 11.998, 16.004] }, table)).toBe(
+      true,
+    );
+    expect(residencyMatchesTable({ ...residency, x_axis: [8.02, 12, 16] }, table)).toBe(false);
     expect(
       residencyMatchesTable(
         {

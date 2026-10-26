@@ -435,6 +435,38 @@ export interface RomInspection {
   afr_stoich: number;
 }
 
+/** One table kind's trace definition as `GET /control/rom/library/{sha}/trace`
+ *  sends it: the viewer's labels and units for the kind, and the ECM's own
+ *  coordinates into it (null when the vehicle maps none). The cells and axes
+ *  are the image's, from `/tables`. */
+export interface RomTraceTableInfo {
+  kind: RomTable["kind"];
+  title: string;
+  x_label: string;
+  x_unit: string;
+  y_label: string;
+  y_unit: string;
+  unit: string;
+  trace: TableTrace | null;
+  editor_disagreement?: RomEditorDisagreement | null;
+}
+
+/** `GET /control/rom/library/{sha}/trace`: what the ROM Editor's live overlay
+ *  needs beyond the image's tables (the part of `RomInspection` that does not
+ *  depend on an uploaded container). */
+export interface RomTraceContext {
+  sha256: string;
+  /** The map slot the trace definitions apply to. */
+  map_slot: number;
+  afr_stoich: number;
+  recorded_revision: string | null;
+  /** This image is the revision the flash history names as running now. */
+  matches_recorded_revision: boolean;
+  live: RomInspection["live"];
+  warnings: string[];
+  tables: RomTraceTableInfo[];
+}
+
 export interface AxisTrace {
   channel: string;
   axis_mapping: "verified" | "unverified";

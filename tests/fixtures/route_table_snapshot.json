@@ -1000,6 +1000,14 @@
       "auth": "control",
       "body": false,
       "method": "GET",
+      "path": "/control/rom/library/{sha}/trace",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
       "path": "/control/sequence-detector",
       "query": [],
       "status_code": null

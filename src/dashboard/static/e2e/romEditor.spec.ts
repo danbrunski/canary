@@ -19,8 +19,8 @@ import {
 
 /**
  * The ROM Editor (W09.3, W09.4, W09.8) in a real Chromium, the daemon stubbed
- * at the network layer (`fixtures/romEditorApi.ts`), as `romMaps.spec.ts` does
- * for the ROM Maps page. Real-image runs are W09.6's and stay open.
+ * at the network layer (`fixtures/romEditorApi.ts`), as `romEditorOverlay.spec.ts`
+ * does for the live overlay. Real-image runs are W09.6's and stay open.
  *
  * The viewport is short on purpose: with the 16 x 16 table partly below the
  * fold, one click on a cell once selected 7-11 cells (focus scrolled the page
@@ -194,7 +194,9 @@ test("open a file, select one cell then a range, scale +2 %, preview, download t
   await expect(first).toContainText("+1.6 %");
   await expect(first).toHaveAttribute("title", "raw 124 (was 122)");
   await expect(first).toHaveCSS("outline-style", "solid");
-  await expect(first).toHaveCSS("outline-width", "2px");
+  // 3 px, dark ink: drawn over the cell's heat colour, where the old 2 px accent
+  // line did not read (a pending cell is the 2 px dashed one).
+  await expect(first).toHaveCSS("outline-width", "3px");
   // A neighbour the edit did not touch is not outlined.
   const untouched = afterCell(after, 0, 0);
   await expect(untouched).not.toHaveAttribute("data-changed", "true");

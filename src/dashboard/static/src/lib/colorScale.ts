@@ -62,6 +62,35 @@ export function divergingAround0(value: number, maxAbs: number): string {
   return diverging(maxAbs > 0 ? value / maxAbs : 0);
 }
 
+/** WCAG relative luminance of an `rgb(r, g, b)` string, or null when it is
+ *  not one. */
+export function luminance(color: string): number | null {
+  const match = /^rgb\(\s*(\d+),\s*(\d+),\s*(\d+)\s*\)$/.exec(color);
+  if (!match) return null;
+  const [r, g, b] = [match[1], match[2], match[3]].map((part) => {
+    const channel = Number(part) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** WCAG contrast ratio of two relative luminances (1 to 21). */
+export function contrastRatio(a: number, b: number): number {
+  const [light, dark] = a >= b ? [a, b] : [b, a];
+  return (light + 0.05) / (dark + 0.05);
+}
+
+/** Luminance at which black and white ink read equally well. */
+const INK_SWITCH = Math.sqrt(1.05 * 0.05) - 0.05;
+
+/** The ink a cell on `background` should carry: the theme's dark ink on a
+ *  light fill, its light ink on a dark one. The ramps above are all light
+ *  enough for dark ink except the deep end of the coverage ramp. */
+export function inkOn(background: string): "dark" | "light" {
+  const light = luminance(background);
+  return light === null || light > INK_SWITCH ? "dark" : "light";
+}
+
 /** Coverage cells under this many samples are "thin", distinct from none. */
 export const THIN_COVERAGE_SAMPLES = 5;
 

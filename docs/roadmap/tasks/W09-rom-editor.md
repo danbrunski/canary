@@ -752,12 +752,13 @@ W09.6 is the orchestrator's own, on the ROM machine.
   - Browser walkthrough on the Pi dashboard: pick the 10-04 image, scale the
     light-load Fuel Comp region +2 %, preview, download the spec, simulate,
     and screenshot the result. `pnpm e2e` gets `romEditor.spec.ts` with the
-    API mocked (as `romMaps.spec.ts`).
+    API mocked (as `romMaps.spec.ts`, retired 2026-10-26 with the ROM Maps page; its successor is
+    `romEditorOverlay.spec.ts`).
     - *Mocked e2e done 2026-10-15 (the real-image walkthrough above stays
       open):* `e2e/romEditor.spec.ts` + `e2e/fixtures/romEditorApi.ts`, desktop
       chromium only, 1280x600 so the 16 x 16 table is partly below the fold
       (asserted). 5 tests, 5 passed in ~25 s (20/20 on `--repeat-each=4`);
-      `romMaps.spec.ts` and `emptyDaemon.spec.ts` still green. Covers: starts
+      `romMaps.spec.ts` (since retired) and `emptyDaemon.spec.ts` still green. Covers: starts
       unloaded (one Open ROM… button, Recent ROMs newest first although the
       API answers oldest first, no grid/form/table request/`?rom=`); open a
       file through the real file chooser (upload POST body, name, octet-stream;
@@ -1672,6 +1673,83 @@ W09.6 is the orchestrator's own, on the ROM machine.
     `RomEditorSimulate`, `SimResults`, `RomEditorPage`: 263 passed; `pnpm exec
     playwright test e2e/romEditor.spec.ts --project=chromium`: 7 passed, one new.
     The private-ROM file was not touched.
+
+- [~] **W09.12 — ROM Maps merged into the ROM Editor (operator decision 2026-10-26).**
+  Complaints: the timing trims and the fuel tables did not show on ROM Maps,
+  ROM Maps and ROM Editor were redundant, and the Editor's grids had no heat
+  colouring. One page now views and edits ROM tables; ROM Maps is retired.
+  - **Every 2-D table the image declares, coloured.** `isViewableTable`
+    (`lib/romEditor.ts`) admits every two-dimensional table of the library
+    image's `/tables` payload (both trims, Fuel Compensation, Fuel Targets, the
+    base timing maps; never an axis table or a one-dimensional curve), plus the
+    editable scalar K; a **Map slot** select picks the slot and Map 1 stays the
+    only editable one (the page says so for 2-5). `CellGrid` shades each cell
+    with the existing `mapColor` over the table's own decoded range (a table
+    with no decoded values by its raw counts; a scalar, a uniform table and a
+    cell with no value are left plain: there is no range), with the same legend
+    as the Library. No second palette. Dark ink on every cell (`inkOn`, WCAG
+    contrast chosen per fill, tested in `colorScale.test.ts` against both theme
+    token sets); selection is a ring, a pending cell a dashed outline plus `✎`,
+    a changed cell a solid 3 px outline plus its delta, the raw byte stays on
+    hover (`title`). Axis `editor_labels` behave as before (commit dd680849):
+    labels only, decode stays raw.
+  - **The live overlay behind a toggle** (`LiveOverlay.tsx`, `useLiveOverlay.ts`,
+    `lib/romOverlay.ts`, `panels/cellOverlay.tsx`): inferred cell and
+    neighbours, the ECM's own cell, ECM-vs-inferred tally, coverage / dwell,
+    Drive presentation, and every refusal and status text ROM Maps had (the slot
+    assertion, calibration mismatch, replay, stale inputs, ECM trace greyed out
+    with the profile that would carry it, out-of-axis, clamp notes). Off by
+    default, and nothing is fetched until it is on. A library table is matched to
+    its trace definition by `kind` and by slot (`traceInfoFor`); the inferred
+    lookup refuses, naming the units, a table whose axes are not labelled in ms
+    and rpm.
+  - **One backend addition**, `GET /control/rom/library/{sha}/trace`
+    (`routes/rom_library.py`, `library_trace_context` and `live_providers` in
+    `routes/rom_maps.py`, shared with `inspect_rom`): the vehicle's viewer
+    definition, `trace_payload` per kind, the live providers, and whether the
+    image's plain sha256 is the running revision in the flash history.
+  - **ROM Maps retired.** `RomMapsPanel` and its test deleted; no nav entry;
+    `tuning-rom-maps` and `live-rom-maps` (and the hash) resolve to
+    `tuning-rom-editor`; the phone "rom" group and the context bar's ROM
+    segment point at the editor. `MapTable` stays (the Library uses it) and now
+    shares the overlay helpers. `POST /control/rom/inspect` and
+    `rom_viewer.yaml` stay. The dashboard no longer uploads an `.OsirisROM`
+    without storing it: Open ROM... adds it to the library (kept by hash), and
+    the in-memory route is for scripts.
+  - Tests: `colorScale.test.ts`, `romOverlay.test.ts`, `romTrace.test.ts`,
+    `CellGrid.test.tsx` (14), `RomEditorTables.test.tsx` (8),
+    `RomEditorOverlay.test.tsx` (24: ROM Maps' assertions moved here),
+    `useHashRoute.test.ts`, `PhoneNav.test.tsx`, `TuningContextBar.test.tsx`;
+    `e2e/romEditorOverlay.spec.ts` replaces `e2e/romMaps.spec.ts`; Python:
+    `test_rom_library_api.py` (4 new, the route and its 404 / 409 / mismatch
+    answers), `test_route_table_snapshot.py`.
+  - Gate (2026-10-26): `ruff check .`, `ruff format --check .`, `mypy src`
+    clean; pytest over the ROM route, trace, kernel and layering files: 155
+    passed, and 217 passed, 1 skipped over the neighbouring ROM route tests;
+    `pnpm typecheck`, `pnpm lint` (no suppression change), `pnpm format`;
+    vitest 56 files / 850 tests over the editor, lib and hooks directories, and
+    `vitest related` 44 files / 753 tests; `pnpm e2e` 41 passed, 1 skipped (the
+    phone-only test on desktop).
+  - **Two behaviour changes the merge made** (recorded here so they are not
+    rediscovered): (1) `residencyMatchesTable` in `lib/romTrace.ts` compared a
+    stored cell-residency's axes with the table's at 1e-6; it is now
+    `AXIS_LABEL_TOLERANCE` (0.005), because the library image's BFS labels
+    (8.7627) are UpRev's, derived from the raw bytes, and the calibration's
+    transcription (8.76) differs from them in the fourth decimal. A residency
+    binned on another revision's axes still refuses (the test pins both sides).
+    (2) A changed cell's outline went from a 2 px accent line to 3 px dark ink
+    (`e2e/romEditor.spec.ts` asserts it), because the accent line did not read
+    over a heat colour. Also: the live-overlay confirmation is kept across a
+    map-slot change (ROM Maps cleared it when its dropdown picked the traced
+    slot); the confirmation is about the image, the overlay's subject is fixed at
+    the trace definition's slot, and `RomEditorOverlay.test.tsx` "keeps the
+    confirmation across a map-slot change" pins it (it fails if the overlay
+    remounts on a slot change).
+  - **Remaining:** the overlay against a real library image and live trace
+    channels (the truck or the Pi with a capture polling `mem:ECM_FUEL_TARGET_MAP_X_TRACE`
+    and `mem:ECM_ENGINE_SPEED_RAM`): the tests and the e2e use fixtures shaped
+    like `/tables` and `/trace`, not a real image's payload. A look at the
+    heat colouring on a real image in both themes belongs with W09.6.
 
 ## Not in scope
 

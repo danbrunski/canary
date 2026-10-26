@@ -320,6 +320,7 @@ def create_app(
         replay_controller=replay_controller,
         capture_controller=capture_controller,
         publish_control_event=publish_control_event,
+        dids_path=dids_path,
     )
     # After the library: the editor's images are its (app.state.rom_library).
     register_rom_editor_routes(app, config=config, resolved_control_token=resolved_control_token)

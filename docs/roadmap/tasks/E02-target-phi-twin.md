@@ -172,7 +172,8 @@ regimes, boost and other ECU programs remain outside the first evidence.
   calling the lookup a final-command prediction. Share one pure kernel
   between streaming and stored-session adapters at the appropriate layer,
   and make it the same axis-search/interpolation function W05.1 uses for
-  the ROM Maps ECM cell (`src/analysis/rom_trace.py`), never a second copy.
+  the ECM cell of the ROM Editor's live overlay (`src/analysis/rom_trace.py`;
+  ROM Maps' cell until 2026-10-26), never a second copy.
   The RAM table at `0xFFFFB260` is 64 bytes and this ECM caps a `0x23` read
   at 63 bytes (64 draws NRC `0x12`), so E02.2's comparison needs two reads.
   **Accept:** independent known lookup vectors cover both branches, interior

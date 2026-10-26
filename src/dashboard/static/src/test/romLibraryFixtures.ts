@@ -621,3 +621,69 @@ export const TABLES_WITH_TRIM: RomTablesResponse = {
     },
   ],
 };
+
+/** A two-dimensional table with no editor and no decode: a base timing map,
+ *  which the ROM Editor shows for looking at only. */
+export const BASE_TIMING_TABLE: RomTableValues = {
+  id: "base_timing_rate_map",
+  name: "Base timing rate map",
+  label: "Base timing rate map (Map 1)",
+  slot: 1,
+  kind: null,
+  role: "table",
+  decode: null,
+  rows: 3,
+  cols: 3,
+  dtype: "u8",
+  unit: null,
+  raw: [
+    [10, 20, 30],
+    [40, 50, 60],
+    [70, 80, 90],
+  ],
+  decoded: null,
+  axes: { rows: null, cols: null },
+  confidence: "inferred",
+  evidence: "Feeds the base timing.",
+};
+
+/** Every 2-D table the Xterra map declares that the editor shows: Fuel Targets
+ *  (UpRev's ms labels on its columns) in Maps 1 and 2, Fuel Compensation and
+ *  Timing Main (trim A) in Map 1, and a base timing map nobody edits. */
+export const TABLES_ALL_2D: RomTablesResponse = {
+  ...TABLES_WITH_TRIM,
+  tables: [
+    ...TABLES_WITH_TRIM.tables,
+    {
+      ...TABLES_WITH_TRIM.tables[1],
+      id: "timing_trim_b",
+      name: "Timing High Det (trim B)",
+      label: "Timing High Det (trim B) (Map 1)",
+      kind: "timing_trim_b",
+      offset: 0x0e0120,
+      end: 0x0e012f,
+    },
+    fuelCompTable(1),
+    TABLES.tables[2],
+    BASE_TIMING_TABLE,
+  ],
+};
+
+/** TABLES_ALL_2D with Fuel Targets and Fuel Compensation in every one of the
+ *  five map slots, as the daemon lists them (the copies in Maps 2-5 carry the
+ *  same editor-label record and are inferred, not verified). */
+export const TABLES_ALL_SLOTS: RomTablesResponse = {
+  ...TABLES_ALL_2D,
+  map_slots: [1, 2, 3, 4, 5],
+  tables: [
+    ...TABLES_ALL_2D.tables,
+    ...[3, 4, 5].map((slot) => ({
+      ...TABLES.tables[2],
+      label: `Fuel Targets (Map ${slot})`,
+      slot,
+      offset: 0x0e0220 + (slot - 1) * 0x800,
+      end: 0x0e025f + (slot - 1) * 0x800,
+    })),
+    ...[2, 3, 4, 5].map(fuelCompTable),
+  ],
+};

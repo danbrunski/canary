@@ -63,7 +63,6 @@ import { TpmsPanel } from "./TpmsPanel";
 import { TreadWearCard } from "./TreadWearCard";
 import { UpdateCard } from "./UpdateCard";
 import { VehicleLedgerPage } from "./VehicleLedgerPage";
-import { RomMapsPanel } from "./RomMapsPanel";
 import { AnalysisPage } from "./tuning/AnalysisPage";
 import { LoggingPage } from "./tuning/LoggingPage";
 import { LogsPage } from "./tuning/LogsPage";
@@ -191,18 +190,6 @@ function renderItem(
   tuning: TuningContext,
 ) {
   switch (item) {
-    case "tuning-rom-maps":
-      return (
-        <RomMapsPanel
-          token={d.token}
-          channels={d.channels}
-          status={d.status}
-          loaded={tuning.loadedRom}
-          onLoadedChange={tuning.setLoadedRom}
-          selectedLogId={tuning.selectedLogId}
-          onNavigate={onNavigate}
-        />
-      );
     case "system-data-sources":
       return <DataSourcesPanel channels={d.channels} status={d.status} />;
     case "diag-anomalies":
@@ -306,7 +293,16 @@ function renderItem(
     case "tuning-calibration":
       return <CalibrationPage token={d.token} status={d.status} />;
     case "tuning-rom-editor":
-      return <RomEditorPage token={d.token} status={d.status} />;
+      return (
+        <RomEditorPage
+          token={d.token}
+          status={d.status}
+          channels={d.channels}
+          selectedLogId={tuning.selectedLogId}
+          onNavigate={onNavigate}
+          onLoadedChange={tuning.setLoadedRom}
+        />
+      );
     case "tuning-flash":
       return (
         <PlaceholderPanel

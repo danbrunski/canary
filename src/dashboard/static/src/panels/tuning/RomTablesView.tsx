@@ -34,7 +34,7 @@ const SEGMENT_TONE: Record<RomConfidence, string> = {
 };
 
 /** Every table of the selected image, per slot, with its confidence and
- *  evidence (W08.6). Fuel Targets is drawn with the ROM Maps `MapTable`;
+ *  evidence (W08.6). Fuel Targets is drawn with `MapTable`;
  *  a table whose decode is unconfirmed is shown raw. */
 export function RomTablesView({
   token,

@@ -1,7 +1,7 @@
 """The ECM's 2-D table lookup arithmetic, once (E02.4, W05.1).
 
 One pure kernel for everything that asks "where does this coordinate land on
-a ROM table's axis, and what does the ECM read there": the ROM Maps page's
+a ROM table's axis, and what does the ECM read there": the ROM Editor overlay's
 ECM cell (:mod:`src.analysis.rom_trace`) and the target-equivalence-ratio twin
 (:mod:`src.analysis.target_phi`), stored-session and streaming alike. A second
 copy of the axis search is how the two would come to disagree about a

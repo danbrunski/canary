@@ -2,6 +2,7 @@ import { act, fireEvent, render, renderHook, screen } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { controlJson } from "../../api/core";
+import { ENTRY_TUNED, SHA_TUNED, TABLES_WITH_FUEL_COMP } from "../../test/romLibraryFixtures";
 import {
   SELECTED_LOG_STORAGE_KEY,
   useTuningContext,
@@ -9,7 +10,6 @@ import {
   type TuningContext,
 } from "../../hooks/useTuningContext";
 import type { ChannelSnapshot } from "../../hooks/useTelemetryStream";
-import type { RomInspection } from "../../lib/romMaps";
 import type { StatusResponse, WorkbenchItem } from "../../types";
 import { Workbench, type DashboardData } from "../Workbench";
 import { READINESS_CHIPS, TuningContextBar, chipTone, elapsedLabel } from "./TuningContextBar";
@@ -21,22 +21,6 @@ vi.mock("../../api/core", async (importOriginal) => ({
 const control = vi.mocked(controlJson);
 
 const NOW = new Date("2026-09-21T12:00:00Z");
-
-const INSPECTION: RomInspection = {
-  source_sha256: "a".repeat(64),
-  revision: "ZS44A-20260920",
-  recorded_revision: "ZS44A-20260920",
-  matches_recorded_revision: true,
-  map_slots: [1],
-  afr_stoich: 14.7,
-  warnings: [],
-  live: {
-    rpm: { spec: "did:RPM", transform: "identity", factor: null },
-    base_fuel_schedule: { spec: "did:BFS", transform: "scale", factor: 0.00049 },
-    commanded_afr: null,
-  },
-  tables: [],
-};
 
 function context(overrides: Partial<TuningContext> = {}): TuningContext {
   return {
@@ -80,8 +64,8 @@ describe("TuningContextBar empty states", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Capture: open Logging" }));
     fireEvent.click(screen.getByRole("button", { name: "Log: open Logs" }));
-    fireEvent.click(screen.getByRole("button", { name: "ROM: open ROM Maps" }));
-    expect(visited).toEqual(["tuning-logging", "tuning-logs", "tuning-rom-maps"]);
+    fireEvent.click(screen.getByRole("button", { name: "ROM: open ROM Editor" }));
+    expect(visited).toEqual(["tuning-logging", "tuning-logs", "tuning-rom-editor"]);
   });
 });
 
@@ -126,7 +110,7 @@ describe("TuningContextBar populated segments", () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     const started = new Date(NOW.getTime() - (3600 + 2 * 60 + 3) * 1000).toISOString();
-    const rom: LoadedRom = { filename: "ZS44A-Tuned.OsirisROM", inspection: INSPECTION };
+    const rom: LoadedRom = { sha256: SHA_TUNED, name: "ZS44A-Tuned.OsirisROM" };
     render(
       <TuningContextBar
         status={status({
@@ -217,7 +201,7 @@ describe("useTuningContext", () => {
     const first = renderHook(() => useTuningContext());
     act(() => {
       first.result.current.setSelectedLogId("_tuning-2026-09-21T120000");
-      first.result.current.setLoadedRom({ filename: "x.OsirisROM", inspection: INSPECTION });
+      first.result.current.setLoadedRom({ sha256: SHA_TUNED, name: "x.OsirisROM" });
     });
     first.unmount();
     expect(JSON.parse(window.localStorage.getItem(SELECTED_LOG_STORAGE_KEY) ?? "null")).toBe(
@@ -255,11 +239,21 @@ const DATA: DashboardData = {
 
 describe("Workbench renders the bar on Engine Tuning pages", () => {
   beforeEach(() => {
-    control.mockImplementation((path: string) =>
-      path === "/control/rom/inspect"
-        ? Promise.resolve(INSPECTION as never)
-        : new Promise<never>(() => {}),
-    );
+    window.history.replaceState(null, "", "/");
+    // The ROM Editor's library answers (and keeps what is uploaded); every
+    // other page's reads never settle.
+    let stored = false;
+    control.mockImplementation((path: string, _token: string, init?: RequestInit) => {
+      if (path === "/control/rom/library" && !init?.method)
+        return Promise.resolve({ entries: stored ? [ENTRY_TUNED] : [] } as never);
+      if (path.startsWith("/control/rom/library?") && init?.method === "POST") {
+        stored = true;
+        return Promise.resolve({ ...ENTRY_TUNED, created: true } as never);
+      }
+      if (path === `/control/rom/library/${SHA_TUNED}/tables`)
+        return Promise.resolve(TABLES_WITH_FUEL_COMP as never);
+      return new Promise<never>(() => {});
+    });
   });
 
   it("shows the bar on every tuning-* route loaded directly, and nowhere else", () => {
@@ -267,7 +261,7 @@ describe("Workbench renders the bar on Engine Tuning pages", () => {
       "tuning-logging",
       "tuning-logs",
       "tuning-analysis",
-      "tuning-rom-maps",
+      "tuning-rom-editor",
       "tuning-rom-library",
       "tuning-calibration",
     ] as const) {
@@ -280,17 +274,18 @@ describe("Workbench renders the bar on Engine Tuning pages", () => {
     expect(screen.queryByRole("region", { name: "Engine Tuning context" })).toBeNull();
   });
 
-  it("keeps a loaded ROM across navigation within the group", async () => {
-    const view = render(<Workbench active="tuning-rom-maps" onNavigate={() => {}} data={DATA} />);
+  it("keeps the ROM in view across navigation within the group", async () => {
+    const view = render(<Workbench active="tuning-rom-editor" onNavigate={() => {}} data={DATA} />);
     await act(async () => {
       fireEvent.change(screen.getByLabelText("ROM file"), {
         target: { files: [new File(["rom"], "ZS44A-Tuned.OsirisROM")] },
       });
     });
-    expect(screen.getByText("ROM: ZS44A-Tuned.OsirisROM")).toBeInTheDocument();
+    expect(await screen.findByText("ROM: ZS44A-Tuned.OsirisROM")).toBeInTheDocument();
     view.rerender(<Workbench active="tuning-calibration" onNavigate={() => {}} data={DATA} />);
     expect(screen.getByText("ROM: ZS44A-Tuned.OsirisROM")).toBeInTheDocument();
-    view.rerender(<Workbench active="tuning-rom-maps" onNavigate={() => {}} data={DATA} />);
-    expect(screen.getByText(/ZS44A-Tuned\.OsirisROM · ZS44A-20260920/)).toBeInTheDocument();
+    // Back on the editor, the image is still the one in view (its `?rom=` link).
+    view.rerender(<Workbench active="tuning-rom-editor" onNavigate={() => {}} data={DATA} />);
+    expect(await screen.findByLabelText("Loaded ROM")).toHaveTextContent(SHA_TUNED.slice(0, 12));
   });
 });

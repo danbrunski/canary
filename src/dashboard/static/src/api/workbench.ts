@@ -1,6 +1,7 @@
 // Engine Tuning workbench routes, one function per route (R08.4). These used
 // to be split between lib/workbenchApi.ts and inline `controlJson` calls in
-// CalibrationPage, RomMapsPanel and AnalysisPage.
+// CalibrationPage, the ROM Maps page (since merged into the ROM Editor) and
+// AnalysisPage.
 
 import type {
   CalibrationResponse,
@@ -14,7 +15,7 @@ import type {
   MemoryChannelsResponse,
   PullComparisonResponse,
   Regime,
-  RomInspection,
+  RomTraceContext,
   SessionChoice,
   TimingResponse,
   TrimSurfaceResponse,
@@ -171,16 +172,6 @@ export function verifyMemoryChannels(token: string, request: VerifyMemoryRequest
   });
 }
 
-/** `POST /control/rom/inspect` — decode a ROM in memory; never stored. */
-export function inspectRom(token: string, file: File, signal?: AbortSignal) {
-  return controlJson<RomInspection>("/control/rom/inspect", token, {
-    method: "POST",
-    headers: { "Content-Type": "application/octet-stream" },
-    body: file,
-    signal,
-  });
-}
-
 /** `GET /control/sessions/{id}/cell-residency` — which cells a log visited (W05.6). */
 export function getCellResidency(
   token: string,
@@ -229,6 +220,13 @@ export function getRomDescription(token: string, sha: string, signal?: AbortSign
 /** `GET /control/rom/library/{sha}/tables` — every table, every slot. */
 export function getRomTables(token: string, sha: string, signal?: AbortSignal) {
   return controlJson<RomTablesResponse>(`${librarySha(sha)}/tables`, token, { signal });
+}
+
+/** `GET /control/rom/library/{sha}/trace` — the live overlay's inputs for one
+ *  image: the vehicle's trace definitions, live providers, and whether this is
+ *  the revision running now. A vehicle without a viewer definition is a 409. */
+export function getRomTrace(token: string, sha: string, signal?: AbortSignal) {
+  return controlJson<RomTraceContext>(`${librarySha(sha)}/trace`, token, { signal });
 }
 
 /** `POST /control/rom/library/{sha}/edits/preview` — the edits applied to the

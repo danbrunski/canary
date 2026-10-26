@@ -11,6 +11,7 @@ import type {
   RomTableValues,
   RomTablesResponse,
 } from "../../src/types/romLibrary";
+import type { RomTraceContext } from "../../src/types/workbench";
 import { LEVERS_FUEL_COMP, LEVERS_TIMING_TRIM } from "../../src/test/romLeverFixtures";
 import {
   buildSimResult,
@@ -46,6 +47,9 @@ export interface RomApiOptions {
   uploads?: Record<string, (RomLibraryEntry & { created?: boolean }) | Failure>;
   /** `GET /control/rom/library/{sha}/tables`. */
   tables?: (sha: string) => RomTablesResponse;
+  /** `GET /control/rom/library/{sha}/trace`: the live overlay's inputs. Unset,
+   *  the stub answers the 409 a vehicle without a viewer definition gives. */
+  trace?: (sha: string) => RomTraceContext | Failure;
   /** The simulate answer. */
   simulate?: RomSimResult | Failure;
   /** `GET /control/rom/editor/typical-values`: the Xterra's real declared values
@@ -286,6 +290,16 @@ export async function mockRomApi(page: Page, options: RomApiOptions): Promise<Ro
     const tables = /^\/control\/rom\/library\/([0-9a-f]{64})\/tables$/.exec(path);
     if (method === "GET" && tables) {
       return reply(route, (options.tables ?? tablesFor)(tables[1]));
+    }
+    const trace = /^\/control\/rom\/library\/([0-9a-f]{64})\/trace$/.exec(path);
+    if (method === "GET" && trace) {
+      return reply(
+        route,
+        options.trace?.(trace[1]) ?? {
+          status: 409,
+          body: { detail: "ROM map definition unavailable for this vehicle: rom_viewer.yaml" },
+        },
+      );
     }
     const preview = /^\/control\/rom\/library\/([0-9a-f]{64})\/edits\/preview$/.exec(path);
     if (method === "POST" && preview) {

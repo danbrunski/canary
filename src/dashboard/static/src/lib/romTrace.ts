@@ -397,12 +397,19 @@ export function coverageColor(count: number, max: number): string {
   return coverage(count, max);
 }
 
+/** How far two displayed breakpoints may differ and still be the same axis.
+ *  The calibration records a revision's BFS breakpoints at the two decimals
+ *  the tuning editor displays (8.76), while the editor's table labels them
+ *  from the image's own bytes (8.7627): the same axis, so rounding, never a
+ *  measurement. A different axis differs by far more. */
+export const AXIS_LABEL_TOLERANCE = 0.005;
+
 /** A residency grid can shade a displayed table only if it was binned on the
  *  same breakpoints — a log from another revision may have other axes. */
 export function residencyMatchesTable(residency: CellResidency, table: RomTable): boolean {
   if (!residency.available) return false;
   const same = (a: number[], b: number[]) =>
-    a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-6);
+    a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) <= AXIS_LABEL_TOLERANCE);
   return same(residency.x_axis, table.x_axis) && same(residency.y_axis, table.y_axis);
 }
 

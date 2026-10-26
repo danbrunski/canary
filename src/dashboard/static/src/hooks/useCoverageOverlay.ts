@@ -1,4 +1,5 @@
-// The ROM-maps coverage overlay (W05.6/W05.8), out of RomMapsPanel (R08.8).
+// The ROM tables' coverage overlay (W05.6/W05.8), shown by the ROM Editor's live
+// overlay (it was ROM Maps' `RomMapsPanel`, R08.8).
 // Per table: whether the overlay is on, which source it shows (the selected
 // log's stored residency, or this capture's live samples), the residency
 // reads, and the client-side live grids. It was four keyed `Record` states,
@@ -112,7 +113,7 @@ export function useCoverageOverlay({
   };
 
   /** This render's new ECM samples during a capture. Called while rendering
-   *  (RomMapsPanel), so it writes an absolute value computed from this
+   *  (`useLiveOverlay`), so it writes an absolute value computed from this
    *  render's grids rather than an updater: a StrictMode double render then
    *  records each sample once, not twice. */
   const recordLive = (samples: { table: RomTable; position: CellPosition }[]) => {

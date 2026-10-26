@@ -9,7 +9,7 @@ Three layers, each usable without the next:
 
 - :func:`predict` — one tuple of raw lookup inputs to one predicted command,
   through the shared kernel :mod:`src.decode.ecm_lookup` (the same search the
-  ROM Maps ECM cell uses). Pure: the streaming adapter (E04) calls it per
+  ROM Editor's ECM cell uses). Pure: the streaming adapter (E04) calls it per
   complete tuple with a preloaded :class:`ResolvedTable`.
 - :func:`resolve_table` / :func:`table_from_calibration` and
   :func:`resolve_slot` — which bytes the ECM is reading, from a W08 library

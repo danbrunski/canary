@@ -23,7 +23,6 @@ export const NAV: NavGroupDef[] = [
       { id: "tuning-logging", label: "Logging", group: "tuning" },
       { id: "tuning-logs", label: "Logs", group: "tuning" },
       { id: "tuning-analysis", label: "Analysis", group: "tuning" },
-      { id: "tuning-rom-maps", label: "ROM Maps", group: "tuning" },
       { id: "tuning-rom-library", label: "ROM Library", group: "tuning" },
       { id: "tuning-calibration", label: "Calibration", group: "tuning" },
       { id: "tuning-rom-editor", label: "ROM Editor", group: "tuning" },
@@ -84,7 +83,10 @@ export const ITEM_ALIASES: Record<string, WorkbenchItem> = {
   "live-trip": "observe-trip",
   "live-alarms": "observe-alarms",
   "live-builder": "observe-builder",
-  "live-rom-maps": "tuning-rom-maps",
+  // 2026-10-26: ROM Maps was merged into the ROM Editor (one page for viewing
+  // and editing ROM tables), so both its old ids land there.
+  "live-rom-maps": "tuning-rom-editor",
+  "tuning-rom-maps": "tuning-rom-editor",
   // W08.6: the checklist names the page `#wb/rom-library`.
   "rom-library": "tuning-rom-library",
   "models-tuning": "model-thresholds",
@@ -153,7 +155,7 @@ export const PHONE_TABS: readonly PhoneTab[] = [
   // "Alerts/DTCs": the trouble codes first (the check-engine light is the
   // question asked from a phone), with CANary's own alerts beside them.
   { id: "alerts", label: "Alerts", items: ["diag-dtc", "diag-anomalies", "observe-alarms"] },
-  { id: "rom", label: "ROM", items: ["tuning-rom-library", "tuning-rom-maps"] },
+  { id: "rom", label: "ROM", items: ["tuning-rom-library", "tuning-rom-editor"] },
   { id: "system", label: "System", items: ["system-info"] },
 ];
 

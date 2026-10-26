@@ -14,6 +14,7 @@ import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -39,8 +40,10 @@ from src.control.rom_library import (
     RomNotFoundError,
     valid_sha,
 )
+from src.dashboard.routes.rom_maps import library_trace_context
 from src.dashboard.security import control_auth_dependency
 from src.dashboard.status import derive_vehicle_state_from_storage
+from src.paths import DIDS_YAML
 from src.vehicle.platforms import VehicleDataFile, config_data_file
 from src.vehicle.profiles import active_registry
 from src.vehicle.profiles import profile_dir as vehicle_profile_dir
@@ -133,6 +136,7 @@ def register_rom_library_routes(
     replay_controller: Any = None,
     capture_controller: CaptureController | None = None,
     publish_control_event: Any = None,
+    dids_path: Path = DIDS_YAML,
 ) -> RomBackupJob:
     """Register the library, compare and backup routes; returns the job."""
     authorize = control_auth_dependency(resolved_control_token)
@@ -239,6 +243,20 @@ def register_rom_library_routes(
     @app.get("/control/rom/library/{sha}/tables", dependencies=[Depends(authorize)])
     async def get_rom_library_tables(sha: str) -> dict[str, Any]:
         result: dict[str, Any] = await _call(library.tables, _sha(sha))
+        return result
+
+    @app.get("/control/rom/library/{sha}/trace", dependencies=[Depends(authorize)])
+    async def get_rom_library_trace(sha: str) -> dict[str, Any]:
+        """The live overlay's inputs for one image (ROM Editor): the vehicle's
+        trace definitions per table kind, the live providers, and whether this
+        image is the revision recorded as running now. Read-only; the image's
+        cells and axes are ``GET .../tables``. 409 when the vehicle has no
+        ``rom_viewer.yaml``."""
+        _sha(sha)
+        await _call(library.entry, sha)  # 404 for an image not in the library
+        result: dict[str, Any] = await _call(
+            lambda: library_trace_context(profile, dids_path, sha=sha, revisions=registry())
+        )
         return result
 
     @app.patch("/control/rom/library/{sha}", dependencies=[Depends(authorize)])

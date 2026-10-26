@@ -250,7 +250,7 @@ def test_shipped_fuel_compensation_labels_its_load_axis_as_throttle_model_fill()
     throttle-model (alpha-N) fill, shown as % of its 224 ceiling. UpRev calls
     the byte Volumetric Flow Ratio and puts that label on the rpm axis's
     bytes; the viewer carries the same swapped-label record as rom_map.yaml,
-    so the ROM Maps card warns even while the table is TBD."""
+    so the ROM Editor warns even while the table is TBD."""
     table = load_viewer_definition(PROFILE).table("fuel_compensation")
     assert table is not None
     assert table.x_unit == "%"

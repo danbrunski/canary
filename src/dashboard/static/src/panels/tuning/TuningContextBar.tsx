@@ -128,11 +128,11 @@ export function TuningContextBar({ status, context, onNavigate }: Props) {
         <button
           type="button"
           className={segmentClass}
-          onClick={() => onNavigate("tuning-rom-maps")}
-          aria-label="ROM: open ROM Maps"
+          onClick={() => onNavigate("tuning-rom-editor")}
+          aria-label="ROM: open ROM Editor"
         >
           {context.loadedRom ? (
-            <span>ROM: {context.loadedRom.filename}</span>
+            <span>ROM: {context.loadedRom.name}</span>
           ) : (
             <span className="text-fg-dim">ROM: none loaded</span>
           )}

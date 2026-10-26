@@ -38,7 +38,7 @@ export default defineConfig({
       // phone-ui.md P2-P5). A Pixel 7 in portrait at its full 412x915 screen
       // (the descriptor's own viewport subtracts browser chrome), touch and
       // mobile viewport semantics on. Runs the dashboard journeys plus the
-      // phone-only spec; the ROM maps spec sizes its own viewport.
+      // phone-only spec; the ROM Editor specs size their own viewports.
       name: "phone",
       use: {
         ...devices["Pixel 7"],
