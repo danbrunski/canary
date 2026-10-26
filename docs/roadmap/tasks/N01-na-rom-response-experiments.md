@@ -136,7 +136,7 @@ block wider than where the truck operates, not by knowing which cell it sits in.
 
 - [ ] **Prerequisite:** N01.1 measured, or deliberately skipped. Never flash both
   at once.
-- [ ] **Prerequisite, capture recipe (E05.4 (b)/(c), E09.1; added 2026-10-17):**
+- [~] **Prerequisite, capture recipe (E05.4 (b)/(c), E09.1; added 2026-10-17):**
   read `0xFFFF283F` before choosing N01.2's trim table (`mem:ECM_HIGH_DET_FLAGS`:
   bit 6 set means warm timing reads trim B, clear means trim A; edit the table
   in force). Drive profile `twin`, which polls PID 0x0E,
@@ -147,6 +147,14 @@ block wider than where the truck operates, not by knowing which cell it sits in.
   through `0xFFFF11FF`) are catalogued but unread: a key-on and idle 0x23 read
   of their eight windows and `knock_chain` comes first (as on 2026-10-08), and
   then a timing-only profile (they do not fit in `twin`; E09.1).
+  - [x] **`0xFFFF283F` read warm (2026-10-26):** 0x40 (bit 6 set) on all 889
+    reads of `_capture-tuning-2026-10-26T010515`, coolant 85–95 °C, idle to
+    ~2,500 rpm, with `mem:ECM_KS_FAULT_FLAGS` 0x80 on all 233 reads (KS1
+    pegged at 255, knock target −5°). So **trim B is in force**, latched by the
+    KS1 fault rather than by measured knock. That holds until KS1 is repaired:
+    re-read after the harness fix, because trim A may take over.
+  - [ ] The `twin` holds, the 56–60 °C warm-up pass and the chain windows'
+    key-on/idle read are still owed.
 - [ ] **The edit:** retard only (knock-safe), a few counts, over the same cruise
   block as N01.1 with the same margin and controls. Record it.
 - [ ] **What it measures:** the table's unit. Nobody here knows what one count is

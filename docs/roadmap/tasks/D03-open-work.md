@@ -2393,6 +2393,12 @@ live here now, so the documents could be archived
     capture that alternates 0x1123–0x1126 with PIDs 0x06–0x09 once learned
     trim moves again. LTFT is slow enough to pair across the alternation;
     short-term trim may not be. Until then the trim scale stays `medium`.
+    2026-10-26: still 0.00 on both banks on every read (919 / 901 of
+    `_capture-tuning-2026-10-26T010515`), through 8 min warm with short-term
+    trim held at −5 to −7 % (purge off) after a new fuel pump raised rail
+    pressure 48 → 56 psi. A sustained offset did not move learned trim, so
+    waiting for it to move may not work on this tune: find out first whether
+    learning is disabled (UpRev calibration) or just slow.
   - [x] **0x1110 is commanded EVAP purge, not intake VVT duty.** The
     CAN Mode 22 handler (`FUN_000d16b8`) sends DID high byte 0x11 to table
     0x24988. Entry 16 there is 0xFFFF272E (read back from the ROM image), and

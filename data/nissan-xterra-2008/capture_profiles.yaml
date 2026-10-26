@@ -260,8 +260,14 @@ profiles:
     10 ms answers) the core batch reads about 3.5 Hz and 0x44 / FUEL_STATUS 2.0 Hz;
     trims, context PIDs, DIDs and memory channels read their plan. Read achieved
     rates per channel off the capture, never the planned 4 Hz. Parent evidence:
-    fuel-target-research on 2026-09-21 ran 20 min with memory windows. No capture of
-    this exact revision exists yet; replace this text with the first one.'
+    fuel-target-research on 2026-09-21 ran 20 min with memory windows. First
+    capture of this revision: _capture-tuning-2026-10-26T010515 (2026-10-26, 512 s,
+    warm idle and light load on the truck, median interarrival per channel): DIDs,
+    memory windows, trims at 2.0 Hz (p95 0.54 s; trims to 0.98 s); context PIDs
+    1.0 Hz; knock status 0.5 Hz; the 4 Hz batch 2.1-2.5 Hz (FUEL_STATUS, load,
+    throttle 2.5; RPM, MAF, timing, lambda, 0x44 2.1; p95 0.6-0.65 s). 58 reads/s
+    in all, 17 timeouts, no negative responses. capture_quality reports
+    rate_shortfall for the 4 Hz batch: that is this plan, not a fault.'
   required_tuple: []
   min_achieved_rate_hz: null
   max_tuple_skew_s: null
