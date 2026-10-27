@@ -1126,6 +1126,25 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
     is the plant input. Decode the firmware term first: its learned vapour
     concentration is the natural observable for the plant's vapour fuel,
     which avoids fitting a free scale.
+    - *Decoded 2026-10-27* (docs/ecu-firmware-analysis.md, "EVAP purge
+      factor α"). It is the chain's existing α (`0xFFFF4698`/`469A`), which
+      `injector_pulse.py` holds at 1.0. It multiplies BFS·φ/8 before the wall
+      film, the pressure correction and the trims, so the chain needs no new
+      stage, only α read live. The ratio's fall over ~30 s after purge starts
+      and its instant recovery match the filtered α and its reset.
+    - **Owed (Pi, key-on/idle 0x23 read, then the `tuning` and `twin`
+      profiles):** `0xFFFF4698–469B` (already catalogued as
+      `mem:ECM_PURGE_FUEL_FACTOR_B1/B2`, hypothesized, window
+      `purge_fuel_factor`). Add one ≤ 63-byte window `0xFFFF9030–9066`
+      (55 bytes: the intermediates and the α copies `9064`/`9066`), plus
+      `0xFFFF3D4E`, `0xFFFF9134`, `0xFFFF8E47`/`8E48` and `0xFFFF47F0`. Until
+      α is logged, purging reads are not a chain known answer. Score the
+      chain on purge-off reads (1.006) or on reads with α logged.
+    - **Plant candidate:** α·BFS·φ is what the ECM believes the vapour
+      displaces, so at a settled state the vapour fuel is ≈ (1 − α)·BFS·φ/8.
+      This input needs α logged; it is not a fit. The unexplained ratio
+      slope against battery voltage falls to 0.024/V with purge off
+      (n = 685), and 0.04/V remains within settled purging reads.
 
 - [~] **E09.12 — Score the prediction of record on the plant-free outputs.**
   Five drives on ZS44A-20261004 exist (E08.7 item 5) and none is scored.

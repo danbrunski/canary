@@ -779,8 +779,43 @@ ratio of (DID − Ts) to the predicted pulse has median 1.006, p10–p90
       x_c    = (Ti_b + 0x141A[c] − 0x152E[c]) × D605[c] >> 7 # D605 = 128 for all six
       P_c    = max(short-pulse(x_c), min pulse 0x2770)       # short-pulse cal 0x9120–0x9126
 
-  - α is the EVAP purge factor (`0x4698`/`469A`; name inferred). `w2E8C` is a
+  - α is the EVAP purge factor (`0x4698`/`469A`). `w2E8C` is a
     diagnostic perturbation, neutral in normal driving.
+- **EVAP purge factor α (structure verified 2026-10-27, `EVAP_purge_control`
+  `0x6A52C`; headless read-only decompile with the divide helpers).**
+  - **Reset:** `α_b = 0x6400` (1.0) whenever `w9134 = 0` (purge inactive this
+    tick or the last) or `b8E48 ≥ 2`.
+  - **Filter:** otherwise α is `w9050 = (g·α* + α_prev·(0x8000 − g)) >> 15`,
+    with `g = w10EC·5/2` (an airflow-like word, inferred). It is clamped to
+    [`0x3200`, `0x6400`], so it never cuts below 0.5; `w3B3E` sets a further
+    floor.
+  - **Target:** `α* = (0x8000 − v_b·200/D)·25/32`, which maps 0x8000 to
+    0x6400, with `v_b = min(0x8000, b3D4E·(T_b + 250)·2/125)`.
+    - T_b = `0x46B2`/`46B4` is the per-bank A/F target ×500 (7350 = 14.7).
+    - D = `(F >> 9) + 200`, with F the purge-flow word (chosen from
+      `38AC`/`8FD6`/`8FDE`/`1816`). When `47F0` bit 2 is set, D comes from
+      `w2BB4` instead.
+  - **Vapour quantity:** `b3D4E = min(255, (w900C·f(F)) >> 20)`. `w900C` is
+    the 8×8 u16 map `0xBF74` (axes `0xDF02`/`0xDEC2`), indexed by `w900E`
+    (vacuum-like, from `w8E28`) and `w9010 = 0x1388000 / (5·((w9002 >> 8) +
+    0x91))`. `w9002` follows `w8E22` while purging and `w2BD0` otherwise:
+    the learned vapour concentration (inferred).
+  - **Copies:** α at `0x9064`/`9066` and `0x8E00`/`8E02`.
+  - **Checks:** the constants 0x19 with >>5, 200, 125, 250, the shifts and
+    the 0x8000 literal at `0x6E514` are line-checked in the listing. The
+    0x3200 floor and the gain come from the decompile only. Maps `0xBF74`
+    and `0xBEF4` and their axes are byte-identical in 20260920 and 20261004.
+  - **Data** (four tuning captures 10-26/27, pulse-chain ratio with α held
+    at 1, n = 1,659): 1.006 with purge off, back within 2 s of purge ending.
+    With purge on it falls 1.01 / 0.98 / 0.96 / 0.93 / 0.909 at 0–4 / 4–8 /
+    8–16 / 16–32 / > 32 s after DID 0x1110 turned on. A term proportional to
+    duty at that instant would have dropped at once, and a slow release would
+    have left purge-off reads below 1; neither is seen. The settled level
+    differs by drive (0.904–0.944).
+  - **Not separated:** the α filter from slow learning of `w9002`.
+  - **Unverified:** α live (never polled); which D path the truck takes; the
+    meanings of F, `w2BB4`, `w10EC` and `w9002`; the tick rate; whether
+    `w9134 ≠ 0` matches DID 0x1110 > 0.
   - Units: 10 µs per count. Inferred, but the timer clock and UpRev's ×0.01 ms
     scale agree.
 - **Dead time is linear, not a table (verified).**
