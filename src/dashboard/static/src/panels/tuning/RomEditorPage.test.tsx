@@ -17,6 +17,13 @@ import {
   LEVERS_MAF_CURVE,
   LEVERS_TIMING_TRIM,
 } from "../../test/romLeverFixtures";
+import {
+  chooseRecent,
+  findTreeTable,
+  recentEntry,
+  showRomView,
+  treeContents,
+} from "../../test/romEditorViews";
 import type { RomEditPreview, RomEditPreviewRequest, RomLevers } from "../../types/romEditor";
 import { downloadText } from "../../util/browser";
 import { Workbench, type DashboardData } from "../Workbench";
@@ -161,7 +168,7 @@ function cell(grid: HTMLElement, row: number, col: number) {
 
 async function openFuelComp() {
   renderEditor();
-  fireEvent.click(await screen.findByRole("button", { name: "Fuel Compensation (Map 1)" }));
+  fireEvent.click(await findTreeTable("Fuel Compensation (Map 1)"));
   return screen.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" });
 }
 
@@ -196,6 +203,7 @@ describe("ROM Editor page: base and table (W09.3)", () => {
       expect(new URLSearchParams(window.location.search).get("rom")).toBe(SHA_K106),
     );
     // The Simulate slot says why it is off for an image that is not a revision.
+    await showRomView("Simulate");
     expect(
       await screen.findByText(/Simulate is unavailable: base_not_a_recorded_revision/),
     ).toBeVisible();
@@ -206,26 +214,21 @@ describe("ROM Editor page: base and table (W09.3)", () => {
     window.history.replaceState(null, "", `/?rom=${SHA_K106}`);
     renderEditor();
     await screen.findByRole("grid");
-    expect(screen.getByRole("button", { name: /Edit from k106\.bin/ })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(within(screen.getByLabelText("Loaded ROM")).getByText("k106.bin")).toBeVisible();
+    expect(recentEntry(/Edit from k106\.bin/)).toHaveAttribute("aria-pressed", "true");
   });
 
   it("offers Fuel Targets, Fuel Compensation and K in Map 1 only, with the Fuel Comp axis note", async () => {
     route();
     renderEditor();
-    const group = await screen.findByRole("group", { name: "Table" });
-    expect(
-      within(group)
-        .getAllByRole("button")
-        .map((button) => button.textContent),
-    ).toEqual([
+    const tree = await screen.findByRole("navigation", { name: "Tables" });
+    expect(treeContents()).toEqual([
+      "Fuel, 3 tables",
       "Fuel Targets (Map 1)",
       "K (injector constant) (Map 1)",
       "Fuel Compensation (Map 1)",
     ]);
-    await userEvent.click(within(group).getByRole("button", { name: "Fuel Compensation (Map 1)" }));
+    await userEvent.click(within(tree).getByRole("button", { name: "Fuel Compensation" }));
     expect(screen.getByRole("note", { name: "Fuel Compensation editor labels" })).toHaveTextContent(
       /UpRev labels these axes differently/,
     );
@@ -310,10 +313,13 @@ describe("ROM Editor page: operation, pending edits and preview", () => {
     const grid = await openFuelComp();
     await applyScale(grid);
 
-    const list = screen.getByRole("list", { name: "Pending edits" });
-    expect(within(list).getByText(/scale raw ×1\.02 \(\+2 %, nearest\) on 2 cells/)).toBeVisible();
     // Pending cells are marked before any preview.
     expect(cell(grid, 1, 1)).toHaveAttribute("data-pending", "true");
+    // Applying stays on Tables; the view's label counts the edit.
+    expect(screen.getByRole("button", { name: "Edits & Preview (1)" })).toBeVisible();
+    await showRomView("Edits & Preview");
+    const list = screen.getByRole("list", { name: "Pending edits" });
+    expect(within(list).getByText(/scale raw ×1\.02 \(\+2 %, nearest\) on 2 cells/)).toBeVisible();
 
     // No label, no preview.
     expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
@@ -378,6 +384,7 @@ describe("ROM Editor page: operation, pending edits and preview", () => {
     );
     const grid = await openFuelComp();
     await applyScale(grid);
+    await showRomView("Edits & Preview");
     await userEvent.type(screen.getByLabelText("Label for this edit set"), "x");
     await userEvent.click(screen.getByRole("button", { name: "Preview" }));
     const alert = await screen.findByRole("alert");
@@ -403,6 +410,7 @@ describe("ROM Editor page: operation, pending edits and preview", () => {
     );
     const grid = await openFuelComp();
     await applyScale(grid);
+    await showRomView("Edits & Preview");
     await userEvent.type(screen.getByLabelText("Label for this edit set"), "x");
     await userEvent.click(screen.getByRole("button", { name: "Preview" }));
     const alert = await screen.findByRole("alert");
@@ -421,7 +429,9 @@ describe("ROM Editor page: operation, pending edits and preview", () => {
     expect(await within(operation).findByRole("alert")).toHaveTextContent(
       /Refused \(value_out_of_range\).*raw 376/,
     );
-    expect(screen.getByText("No pending edits.")).toBeVisible();
+    // Nothing pending: the view's label carries no count.
+    expect(screen.getByRole("button", { name: "Edits & Preview" })).toBeVisible();
+    expect(screen.getByText("No pending edits.")).toBeInTheDocument();
     expect(control.mock.calls.some(([, , init]) => init?.method === "POST")).toBe(false);
   });
 
@@ -433,6 +443,7 @@ describe("ROM Editor page: operation, pending edits and preview", () => {
     const operation = screen.getByRole("form", { name: "Operation" });
     await userEvent.type(within(operation).getByLabelText("Value (AFR)"), "12.5");
     await userEvent.click(within(operation).getByRole("button", { name: "Apply to selection" }));
+    await showRomView("Edits & Preview");
     expect(await screen.findByText("12.5 AFR → raw 151 → 12.46 AFR")).toBeVisible();
   });
 
@@ -454,27 +465,35 @@ describe("ROM Editor page: operation, pending edits and preview", () => {
     // Same cells again: the second is a duplicate (E08.1 duplicate_edit).
     await userEvent.click(screen.getByRole("button", { name: "Apply to selection" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("duplicate_edit");
-    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Edits & Preview (1)" })).toBeVisible();
+    await showRomView("Edits & Preview");
+    const list = screen.getByRole("list", { name: "Pending edits" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
     await userEvent.click(screen.getByRole("button", { name: "Remove edit 1" }));
     expect(screen.getByText("No pending edits.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Edits & Preview" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("keeps the pending edits and label per image across a reload", async () => {
     route();
     const first = renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Fuel Compensation (Map 1)" }));
+    fireEvent.click(await findTreeTable("Fuel Compensation (Map 1)"));
     await applyScale(screen.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" }));
+    await showRomView("Edits & Preview");
     await userEvent.type(screen.getByLabelText("Label for this edit set"), "kept");
     first.unmount();
 
+    // The reload comes back on the same view (`?view=edits`).
     renderEditor();
     const list = await screen.findByRole("list", { name: "Pending edits" });
     expect(within(list).getByText(/scale raw ×1\.02/)).toBeVisible();
     expect(screen.getByLabelText("Label for this edit set")).toHaveValue("kept");
 
     // Another image does not see them.
-    await screen.findByRole("grid");
-    await userEvent.click(screen.getByRole("button", { name: /Edit from k106\.bin/ }));
+    chooseRecent(/Edit from k106\.bin/);
     await waitFor(() => expect(screen.getByText("No pending edits.")).toBeVisible());
   });
 });
@@ -484,6 +503,7 @@ describe("ROM Editor page: spec download and no image", () => {
     route();
     const grid = await openFuelComp();
     await applyScale(grid);
+    await showRomView("Edits & Preview");
     await userEvent.type(screen.getByLabelText("Label for this edit set"), "idle richer");
     await userEvent.click(screen.getByRole("button", { name: "Preview" }));
     await screen.findByRole("region", { name: "Preview result" });
@@ -519,6 +539,7 @@ async function previewWithLevers(levers: RomLevers | null) {
   });
   const grid = await openFuelComp();
   await applyScale(grid);
+  await showRomView("Edits & Preview");
   await userEvent.type(screen.getByLabelText("Label for this edit set"), "idle richer");
   await userEvent.click(screen.getByRole("button", { name: "Preview" }));
 }
@@ -546,10 +567,13 @@ describe("ROM Editor page: what the edit can and cannot show (E09.14b)", () => {
     expect(block).toHaveTextContent(
       /plant not qualified: .*; closed loop: trim authority undecoded/,
     );
-    // It is on the page before Simulate is offered: above the Simulate region
-    // in the document, and the form is there below it.
-    const simulate = screen.getByRole("region", { name: "Simulate" });
+    // It is on the page before Simulate is offered: on Edits & Preview, ahead
+    // of the Simulate view in the document, and the form is on that view.
+    // (A hidden region has no accessible name, so it is found by its slot.)
+    const simulate = document.querySelector<HTMLElement>('[data-slot="simulate"]');
+    if (!simulate) throw new Error("no Simulate slot");
     expect(block.compareDocumentPosition(simulate) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await showRomView("Simulate");
     expect(within(simulate).getByRole("form", { name: "Simulate form" })).toBeVisible();
   });
 
@@ -565,6 +589,7 @@ describe("ROM Editor page: what the edit can and cannot show (E09.14b)", () => {
     expect(shown(block)).toEqual(LEVERS_TIMING_TRIM.messages);
     cleanup();
     vi.clearAllMocks();
+    window.history.replaceState(null, "", "/");
 
     await previewWithLevers(LEVERS_MAF_CURVE);
     block = within(await screen.findByRole("region", { name: "Preview result" })).getByRole(
@@ -632,14 +657,16 @@ describe("ROM Editor page: the Simulate slot", () => {
     route();
     renderEditor();
     await screen.findByRole("grid");
-    const slot = screen.getByRole("region", { name: "Simulate" });
+    await showRomView("Simulate");
+    let slot = screen.getByRole("region", { name: "Simulate" });
     // A matched revision: the form is there, nothing says it is unavailable.
     expect(within(slot).getByRole("form", { name: "Simulate form" })).toBeVisible();
     expect(within(slot).queryByRole("note")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: /Edit from k106\.bin/ }));
+    chooseRecent(/Edit from k106\.bin/);
     expect(await screen.findByRole("note")).toHaveTextContent(
       /Simulate is unavailable: base_not_a_recorded_revision\. The simulator needs a base recorded/,
     );
+    slot = screen.getByRole("region", { name: "Simulate" });
     expect(within(slot).getByRole("button", { name: "Run simulation" })).toBeDisabled();
   });
 });
@@ -701,6 +728,7 @@ describe("ROM Editor page: Open ROM (W09.8)", () => {
     expect(within(loaded).getByText("tuner-base.bin")).toBeVisible();
     expect(within(loaded).getByText("unrecognised")).toBeVisible();
     expect(within(loaded).getByText("preview only")).toBeVisible();
+    await showRomView("Simulate");
     expect(
       await screen.findByText(/Simulate is unavailable: base_not_a_recorded_revision/),
     ).toBeVisible();
@@ -709,10 +737,7 @@ describe("ROM Editor page: Open ROM (W09.8)", () => {
     expect(screen.queryByText(/already in the library/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open another ROM…" })).toBeEnabled();
     // It is also in the recent list, selected.
-    expect(screen.getByRole("button", { name: /Edit from tuner-base\.bin/ })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(recentEntry(/Edit from tuner-base\.bin/)).toHaveAttribute("aria-pressed", "true");
   });
 
   it("a recorded revision opened from a file can simulate", async () => {
@@ -736,10 +761,7 @@ describe("ROM Editor page: Open ROM (W09.8)", () => {
     expect(
       await screen.findByText("again.bin is already in the library; nothing new was stored."),
     ).toBeVisible();
-    expect(screen.getByRole("button", { name: /Edit from k106\.bin/ })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(recentEntry(/Edit from k106\.bin/)).toHaveAttribute("aria-pressed", "true");
   });
 
   it("shows UpRev's encrypted backup refusal by its name and keeps the current base", async () => {
@@ -752,10 +774,7 @@ describe("ROM Editor page: Open ROM (W09.8)", () => {
     await screen.findByRole("grid");
     await openFile(pickFile("Xterra-backup.bin", 1048592));
     expect(await screen.findByText(`Xterra-backup.bin: ${detail}`)).toBeVisible();
-    expect(screen.getByRole("button", { name: /Edit from Running tune/ })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(recentEntry(/Edit from Running tune/)).toHaveAttribute("aria-pressed", "true");
     expect(new URLSearchParams(window.location.search).get("rom")).toBe(SHA_TUNED);
     expect(screen.getByRole("grid", { name: "Fuel Targets (Map 1) cells" })).toBeVisible();
   });
@@ -802,16 +821,17 @@ describe("ROM Editor page: Open ROM (W09.8)", () => {
   it("keeps each image's pending edits across an upload-driven switch, and leaks none", async () => {
     route(undefined, { [UPLOAD("tuner-base.bin")]: { ...ENTRY_UNRECORDED, created: true } });
     renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Fuel Compensation (Map 1)" }));
+    fireEvent.click(await findTreeTable("Fuel Compensation (Map 1)"));
     await applyScale(screen.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" }));
-    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Edits & Preview (1)" })).toBeVisible();
 
     await openFile(pickFile("tuner-base.bin"));
     await within(await screen.findByLabelText("Loaded ROM")).findByText("preview only");
+    await showRomView("Edits & Preview");
     await waitFor(() => expect(screen.getByText("No pending edits.")).toBeVisible());
 
     // Back to the first image: its edit is still there.
-    await userEvent.click(screen.getByRole("button", { name: /Edit from Running tune/ }));
+    chooseRecent(/Edit from Running tune/);
     const list = await screen.findByRole("list", { name: "Pending edits" });
     expect(within(list).getByText(/scale raw ×1\.02/)).toBeVisible();
   }, 30000);
@@ -846,7 +866,7 @@ describe("ROM Editor page: starts unloaded (W09.8)", () => {
     await screen.findByRole("table", { name: "Base images" });
     expect(screen.getByRole("button", { name: "Open ROM…" })).toBeEnabled();
     expect(screen.queryByLabelText("Loaded ROM")).not.toBeInTheDocument();
-    for (const name of ["Edit", "Pending edits", "Preview", "Simulate"]) {
+    for (const name of ["Tables", "Edit", "Pending edits", "Preview", "Simulate"]) {
       expect(screen.queryByRole("heading", { name })).not.toBeInTheDocument();
     }
     expect(screen.queryByRole("grid")).not.toBeInTheDocument();
@@ -897,5 +917,128 @@ describe("ROM Editor page: starts unloaded (W09.8)", () => {
     expect(screen.queryByLabelText("Loaded ROM")).not.toBeInTheDocument();
     expect(screen.getByRole("table", { name: "Base images" })).toBeVisible();
     expect(control.mock.calls.some(([path]) => String(path).includes("/tables"))).toBe(false);
+  });
+});
+
+describe("ROM Editor page: the loaded header (W10.8)", () => {
+  const menuTitles = (menu: HTMLElement) =>
+    within(within(menu).getByRole("table", { name: "Base images" }))
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) =>
+        (within(row).getAllByRole("cell")[0]?.textContent ?? "").replace(/[0-9a-f]{12}$/, ""),
+      );
+
+  it("is one line with Recent ▾ in place of the Recent ROMs table, and the menu switches the image", async () => {
+    route(undefined, {
+      "GET /control/rom/library": { entries: [ENTRY_K106, ENTRY_TUNED, ENTRY_UNRECORDED] },
+    });
+    renderEditor();
+    await screen.findByRole("grid");
+    // Loaded: no intro, no Recent ROMs table; the header names the image.
+    expect(screen.queryByText("Recent ROMs")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Base images" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Opening a file adds it to the ROM library/)).not.toBeInTheDocument();
+    const header = screen.getByRole("group", { name: "Open a ROM file" });
+    expect(within(header).getByLabelText("Loaded ROM")).toHaveTextContent("Running tune");
+    expect(within(header).getByRole("button", { name: "Open another ROM…" })).toBeEnabled();
+
+    const recent = within(header).getByRole("button", { name: "Recent" });
+    expect(recent).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(recent);
+    expect(recent).toHaveAttribute("aria-expanded", "true");
+    const menu = screen.getByRole("dialog", { name: "Recent ROMs" });
+    expect(menuTitles(menu)).toEqual(["tuner-base.bin", "Running tune", "k106.bin"]);
+
+    fireEvent.click(within(menu).getByRole("button", { name: /Edit from k106\.bin/ }));
+    expect(screen.queryByRole("dialog", { name: "Recent ROMs" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get("rom")).toBe(SHA_K106),
+    );
+    expect(within(screen.getByLabelText("Loaded ROM")).getByText("k106.bin")).toBeVisible();
+    await screen.findByRole("grid");
+  });
+
+  it("closes the menu on Escape and on a click elsewhere, not on a click inside it", async () => {
+    route();
+    renderEditor();
+    await screen.findByRole("grid");
+    const recent = screen.getByRole("button", { name: "Recent" });
+    const isOpen = () => screen.queryByRole("dialog", { name: "Recent ROMs" }) !== null;
+    fireEvent.click(recent);
+    fireEvent.mouseDown(
+      within(screen.getByRole("dialog", { name: "Recent ROMs" })).getByRole("table"),
+    );
+    expect(isOpen()).toBe(true);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(isOpen()).toBe(false);
+    fireEvent.click(recent);
+    fireEvent.mouseDown(screen.getByRole("grid"));
+    expect(isOpen()).toBe(false);
+    // The second press of the button closes it too.
+    fireEvent.click(recent);
+    fireEvent.click(recent);
+    expect(isOpen()).toBe(false);
+  });
+});
+
+describe("ROM Editor page: three views (W10.9)", () => {
+  const views = () => screen.getByRole("group", { name: "ROM Editor views" });
+  const pressed = () =>
+    within(views())
+      .getAllByRole("button")
+      .filter((button) => button.getAttribute("aria-pressed") === "true")
+      .map((button) => button.textContent);
+
+  it("opens on Tables and writes the view beside ?rom=", async () => {
+    route();
+    renderEditor();
+    await screen.findByRole("grid");
+    expect(
+      within(views())
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Tables", "Edits & Preview", "Simulate"]);
+    expect(pressed()).toEqual(["Tables"]);
+    await showRomView("Simulate");
+    const params = new URLSearchParams(window.location.search);
+    expect(params.get("view")).toBe("simulate");
+    expect(params.get("rom")).toBe(SHA_TUNED);
+    expect(screen.getByRole("form", { name: "Simulate form" })).toBeVisible();
+    expect(screen.queryByRole("grid")).not.toBeInTheDocument();
+    await showRomView("Edits & Preview");
+    expect(new URLSearchParams(window.location.search).get("view")).toBe("edits");
+    expect(screen.getByRole("heading", { name: "Pending edits" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Preview" })).toBeVisible();
+  });
+
+  it("restores the view ?view= names, and falls back to Tables for anything else", async () => {
+    route();
+    window.history.replaceState(null, "", `/?rom=${SHA_TUNED}&view=simulate`);
+    const first = renderEditor();
+    expect(await screen.findByRole("form", { name: "Simulate form" })).toBeVisible();
+    expect(pressed()).toEqual(["Simulate"]);
+    first.unmount();
+
+    window.history.replaceState(null, "", `/?rom=${SHA_TUNED}&view=preview`);
+    renderEditor();
+    expect(await screen.findByRole("grid")).toBeVisible();
+    expect(pressed()).toEqual(["Tables"]);
+  });
+
+  it("keeps a half-made operation across a view switch: every view stays mounted", async () => {
+    route();
+    const grid = await openFuelComp();
+    fireEvent.mouseDown(cell(grid, 1, 1));
+    const operation = screen.getByRole("form", { name: "Operation" });
+    await userEvent.selectOptions(within(operation).getByLabelText("Operation"), "scale");
+    await userEvent.type(within(operation).getByLabelText("Scale (%)"), "2");
+    await showRomView("Edits & Preview");
+    await showRomView("Tables");
+    // Queried afresh: a remounted form would be a new, empty one.
+    const again = screen.getByRole("form", { name: "Operation" });
+    expect(again).toBe(operation);
+    expect(within(again).getByLabelText("Scale (%)")).toHaveValue("2");
+    expect(screen.getByText("Selected: 1 cell (row 1, column 1).")).toBeVisible();
   });
 });

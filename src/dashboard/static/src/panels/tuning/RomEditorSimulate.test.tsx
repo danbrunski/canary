@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HttpError, NetworkError, controlBlob, controlJson } from "../../api/core";
 import { SIM_STORAGE_KEY } from "../../lib/romSim";
 import { ENTRY_K106, ENTRY_TUNED, SHA_K106, SHA_TUNED } from "../../test/romLibraryFixtures";
+import { chooseRecent, findTreeTable, showRomView } from "../../test/romEditorViews";
 import { documentedSimFields } from "../../test/romSimDoc";
 import { buildSimResult, buildTimingBlock, tablesWithAxes } from "../../test/romSimFixtures";
 import { SHIPPED_TYPICAL, leftEmptyOf, typicalWith } from "../../test/romTypicalFixtures";
@@ -110,7 +111,7 @@ async function withPendingEdit(
   },
 ) {
   renderEditor();
-  fireEvent.click(await screen.findByRole("button", { name: target.table }));
+  fireEvent.click(await findTreeTable(target.table));
   const grid = screen.getByRole("grid", { name: `${target.table} cells` });
   fireEvent.mouseDown(cell(grid, ...target.from));
   fireEvent.mouseDown(cell(grid, ...target.to), { shiftKey: true });
@@ -121,6 +122,7 @@ async function withPendingEdit(
   fireEvent.change(within(operation).getByLabelText("Rounding"), { target: { value: "nearest" } });
   await click(within(operation).getByRole("button", { name: "Apply to selection" }));
   type(screen.getByLabelText("Label for this edit set"), label);
+  await showRomView("Simulate");
   return screen.getByRole("form", { name: "Simulate form" });
 }
 
@@ -179,7 +181,8 @@ describe("the Simulate form: off, empty, and honest about it", () => {
     route();
     renderEditor();
     await screen.findByRole("grid");
-    fireEvent.click(screen.getByRole("button", { name: /Edit from k106\.bin/ }));
+    await showRomView("Simulate");
+    chooseRecent(/Edit from k106\.bin/);
     const note = await screen.findByRole("note");
     expect(note).toHaveTextContent(/Simulate is unavailable: base_not_a_recorded_revision\./);
     const form = screen.getByRole("form", { name: "Simulate form" });
@@ -203,8 +206,10 @@ describe("the Simulate form: off, empty, and honest about it", () => {
     });
     const form = await withPendingEdit();
     expect(within(form).queryByRole("note")).not.toBeInTheDocument();
+    await showRomView("Edits & Preview");
     await click(screen.getByRole("button", { name: "Preview" }));
     await screen.findByText("Refused: value_out_of_range");
+    await showRomView("Simulate");
     expect(within(form).getByRole("note")).toHaveTextContent(
       /Simulate is unavailable: preview_refused\. The last preview was refused/,
     );
@@ -572,7 +577,14 @@ describe("Run", () => {
     await click(runButton(form));
     await screen.findByRole("region", { name: "Simulation result" });
     expect(screen.queryByText(/pending edits have changed since this run/)).not.toBeInTheDocument();
+    await showRomView("Edits & Preview");
     await click(screen.getByRole("button", { name: "Remove edit 1" }));
+    await showRomView("Simulate");
+    // The view's label says so too, before anyone opens it.
+    expect(screen.getByRole("button", { name: "Simulate · stale" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(await screen.findByText(/pending edits have changed since this run/)).toBeVisible();
   });
 });
@@ -933,7 +945,8 @@ describe("the Coarse and Fine presets", () => {
       return Promise.reject(new Error(`unexpected ${key}`));
     });
     render(<RomEditorPage token="t" status={null} />);
-    const form = await screen.findByRole("form", { name: "Simulate form" });
+    await showRomView("Simulate");
+    const form = screen.getByRole("form", { name: "Simulate form" });
     expect(presetButton(form, "Coarse (quick check)")).toBeDisabled();
     expect(presetButton(form, "Fine")).toBeDisabled();
     expect(form).toHaveTextContent(
@@ -1546,7 +1559,8 @@ describe("Fill typical values", () => {
     route({ typical: SHIPPED_TYPICAL });
     renderEditor();
     await screen.findByRole("grid");
-    fireEvent.click(screen.getByRole("button", { name: /Edit from k106\.bin/ }));
+    await showRomView("Simulate");
+    chooseRecent(/Edit from k106\.bin/);
     await screen.findByRole("note");
     const form = screen.getByRole("form", { name: "Simulate form" });
     expect(typicalButton(form)).toBeDisabled();
@@ -1740,7 +1754,7 @@ describe("the ignition timing state and the timing trims (E09.7)", () => {
   it("edits a timing trim like a fuel table: a masked grid, the flag kept, the request exact", async () => {
     route({ simulate: { ...buildSimResult(), ignition_timing: buildTimingBlock("trim_b") } });
     renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: TRIM_B }));
+    fireEvent.click(await findTreeTable(TRIM_B));
     const grid = screen.getByRole("grid", { name: `${TRIM_B} cells` });
     // The grid shows the value bits; the flag is in the raw count on hover.
     expect(cell(grid, 5, 10)).toHaveTextContent("47");
@@ -1754,9 +1768,11 @@ describe("the ignition timing state and the timing trims (E09.7)", () => {
     });
     type(within(operation).getByLabelText("Raw counts to add"), "-3");
     await click(within(operation).getByRole("button", { name: "Apply to selection" }));
+    await showRomView("Edits & Preview");
     const pending = screen.getByRole("list", { name: "Pending edits" });
     expect(pending).toHaveTextContent("Ignition timing trim B: add raw -3 on 1 cell");
     type(screen.getByLabelText("Label for this edit set"), "trim B -3");
+    await showRomView("Simulate");
     const form = screen.getByRole("form", { name: "Simulate form" });
     state(form);
     await click(runButton(form));
@@ -1784,7 +1800,7 @@ describe("the ignition timing state and the timing trims (E09.7)", () => {
   it("says a trim edit is read nowhere under the stated latch, not that it changed nothing", async () => {
     route({ simulate: { ...buildSimResult(), ignition_timing: buildTimingBlock("trim_a") } });
     renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Ignition timing trim A (Map 1)" }));
+    fireEvent.click(await findTreeTable("Ignition timing trim A (Map 1)"));
     const grid = screen.getByRole("grid", { name: "Ignition timing trim A (Map 1) cells" });
     fireEvent.mouseDown(cell(grid, 4, 4));
     fireEvent.mouseUp(window);
@@ -1795,6 +1811,7 @@ describe("the ignition timing state and the timing trims (E09.7)", () => {
     type(within(operation).getByLabelText("Raw counts to add"), "-3");
     await click(within(operation).getByRole("button", { name: "Apply to selection" }));
     type(screen.getByLabelText("Label for this edit set"), "trim A -3");
+    await showRomView("Simulate");
     const form = screen.getByRole("form", { name: "Simulate form" });
     state(form);
     await click(runButton(form));
@@ -1802,5 +1819,60 @@ describe("the ignition timing state and the timing trims (E09.7)", () => {
     expect(within(section).getAllByText("NR")).toHaveLength(2 + 1); // two cells, one legend swatch
     expect(section).toHaveTextContent("trim_a_not_read:high_det_latch_set");
     expect(section).toHaveTextContent("the HI DET latch is set, so the ECM reads trim B warm");
+  });
+});
+
+describe("Simulate as a view of its own (W10.9)", () => {
+  const simulateView = () =>
+    within(screen.getByRole("group", { name: "ROM Editor views" }))
+      .getAllByRole("button")
+      .find((button) => button.textContent?.startsWith("Simulate"));
+
+  it("keeps a typed field across a view switch", async () => {
+    route();
+    const form = await withPendingEdit();
+    type(within(form).getByLabelText("Baro (kPa)"), "71.5");
+    type(within(form).getByLabelText("RPM edges (rpm)"), "800, 1600, 2400");
+    await showRomView("Tables");
+    await showRomView("Edits & Preview");
+    await showRomView("Simulate");
+    // Queried afresh: a remounted form would be a new, empty one.
+    const again = screen.getByRole("form", { name: "Simulate form" });
+    expect(again).toBe(form);
+    expect(within(again).getByLabelText("Baro (kPa)")).toHaveValue("71.5");
+    expect(within(again).getByLabelText("RPM edges (rpm)")).toHaveValue("800, 1600, 2400");
+  });
+
+  it("says a run is in flight on the label, and lands a run left while running", async () => {
+    let resolve: (value: RomSimResult) => void = () => {};
+    route({ simulate: () => new Promise<RomSimResult>((done) => (resolve = done)) });
+    const form = await withPendingEdit();
+    state(form);
+    await click(runButton(form));
+    expect(simulateView()).toHaveTextContent("Simulate · running");
+    await showRomView("Tables");
+    expect(simulateView()).toHaveTextContent("Simulate · running");
+    await act(async () => {
+      resolve(buildSimResult());
+    });
+    // The run is the editor's, not the view's: it landed while Tables showed.
+    expect(simulateView()).toHaveTextContent(/^Simulate$/);
+    await showRomView("Simulate");
+    expect(screen.getByRole("region", { name: "Simulation result" })).toBeVisible();
+    expect(simulateCalls()).toHaveLength(1);
+  });
+
+  it("says a run failed on the label", async () => {
+    route({
+      simulate: new HttpError(
+        503,
+        JSON.stringify({ detail: { error: "analysis_unavailable", message: "child died" } }),
+      ),
+    });
+    const form = await withPendingEdit();
+    state(form);
+    await click(runButton(form));
+    await screen.findByRole("alert");
+    expect(simulateView()).toHaveTextContent("Simulate · failed");
   });
 });

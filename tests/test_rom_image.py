@@ -224,6 +224,18 @@ def test_tables_synthetic_fuel_targets_and_k() -> None:
     assert _table(payload, "fuel_targets_maps_2_5", 3)["raw"] == target_raw("ZS44A-k106")
 
 
+def test_tables_serve_the_tree_group_and_short_name() -> None:
+    """W10.7: the ROM Editor's tree reads both from the payload; an axis has
+    neither, and a short name rides only where the map declares one."""
+    payload = tables_payload(synthetic_image(), xterra_map())
+    fuel = _table(payload, "fuel_targets", 1)
+    assert (fuel["group"], fuel["short_name"]) == ("fuel", None)
+    retard = _table(payload, "timing_retard_26d9_map", None)
+    assert (retard["group"], retard["short_name"]) == ("ignition", "Timing retard map 0xFFFF3630")
+    axis = _table(payload, "fuel_targets_rpm_axis", None)
+    assert axis["role"] == "axis" and axis["group"] is None
+
+
 def test_tables_label_the_x_count_axes_in_uprevs_bfs_ms_from_the_images_own_scaler() -> None:
     """The trims' and Fuel Targets' columns carry UpRev's BFS labels, computed
     from the Load Point Scaler in the same image: an edited scaler moves them,

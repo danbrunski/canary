@@ -6,7 +6,11 @@ import { buttonClass, cn } from "../../../styles";
  *  opens the browser's native file dialog (a plain file input, no `accept`
  *  filter, so an `.OsirisROM` or an odd extension is never hidden). What the
  *  file is, is the server's call: it detects the format from the bytes and
- *  refuses by name. Dropping a file on the area does the same. */
+ *  refuses by name. Dropping a file on the area does the same.
+ *
+ *  `bare` is the loaded page's one-line header (W10.8): no dashed box until a
+ *  file is dragged over, `children` first and the button at the far end,
+ *  followed by `trailing`. */
 export function OpenRom({
   label,
   primary,
@@ -14,6 +18,8 @@ export function OpenRom({
   dragging,
   onDraggingChange,
   onFile,
+  bare = false,
+  trailing,
   children,
 }: {
   label: string;
@@ -22,9 +28,22 @@ export function OpenRom({
   dragging: boolean;
   onDraggingChange: (dragging: boolean) => void;
   onFile: (file: File | undefined) => void;
+  bare?: boolean;
+  trailing?: ReactNode;
   children?: ReactNode;
 }) {
   const input = useRef<HTMLInputElement>(null);
+
+  const open = (
+    <button
+      type="button"
+      className={cn(buttonClass, primary && "border-accent-2 px-6 py-3 text-base font-semibold")}
+      disabled={disabled}
+      onClick={() => input.current?.click()}
+    >
+      {label}
+    </button>
+  );
 
   function drop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -43,8 +62,9 @@ export function OpenRom({
       onDragLeave={() => onDraggingChange(false)}
       onDrop={drop}
       className={cn(
-        "flex flex-wrap items-center gap-3 rounded-lg border border-dashed p-3",
-        dragging ? "border-accent-2 bg-accent-2/5" : "border-border",
+        "flex flex-wrap items-center gap-3 rounded-lg border border-dashed",
+        bare ? "p-1" : "p-3",
+        dragging ? "border-accent-2 bg-accent-2/5" : bare ? "border-transparent" : "border-border",
         primary && "p-6",
       )}
     >
@@ -60,15 +80,14 @@ export function OpenRom({
           event.target.value = "";
         }}
       />
-      <button
-        type="button"
-        className={cn(buttonClass, primary && "border-accent-2 px-6 py-3 text-base font-semibold")}
-        disabled={disabled}
-        onClick={() => input.current?.click()}
-      >
-        {label}
-      </button>
+      {!bare && open}
       {children}
+      {bare && (
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {open}
+          {trailing}
+        </div>
+      )}
     </div>
   );
 }

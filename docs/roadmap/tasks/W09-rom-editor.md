@@ -1205,7 +1205,8 @@ W09.6 is the orchestrator's own, on the ROM machine.
     "is not in the library" note. This reverses an earlier draft of this
     item that kept W09.3's first-entry auto-select.
   - The stored images are a secondary **Recent ROMs** list (BasePicker, rows
-    unchanged), **newest first by the entry's `added_at`** (the field the
+    unchanged; with an image loaded it sits behind **Recent ▾**, W10.8),
+    **newest first by the entry's `added_at`** (the field the
     library sets on every entry; the API's own order is not relied on),
     one click to load, each with its `revision_match` chip and can simulate /
     preview only. W09's rule stands: Simulate only when `revision_match
@@ -1683,7 +1684,9 @@ W09.6 is the orchestrator's own, on the ROM machine.
     image's `/tables` payload (both trims, Fuel Compensation, Fuel Targets, the
     base timing maps; never an axis table or a one-dimensional curve), plus the
     editable scalar K; a **Map slot** select picks the slot and Map 1 stays the
-    only editable one (the page says so for 2-5). `CellGrid` shades each cell
+    only editable one (the page says so for 2-5). *Widened by W10.10
+    (2026-10-27): every non-axis table, curves and scalars too, picked from a
+    grouped tree.* `CellGrid` shades each cell
     with the existing `mapColor` over the table's own decoded range (a table
     with no decoded values by its raw counts; a scalar, a uniform table and a
     cell with no value are left plain: there is no range), with the same legend

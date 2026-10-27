@@ -52,12 +52,40 @@ const cellAt = (grid: Locator, row: number, col: number) =>
 const afterCell = (table: Locator, row: number, col: number) =>
   table.getByRole("cell", { name: new RegExp(`^Row ${row + 1}, column ${col + 1}:`) });
 
+/** A table in the tree (W10.10), by its tree label. */
+const treeTable = (page: Page, name: string) =>
+  page.getByRole("navigation", { name: "Tables" }).getByRole("button", { name, exact: true });
+
+/** Pick a table as the operator would at this width: from the tree, or below
+ *  900px from its select (W10.11), whose option carries the marks as text. */
+async function chooseTable(page: Page, name: string) {
+  if ((page.viewportSize()?.width ?? 1280) >= 900) {
+    await treeTable(page, name).click();
+    return;
+  }
+  const select = page.getByRole("combobox", { name: "Table" });
+  const value = await select.locator("option", { hasText: name }).first().getAttribute("value");
+  await select.selectOption(value ?? "");
+}
+
+/** The ROM Editor's view switch (W10.9); a label may carry state ("(1)", "· running"). */
+const viewButton = (page: Page, view: "Tables" | "Edits & Preview" | "Simulate") =>
+  page
+    .getByRole("group", { name: "ROM Editor views" })
+    .getByRole("button", { name: new RegExp(`^${view}`) });
+
+/** Show one view; the others stay mounted but hidden. */
+async function showView(page: Page, view: "Tables" | "Edits & Preview" | "Simulate") {
+  await viewButton(page, view).click();
+}
+
 /** Open the tuned ROM, pick Fuel Compensation, scale cells (1,1)-(2,3) by 2 %
- *  nearest and name the set. Returns the grid. */
+ *  nearest and name the set, which leaves Edits & Preview showing. Returns the
+ *  grid. */
 async function openAndEdit(page: Page, label: string) {
   await chooseFile(page, TUNED_FILE);
   await expect(page.getByLabel("Loaded ROM")).toBeVisible();
-  await page.getByRole("button", { name: "Fuel Compensation (Map 1)" }).click();
+  await chooseTable(page, "Fuel Compensation");
   const grid = page.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" });
   await cellAt(grid, 1, 1).click();
   await cellAt(grid, 2, 3).click({ modifiers: ["Shift"] });
@@ -66,6 +94,7 @@ async function openAndEdit(page: Page, label: string) {
   await operation.getByLabel("Scale (%)").fill("2");
   await operation.getByLabel("Rounding").selectOption("nearest");
   await operation.getByRole("button", { name: "Apply to selection" }).click();
+  await showView(page, "Edits & Preview");
   await page.getByLabel("Label for this edit set").fill(label);
   return grid;
 }
@@ -89,6 +118,7 @@ test("starts unloaded: one Open ROM… button, Recent ROMs newest first, nothing
   await expect(page.getByRole("form", { name: "Operation" })).toHaveCount(0);
   await expect(page.getByRole("form", { name: "Simulate form" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Preview" })).toHaveCount(0);
+  await expect(page.getByRole("group", { name: "ROM Editor views" })).toHaveCount(0);
   expect(new URL(page.url()).searchParams.has("rom")).toBe(false);
   expect(api.calls.map((call) => `${call.method} ${call.path}`)).toEqual([
     "GET /control/rom/library",
@@ -119,7 +149,7 @@ test("open a file, select one cell then a range, scale +2 %, preview, download t
   await expect(loaded.getByText("can simulate")).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`\\?rom=${ENTRY_TUNED.sha256}`));
 
-  await page.getByRole("button", { name: "Fuel Compensation (Map 1)" }).click();
+  await treeTable(page, "Fuel Compensation").click();
   const grid = page.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" });
   await expect(grid.getByRole("gridcell")).toHaveCount(256);
 
@@ -146,14 +176,18 @@ test("open a file, select one cell then a range, scale +2 %, preview, download t
   // No default rounding: applying without one is refused by name, and adds nothing.
   await operation.getByRole("button", { name: "Apply to selection" }).click();
   await expect(operation.getByRole("alert")).toContainText("Refused (rounding_undeclared)");
-  await expect(page.getByRole("list", { name: "Pending edits" })).toHaveCount(0);
+  await expect(viewButton(page, "Edits & Preview")).toHaveText("Edits & Preview");
   await operation.getByLabel("Rounding").selectOption("nearest");
   await operation.getByRole("button", { name: "Apply to selection" }).click();
+  // Applying stays on Tables, and the view's label counts the edit.
+  await expect(grid.locator("[data-pending]")).toHaveCount(6);
+  await expect(viewButton(page, "Edits & Preview")).toHaveText("Edits & Preview (1)");
+  await showView(page, "Edits & Preview");
+  await expect(page).toHaveURL(/[?&]view=edits\b/);
   const pending = page.getByRole("list", { name: "Pending edits" });
   await expect(pending.getByRole("listitem")).toHaveCount(1);
   await expect(pending).toContainText("Fuel Compensation");
   await expect(pending).toContainText("6 cells");
-  await expect(grid.locator("[data-pending]")).toHaveCount(6);
 
   // Preview needs a name for the set.
   const previewButton = page.getByRole("button", { name: "Preview", exact: true });
@@ -208,13 +242,11 @@ test("open a file, select one cell then a range, scale +2 %, preview, download t
     "fuel_comp_lookup",
   );
   // What the edit can and cannot show: the classifier's lines, verbatim and in
-  // order, drawn above the Simulate form (E09.14b).
+  // order, on Edits & Preview, read before Simulate is offered (E09.14b).
   const levers = page.getByRole("region", { name: "What this edit can and cannot show" });
   await expect(levers.getByRole("listitem")).toHaveText(LEVERS_FUEL_COMP.messages);
   await expect(levers).toContainText("closed loop: trim authority undecoded");
-  const leversBox = await levers.boundingBox();
-  const simulateBox = await page.getByRole("region", { name: "Simulate" }).boundingBox();
-  expect(leversBox?.y).toBeLessThan(simulateBox?.y ?? 0);
+  await expect(page.getByRole("form", { name: "Simulate form" })).toBeHidden();
   await page.screenshot({ path: testInfo.outputPath("rom-editor-preview.png"), fullPage: true });
 
   // Download spec: a file named for the label, holding the spec the daemon returned.
@@ -299,6 +331,7 @@ test("simulate: a missing field blocks Run and is named; the result puts the cav
   });
   await openAndEdit(page, label);
 
+  await showView(page, "Simulate");
   const form = page.getByRole("form", { name: "Simulate form" });
   const run = form.getByRole("button", { name: "Run simulation" });
   // Nothing is defaulted: a fresh form cannot run, and says what it needs.
@@ -405,7 +438,7 @@ test("timing trims: edit trim B on its value bits with the flag kept, state the 
   });
   await chooseFile(page, TUNED_FILE);
   await expect(page.getByLabel("Loaded ROM")).toBeVisible();
-  await page.getByRole("button", { name: "Ignition timing trim B (Map 1)" }).click();
+  await treeTable(page, "Ignition timing trim B").click();
   const grid = page.getByRole("grid", { name: "Ignition timing trim B (Map 1) cells" });
   await expect(grid.getByRole("gridcell")).toHaveCount(256);
   await expect(page.getByRole("note").filter({ hasText: "decode mask 0x7F" })).toBeVisible();
@@ -417,6 +450,7 @@ test("timing trims: edit trim B on its value bits with the flag kept, state the 
   await operation.getByLabel("Operation").selectOption("add_raw");
   await operation.getByLabel("Raw counts to add").fill("-3");
   await operation.getByRole("button", { name: "Apply to selection" }).click();
+  await showView(page, "Edits & Preview");
   await expect(page.getByRole("list", { name: "Pending edits" })).toContainText(
     "Ignition timing trim B: add raw -3 on 1 cell",
   );
@@ -439,6 +473,7 @@ test("timing trims: edit trim B on its value bits with the flag kept, state the 
   await expect(levers.getByRole("listitem")).toHaveText(LEVERS_TIMING_TRIM.messages);
 
   // Simulate: nothing is preselected, and the two ECU states are named while missing.
+  await showView(page, "Simulate");
   const form = page.getByRole("form", { name: "Simulate form" });
   const run = form.getByRole("button", { name: "Run simulation" });
   await expect(form.getByRole("group", { name: "HI DET latch" }).getByRole("radio")).toHaveCount(2);
@@ -478,6 +513,7 @@ test("simulate: the Coarse preset fills the edges and draws visibly, and the res
     simulate: buildSimResult(),
   });
   await openAndEdit(page, "light load 2 % richer");
+  await showView(page, "Simulate");
   const form = page.getByRole("form", { name: "Simulate form" });
   // Nothing pressed, nothing remembered: no preset, no draws.
   await expect(form.getByRole("status", { name: "Preset state" })).toContainText(
@@ -544,6 +580,7 @@ test("simulate: Fill typical values fills the stated environment with its source
     simulate: buildSimResult(),
   });
   await openAndEdit(page, "light load 2 % richer");
+  await showView(page, "Simulate");
   const form = page.getByRole("form", { name: "Simulate form" });
   const tags = form.locator("[data-typical]");
   const rpmEdges = await form.getByLabel("RPM edges (rpm)").inputValue();
@@ -603,8 +640,69 @@ test("simulate: Fill typical values fills the stated environment with its source
   expect(api.unexpected).toEqual([]);
 });
 
+test("loaded, the header is one line: Recent ▾ lists the library over the page and switches the image", async ({
+  page,
+}) => {
+  const api = await open(page, {
+    library: [ENTRY_K106],
+    uploads: { [TUNED_FILE]: { ...ENTRY_TUNED, created: true } },
+  });
+  await chooseFile(page, TUNED_FILE);
+  await expect(page.getByLabel("Loaded ROM")).toContainText(TUNED_FILE);
+  // The table the empty page shows is behind the button now.
+  await expect(page.getByRole("heading", { name: "Recent ROMs" })).toHaveCount(0);
+  await expect(page.getByRole("table", { name: "Base images" })).toHaveCount(0);
+  const recent = page.getByRole("button", { name: "Recent" });
+  await recent.click();
+  const menu = page.getByRole("dialog", { name: "Recent ROMs" });
+  await expect(menu.getByRole("row")).toHaveCount(3); // header + two images
+  await expect(menu.getByRole("row").nth(1)).toContainText("Running tune");
+  // Drawn over the Tables view, not clipped by the one-line header panel
+  // (panels clip their content, and a click did not notice): the row's own
+  // button is what is under its centre.
+  const k106 = menu.getByRole("button", { name: /Edit from k106\.bin/ });
+  const onTop = await k106.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return hit !== null && el.contains(hit);
+  });
+  expect(onTop, "the Recent ROMs menu is drawn over the page").toBe(true);
+  await k106.click();
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByLabel("Loaded ROM")).toContainText("k106.bin");
+  await expect(page).toHaveURL(new RegExp(`rom=${ENTRY_K106.sha256}`));
+  // Escape closes it without choosing.
+  await recent.click();
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByLabel("Loaded ROM")).toContainText("k106.bin");
+  expect(api.unexpected).toEqual([]);
+});
+
 test.describe("at phone width (412 x 915)", () => {
   test.use({ viewport: { width: 412, height: 915 }, hasTouch: true });
+
+  test("the table tree is a select: choosing a table changes the grid, and nothing scrolls sideways", async ({
+    page,
+  }) => {
+    await open(page, {
+      library: [],
+      uploads: { [TUNED_FILE]: { ...ENTRY_TUNED, created: true } },
+    });
+    await chooseFile(page, TUNED_FILE);
+    await expect(page.getByLabel("Loaded ROM")).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Tables" })).toHaveCount(0);
+    await expect(page.getByRole("searchbox", { name: "Filter tables" })).toHaveCount(0);
+    const select = page.getByRole("combobox", { name: "Table" });
+    await expect(select).toBeVisible();
+    await expect(page.getByRole("grid", { name: "Fuel Targets (Map 1) cells" })).toBeVisible();
+    await select.selectOption({ label: "Fuel Compensation ✎" });
+    await expect(page.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" })).toBeVisible();
+    const report = await overflowReport(page);
+    expect(report.documentWidth, "document width").toBeLessThanOrEqual(report.viewport);
+    expect(report.offenders, "elements past the right edge").toEqual([]);
+  });
 
   test("the preview's levers, the Simulate form after Fill typical values, and a result have no horizontal page scroll", async ({
     page,
@@ -630,6 +728,7 @@ test.describe("at phone width (412 x 915)", () => {
     ).toBeVisible();
     await noSidewaysPage("preview with levers");
 
+    await showView(page, "Simulate");
     const form = page.getByRole("form", { name: "Simulate form" });
     await form.scrollIntoViewIfNeeded();
     await form.getByRole("button", { name: "Fill typical values" }).click();
@@ -675,6 +774,7 @@ test("an unrecorded base is preview only: Simulate is off and gives the reason",
   await expect(loaded.getByText("preview only")).toBeVisible();
   await expect(loaded.getByText("can simulate")).toHaveCount(0);
 
+  await showView(page, "Simulate");
   const form = page.getByRole("form", { name: "Simulate form" });
   await expect(form.getByRole("note")).toContainText(
     "Simulate is unavailable: base_not_a_recorded_revision.",
@@ -683,7 +783,8 @@ test("an unrecorded base is preview only: Simulate is off and gives the reason",
   await expect(form.getByLabel("Baro (kPa)", { exact: true })).toBeDisabled();
 
   // It still previews: preview-only is not unusable, and the reason survives it.
-  await page.getByRole("button", { name: "Fuel Compensation (Map 1)" }).click();
+  await showView(page, "Tables");
+  await treeTable(page, "Fuel Compensation").click();
   const grid = page.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" });
   await cellAt(grid, 0, 0).click();
   const operation = page.getByRole("form", { name: "Operation" });
@@ -691,9 +792,11 @@ test("an unrecorded base is preview only: Simulate is off and gives the reason",
   await operation.getByLabel("Scale (%)").fill("2");
   await operation.getByLabel("Rounding").selectOption("nearest");
   await operation.getByRole("button", { name: "Apply to selection" }).click();
+  await showView(page, "Edits & Preview");
   await page.getByLabel("Label for this edit set").fill("tuner base probe");
   await page.getByRole("button", { name: "Preview", exact: true }).click();
   await expect(page.getByRole("button", { name: "Download spec" })).toBeVisible();
+  await showView(page, "Simulate");
   await expect(form.getByRole("note")).toContainText("base_not_a_recorded_revision");
   await expect(form.getByRole("button", { name: "Run simulation" })).toBeDisabled();
   expect(api.posted("/simulate")).toEqual([]);

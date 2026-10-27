@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HttpError, controlJson } from "../../api/core";
 import type { ChannelSnapshot } from "../../hooks/useTelemetryStream";
+import { treeTable } from "../../test/romEditorViews";
 import { ENTRY_TUNED, SHA_TUNED, TABLES_ALL_2D } from "../../test/romLibraryFixtures";
 import type { StatusResponse } from "../../types";
 import type { RomTablesResponse } from "../../types/romLibrary";
@@ -216,6 +217,14 @@ async function overlayOn() {
   });
   await settle();
 }
+/** Switch the editor's view (fake timers: no `findBy`, so not showRomView). */
+async function view(name: RegExp) {
+  const views = screen.getByRole("group", { name: "ROM Editor views" });
+  await act(async () => {
+    fireEvent.click(within(views).getByRole("button", { name }));
+  });
+  await settle();
+}
 async function confirm() {
   fireEvent.click(screen.getByRole("checkbox", { name: /I confirm/ }));
 }
@@ -258,6 +267,21 @@ describe("ROM Editor: the live overlay is behind a toggle", () => {
     expect(screen.queryByLabelText("Live map inputs")).not.toBeInTheDocument();
   });
 
+  it("is mounted only while Tables is showing: its clock never runs behind a hidden grid", async () => {
+    await mount();
+    await overlayOn();
+    expect(screen.getByText(/I confirm/)).toBeInTheDocument();
+    await view(/^Edits & Preview/);
+    // Gone, not hidden: the grid stays mounted, the overlay does not.
+    expect(screen.queryByText(/I confirm/)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("grid", { name: "Fuel Targets (Map 1) cells", hidden: true }),
+    ).toBeInTheDocument();
+    await view(/^Tables/);
+    expect(toggle()).toBeChecked();
+    expect(screen.getByText(/I confirm/)).toBeInTheDocument();
+  });
+
   it("says so when the vehicle has no viewer definition, and the editor still works", async () => {
     routeControl(
       new HttpError(
@@ -278,9 +302,9 @@ describe("ROM Editor: the live overlay is behind a toggle", () => {
   it("names tables with no trace mapped, and other slots, instead of drawing a cell", async () => {
     const view = await mount(props());
     await overlayOn();
-    fireEvent.click(screen.getByRole("button", { name: "Fuel Compensation (Map 1)" }));
+    fireEvent.click(treeTable("Fuel Compensation (Map 1)"));
     expect(screen.getByText(/maps no trace channels to Fuel Compensation/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Timing Main (trim A) (Map 1)" }));
+    fireEvent.click(treeTable("Timing Main (trim A) (Map 1)"));
     expect(
       screen.getByText(/places cells on the tables the vehicle maps a trace to/),
     ).toBeInTheDocument();

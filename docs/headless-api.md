@@ -425,7 +425,8 @@ map_slots: [1, 2, 3, 4, 5], tables: [...], reason}`. Each table:
 
 ```json
 {"id": "fuel_targets", "kind": "fuel_targets", "name": "Fuel Targets",
- "label": "Fuel Targets (Map 1)", "slot": 1, "offset": 918048, "end": 918111,
+ "label": "Fuel Targets (Map 1)", "short_name": null, "group": "fuel",
+ "slot": 1, "offset": 918048, "end": 918111,
  "rows": 8, "cols": 8, "dtype": "u8", "role": "table", "unit": "AFR",
  "raw": [[128, 128, ...], ...], "decoded": [[14.7, 14.7, ...], ...],
  "decode": {"formula": "afr = 1881.6 / raw", "kind": "reciprocal", "quantity": "afr",
@@ -436,6 +437,11 @@ map_slots: [1, 2, 3, 4, 5], tables: [...], reason}`. Each table:
           "cols": {"id": "fuel_targets_bfs_axis", "raw": [52, 68, ...], "decoded": null, ...}},
  "confidence": "verified", "evidence": "..."}
 ```
+
+`group` (`fuel`, `ignition`, `airflow` or `emissions`) and `short_name` are
+the ROM Editor's table tree (W10.7). `rom_map.yaml` must give every table that
+is not an axis a group. A name over 36 characters needs a short name, which
+the tree shows in its place. An axis (`role: "axis"`) has neither.
 
 A table without a declared decode (`K`, `be16` at slot +0x762, `inferred`)
 has `decoded: null` and is shown raw; a scalar is `[[value]]`. `role` is

@@ -559,6 +559,7 @@ export function timingTrimTable(which: "a" | "b"): RomTableValues {
     slot: 1,
     kind: `timing_trim_${which}`,
     role: "table",
+    group: "ignition",
     decode: TRIM_DECODE,
     offset: which === "a" ? 0xe0040 : 0xe0140,
     end: which === "a" ? 0xe013f : 0xe023f,

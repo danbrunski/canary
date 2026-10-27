@@ -327,7 +327,7 @@ def table_placements(rom_map: RomMap) -> list[tuple[Table, int | None, int, int]
 
 
 def _axis_ids(rom_map: RomMap) -> set[str]:
-    return {ref for t in rom_map.tables for ref in (t.axes.rows, t.axes.cols) if ref is not None}
+    return rom_map.axis_table_ids()
 
 
 def table_definitions(rom_map: RomMap) -> list[dict[str, Any]]:
@@ -339,6 +339,8 @@ def table_definitions(rom_map: RomMap) -> list[dict[str, Any]]:
             "kind": table.kind,
             "name": table.name,
             "label": _table_label(table, slot),
+            "short_name": table.short_name,
+            "group": table.group,
             "slot": slot,
             "offset": start,
             "end": end,
@@ -519,6 +521,8 @@ def table_values(image: bytes, rom_map: RomMap) -> list[dict[str, Any]]:
                 "kind": table.kind,
                 "name": table.name,
                 "label": _table_label(table, slot),
+                "short_name": table.short_name,
+                "group": table.group,
                 "slot": slot,
                 "offset": start,
                 "end": end,

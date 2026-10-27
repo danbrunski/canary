@@ -28,7 +28,7 @@ drift apart (``load_rom_map`` refuses by name).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -44,6 +44,13 @@ Dtype = Literal["u8", "be16"]
 #: A program literal may be a whole 32-bit word (a ``mov.l`` literal-pool
 #: entry); tables are bytes and words only.
 ConstantDtype = Literal["u8", "be16", "be32"]
+
+#: Where the ROM Editor's table tree files a table (W10.7). A closed set, so a
+#: typo cannot fork a group: extend it when a table needs another.
+TableGroup = Literal["fuel", "ignition", "airflow", "emissions"]
+#: The longest label the table tree shows, about two lines of it. A longer
+#: ``name`` needs a ``short_name``.
+TREE_LABEL_MAX = 36
 
 #: Bytes per cell for each dtype.
 DTYPE_BYTES: dict[str, int] = {"u8": 1, "be16": 2, "be32": 4}
@@ -280,6 +287,15 @@ class Table(_Strict):
     #: How a tuning editor labels this axis's breakpoints
     #: (:class:`EditorLabels`). Only on a one-dimensional table.
     editor_labels: EditorLabels | None = None
+    #: The ROM Editor tree's group. Required of every table no other table
+    #: uses as an axis (:class:`RomMap` checks), since the tree lists them all.
+    group: TableGroup | None = None
+    #: The tree's label, for a ``name`` longer than :data:`TREE_LABEL_MAX`.
+    short_name: str | None = Field(default=None, min_length=1, max_length=TREE_LABEL_MAX)
+
+    @property
+    def tree_label(self) -> str:
+        return self.short_name or self.name
 
     @model_validator(mode="after")
     def _placement(self) -> Table:
@@ -464,6 +480,7 @@ class RomMap(_Strict):
                     )
             _check_editor_labels(table, by_id)
         _refuse_overlaps(spans, nesting=False, what="tables")
+        self._check_tree_labels()
         constant_ids = [constant.id for constant in self.program_constants]
         clashes = sorted({i for i in constant_ids if constant_ids.count(i) > 1 or i in by_id})
         if clashes:
@@ -475,6 +492,39 @@ class RomMap(_Strict):
             constant_spans.append((constant.id, constant.offset, end))
         _refuse_overlaps(spans + constant_spans, nesting=False, what="tables or constants")
         return self
+
+    def axis_table_ids(self) -> set[str]:
+        """Ids of the tables another table uses as an axis."""
+        return {ref for table in self.tables for ref in (table.axes.rows, table.axes.cols) if ref}
+
+    def _check_tree_labels(self) -> None:
+        """Every table the ROM Editor lists has a group and a readable,
+        unambiguous label (W10.7). The tree shows one slot's copies plus every
+        single-copy table, so labels must differ within each slot."""
+        axes = self.axis_table_ids()
+        listed = [table for table in self.tables if table.id not in axes]
+        for table in listed:
+            if table.group is None:
+                raise ValueError(
+                    f"table {table.id!r}: give a group ({', '.join(get_args(TableGroup))}); "
+                    "the ROM Editor lists every table that is not an axis"
+                )
+            if table.short_name is None and len(table.name) > TREE_LABEL_MAX:
+                raise ValueError(
+                    f"table {table.id!r}: its name is {len(table.name)} characters, longer "
+                    f"than the ROM Editor tree's {TREE_LABEL_MAX}; give a short_name"
+                )
+        slots = range(1, self.map_slots.count + 1) if self.map_slots else [None]
+        for slot in slots:
+            shown = [t for t in listed if t.slot_offset is None or slot in self.table_slots(t)]
+            labels = [t.tree_label for t in shown]
+            clashes = sorted({label for label in labels if labels.count(label) > 1})
+            if clashes:
+                where = "" if slot is None else f" in Map {slot}"
+                raise ValueError(
+                    f"tables{where} share a ROM Editor tree label {clashes}; give one a "
+                    "short_name that tells them apart"
+                )
 
     def program_constant(self, constant_id: str) -> ProgramConstant:
         for constant in self.program_constants:

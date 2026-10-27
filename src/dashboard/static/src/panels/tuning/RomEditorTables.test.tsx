@@ -1,8 +1,9 @@
 /**
  * One page for viewing and editing ROM tables (ROM Maps merged into the ROM
- * Editor, 2026-10-26): every two-dimensional table the image's map declares,
- * both timing trims and Fuel Compensation and Fuel Targets among them, drawn
- * shaded low to high; Map 1 is edited, the rest are looked at.
+ * Editor, 2026-10-26): every table the image's map declares but the axes,
+ * both timing trims and Fuel Compensation and Fuel Targets among them, picked
+ * from a tree grouped as the map files them (W10.10) and drawn shaded low to
+ * high; Map 1 is edited, the rest are looked at.
  */
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +17,7 @@ import {
   TABLES_ALL_SLOTS,
   TABLES_WITH_CURVES,
 } from "../../test/romLibraryFixtures";
+import { treeContents, treeTable } from "../../test/romEditorViews";
 import type { RomTablesResponse } from "../../types/romLibrary";
 import { RomEditorPage } from "./RomEditorPage";
 
@@ -44,35 +46,43 @@ async function open(tables: RomTablesResponse = TABLES_ALL_2D) {
   route(tables);
   window.history.replaceState(null, "", `/?rom=${SHA_TUNED}`);
   render(<RomEditorPage token="t" status={null} />);
-  return screen.findByRole("group", { name: "Table" });
+  return screen.findByRole("navigation", { name: "Tables" });
 }
 
 const shadedCells = (grid: HTMLElement) => within(grid).getAllByRole("gridcell");
 
-describe("ROM Editor: every two-dimensional table, shaded", () => {
-  it("offers Fuel Targets, Fuel Compensation, both timing trims and the base timing map in Map 1", async () => {
+describe("ROM Editor: every table, shaded", () => {
+  it("offers Fuel Targets, Fuel Compensation, both timing trims and the base timing map in Map 1, by group", async () => {
     const picker = await open();
-    const names = within(picker)
-      .getAllByRole("button")
-      .map((button) => button.textContent);
-    expect(names).toEqual([
+    expect(treeContents()).toEqual([
+      "Fuel, 2 tables",
       "Fuel Targets (Map 1)",
+      "Fuel Compensation (Map 1)",
+      "Ignition, 3 tables",
       "Timing Main (trim A) (Map 1)",
       "Timing High Det (trim B) (Map 1)",
-      "Fuel Compensation (Map 1)",
       "Base timing rate map (Map 1)",
     ]);
+    // Named by the tree label (the slot is the Map slot choice's to say); the
+    // detail column's heading is the full label.
+    const targets = within(picker).getByRole("button", { name: "Fuel Targets" });
+    expect(targets).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("heading", { name: "Fuel Targets (Map 1)" })).toBeVisible();
+    fireEvent.click(within(picker).getByRole("button", { name: "Fuel Compensation" }));
+    expect(targets).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("heading", { name: "Fuel Compensation (Map 1)" })).toBeVisible();
+    expect(screen.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" })).toBeVisible();
   });
 
   it("shades each table's cells on the Library's ramp, whichever table is picked", async () => {
-    const picker = await open();
+    await open();
     for (const [name, label] of [
       ["Fuel Targets (Map 1)", "Fuel Targets (Map 1) cells"],
       ["Timing Main (trim A) (Map 1)", "Timing Main (trim A) (Map 1) cells"],
       ["Timing High Det (trim B) (Map 1)", "Timing High Det (trim B) (Map 1) cells"],
       ["Fuel Compensation (Map 1)", "Fuel Compensation (Map 1) cells"],
     ] as const) {
-      fireEvent.click(within(picker).getByRole("button", { name }));
+      fireEvent.click(treeTable(name));
       const grid = screen.getByRole("grid", { name: label });
       const cells = shadedCells(grid);
       expect(cells.length).toBeGreaterThan(8);
@@ -84,7 +94,7 @@ describe("ROM Editor: every two-dimensional table, shaded", () => {
       expect(colours.size, `${name} has a range of colours`).toBeGreaterThan(1);
     }
     // Fuel Targets: AFR is shaded by its decoded value, the lowest AFR (richest) at the green end.
-    fireEvent.click(within(picker).getByRole("button", { name: "Fuel Targets (Map 1)" }));
+    fireEvent.click(treeTable("Fuel Targets (Map 1)"));
     const targets = shadedCells(screen.getByRole("grid", { name: "Fuel Targets (Map 1) cells" }));
     const values = targets.map((cell) => 1881.6 / Number(/raw (\d+)/.exec(cell.title)?.[1]));
     const min = Math.min(...values);
@@ -95,8 +105,8 @@ describe("ROM Editor: every two-dimensional table, shaded", () => {
   });
 
   it("shades the timing trim by its masked value, flag bit and all on hover", async () => {
-    const picker = await open();
-    fireEvent.click(within(picker).getByRole("button", { name: "Timing Main (trim A) (Map 1)" }));
+    await open();
+    fireEvent.click(treeTable("Timing Main (trim A) (Map 1)"));
     const grid = screen.getByRole("grid", { name: "Timing Main (trim A) (Map 1) cells" });
     const first = within(grid).getByRole("gridcell", { name: /^Row 1, column 1:/ });
     // Raw 171 = 43 + the bit-7 flag: shown and shaded as 43, the lowest value.
@@ -115,8 +125,8 @@ describe("ROM Editor: every two-dimensional table, shaded", () => {
   });
 
   it("looks at a table nobody edits, without offering an edit", async () => {
-    const picker = await open();
-    fireEvent.click(within(picker).getByRole("button", { name: "Base timing rate map (Map 1)" }));
+    await open();
+    fireEvent.click(treeTable("Base timing rate map (Map 1)"));
     const grid = screen.getByRole("table", { name: "Base timing rate map (Map 1) cells" });
     expect(
       within(grid)
@@ -129,7 +139,7 @@ describe("ROM Editor: every two-dimensional table, shaded", () => {
     expect(screen.queryByRole("form", { name: "Operation" })).not.toBeInTheDocument();
     expect(screen.queryByRole("grid", { name: /Base timing/ })).not.toBeInTheDocument();
     // The edit tables are still editable.
-    fireEvent.click(within(picker).getByRole("button", { name: "Fuel Compensation (Map 1)" }));
+    fireEvent.click(treeTable("Fuel Compensation (Map 1)"));
     expect(screen.getByRole("form", { name: "Operation" })).toBeVisible();
   });
 
@@ -137,12 +147,7 @@ describe("ROM Editor: every two-dimensional table, shaded", () => {
     await open();
     await screen.findByRole("grid", { name: "Fuel Targets (Map 1) cells" });
     fireEvent.change(screen.getByLabelText("Map slot"), { target: { value: "2" } });
-    const picker = screen.getByRole("group", { name: "Table" });
-    expect(
-      within(picker)
-        .getAllByRole("button")
-        .map((b) => b.textContent),
-    ).toEqual(["Fuel Targets (Map 2)"]);
+    expect(treeContents()).toEqual(["Fuel, 1 table", "Fuel Targets (Map 2)"]);
     expect(screen.getByRole("table", { name: "Fuel Targets (Map 2) cells" })).toBeVisible();
     expect(screen.getByText(/edits and the simulator cover Map 1 only/)).toBeVisible();
     expect(screen.queryByRole("form", { name: "Operation" })).not.toBeInTheDocument();
@@ -161,12 +166,11 @@ describe("ROM Editor: every two-dimensional table, shaded", () => {
         .map((option) => option.textContent),
     ).toEqual(["Map 1 (editable)", "Map 2", "Map 3", "Map 4", "Map 5"]);
     fireEvent.change(select, { target: { value: "5" } });
-    const picker = screen.getByRole("group", { name: "Table" });
-    expect(
-      within(picker)
-        .getAllByRole("button")
-        .map((button) => button.textContent),
-    ).toEqual(["Fuel Targets (Map 5)", "Fuel Compensation (Map 5)"]);
+    expect(treeContents()).toEqual([
+      "Fuel, 2 tables",
+      "Fuel Targets (Map 5)",
+      "Fuel Compensation (Map 5)",
+    ]);
     const grid = screen.getByRole("table", { name: "Fuel Targets (Map 5) cells" });
     expect(
       within(grid)
@@ -182,20 +186,12 @@ describe("ROM Editor: every two-dimensional table, shaded", () => {
     await open(TABLES_ALL_SLOTS);
     await screen.findByRole("grid", { name: "Fuel Targets (Map 1) cells" });
     fireEvent.change(screen.getByLabelText("Map slot"), { target: { value: "3" } });
-    fireEvent.click(
-      within(screen.getByRole("group", { name: "Table" })).getByRole("button", {
-        name: "Fuel Compensation (Map 3)",
-      }),
-    );
+    fireEvent.click(treeTable("Fuel Compensation (Map 3)"));
     const note = screen.getByRole("note", { name: "Fuel Compensation editor labels" });
     expect(note).toHaveTextContent(/UpRev labels these axes differently/);
     expect(note).toHaveTextContent(/Grid positions agree/);
     // The warning is the table's own: Fuel Targets in the same slot carries none.
-    fireEvent.click(
-      within(screen.getByRole("group", { name: "Table" })).getByRole("button", {
-        name: "Fuel Targets (Map 3)",
-      }),
-    );
+    fireEvent.click(treeTable("Fuel Targets (Map 3)"));
     expect(screen.queryByRole("note", { name: /editor labels/ })).not.toBeInTheDocument();
   });
 
@@ -207,18 +203,38 @@ describe("ROM Editor: every two-dimensional table, shaded", () => {
     expect(control).not.toHaveBeenCalled();
   });
 
-  it("never offers an axis table or a one-dimensional curve as a grid", async () => {
-    const picker = await open(TABLES_WITH_CURVES);
-    const names = within(picker)
-      .getAllByRole("button")
-      .map((button) => button.textContent);
-    expect(names).toEqual(["Fuel Targets (Map 1)", "K (injector constant) (Map 1)"]);
+  it("lists every table but the axes: a curve is a one-row grid and a scalar one cell", async () => {
+    await open(TABLES_WITH_CURVES);
+    expect(treeContents()).toEqual([
+      "Fuel, 2 tables",
+      "Fuel Targets (Map 1)",
+      "K (injector constant) (Map 1)",
+      "Airflow, 2 tables",
+      "Throttle effective area",
+      "Idle air learning cap",
+    ]);
+    fireEvent.click(treeTable("Throttle effective area"));
+    const curve = screen.getByRole("table", { name: "Throttle effective area cells" });
+    expect(within(curve).getAllByRole("cell")).toHaveLength(32);
+    expect(screen.getByText(/Columns: Throttle effective-area curve axis/)).toBeVisible();
+    expect(
+      screen.getByText(
+        /Viewing only: Throttle effective area is not one of the tables edited here/,
+      ),
+    ).toBeVisible();
+    fireEvent.click(treeTable("Idle air learning cap"));
+    const scalar = screen.getByRole("table", { name: "Idle air learning cap cells" });
+    expect(within(scalar).getAllByRole("cell")).toHaveLength(1);
+    expect(screen.queryByRole("form", { name: "Operation" })).not.toBeInTheDocument();
   });
 
-  it("says Opening a file adds it to the library", async () => {
-    await open();
-    expect(
-      screen.getByText(/Opening a file adds it to the ROM library, kept by its hash/),
-    ).toBeVisible();
+  it("says Opening a file adds it to the library before anything is loaded, and not after", async () => {
+    route(TABLES_ALL_2D);
+    render(<RomEditorPage token="t" status={null} />);
+    const intro = /Opening a file adds it to the ROM library, kept by its hash/;
+    expect(await screen.findByText(intro)).toBeVisible();
+    fireEvent.click(await screen.findByRole("button", { name: /Edit from/ }));
+    await screen.findByRole("navigation", { name: "Tables" });
+    expect(screen.queryByText(intro)).not.toBeInTheDocument();
   });
 });

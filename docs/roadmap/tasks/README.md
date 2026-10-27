@@ -5,11 +5,13 @@
 answers the operator's "the navigation sidebar is getting pretty busy". The
 five NAV groups become areas on a bar above the Workbench. The sidebar lists
 one area's pages and collapses to a rail. System sits behind a gear. Part A
-(W10.1–W10.6) is that, and it landed first. Part B rebuilds the ROM Editor:
-a File-style Open / Recent header, the views Tables | Edits & Preview |
-Simulate, and a grouped table tree, with the groups coming from a new `group`
-field in `rom_map.yaml`. ROM editing and simulation stay in Engine Tuning,
-because the tuning context ties them to Logs.
+(W10.1–W10.6) is that, and it landed first. Part B (W10.7–W10.13, landed the
+same day) rebuilds the ROM Editor: a File-style Open / Recent ▾ header, the
+views Tables | Edits & Preview | Simulate, and a grouped table tree listing
+every non-axis table, curves and scalars included, with the groups and short
+names coming from new `group` and `short_name` fields in `rom_map.yaml`. ROM
+editing and simulation stay in Engine Tuning, because the tuning context ties
+them to Logs.
 
 **Status 2026-10-15: E09, one engine twin.**
 [`E09-engine-twin-runner-and-levers.md`](E09-engine-twin-runner-and-levers.md)

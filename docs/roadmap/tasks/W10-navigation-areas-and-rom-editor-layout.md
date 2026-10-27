@@ -62,6 +62,13 @@ sidebar.
 - **The ROM choice becomes File-style:** a one-line header with **Open…** and
   **Recent ▾** once an image is loaded. The empty state keeps today's intro,
   Open box and Recent ROMs table.
+- **Every non-axis table is listed, curves and scalars included** (operator,
+  2026-10-27: "show hidden items in the new table list"). `isViewableTable`
+  becomes "not an axis". A curve is a one-row or one-column grid and a scalar
+  a single cell, the way K is shown today.
+- **Short names keep the address where no plain-English name is
+  established** (operator, 2026-10-27), e.g. "Timing retard map 0xFFFF3630".
+  No function names that the evidence does not support.
 - **The phone layout does not change.** It keeps its bottom bar and More sheet
   (P2.2). Below 900 px the table tree becomes a native `<select>` with one
   `<optgroup>` per group.
@@ -158,16 +165,18 @@ sidebar.
 
 ## Part B — the ROM Editor
 
-- [ ] **W10.7 — `group` and `short_name` on ROM tables.** `src/analysis/rom_map.py`
+- [x] **W10.7 — `group` and `short_name` on ROM tables.** `src/analysis/rom_map.py`
   `Table` gains:
   - `group: TableGroup | None`, a closed `Literal` (`fuel`, `ignition`,
     `airflow`, `emissions`; extend the set when a table needs it). A `RomMap`
     validator refuses a table that no other table references as an axis and
     has no `group`, naming the table. Axis tables do not need one; they are
     never listed.
-  - `short_name: str | None`, at most 32 characters, the tree's label. It
-    defaults to `name`. A validator refuses two tables that would show the same
-    tree label in one slot. This covers a slot's own copy plus every
+  - `short_name: str | None`, the tree's label, which defaults to `name`. A
+    tree label is at most 36 characters (about two lines of the 15 rem tree),
+    so a table whose `name` is longer must declare a `short_name`. The
+    validator refuses the omission and names the table. A validator also
+    refuses two tables that would show the same tree label in one slot. This covers a slot's own copy plus every
     single-copy table: "Fuel Targets" (Map 1) beside "Fuel Targets
     (calibration copy)" must stay distinguishable, and so must the two "Fill
     time constant" maps.
@@ -176,7 +185,7 @@ sidebar.
   payload builders: `table_definitions`, `table_values` and the tables
   payload), and `types/romLibrary.ts` `RomTableValues` gains them. Fill both
   `data/nissan-xterra-2008/rom_map.yaml` (45 non-axis tables) and
-  `data/nissan-xterra-2013/rom_map.yaml` (6). Give every name over 32
+  `data/nissan-xterra-2013/rom_map.yaml` (6). Give every name over 36
   characters a `short_name` that keeps what tells it apart. Where no plain
   English name is established, the address that identifies it stays in the
   label ("Retard 0xFFFF3630 by coolant"); do not invent function names the
@@ -186,7 +195,22 @@ sidebar.
   vehicle maps load), `tests/test_rom_image.py` or the route test for the
   served fields. `docs/headless-api.md`'s `/tables` entry names the two
   fields.
-- [ ] **W10.8 — The ROM header.** With an image loaded, the `ROM Editor`
+  *Done 2026-10-27:* `TableGroup` (a closed `Literal`) and `TREE_LABEL_MAX = 36`
+  in `rom_map.py`; `Table.group`, `Table.short_name` (1–36 characters) and the
+  `tree_label` property. `RomMap._check_tree_labels` refuses, naming the table,
+  a listed table without a group, a name over 36 characters without a short
+  name, and two tables sharing a tree label in one slot (the slot's copies plus
+  every single-copy table). `RomMap.axis_table_ids()` is now the one definition
+  of an axis, and `rom_image._axis_ids` uses it. `table_definitions` and
+  `table_values` serve both fields, so `/tables` carries them. The 2008 map
+  lists 45 tables (fuel 9, ignition 27, airflow 8, emissions 1), with 28 short
+  names and a longest label of 35 characters. The address stays wherever no
+  function is established ("Timing retard map 0xFFFF3630"). The 2013 map has
+  6 tables and needed groups only. `tests/test_rom_map.py` gains 8 tests and
+  `tests/test_rom_image.py` gains 1; both files pass (93 tests), and so does
+  every test file that loads a ROM map except the 4 data-dependent slow-tier
+  failures below. `docs/headless-api.md` names the two fields.
+- [x] **W10.8 — The ROM header.** With an image loaded, the `ROM Editor`
   panel becomes one line: name, the first 12 hex digits of the sha,
   `RevisionChip`, `SimulateChip`, then **Open…** and **Recent ▾** on the right.
   The header is still the `OpenRom` drop target, so a dropped file still
@@ -200,7 +224,20 @@ sidebar.
   and the popover lists every entry. Choosing from it switches the image and
   writes `?rom=`. A drop on the header opens the file. The empty state is
   unchanged.
-- [ ] **W10.9 — Three views.** Under the header, a `SegmentedControl`
+  *Done 2026-10-27:* `OpenRom` gains a `bare` variant for the loaded header: no
+  dashed box until a file is dragged over, `children` first, then the button
+  and `trailing` at the far end. It is still the drop target ("accepts a
+  dropped file" drops on it). `romEditor/RecentMenu.tsx` is **Recent ▾**, a
+  `dialog` "Recent ROMs" that holds the same `BasePicker` table. A choice,
+  Escape, a click elsewhere or a second press closes it. The intro and the
+  Recent ROMs table show only while nothing is loaded. The button keeps its
+  existing label, "Open another ROM…", rather than "Open…". Panels clip their
+  content (`overflow-hidden`), so the header panel is `overflow-visible!`. The
+  e2e test checks that `elementFromPoint` at a menu row's centre hits that
+  row's button, and it fails without the fix: a plain Playwright click did not
+  notice the clipping. Tests: `RomEditorPage.test.tsx` "the loaded header
+  (W10.8)" (2) and the e2e "loaded, the header is one line…".
+- [x] **W10.9 — Three views.** Under the header, a `SegmentedControl`
   (`label="ROM Editor views"`): **Tables**, **Edits & Preview** and
   **Simulate**.
   - **Tables:** the map-slot choice, the tree (W10.10), and for the chosen
@@ -227,7 +264,20 @@ sidebar.
   The labels' counts and states. `?view=` restores the view on load, and
   junk falls back to Tables. A run started on Simulate and left while running
   still lands its result (state is the Workspace's, not the view's).
-- [ ] **W10.10 — The table tree.** `romEditor/TableTree.tsx`, the left column
+  *Done 2026-10-27:* `SegmentedControl label="ROM Editor views"` in `Workspace`.
+  The labels are "Edits & Preview (n)" and "Simulate · running", "· failed" or
+  "· stale" (`simStale`, the result panel's own comparison). `viewFromUrl` and
+  `writeViewToUrl` keep `?view=` beside `?rom=`. Each view is a `hidden`
+  wrapper, so all three stay mounted, and `LiveOverlay` renders only while
+  `view === "tables"`. Tests: `RomEditorPage.test.tsx` "three views (W10.9)"
+  (3: order and URL, restore with junk falling back, a half-made operation kept
+  in the same form element). `RomEditorSimulate.test.tsx` "Simulate as a view
+  of its own (W10.9)" (3: a typed field kept, the running label and a run left
+  mid-flight still landing, the failed label), plus "· stale" in "notes when
+  the pending edits change after a run". `RomEditorOverlay.test.tsx` "is
+  mounted only while Tables is showing", which fails when the `view` condition
+  is removed.
+- [x] **W10.10 — The table tree.** `romEditor/TableTree.tsx`, the left column
   of Tables (about 15 rem; the grid takes the rest):
   - The Map slot `<select>` at the top when the image has more than one slot.
   - A filter box: a case-insensitive substring over `short_name` and `name`.
@@ -239,6 +289,10 @@ sidebar.
     table, and a faint marker with the confidence in its accessible name when
     the decode is `inferred` or `unknown`.
   - `<nav aria-label="Tables">`, the chosen table `aria-current="true"`.
+  - Every non-axis table, curves and scalars included (Decisions). The
+    `group` comes from the daemon. A table without one, sent by a daemon older
+    than W10.7, is listed under "Other" at the end, so the tree still works
+    against it.
 
   Choosing a table keeps today's side effects (clear the selection and the
   operation refusal). The detail column's heading is the table's full `label`.
@@ -248,13 +302,32 @@ sidebar.
   filter, collapse, the ✎ / pending / confidence markers and `aria-current`.
   `RomEditorTables.test.tsx` covers choosing from the tree, which changes the
   grid.
-- [ ] **W10.11 — Narrow widths.** Below 900 px the tree is a native
+  *Done 2026-10-27:* `romEditor/TableTree.tsx`, using `treeLabel`,
+  `TREE_GROUPS`, `groupTables`, `matchesTableFilter` and `pendingEditCount`
+  from `lib/romEditor.ts`. `isViewableTable` is now "not an axis". The Tables
+  view is a 15 rem column for the tree and the rest for the table, headed by
+  the table's full label (an `h3`). One deviation from the text above: the
+  confidence, like the ✎ and pending marks, goes in the entry's `title` (its
+  accessible description), not its name. Each entry is named by its tree label
+  alone ("Fuel Compensation"), and the marks themselves are `aria-hidden`. The
+  old `Table` button row is gone. Tests: `romEditor/TableTree.test.tsx` (9),
+  and `RomEditorTables.test.tsx` rewritten for the tree (grouped order;
+  choosing changes the grid and the heading; curves and scalars listed and
+  drawn).
+- [x] **W10.11 — Narrow widths.** Below 900 px the tree is a native
   `<select aria-label="Table">` with one `<optgroup>` per group (the editable
   and pending markers as text in the option), the filter hidden, the grid full
   width. The phone's ROM tab reaches this page (`PHONE_TABS`), so it is used.
   *Tests:* an e2e check at 412 px: the select is present, choosing an option
   changes the grid, and `overflowReport` finds no horizontal page overflow.
-- [ ] **W10.12 — Sweep the ROM Editor tests.** `RomEditorPage.test.tsx`,
+  *Done 2026-10-27:* `TableTree` with `narrow` (`useIsNarrow`, below 900 px)
+  renders `<select aria-label="Table">` with one `optgroup` per group. "✎" and
+  "(n pending)" go in the option text, and the filter is absent. The Tables
+  grid is a single column there. Tests: `TableTree.test.tsx` "below 900px",
+  and the e2e at 412 × 915 "the table tree is a select…" (the select is there,
+  a choice changes the grid, `overflowReport` is clean). The existing phone e2e
+  now picks its table from the select (`chooseTable`).
+- [x] **W10.12 — Sweep the ROM Editor tests.** `RomEditorPage.test.tsx`,
   `RomEditorTables.test.tsx`, `RomEditorSimulate.test.tsx`,
   `RomEditorOverlay.test.tsx`, `romEditor/CellGrid.test.tsx`,
   `e2e/romEditor.spec.ts` and `e2e/romEditorOverlay.spec.ts` find tables
@@ -263,20 +336,42 @@ sidebar.
   assertion: re-point each, don't delete it. The e2e short-viewport
   regression ("one click selected 7-11 cells") stays and runs inside the
   Tables view.
-- [ ] **W10.13 — Docs.** `RomEditorPage`'s docstring (views, tree, header).
+  *Done 2026-10-27:* `src/test/romEditorViews.ts` (`showRomView`, `treeTable` and
+  `findTreeTable` by full label, `treeContents`, `recentEntry`,
+  `chooseRecent`) is shared by the four page test files. The e2e spec has
+  `treeTable`, `chooseTable`, `viewButton` and `showView`. Every assertion was
+  re-pointed and none dropped. Two were rewritten because their premise
+  changed. "Never offers … a one-dimensional curve" is now "lists every table
+  but the axes", the operator's decision. "Levers above the Simulate region"
+  is now "levers on Edits & Preview, ahead of Simulate in the document, with
+  the Simulate form hidden". The short-viewport single-click check runs inside
+  Tables. `CellGrid.test.tsx` and `e2e/romEditorOverlay.spec.ts` needed no
+  change. The fixtures carry `group`. Gate: `pnpm typecheck`, `lint` and
+  `format:check` clean; `pnpm test` 123 files, 1323 tests; `pnpm e2e` 45
+  passed and 3 skipped (the existing phone-only and desktop-only skips).
+- [x] **W10.13 — Docs.** `RomEditorPage`'s docstring (views, tree, header).
   W09's text describes behaviour, not layout; check its "the page shows"
   sentences and correct any that no longer hold. Add the `tasks/README.md`
   status entry, and record the closure here.
+  *Done 2026-10-27:* `RomEditorPage`'s docstring covers the header, the views,
+  the tree, `?view=`, the mounted views and the overlay. W09.8 and W09.12 each
+  carry a one-line note where W10 changed what they describe. The
+  `tasks/README.md` entry says Part B landed.
 
 **Gate for Part B:** as Part A, plus `.venv/bin/python -m pytest
 tests/test_rom_map.py tests/test_rom_image.py` (and whatever the route tests
 are named) for W10.7, then `scripts/push.sh`.
 
+**Closed 2026-10-27.** Part A landed in `495d3143`, Part B in the commit after
+it. The slow tier still fails 4 tests in
+`tests/test_plant_validation_ecu_outputs.py` (`assert 64 == 33` on BFS post
+reads). They read local session data, failed the same way with the W10.7
+changes stashed, and are not this work's.
+
 ## Not in scope
 
-- **Curves and scalars in the tree** (the ~30 tables `isViewableTable` drops
-  today) are left out until the operator decides; asked 2026-10-27, no answer
-  yet. A one-row grid or the existing `Curve` chart would both fit the tree
-  without changing it.
+- **A curve drawn as a chart** (the existing `Curve` component) rather than a
+  one-row grid. The grid is enough to read and compare values, and it keeps
+  one rendering for every table.
 - Simulate as its own page (see Decisions), a header redesign, and regrouping
   Diagnose's 10 pages.

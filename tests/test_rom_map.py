@@ -11,6 +11,7 @@ import yaml
 from pydantic import ValidationError
 
 from src.analysis.rom_map import (
+    TREE_LABEL_MAX,
     RomMap,
     check_against_targets,
     check_program_constants,
@@ -568,3 +569,68 @@ def test_check_program_constants_names_a_different_program() -> None:
     image[0x3C5E8:0x3C5EC] = (0x00DC1D01).to_bytes(4, "big")
     (problem,) = check_program_constants(bytes(image), rom_map)
     assert "fill_reciprocal_numerator at 0x03C5E8 holds 0xDC1D01" in problem
+
+
+# -- W10.7: the ROM Editor's table tree ------------------------------------------
+
+
+def _by_id(data: dict[str, Any], table_id: str) -> dict[str, Any]:
+    return next(t for t in data["tables"] if t["id"] == table_id)
+
+
+@pytest.mark.parametrize("profile", ["nissan-xterra-2008", "nissan-xterra-2013"])
+def test_every_listed_table_has_a_group_and_a_readable_label(profile: str) -> None:
+    rom_map = load_rom_map(PROFILE.parent / profile)
+    axes = rom_map.axis_table_ids()
+    listed = [t for t in rom_map.tables if t.id not in axes]
+    assert listed
+    assert all(t.group is not None for t in listed)
+    assert all(len(t.tree_label) <= TREE_LABEL_MAX for t in listed)
+
+
+def test_a_listed_table_without_a_group_is_refused_by_name() -> None:
+    data = _shipped()
+    del _by_id(data, "k_constant")["group"]
+    _refuse(data, "table 'k_constant': give a group")
+
+
+def test_an_axis_needs_no_group() -> None:
+    data = _shipped()
+    axis = _by_id(data, "fuel_targets_rpm_axis")
+    assert "group" not in axis
+    RomMap.model_validate(data)
+
+
+def test_a_group_outside_the_closed_set_is_refused() -> None:
+    data = _shipped()
+    _by_id(data, "k_constant")["group"] = "fueling"
+    _refuse(data, "group")
+
+
+def test_a_long_name_needs_a_short_name() -> None:
+    data = _shipped()
+    table = _by_id(data, "timing_retard_26d9_map")
+    assert len(table["name"]) > TREE_LABEL_MAX
+    del table["short_name"]
+    _refuse(data, "table 'timing_retard_26d9_map': its name is 62 characters")
+
+
+def test_a_short_name_is_held_to_the_tree_width() -> None:
+    data = _shipped()
+    _by_id(data, "k_constant")["short_name"] = "x" * (TREE_LABEL_MAX + 1)
+    _refuse(data, "short_name")
+
+
+def test_two_tables_one_slot_shows_cannot_share_a_label() -> None:
+    # The calibration copy is single-copy, so Map 1 lists it beside Map 1's
+    # own Fuel Targets: the two must stay distinguishable.
+    data = _shipped()
+    _by_id(data, "fuel_targets_calibration")["short_name"] = "Fuel Targets"
+    _refuse(data, r"tables in Map 1 share a ROM Editor tree label \['Fuel Targets'\]")
+
+
+def test_copies_in_different_slots_may_share_a_label() -> None:
+    # Map 1's Fuel Targets and Maps 2-5's are never listed together.
+    data = _shipped()
+    assert _by_id(data, "fuel_targets")["name"] == _by_id(data, "fuel_targets_maps_2_5")["name"]
+    RomMap.model_validate(data)

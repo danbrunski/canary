@@ -185,6 +185,7 @@ tables:
   - id: fuel_targets
     kind: fuel_targets
     name: Fuel Targets
+    group: fuel
     offset: 0xAEA4
     rows: 16
     cols: 16
@@ -213,6 +214,7 @@ tables:
   - id: fuel_targets_high_det
     kind: fuel_targets
     name: Fuel Targets (High Det)
+    group: fuel
     offset: 0xAFA4
     rows: 16
     cols: 16
@@ -273,6 +275,7 @@ tables:
   - id: timing_trim_a
     kind: timing_trim_a
     name: Timing Main (trim A)
+    group: ignition
     offset: 0x9A54
     rows: 16
     cols: 16
@@ -301,6 +304,7 @@ tables:
   - id: timing_trim_b
     kind: timing_trim_b
     name: Timing High Det (trim B)
+    group: ignition
     offset: 0x9B54
     rows: 16
     cols: 16
@@ -349,6 +353,7 @@ tables:
   - id: fuel_compensation
     kind: fuel_compensation
     name: Fuel Compensation
+    group: fuel
     offset: 0xA3D4
     rows: 16
     cols: 16
@@ -393,6 +398,7 @@ tables:
   - id: load_point_scaler
     kind: load_point_scaler
     name: Load Point Scaler
+    group: fuel
     offset: 0x94F6
     rows: 1
     cols: 1

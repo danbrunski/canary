@@ -275,6 +275,7 @@ tables:
   - id: fuel_targets
     kind: fuel_targets
     name: Fuel Targets
+    group: fuel
     slot_offset: 0x220
     slots: [1]
     rows: 8
@@ -297,6 +298,7 @@ tables:
   - id: fuel_targets_maps_2_5
     kind: fuel_targets
     name: Fuel Targets
+    group: fuel
     slot_offset: 0x220
     slots: [2, 3, 4, 5]
     rows: 8
@@ -318,6 +320,7 @@ tables:
   - id: fuel_targets_calibration
     kind: fuel_targets
     name: Fuel Targets (calibration copy)
+    group: fuel
     offset: 0xA169
     rows: 8
     cols: 8
@@ -383,6 +386,7 @@ tables:
   - id: timing_trim_a
     kind: timing_trim_a
     name: Timing Main (trim A)
+    group: ignition
     slot_offset: 0x020
     slots: [1]
     rows: 16
@@ -434,6 +438,7 @@ tables:
   - id: timing_trim_a_maps_2_5
     kind: timing_trim_a
     name: Timing Main (trim A)
+    group: ignition
     slot_offset: 0x020
     slots: [2, 3, 4, 5]
     rows: 16
@@ -456,6 +461,7 @@ tables:
   - id: timing_trim_b
     kind: timing_trim_b
     name: Timing High Det (trim B)
+    group: ignition
     slot_offset: 0x120
     slots: [1]
     rows: 16
@@ -481,6 +487,7 @@ tables:
   - id: timing_trim_b_maps_2_5
     kind: timing_trim_b
     name: Timing High Det (trim B)
+    group: ignition
     slot_offset: 0x120
     slots: [2, 3, 4, 5]
     rows: 16
@@ -557,6 +564,8 @@ tables:
   # reads is mapped below, shown raw.
   - id: base_timing_rate_map
     name: Base timing rate map (rpm x X, feeds 0xFFFF27C6)
+    group: ignition
+    short_name: Base timing rate map
     offset: 0x9AF9
     rows: 4
     cols: 4
@@ -620,6 +629,8 @@ tables:
       X byte 0xFFFF103E (raw 10 20 40 70); shown raw as the trims' load axis is.
   - id: base_timing_charge_map
     name: Base timing charge factor (rpm x X, q7, feeds 0xFFFF27C6)
+    group: ignition
+    short_name: Base timing charge factor
     offset: 0x9B89
     rows: 4
     cols: 4
@@ -641,6 +652,7 @@ tables:
       / 76 76 8E 9C, identical on ROM Store ZS44A, k106, 20260920 and 20261004.
   - id: base_timing_load_curve
     name: Base timing X curve (0xFFFF19CB)
+    group: ignition
     offset: 0xCD9B
     rows: 8
     cols: 1
@@ -653,6 +665,8 @@ tables:
       image: 0xFFFF19CB = min(X, 224).
   - id: base_timing_charge_curve
     name: Base timing rate charge curve (0xFFFF15D7)
+    group: ignition
+    short_name: Base timing charge 0xFFFF15D7
     offset: 0xCEAB
     rows: 8
     cols: 1
@@ -664,6 +678,8 @@ tables:
       factor of 0xFFFF15DA with 15DC. Flat 0x80 on every listed image.
   - id: base_timing_coolant_curve
     name: Base timing rate coolant curve (0xFFFF15DC)
+    group: ignition
+    short_name: Base timing coolant 0xFFFF15DC
     offset: 0xCEBB
     rows: 8
     cols: 1
@@ -675,6 +691,8 @@ tables:
       0xFFFF15DA. 67 6C 76 78 78 7B 80 80 on every listed image.
   - id: base_timing_rate_charge_curve
     name: Base timing rate charge curve 2 (0xFFFF19B6)
+    group: ignition
+    short_name: Base timing charge 2 0xFFFF19B6
     offset: 0xD60F
     rows: 8
     cols: 1
@@ -686,6 +704,8 @@ tables:
       Flat 0x80 on every listed image.
   - id: base_timing_rate_coolant_curve
     name: Base timing rate coolant curve 2 (0xFFFF1CC9)
+    group: ignition
+    short_name: Base timing coolant 2 0xFFFF1CC9
     offset: 0xD9AF
     rows: 8
     cols: 1
@@ -700,6 +720,8 @@ tables:
   # one is a mapped table change, never an unknown byte.
   - id: base_timing_time_gain
     name: Base timing burn-time gain (cal 0x880D)
+    group: ignition
+    short_name: Base timing burn-time gain
     offset: 0x880D
     rows: 1
     cols: 1
@@ -710,6 +732,8 @@ tables:
       (udiv 0x021D6C; firmware notes 2026-10-17). 179 on every listed image.
   - id: base_timing_rate_rpm_gain
     name: Base timing rate rpm gain (cal 0x880E)
+    group: ignition
+    short_name: Base timing rate rpm gain
     offset: 0x880E
     rows: 1
     cols: 1
@@ -720,6 +744,8 @@ tables:
       0, 0xFFFF). 25 on every listed image.
   - id: base_timing_rate_factor_gain
     name: Base timing charge-factor gain (cal 0x8440)
+    group: ignition
+    short_name: Base timing charge-factor gain
     offset: 0x8440
     rows: 1
     cols: 1
@@ -730,6 +756,8 @@ tables:
       0xFFFF10EB (base_timing_charge_map). 32 on every listed image.
   - id: base_timing_time_offset
     name: Base timing burn-time offset (cal 0x8B0C)
+    group: ignition
+    short_name: Base timing burn-time offset
     offset: 0x8B0C
     rows: 1
     cols: 1
@@ -739,6 +767,8 @@ tables:
       0x04BC5A: u = t + (cal 0x8B0C x 5 >> 1). 14 on every listed image (+35).
   - id: base_timing_1512_gain
     name: Base timing 0xFFFF1512 gain (cal 0x8538)
+    group: ignition
+    short_name: Base timing 0xFFFF1512 gain
     offset: 0x8538
     rows: 1
     cols: 1
@@ -753,6 +783,8 @@ tables:
   # (HI DET) picks one of each pair: 0x8792 / 0x8797 clear, 0x8793 / 0x8798 set.
   - id: enrichment_retard_threshold
     name: Enrichment retard threshold, HI DET clear (cal 0x8792)
+    group: ignition
+    short_name: Enrichment threshold, HI DET clear
     offset: 0x8792
     rows: 1
     cols: 1
@@ -766,6 +798,8 @@ tables:
       gate's 130, so 174B reaches it exactly when the gate is latched).
   - id: enrichment_retard_threshold_high_det
     name: Enrichment retard threshold, HI DET set (cal 0x8793)
+    group: ignition
+    short_name: Enrichment threshold, HI DET set
     offset: 0x8793
     rows: 1
     cols: 1
@@ -776,6 +810,8 @@ tables:
       0x8792. 0x82 on every listed image.
   - id: enrichment_retard_below_gain
     name: Enrichment retard gain below threshold, HI DET clear (cal 0x8797)
+    group: ignition
+    short_name: Enrichment gain below, HI DET clear
     offset: 0x8797
     rows: 1
     cols: 1
@@ -788,6 +824,8 @@ tables:
       the threshold.
   - id: enrichment_retard_below_gain_high_det
     name: Enrichment retard gain below threshold, HI DET set (cal 0x8798)
+    group: ignition
+    short_name: Enrichment gain below, HI DET set
     offset: 0x8798
     rows: 1
     cols: 1
@@ -800,6 +838,8 @@ tables:
   # (0xFFFF17FA >> 4), 0, 255) (0x04C952), subtracted in the base timing sum.
   - id: timing_retard_26d9_map
     name: Timing retard map 0xFFFF3630 (rpm x coolant, feeds 0xFFFF279A)
+    group: ignition
+    short_name: Timing retard map 0xFFFF3630
     offset: 0x9B09
     rows: 8
     cols: 8
@@ -838,6 +878,8 @@ tables:
       byte 0xFFFF1077 (degC = byte x 0.625 - 40). Raw 40 48 50 58 60 68 70 80.
   - id: timing_retard_26d0_rpm_curve
     name: Timing retard 0xFFFF26D0 rpm curve (0xFFFF1301)
+    group: ignition
+    short_name: Timing retard 0xFFFF26D0 rpm
     offset: 0xCC1B
     rows: 16
     cols: 1
@@ -849,6 +891,8 @@ tables:
       00 00 00 60 C4 D0 FF 88 50 00 ... on every listed image.
   - id: timing_retard_26d0_bfs_curve
     name: Timing retard 0xFFFF26D0 BFS curve (0xFFFF1302)
+    group: ignition
+    short_name: Timing retard 0xFFFF26D0 BFS
     offset: 0xCC2B
     rows: 8
     cols: 1
@@ -860,6 +904,8 @@ tables:
       every listed image.
   - id: timing_retard_26d0_coolant_curve
     name: Timing retard 0xFFFF26D0 coolant curve (0xFFFF1303)
+    group: ignition
+    short_name: Timing retard 0xFFFF26D0 coolant
     offset: 0xCC33
     rows: 16
     cols: 1
@@ -872,6 +918,8 @@ tables:
       (60 degC): 0xFFFF279A is 0 on a warm engine.
   - id: timing_retard_17fa_rpm_curve
     name: Timing retard 0xFFFF17FA rpm curve (0xFFFF17FB)
+    group: ignition
+    short_name: Timing retard 0xFFFF17FA rpm
     offset: 0xD335
     rows: 8
     cols: 1
@@ -883,6 +931,8 @@ tables:
       image (firmware notes 2026-10-17).
   - id: timing_retard_17fa_bfs_curve
     name: Timing retard 0xFFFF17FA BFS curve (0xFFFF17FC)
+    group: ignition
+    short_name: Timing retard 0xFFFF17FA BFS
     offset: 0xD33D
     rows: 8
     cols: 1
@@ -894,6 +944,8 @@ tables:
       only subtracts (>> 4) before 0xFFFF279A's clamp at 0.
   - id: base_timing_alternate_curve
     name: Alternate base timing by coolant (0xFFFF1A59)
+    group: ignition
+    short_name: Alternate base timing by coolant
     offset: 0xCD6B
     rows: 8
     cols: 1
@@ -912,6 +964,7 @@ tables:
   - id: fuel_compensation
     kind: fuel_compensation
     name: Fuel Compensation
+    group: fuel
     slot_offset: 0x660
     slots: [1]
     rows: 16
@@ -963,6 +1016,7 @@ tables:
   - id: fuel_compensation_maps_2_5
     kind: fuel_compensation
     name: Fuel Compensation
+    group: fuel
     slot_offset: 0x660
     slots: [2, 3, 4, 5]
     rows: 16
@@ -1056,6 +1110,7 @@ tables:
   - id: load_point_scaler
     kind: load_point_scaler
     name: Load Point Scaler
+    group: fuel
     offset: 0x9416
     rows: 1
     cols: 1
@@ -1082,6 +1137,7 @@ tables:
   - id: load_point_scaler_slot_copy
     kind: load_point_scaler
     name: Load Point Scaler (map copy)
+    group: fuel
     slot_offset: 0x760
     rows: 1
     cols: 1
@@ -1103,6 +1159,7 @@ tables:
   - id: k_constant
     kind: k_constant
     name: K (injector constant)
+    group: fuel
     slot_offset: 0x762
     rows: 1
     cols: 1
@@ -1138,6 +1195,7 @@ tables:
       UpRev base, k106, 20260920 and 20261004.
   - id: throttle_area_curve
     name: Throttle effective area
+    group: airflow
     offset: 0xDD94
     rows: 1
     cols: 32
@@ -1154,6 +1212,8 @@ tables:
       (N02.2).
   - id: fill_curve_low
     name: Throttle-model fill curve, X below 0x3C00
+    group: airflow
+    short_name: Fill curve, X below 0x3C00
     offset: 0xEAEC
     rows: 1
     cols: 16
@@ -1167,6 +1227,8 @@ tables:
       fill_curve_high's first, so the byte is continuous across the split.
   - id: fill_curve_high
     name: Throttle-model fill curve, X from 0x3C00
+    group: airflow
+    short_name: Fill curve, X from 0x3C00
     offset: 0xEACC
     rows: 1
     cols: 16
@@ -1180,6 +1242,8 @@ tables:
       ceiling the byte reaches for X >= 0xFC00.
   - id: fill_rpm_multiplier
     name: Throttle-model fill rpm multiplier
+    group: airflow
+    short_name: Fill rpm multiplier
     offset: 0x8D25
     rows: 1
     cols: 1
@@ -1194,6 +1258,7 @@ tables:
       3,954 cc / 25 is speculation.
   - id: idle_air_cap
     name: Idle air learning cap
+    group: airflow
     offset: 0x8ED2
     rows: 1
     cols: 1
@@ -1207,6 +1272,8 @@ tables:
       throttle area. So the idle-air word can never exceed this.
   - id: etc_limp_home_area
     name: Electronic-throttle limp-home area
+    group: airflow
+    short_name: Throttle limp-home area
     offset: 0x90BE
     rows: 1
     cols: 1
@@ -1220,6 +1287,7 @@ tables:
       6.7 % throttle, the ETC limp-home opening (inferred).
   - id: evap_purge_area_gain
     name: EVAP purge area gain
+    group: emissions
     offset: 0x82FE
     rows: 1
     cols: 1
@@ -1237,6 +1305,7 @@ tables:
   # reading as unmapped bytes.
   - id: bfs_ceiling
     name: BFS ceiling by engine speed
+    group: fuel
     offset: 0xD8B3
     rows: 1
     cols: 16
@@ -1275,6 +1344,8 @@ tables:
       the byte's whole reachable range.
   - id: fill_time_constant_rising
     name: Fill time constant (airflow rising or steady)
+    group: airflow
+    short_name: Fill time constant, rising
     offset: 0x9B99
     rows: 8
     cols: 8
@@ -1288,6 +1359,8 @@ tables:
       weight while 0xFFFF283C bit 3 is set. Values 86..122 on 20260920.
   - id: fill_time_constant_falling
     name: Fill time constant (airflow falling)
+    group: airflow
+    short_name: Fill time constant, falling
     offset: 0x9BD9
     rows: 8
     cols: 8

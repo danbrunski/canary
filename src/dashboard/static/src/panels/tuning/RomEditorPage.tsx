@@ -9,7 +9,9 @@ import {
 } from "../../api/workbench";
 import { Notice } from "../../components/Notice";
 import { Panel } from "../../components/Panel";
+import { SegmentedControl, type SegmentOption } from "../../components/SegmentedControl";
 import { describeError, useControlResource } from "../../hooks/useControlResource";
+import { useIsNarrow } from "../../hooks/useMediaQuery";
 import type { ChannelSnapshot } from "../../hooks/useTelemetryStream";
 import type { LoadedRom } from "../../hooks/useTuningContext";
 import {
@@ -46,7 +48,6 @@ import {
 } from "../../lib/romSim";
 import { editsTouchWotColumn } from "../../lib/romSim";
 import { expectedRun, fineReference, loadTimings, recordTiming } from "../../lib/romSimSize";
-import { buttonClass, cn, inputClass } from "../../styles";
 import type { StatusResponse, WorkbenchItem } from "../../types";
 import type {
   CellSelection,
@@ -59,7 +60,7 @@ import type {
   SimFailure,
   SimRunContext,
 } from "../../types/romEditor";
-import type { RomLibraryEntry } from "../../types/romLibrary";
+import type { RomLibraryEntry, RomTableValues } from "../../types/romLibrary";
 import { downloadText } from "../../util/browser";
 import { BasePicker, SimulateChip } from "./romEditor/BasePicker";
 import type { GridOverlay } from "../cellOverlay";
@@ -69,8 +70,10 @@ import { OpenRom } from "./romEditor/OpenRom";
 import { OperationPanel } from "./romEditor/OperationPanel";
 import { PendingEdits } from "./romEditor/PendingEdits";
 import { PreviewResult } from "./romEditor/PreviewResult";
+import { RecentMenu } from "./romEditor/RecentMenu";
 import { SimCancelled, SimFailureAlert, SimForm, SimRunning } from "./romEditor/SimForm";
 import { SimResults } from "./romEditor/SimResults";
+import { TableTree } from "./romEditor/TableTree";
 import { RevisionChip } from "./romLibraryParts";
 
 /** The chosen image's sha lives in `?rom=<sha>`. The hash is the router's
@@ -95,18 +98,54 @@ function writeShaToUrl(sha: string) {
   }
 }
 
+/** The Workspace's view rides beside it in `?view=` (W10.9); a missing or
+ *  unknown value is Tables. */
+const VIEW_PARAM = "view";
+
+type RomView = "tables" | "edits" | "simulate";
+
+const ROM_VIEWS: readonly RomView[] = ["tables", "edits", "simulate"];
+
+function viewFromUrl(): RomView {
+  try {
+    const value = new URLSearchParams(window.location.search).get(VIEW_PARAM);
+    return ROM_VIEWS.find((view) => view === value) ?? "tables";
+  } catch {
+    return "tables";
+  }
+}
+
+function writeViewToUrl(view: RomView) {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set(VIEW_PARAM, view);
+    window.history.replaceState(null, "", url);
+  } catch {
+    // As for the sha.
+  }
+}
+
 /** No live telemetry: the editor works without it (the overlay then has no
  *  inputs, and says so). */
 const NO_CHANNELS = new Map<string, ChannelSnapshot>();
 
 /** Engine Tuning ▸ ROM Editor (W09.3), and since 2026-10-26 the one page for
  *  viewing ROM tables too (it absorbed ROM Maps): pick a stored image, look at
- *  every two-dimensional table its map declares shaded low to high, edit the
+ *  every table its map declares but the axes, shaded low to high, edit the
  *  fuel chain and timing trims in Map 1, preview the result, download the edit
- *  spec. The live overlay (inferred cell, ECM cell, log coverage) sits behind a
- *  toggle on the tables the vehicle maps a trace to. The edited image never
- *  leaves the server: it is not stored, not downloadable, and not flashable. A
- *  flash is the Flash page's explicit act. */
+ *  spec.
+ *
+ *  Loaded, the image is a one-line header (name, sha, chips, Open another
+ *  ROM…, Recent ▾) over three views (W10): Tables (a tree grouped as
+ *  `rom_map.yaml` files the tables, a select below 900px, beside the chosen
+ *  table's grid and operation), Edits & Preview, and Simulate. The view rides
+ *  in `?view=` beside `?rom=`. Hidden views stay mounted, so a half-typed
+ *  operation or Simulate form survives a switch, and a run keeps going when
+ *  its view is left. The live overlay (inferred cell, ECM cell, log coverage)
+ *  sits behind a toggle on the tables the vehicle maps a trace to, mounted
+ *  only while Tables shows. The edited image never leaves the server: it is
+ *  not stored, not downloadable, and not flashable. A flash is the Flash
+ *  page's explicit act. */
 export function RomEditorPage({
   token,
   channels = NO_CHANNELS,
@@ -201,20 +240,28 @@ export function RomEditorPage({
   useEffect(() => {
     onLoadedChange?.(selectedSha && name ? { sha256: selectedSha, name } : null);
   }, [onLoadedChange, selectedSha, name]);
+  const choose = (sha: string) => {
+    setChosen(sha);
+    writeShaToUrl(sha);
+  };
   return (
     <section className="space-y-4">
+      {/* Not clipped: the Recent ▾ menu hangs below this one-line panel. */}
       <Panel
         title="ROM Editor"
         count={library.data ? `${entries.length} ${entries.length === 1 ? "image" : "images"}` : ""}
+        className="overflow-visible!"
       >
-        <div className="space-y-4">
-          <p className="text-sm text-fg-dim">
-            Look at every table in a ROM, shaded from low to high, and edit the fuel chain (Fuel
-            Targets, Fuel Compensation and K) and the ignition timing trims (A and B) in Map 1, then
-            see the tables after the edits. The edited image is never stored or offered: you get an
-            edit spec, a reviewable file that reproduces the edit from its base. Opening a file adds
-            it to the ROM library, kept by its hash. Nothing here writes the ECU.
-          </p>
+        <div className={nothingLoaded ? "space-y-4" : "space-y-2"}>
+          {nothingLoaded && (
+            <p className="text-sm text-fg-dim">
+              Look at every table in a ROM, shaded from low to high, and edit the fuel chain (Fuel
+              Targets, Fuel Compensation and K) and the ignition timing trims (A and B) in Map 1,
+              then see the tables after the edits. The edited image is never stored or offered: you
+              get an edit spec, a reviewable file that reproduces the edit from its base. Opening a
+              file adds it to the ROM library, kept by its hash. Nothing here writes the ECU.
+            </p>
+          )}
           {!token && <p role="status">Enter the control token to use the ROM Editor.</p>}
           {library.error && <Notice notice={{ kind: "error", text: library.error }} />}
           <OpenRom
@@ -224,6 +271,12 @@ export function RomEditorPage({
             dragging={dragging}
             onDraggingChange={setDragging}
             onFile={(file) => void openFile(file)}
+            bare={!nothingLoaded}
+            trailing={
+              !nothingLoaded && (
+                <RecentMenu entries={recent} selectedSha={selectedSha} onChoose={choose} />
+              )
+            }
           >
             {selected ? (
               <div className="flex min-w-0 flex-wrap items-center gap-2" aria-label="Loaded ROM">
@@ -254,17 +307,10 @@ export function RomEditorPage({
             </p>
           )}
           {loading && <p className="text-fg-dim">Reading the library…</p>}
-          {recent.length > 0 && (
+          {nothingLoaded && recent.length > 0 && (
             <div className="space-y-2">
               <h3 className="text-sm font-semibold">Recent ROMs</h3>
-              <BasePicker
-                entries={recent}
-                selectedSha={selectedSha}
-                onChoose={(sha) => {
-                  setChosen(sha);
-                  writeShaToUrl(sha);
-                }}
-              />
+              <BasePicker entries={recent} selectedSha={selectedSha} onChoose={choose} />
             </div>
           )}
         </div>
@@ -351,6 +397,8 @@ function Workspace({
   const table = inSlot.find((item) => tableChoice(item) === choice) ?? inSlot[0] ?? null;
   const editable = table !== null && isEditableTable(table);
   const [overlayOn, setOverlayOn] = useState(false);
+  const [view, setView] = useState<RomView>(viewFromUrl);
+  const narrow = useIsNarrow();
 
   const [selection, setSelection] = useState<CellSelection | null>(null);
   const [saved] = useState(() => loadEditorState(sha));
@@ -506,9 +554,9 @@ function Workspace({
   if (tables.error) return <Notice notice={{ kind: "error", text: tables.error }} />;
   if (!table) {
     return (
-      <Panel title="Edit">
+      <Panel title="Tables">
         <p className="text-fg-dim">
-          {tables.data?.reason ?? "This image has no two-dimensional table to show or edit."}
+          {tables.data?.reason ?? "This image has no table to show or edit."}
         </p>
       </Panel>
     );
@@ -538,6 +586,30 @@ function Workspace({
       }
     : null;
 
+  const simStale =
+    sim.kind === "ok" && JSON.stringify(sim.run.request.edits) !== JSON.stringify(edits);
+  const simState =
+    sim.kind === "running"
+      ? " · running"
+      : sim.kind === "failed"
+        ? " · failed"
+        : simStale
+          ? " · stale"
+          : "";
+  const views: ReadonlyArray<SegmentOption<RomView>> = [
+    { id: "tables", label: "Tables" },
+    {
+      id: "edits",
+      label: pending.length > 0 ? `Edits & Preview (${pending.length})` : "Edits & Preview",
+    },
+    { id: "simulate", label: `Simulate${simState}` },
+  ];
+  const chooseTable = (item: RomTableValues) => {
+    setChoice(tableChoice(item));
+    setSelection(null);
+    setOpRefusal(null);
+  };
+
   const grid = (overlay: GridOverlay | null) => (
     <CellGrid
       key={`grid-${tableChoice(table)}`}
@@ -552,168 +624,171 @@ function Workspace({
 
   return (
     <div className="space-y-4">
-      <Panel title="Edit">
-        <div className="space-y-4">
-          {slots.length > 1 && (
-            <label className="flex items-center gap-2 text-sm">
-              Map slot
-              <select
-                aria-label="Map slot"
-                className={inputClass}
-                value={slot ?? ""}
-                onChange={(event) => {
-                  setSlotChoice(Number(event.target.value));
-                  setChoice(null);
-                  setSelection(null);
-                  setOpRefusal(null);
-                }}
-              >
-                {slots.map((number) => (
-                  <option key={number} value={number}>
-                    Map {number}
-                    {number === SIM_SLOT ? " (editable)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <div role="group" aria-label="Table" className="flex flex-wrap gap-2">
-            {inSlot.map((item) => (
-              <button
-                key={tableChoice(item)}
-                type="button"
-                className={cn(buttonClass, item === table && "border-accent-2")}
-                aria-pressed={item === table}
-                onClick={() => {
-                  setChoice(tableChoice(item));
-                  setSelection(null);
-                  setOpRefusal(null);
-                }}
-              >
-                {item.label ?? item.name}
-              </button>
-            ))}
-          </div>
-          <p className="font-num text-xs text-fg-faint">{decodeLine}</p>
-          <p className="text-xs text-fg-dim">
-            {rowAxis
-              ? `Rows: ${rowAxis.label}${rowAxis.unit ? ` (${rowAxis.unit})` : ""}`
-              : "Rows: index"}
-            {" · "}
-            {colAxis
-              ? `Columns: ${colAxis.label}${colAxis.unit ? ` (${colAxis.unit})` : ""}`
-              : "Columns: index"}
-            {" · "}Cells: {table.decoded ? (table.unit ?? "value") : "raw"}
-          </p>
-          {table.editor_disagreement && (
-            <p role="note" aria-label={`${table.name} editor labels`} className="text-sm text-warn">
-              {describeEditorDisagreement(table.editor_disagreement)}
-            </p>
-          )}
-          {editable ? (
-            <p className="text-xs text-fg-faint">
-              Click a cell, shift-click or drag for a range; arrows move, shift+arrows extend.
-              Dashed cells are in a pending edit.
-            </p>
-          ) : (
-            <p role="note" className="text-xs text-fg-dim">
-              Viewing only:{" "}
-              {table.slot !== null && table.slot !== SIM_SLOT
-                ? `edits and the simulator cover Map ${SIM_SLOT} only.`
-                : `${table.name} is not one of the tables edited here.`}
-            </p>
-          )}
-          {maskBits !== null && (
-            <p role="note" className="text-xs text-fg-dim">
-              The ECM reads {maskBits} of each cell and strips the rest as a flag (decode mask{" "}
-              <span className="font-num">0x{mask?.toString(16).toUpperCase()}</span>). The grid
-              shows the value; the raw count, flag included, is on hover.
-              {editable &&
-                " Add and Scale act on the value and keep each cell's flag; Set to value keeps it too. A raw count may not change it."}
-            </p>
-          )}
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={overlayOn}
-              onChange={(event) => setOverlayOn(event.target.checked)}
+      <SegmentedControl
+        label="ROM Editor views"
+        options={views}
+        value={view}
+        onChange={(next) => {
+          setView(next);
+          writeViewToUrl(next);
+        }}
+        className="flex-wrap"
+      />
+      {/* Every view stays mounted while hidden: SimForm's typed fields and
+          OperationPanel's value would not survive an unmount. */}
+      <div hidden={view !== "tables"}>
+        <Panel title="Tables" count={`${inSlot.length}`}>
+          <div className="grid grid-cols-[15rem_minmax(0,1fr)] items-start gap-4 max-[900px]:grid-cols-1">
+            <TableTree
+              tables={inSlot}
+              chosen={table}
+              slots={slots}
+              slot={slot}
+              pending={pending}
+              narrow={narrow}
+              onSlot={(number) => {
+                setSlotChoice(number);
+                setChoice(null);
+                setSelection(null);
+                setOpRefusal(null);
+              }}
+              onChoose={chooseTable}
             />
-            Live overlay: inferred cell, ECM cell and log coverage
-          </label>
-          {overlayOn ? (
-            <LiveOverlay
-              token={token}
-              sha={sha}
-              channels={channels}
-              status={status}
-              selectedLogId={selectedLogId}
-              onNavigate={onNavigate}
-              table={table}
-              tables={viewable}
-            >
-              {(overlay) => grid(overlay)}
-            </LiveOverlay>
-          ) : (
-            grid(null)
-          )}
-          {editable && (
-            <OperationPanel
-              key={`operation-${table.id}`}
-              table={table}
-              selection={selection}
-              refusal={opRefusal}
-              onApply={apply}
-            />
-          )}
-        </div>
-      </Panel>
-
-      <Panel title="Pending edits" count={`${pending.length}`}>
-        <PendingEdits
-          pending={pending}
-          label={label}
-          busy={preview.kind === "busy"}
-          onLabel={(value) => {
-            setLabel(value);
-            invalidate();
-          }}
-          onRemove={(id) => {
-            setPending((items) => items.filter((item) => item.id !== id));
-            invalidate();
-          }}
-          onPreview={() => void runPreview()}
-        />
-      </Panel>
-
-      <Panel title="Preview">
-        <div className="space-y-3" aria-live="polite">
-          {preview.kind === "idle" && (
-            <p className="text-sm text-fg-dim">
-              Preview applies the pending edits to the image in memory and shows the tables after
-              them.
-            </p>
-          )}
-          {preview.kind === "busy" && <Notice notice={{ kind: "busy", text: "Previewing…" }} />}
-          {preview.kind === "error" && <Notice notice={{ kind: "error", text: preview.text }} />}
-          {preview.kind === "refused" && (
-            <div role="alert" className="space-y-1 rounded-lg border border-bad/55 p-3">
-              <p className="font-semibold text-bad">Refused: {preview.refusal.reason}</p>
-              <p className="text-sm">{preview.refusal.message}</p>
+            <div className="min-w-0 space-y-4">
+              <h3 className="text-base font-semibold">{table.label ?? table.name}</h3>
+              <p className="font-num text-xs text-fg-faint">{decodeLine}</p>
+              <p className="text-xs text-fg-dim">
+                {rowAxis
+                  ? `Rows: ${rowAxis.label}${rowAxis.unit ? ` (${rowAxis.unit})` : ""}`
+                  : "Rows: index"}
+                {" · "}
+                {colAxis
+                  ? `Columns: ${colAxis.label}${colAxis.unit ? ` (${colAxis.unit})` : ""}`
+                  : "Columns: index"}
+                {" · "}Cells: {table.decoded ? (table.unit ?? "value") : "raw"}
+              </p>
+              {table.editor_disagreement && (
+                <p
+                  role="note"
+                  aria-label={`${table.name} editor labels`}
+                  className="text-sm text-warn"
+                >
+                  {describeEditorDisagreement(table.editor_disagreement)}
+                </p>
+              )}
+              {editable ? (
+                <p className="text-xs text-fg-faint">
+                  Click a cell, shift-click or drag for a range; arrows move, shift+arrows extend.
+                  Dashed cells are in a pending edit.
+                </p>
+              ) : (
+                <p role="note" className="text-xs text-fg-dim">
+                  Viewing only:{" "}
+                  {table.slot !== null && table.slot !== SIM_SLOT
+                    ? `edits and the simulator cover Map ${SIM_SLOT} only.`
+                    : `${table.name} is not one of the tables edited here.`}
+                </p>
+              )}
+              {maskBits !== null && (
+                <p role="note" className="text-xs text-fg-dim">
+                  The ECM reads {maskBits} of each cell and strips the rest as a flag (decode mask{" "}
+                  <span className="font-num">0x{mask?.toString(16).toUpperCase()}</span>). The grid
+                  shows the value; the raw count, flag included, is on hover.
+                  {editable &&
+                    " Add and Scale act on the value and keep each cell's flag; Set to value keeps it too. A raw count may not change it."}
+                </p>
+              )}
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={overlayOn}
+                  onChange={(event) => setOverlayOn(event.target.checked)}
+                />
+                Live overlay: inferred cell, ECM cell and log coverage
+              </label>
+              {overlayOn && view === "tables" ? (
+                <LiveOverlay
+                  token={token}
+                  sha={sha}
+                  channels={channels}
+                  status={status}
+                  selectedLogId={selectedLogId}
+                  onNavigate={onNavigate}
+                  table={table}
+                  tables={viewable}
+                >
+                  {(overlay) => grid(overlay)}
+                </LiveOverlay>
+              ) : (
+                grid(null)
+              )}
+              {editable && (
+                <OperationPanel
+                  key={`operation-${table.id}`}
+                  table={table}
+                  selection={selection}
+                  refusal={opRefusal}
+                  onApply={apply}
+                />
+              )}
             </div>
-          )}
-          {preview.kind === "ok" && (
-            <PreviewResult
-              preview={preview.data}
-              baseTables={baseTables}
-              onDownload={() =>
-                downloadText(preview.data.spec_yaml, specFileName(label), "application/x-yaml")
-              }
-            />
-          )}
-        </div>
-      </Panel>
+          </div>
+        </Panel>
+      </div>
 
-      <section aria-label="Simulate" data-slot="simulate" className="space-y-4">
+      <div hidden={view !== "edits"} className="space-y-4">
+        <Panel title="Pending edits" count={`${pending.length}`}>
+          <PendingEdits
+            pending={pending}
+            label={label}
+            busy={preview.kind === "busy"}
+            onLabel={(value) => {
+              setLabel(value);
+              invalidate();
+            }}
+            onRemove={(id) => {
+              setPending((items) => items.filter((item) => item.id !== id));
+              invalidate();
+            }}
+            onPreview={() => void runPreview()}
+          />
+        </Panel>
+
+        <Panel title="Preview">
+          <div className="space-y-3" aria-live="polite">
+            {preview.kind === "idle" && (
+              <p className="text-sm text-fg-dim">
+                Preview applies the pending edits to the image in memory and shows the tables after
+                them.
+              </p>
+            )}
+            {preview.kind === "busy" && <Notice notice={{ kind: "busy", text: "Previewing…" }} />}
+            {preview.kind === "error" && <Notice notice={{ kind: "error", text: preview.text }} />}
+            {preview.kind === "refused" && (
+              <div role="alert" className="space-y-1 rounded-lg border border-bad/55 p-3">
+                <p className="font-semibold text-bad">Refused: {preview.refusal.reason}</p>
+                <p className="text-sm">{preview.refusal.message}</p>
+              </div>
+            )}
+            {preview.kind === "ok" && (
+              <PreviewResult
+                preview={preview.data}
+                baseTables={baseTables}
+                onDownload={() =>
+                  downloadText(preview.data.spec_yaml, specFileName(label), "application/x-yaml")
+                }
+              />
+            )}
+          </div>
+        </Panel>
+      </div>
+
+      <section
+        aria-label="Simulate"
+        data-slot="simulate"
+        hidden={view !== "simulate"}
+        className="space-y-4"
+      >
         <Panel title="Simulate">
           <div className="space-y-4">
             <SimForm
@@ -751,7 +826,7 @@ function Workspace({
               result={sim.result}
               run={sim.run}
               tables={baseTables}
-              stale={JSON.stringify(sim.run.request.edits) !== JSON.stringify(edits)}
+              stale={simStale}
               onDownload={() =>
                 downloadText(
                   JSON.stringify(sim.result),

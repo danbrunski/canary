@@ -30,7 +30,7 @@ import type {
   RomEditorDecode,
   SelectionRange,
 } from "../types/romEditor";
-import type { RomTableValues } from "../types/romLibrary";
+import type { RomTableGroup, RomTableValues } from "../types/romLibrary";
 
 /** `rom_editor.EDITABLE_TABLES` and `SIM_SLOT`: the fuel chain and the
  *  ignition timing trims (E09.7), Map 1. */
@@ -56,15 +56,61 @@ export function isEditableTable(table: RomTableValues): boolean {
   );
 }
 
-/** Whether the page shows this table: every two-dimensional table the map
- *  declares (the editable ones, and the base timing maps and the like to look
- *  at), and the editable scalar K. An axis table is never a table to show, and
- *  a one-dimensional curve is not a grid. Showing a table is not editing it:
- *  only `isEditableTable` ones take an edit. */
+/** Whether the page lists this table: every table the map declares except
+ *  the axes, curves and scalars included (operator, 2026-10-27). A curve is a
+ *  one-row or one-column grid, a scalar one cell. Showing a table is not
+ *  editing it: only `isEditableTable` ones take an edit. */
 export function isViewableTable(table: RomTableValues): boolean {
-  if (table.role === "axis") return false;
-  if (isEditableTable(table)) return true;
-  return table.raw.length > 1 && (table.raw[0]?.length ?? 0) > 1;
+  return table.role !== "axis";
+}
+
+/** The table tree's label: the map's short name, else its name (W10.7). */
+export function treeLabel(table: RomTableValues): string {
+  return table.short_name ?? table.name;
+}
+
+export type TreeGroupId = RomTableGroup | "other";
+
+/** The tree's groups in order: `rom_map.py`'s closed set, then Other for a
+ *  table that carries none (a daemon older than W10.7). */
+export const TREE_GROUPS: ReadonlyArray<{ id: TreeGroupId; label: string }> = [
+  { id: "fuel", label: "Fuel" },
+  { id: "ignition", label: "Ignition" },
+  { id: "airflow", label: "Airflow" },
+  { id: "emissions", label: "Emissions" },
+  { id: "other", label: "Other" },
+];
+
+function treeGroupOf(table: RomTableValues): TreeGroupId {
+  return TREE_GROUPS.find((group) => group.id === table.group)?.id ?? "other";
+}
+
+/** Whether `filter` (any case) is in the table's tree label or its name. */
+export function matchesTableFilter(table: RomTableValues, filter: string): boolean {
+  const needle = filter.trim().toLowerCase();
+  if (!needle) return true;
+  return [treeLabel(table), table.name].some((text) => text.toLowerCase().includes(needle));
+}
+
+/** The tables of one tree view, by group in `TREE_GROUPS` order and the
+ *  daemon's order within each, keeping only those `filter` matches. Empty
+ *  groups are dropped. */
+export function groupTables(
+  tables: readonly RomTableValues[],
+  filter = "",
+): Array<{ id: TreeGroupId; label: string; tables: RomTableValues[] }> {
+  return TREE_GROUPS.map((group) => ({
+    ...group,
+    tables: tables.filter(
+      (table) => treeGroupOf(table) === group.id && matchesTableFilter(table, filter),
+    ),
+  })).filter((group) => group.tables.length > 0);
+}
+
+/** How many pending edits change this table (its id is unique per file, so a
+ *  Map 1 table is never confused with its copy in Maps 2-5). */
+export function pendingEditCount(pending: readonly PendingEdit[], table: RomTableValues): number {
+  return table.id === undefined ? 0 : pending.filter((item) => item.edit.table === table.id).length;
 }
 
 /** One table of one slot, for picking between them: a table id is shared by

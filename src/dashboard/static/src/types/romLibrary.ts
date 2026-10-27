@@ -317,12 +317,21 @@ export interface RomEditorDisagreement {
   evidence: string;
 }
 
+/** Where the ROM Editor's table tree files a table (`rom_map.py`
+ *  `TableGroup`, W10.7). */
+export type RomTableGroup = "fuel" | "ignition" | "airflow" | "emissions";
+
 export interface RomTableValues {
   /** The definition's table id, unique per file. */
   id?: string;
   name: string;
   /** `Fuel Targets (Map 1)`. */
   label?: string;
+  /** The tree's label when `name` is too long for it (W10.7). */
+  short_name?: string | null;
+  /** The tree's group; null on an axis. Absent from a daemon older than
+   *  W10.7, whose tables the tree files under Other. */
+  group?: RomTableGroup | null;
   /** Map slot (1-based) for a per-slot table; null for a single-copy table. */
   slot: number | null;
   /** Stable kind shared by every copy of one table (`fuel_targets`). Page
