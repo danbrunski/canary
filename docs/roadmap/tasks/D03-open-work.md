@@ -1793,6 +1793,18 @@ live here now, so the documents could be archived
     *2026-09-24 16:04Z key-on (Pi up since 04:55Z):* `/status.gps` showed a fix
     within ~1 min of the engine starting (fix_quality 1, 10 satellites, HDOP
     1.07, 2,014 m). One good start; the 09-23 no-fix drive stays unexplained.
+- [ ] **`tuning` memory windows gap for seconds right after a daemon start
+  (2026-10-27).** `_capture-tuning-2026-10-27T160919` started 29 s after a
+  daemon restart and stopped with `fail`: `rate_shortfall` (the 4 Hz batch at
+  its planned 2–3.4 Hz, which is expected) and `acquisition_gap`.
+  `mem:ECM_TARGET_EQUIV_RATIO` (fuel_target window) gapped five times, 2.5–6.5 s
+  each, at 15.7–91.7 s into the capture. The spark window gapped once, 5.0 s at
+  214.7 s. Zero socket, storage and controller losses. The 10-26 capture of the
+  same revision (512 s) recorded the windows at 2.0 Hz with p95 0.54 s and no
+  gaps, so this is new. Owed: check whether it repeats on a capture started
+  long after boot. If it only follows a start, look at the memory scheduler's
+  first minute (session 0xC0 re-entry, window verify) before calling it a
+  fault.
 - [ ] **GNSS sees no satellites (since at least 2026-10-10).** The no-fix case
   above has come back, and this time it doesn't clear. Every GPS row in
   `2026-10-10T171856`, `_capture-tuning-2026-10-10T171518`,
@@ -1810,6 +1822,17 @@ live here now, so the documents could be archived
     already dark.
   - **Operator:** check the antenna connector at the HAT and the cable run.
     Then confirm satellites in `gpspipe -w` within a few minutes outdoors.
+  - 2026-10-27: still 0 satellites on every GPS row of `2026-10-27T153418`
+    (3,634) and `_capture-tuning-2026-10-27T154559` (12,216), 15:34–16:06Z.
+    With the antenna sitting on the dash (operator), the receiver got its
+    first fix at 16:11:30Z, 2.5 min into the daemon restart at 16:08:50Z
+    (gpsd itself wasn't restarted). After that, 1,105 of 2,414 rows of
+    `_capture-tuning-2026-10-27T160919` had a fix, 7 satellites, HDOP 1.85
+    (≤ 3.75). `/status` read 9 satellites, HDOP 1.51 at 16:16Z, and chrony
+    selected PPS at 16:13:32Z. So the receiver, the HAT path and gpsd all
+    work, and the fault is where the antenna normally sits or its cable run.
+    Not closed: find the mounting spot that sees sky (or the cable fault)
+    and confirm a fix within minutes from a cold start there.
   - Owed with it: the H07.11 gear holds and every GPS-referenced committee
     (`SPEED_SOURCE_DIVERGENCE` reads `reference_missing`). Note too that the
     daemon logs "model feature spec is unsatisfiable … this detector will
@@ -2424,6 +2447,25 @@ live here now, so the documents could be archived
     learning is disabled (UpRev calibration) or just slow. Same again on the
     next morning's 23-min drive from a 28 °C start
     (`_capture-tuning-2026-10-26T140411`, 2,646 / 2,631 reads, all 0.00).
+    **2026-10-27 firmware answer (desk, read-only, from `~/ecu-re/out` and the
+    decoded ROM images): learning is not disabled by the calibration, and it
+    isn't slow.** The writer is `FUN_00057b04` (store at 0x57C06):
+    LTFT = cell + w62AC − 0x6400. The cell comes from an 8×8 learned map per
+    bank, B1 at 0xFFFF54E0 and B2 at 0xFFFF5460, with visit counts at
+    0xFFFF5335 and 0xFFFF52F5. The learner `FUN_00057cf8` steps a cell by
+    about 10 % of the error per update (gains at cal 0xD60B) and clamps it to
+    ±10 %. Every learning constant is identical in the UpRev base, k106 (which
+    learned −10.2..+9.4 % on 09-17/18/20) and 20261004. A runtime gate is
+    closed instead: per-bank bits 0xFFFF1518 / 151A, set in `FUN_00058714`
+    (closed loop, coolant > 69 °C, no after-start enrichment, rear-O2 offset
+    within ±250, A/F stability, plus an idle or off-idle path). Which input is
+    false is unresolved, because no capture has logged the gate RAM. LTFT also
+    read 0.00 on every session 07-18..08-08, so this spell repeats one that
+    opened between 08-08 and 09-17. Owed: one warm drive with the visit counts
+    (0xFFFF52F5..0x5374), the maps (0xFFFF5460..0x555F), the gate bits
+    0x1518–151A / 0x179C and their inputs as memory channels. This is a new
+    catalog entry plus a restart, so it's desk work before the drive. The
+    first input that reads false names the gate.
   - [x] **0x1110 is commanded EVAP purge, not intake VVT duty.** The
     CAN Mode 22 handler (`FUN_000d16b8`) sends DID high byte 0x11 to table
     0x24988. Entry 16 there is 0xFFFF272E (read back from the ROM image), and

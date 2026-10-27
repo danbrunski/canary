@@ -347,6 +347,16 @@ First-start monitoring, in order, each step gated on the one before:
   new pump's set point is measured against it
   (`docs/aem-fuel-pressure-analog-input.md`; v2 firmware re-checked against the
   face 2026-10-04: 1.5-2.5 psi, within the face's 1 psi resolution).
+  2026-10-27: the pump went in between 10-10 and 10-26, and the vent check
+  wasn't done: the ADC was disconnected from the swap until 16:06Z on 10-27.
+  The same analog instrument, so the offset cancels in the ratio, reads the
+  new pump at 53.78 psi warm idle (10-04 stock: 50.79). By MAF band
+  (`_capture-tuning-2026-10-27T160919`, 542 pairs, ±0.25 s means):
+  +3.0 psi at 0–10 g/s, falling to +1.3 psi at 60–100 g/s (n = 14). The new
+  pump droops more with airflow than the stock one did, which is a lead
+  until a pull confirms it. That's +2.5–3 % injector flow, not the +7–8 % a
+  48 → 56 psi face reading implies (`data/analyses/2026-10-27-drive-log.md`).
+  The vent check is still owed.
 - [ ] **F1 — KOEO.** Fuel pump primes; no DTCs; `ignition_only`. Re-verify the
   RAM memory channels (`tools.verify_memory_channels`).
 - [ ] **F2 — Idle.** λ at stoich, STFT near 0 on both banks (a large STFT at idle
