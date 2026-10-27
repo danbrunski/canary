@@ -1140,9 +1140,20 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
       `0xFFFF3D4E`, `0xFFFF9134`, `0xFFFF8E47`/`8E48` and `0xFFFF47F0`. Until
       α is logged, purging reads are not a chain known answer. Score the
       chain on purge-off reads (1.006) or on reads with α logged.
-    - **Plant candidate:** α·BFS·φ is what the ECM believes the vapour
-      displaces, so at a settled state the vapour fuel is ≈ (1 − α)·BFS·φ/8.
-      This input needs α logged; it is not a fit. The unexplained ratio
+    - **Plant candidate: (1 − α)·BFS·φ/8 is the ECM's *estimate* of the
+      vapour fuel, and the trims say it overestimates** (canary-dc's matched
+      pairs, D03, 2026-10-27). Post-pump at matched operating points, the
+      pulse is cut to 0.898 at idle and 0.950 off idle while purging, but
+      STFT goes +2.7 / +3.5 % richer at the same time. The vapour actually
+      supplied is therefore about 7 % at idle and 1.5 % off idle. So
+      (1 − α) is an upper bound, not the input. Declare the vapour fuel as
+      κ·(1 − α)·BFS·φ/8, where κ (the delivered fraction of the ECM's
+      estimate) is a named parameter. The trim evidence puts its bracket at
+      roughly 0.3–0.8, and κ is identified on the identification drives
+      only. Don't assume κ = 1.
+      Circularity: the STFT shift is the controller's own error estimate,
+      so it may bracket κ but must never be fed in as a plant input. The
+      held-out λ test still decides. The unexplained ratio
       slope against battery voltage falls to 0.024/V with purge off
       (n = 685), and 0.04/V remains within settled purging reads.
 
