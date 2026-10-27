@@ -35,8 +35,13 @@ visits in closed loop, and that correction carries into open loop.
   - inputs 0xFFFF26BA (closed loop), 0xFFFF1726 (after-start enrichment),
     0xFFFF2834, 0xFFFF28B6–28B9, 0xFFFF2792, 0xFFFF358B–358E, 0xFFFF4857,
     0xFFFF284E, 0xFFFF2881;
+  - **the EVAP purge controller's words** (Ghidra, 2026-10-27: it writes
+    every path input of the gate): w5224 (4 bytes, accumulated purge vapour
+    since power-up; 28B9.6 needs ≥ 0x302<<15), w38AA (purge flow), 0x28B9,
+    0x2792 (purge state, must be < 2 off idle);
   - rear-O2 offsets 0xFFFF4CA4–4CA7, already catalogued as
-    `mem:ECM_AF_LEARNED_OFFSET_B1/B2`;
+    `mem:ECM_AF_LEARNED_OFFSET_B1/B2` and readable as DIDs 0x1249/0x124A.
+    The ±250 window is already refuted by data, so these are context only;
   - one-shot reads at the start: the visit counts 0xFFFF52F5..0x5374 and the
     maps 0xFFFF5460..0x555F.
 
@@ -58,6 +63,9 @@ visits in closed loop, and that correction carries into open loop.
   share the blame.
 - **G2:** the visit counts all read 0 (the learner hasn't run since the
   09-20 flash). Fail: any nonzero count.
+- **G3 (purge):** on warm off-idle reads, 28B9.6 is clear or b2792 ≥ 2 on
+  ≥ 95 % of reads. Pass names the purge controller as the closed gate. Fail:
+  both read open while 0x1518 stays clear.
 
 ## Drive order
 

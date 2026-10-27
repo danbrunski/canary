@@ -2466,6 +2466,42 @@ live here now, so the documents could be archived
     0x1518–151A / 0x179C and their inputs as memory channels. This is a new
     catalog entry plus a restart, so it's desk work before the drive. The
     first input that reads false names the gate.
+    **2026-10-27 Ghidra trace (headless, `-readOnly -noanalysis`; constants
+    checked against the 20261004 bytes and identical in the UpRev base):** the
+    full refusal list.
+    - **Forced to 0x6400:** fault item 0x114, the KWP 0x31 id 6 wipe pulse
+      47B2.7, and two active tests. All transient.
+    - **The learner writes only when** both 0x1518 and 0x151A hold the bank
+      bit. 151A: averaged STFT changed by < 3 % and |A/F − target| < 0x97.
+    - **0x1518 needs all of these:**
+      - closed loop (26BA.b);
+      - coolant > 69 °C (code immediate 0x77);
+      - after-start enrichment w1726 = 0;
+      - rear-O2 learned offset |4CA4/4CA6| ≤ 250 (cal 0x8E60/62);
+      - no EVAP leak test running (4857.7);
+      - no fault 0x114 (284E.1);
+      - and one of three paths:
+        - idle: speed 0, purge w38AA < 40, 2834.4 held 10×5 passes (cal
+          0x86D3), rear-O2 sub-feedback idle, 28B9.6, capped at 30 updates;
+        - off-idle: 2834.4 clear, 28B9.6 set, purge state b2792 < 2;
+        - the A/F-diagnostic flags 28B8.3 / 28B6.1.
+    - **The EVAP purge controller writes every path input**
+      (`FUN_0006a52c`): 28B9.6, 2792, w38AA, w5224, 28B8.3 and 28B6.1.
+      28B9.6 needs an accumulated purge-vapour quantity w5224 ≥ 0x302<<15
+      since power-up (MAF × purge duty), or a step past table 0xDE4A.
+      The purge controller also reads the learner's flags and the LTFT words,
+      so the two are coupled both ways.
+    - **Data:** the rear-O2 window is refuted. On 08-05 (zero spell) 4CA4/4CA6
+      read −10/−3; on 09-17 (learning) −5..+6 / −12..−10; both are far inside
+      ±250. The pattern that stands out is purge. Warm commanded purge (PID
+      0x2E) on 09-20, while learning, averaged 28–75 % per session. The zero
+      spells mostly ran 0–28 %, many drives at 0 % throughout. But 07-26,
+      07-28/29/30 and 08-06 sat at 17–28 % and still didn't learn, and the
+      coupling runs both ways, so this is a correlation, not a cause.
+    - **Leading candidates, both unresolved:** 28B9.6 (accumulated purge)
+      and b2792 (purge diagnostic state ≥ 2). The w5224 scaling used to test
+      the first is unverified. The gate read in the next-drive plan now
+      carries w5224 (4 bytes, backup RAM), w38AA, 0x28B9 and 0x2792 too.
   - [x] **0x1110 is commanded EVAP purge, not intake VVT duty.** The
     CAN Mode 22 handler (`FUN_000d16b8`) sends DID high byte 0x11 to table
     0x24988. Entry 16 there is 0xFFFF272E (read back from the ROM image), and
