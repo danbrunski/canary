@@ -2501,7 +2501,34 @@ live here now, so the documents could be archived
     - **Leading candidates, both unresolved:** 28B9.6 (accumulated purge)
       and b2792 (purge diagnostic state ≥ 2). The w5224 scaling used to test
       the first is unverified. The gate read in the next-drive plan now
-      carries w5224 (4 bytes, backup RAM), w38AA, 0x28B9 and 0x2792 too.
+      carries w5224 (4 bytes), w38AA, 0x28B9 and 0x2792 too.
+    - **Gate RAM read live (second 10-27 drive, one-shot 0x23 reads at
+      17:52Z, ~15 min after key-on; KOEO at ~18:10Z):**
+      - Visit counts 0x52F5..0x5374 all 0, maps 0x5460..0x555F all 0x6400:
+        the learner hasn't run since the 09-20 flash.
+      - Every 0x1518 input except 28B9.6 read permissive: 26BA = 0x03 (both
+        banks closed loop), 1726 = 0, 2792 = 0, 4857.7 / 284E.1 / 28B8.3 /
+        28B6.1 clear, 4CA4/4CA6 +24/−36.
+      - 28B9.6 clear, w5224 >> 15 = 98 of the 770 needed. The idle path
+        needs 28B9.6 too, so with it clear no path opens.
+      - At KOEO w5224 read 0 (28B9 = 0x14, 1584 = 0, 14A0 = 0): **the
+        accumulator restarts every key cycle.** It is not backup RAM.
+    - **Not the tune (byte diff of the decoded images, 2026-10-27).**
+      - The threshold is calibration word 0x9048 = 0x0302 on the UpRev base,
+        k106, 20260920 and 20261004 (and on the ECU's own 09-20 read, which
+        matches the decoded 20260920 byte for byte).
+      - k106 → 20260920 changed 3 bytes: one fuel-target slot cell (0xE025C)
+        and the checksum words 0x9598/0x95A0 (the sum loop at 0x2148C skips
+        them). 20261004 adds the fuel-comp load axis 0xCB2A–CB38 and slot
+        bytes 0xE0671–E075F.
+      - No calibration byte read by `FUN_0006a52c`, `FUN_00058714`,
+        `FUN_00057cf8` or `FUN_00057b04` differs between any two images, and
+        none of them reads UpRev's RAM map copy (0xFFFFB040..).
+      - k106 alone saw both states: zero 08-03..08-08, learning by 09-17.
+      - So the flash wiped the learned maps and changed nothing the gate
+        reads. Whether learning runs is decided by how much purge flows in
+        one key cycle. Next: the `ltft-gate` capture logs w5224 through a
+        drive for the fill rate.
   - [x] **0x1110 is commanded EVAP purge, not intake VVT duty.** The
     CAN Mode 22 handler (`FUN_000d16b8`) sends DID high byte 0x11 to table
     0x24988. Entry 16 there is 0xFFFF272E (read back from the ROM image), and
