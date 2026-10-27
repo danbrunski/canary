@@ -590,6 +590,44 @@ supercharger is a hardware intervention with a new plant parameter set.
       - Measurement now declared: `evap_purge_drive` (contract, `planned`;
         operator 2026-10-15). The `tuning` capture profile polls DID 0x1110 at
         2 Hz on the pulse DID's cycle from 2026-10-15.
+    - **The ECM cuts the pulse while purging (2026-10-27, desk; the pulse
+      chain only, no plant λ scored).** `tools.fuel_plant_check chain` with
+      the ZS44A-20261004 image (plain sha256 `5587f7e1…`) on the four
+      post-pump tuning captures (10-26T010515, 10-26T140411, 10-27T154559,
+      10-27T160919; 1,659 checked reads) gives a pooled ratio of **0.948**,
+      p10–p90 0.897–1.013. That is outside [0.98, 1.04], against 1.0084 on
+      the six earlier captures. Split per read by DID 0x1110
+      (`ECM_EVAP_PURGE_CMD`, nearest read within 1 s):
+
+      | Capture | No purge | Purging |
+      |---|---|---|
+      | 10-26T010515 | 1.000 (160) | 1.002 (5) |
+      | 10-26T140411 | 1.006 (425) | 0.908 (480) |
+      | 10-27T154559 | 1.006 (87) | 0.946 (244) |
+      | 10-27T160919 | 1.006 (13) | 0.904 (245) |
+
+      With no purge the chain holds in every session. While purging, the ECM
+      shortens the pulse by 5–10 % (0.909 at MAF < 5 g/s, n = 832), and the
+      decoded chain has no term for it. The six earlier captures never logged
+      purge, so their pass says nothing about purging reads. This is the
+      first direct sign that purge vapour is a real fuel input the ECM
+      corrects for. It supports purge as the plant's missing input (the STFT
+      residual above), but it doesn't test that.
+      - *Not dead time.* These are the first captures with PID 0x42 beside
+        the pulse, so Ts comes from the voltage formula. It matches the
+        session's own fuel-cut pulse words within 2 counts on all four
+        (51/49, 49/47, 56/56, 55/56), across 13.0–14.0 V. Substituting the
+        fuel-cut Ts moves the ratio by under 0.013.
+      - *Unexplained lead:* within a session the ratio rises about 0.15 per
+        battery volt, separately from purge (least squares on
+        session-demeaned reads, purge coefficient −0.0007 per %).
+      - The firmware term (where purge enters the fuel quantity, and its
+        learned vapour concentration) is being traced. Until it is decoded
+        and in `injector_pulse.py`, purging reads are not a known answer.
+      - 10-27T160919 is the first tuning-profile recording with the AEM rail
+        pressure beside the pulse DID (item 2 below; 4 min, median
+        370.7 kPa). The new pump (fitted before all four captures) puts warm
+        rail pressure at the top of the 350 [305, 371] kPa working assumption.
   - **Remaining:** *(item 1's revised structure is specified as E09.11,
     fuel-mv-4: purge, MAF transfer error, PID 0x42, the short-pulse decode
     and the pairing fix, on E09.1's capture.)*

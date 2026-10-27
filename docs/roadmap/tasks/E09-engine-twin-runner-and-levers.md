@@ -1102,6 +1102,30 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
   **Accept:** E07.3's bounds on held-out drives, and the residual's
   correlation with STFT below a threshold declared with the bounds. If it
   fails, the next version is not VE either; the evidence says where.
+  - **Split, declared 2026-10-27 before any plant λ was scored on these
+    drives** (operator-approved recommendation). There are three physical
+    drives (`physical_drives`). All are post-pump and on ZS44A-20261004, on
+    the `tuning` profile, which logs the pulse, MAF, λ, STFT, DID 0x1110 and
+    PID 0x42 together. The `twin` profile drive (E09.1) is still owed, and
+    it adds to held-out.
+    - Identification: `_capture-tuning-2026-10-26T010515` (drive
+      2026-10-26T010215) and `_capture-tuning-2026-10-26T140411` (drive
+      2026-10-26T140256).
+    - Held out: `_capture-tuning-2026-10-27T154559` and
+      `_capture-tuning-2026-10-27T160919` (one drive, 2026-10-27T153418; the
+      only rail-pressure recording).
+    - What has already been looked at: the ECU pulse-chain ratio on all four
+      (E07.3, 2026-10-27, "The ECM cuts the pulse while purging"). That ratio
+      shaped this version's purge input. Plant λ has not been scored on
+      any of them. Don't run fuel-mv-1..3 `evaluate` on them, because it
+      would spend them on versions that already fail.
+  - **Purge, two separate terms.** The ECM's own purge compensation
+    shortens the pulse 5–10 % (E07.3, 2026-10-27). It is in the logged
+    pulse, so the plant needs no model of it, but the pulse chain does. The
+    vapour fuel itself enters downstream of the MAF and is in neither, so it
+    is the plant input. Decode the firmware term first: its learned vapour
+    concentration is the natural observable for the plant's vapour fuel,
+    which avoids fitting a free scale.
 
 - [~] **E09.12 — Score the prediction of record on the plant-free outputs.**
   Five drives on ZS44A-20261004 exist (E08.7 item 5) and none is scored.
