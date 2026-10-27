@@ -25,7 +25,18 @@ visits in closed loop, and that correction carries into open loop.
    the trip-end digest couldn't be checked. Keep it up ≥ 5 min after key-off,
    or plug in the Ethernet cable at the stop.
 
-## Pending code (desk, before the drive; nothing is deployed yet)
+## Pending code (desk, before the drive)
+
+Landed 2026-10-27 as the `ltft-gate` capture profile (a copy of `tuning` plus
+36 read-only memory channels; each address answered a live 0x23 read on the
+second 10-27 drive). It also polls PID 0x32 (on this ECM baro minus the EVAP
+sensor, so vacuum reads positive), PID 0x2F fuel level and DID 0x1116. Still
+owed: the EVAP purge factor α words (canary-a5, E09.11: 4698–469B, a
+9030–9066 window, 3D4E, 9134, 8E47/8E48, 47F0), catalogued after a key-on
+read.
+
+The original list:
+
 
 - **LTFT gate RAM channels** in `data/dids.yaml` `memory:`, read-only 0x23 at
   slow weight, plus a capture profile carrying them on top of `tuning` (a new
@@ -63,13 +74,20 @@ visits in closed loop, and that correction carries into open loop.
   share the blame.
 - **G2:** the visit counts all read 0 (the learner hasn't run since the
   09-20 flash). Fail: any nonzero count.
+- **G4 (accumulator, added 2026-10-27 after the one-shot reads, before any
+  `ltft-gate` data):** w5224 starts at 0 at key-on and grows only while DID
+  0x1110 > 0. 28B9.6 is clear on every read where w5224 >> 15 < 770, and
+  the visit counts stay 0 until it sets. At 17:52Z it grew 12.3 units/min
+  at cruise. Pass: all three hold. Fail: w5224 grows with purge at 0, or a
+  visit count moves with 28B9.6 clear.
 - **G3 (purge):** on warm off-idle reads, 28B9.6 is clear or b2792 ≥ 2 on
   ≥ 95 % of reads. Pass names the purge controller as the closed gate. Fail:
   both read open while 0x1518 stays clear.
 
 ## Drive order
 
-1. `tuning`-plus-gates capture from the first `engine_running` to parking
+1. `ltft-gate` capture (`POST /control/capture {"profile":"ltft-gate"}`) from
+   the first `engine_running` to parking
    (a tuning run is the whole drive).
 2. No maneuvers needed. Warm idle, cruise at 1,700–3,200 rpm, and one steady
    3rd-gear pull from 2,500 rpm if the road allows. That pull would also be

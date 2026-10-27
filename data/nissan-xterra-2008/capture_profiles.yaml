@@ -423,3 +423,184 @@ profiles:
   corpus_eligible: false
   behavior_model_recipes: []
   storage_prefix: _capture-twin
+- name: ltft-gate
+  description: 'LTFT learning-gate study: the tuning capture plus read-only RAM reads of the
+    learn-gate bits, their inputs, the EVAP purge controller state and the learned-trim maps'
+  notes: 'Built 2026-10-27 from the Ghidra trace of why long-term fuel trim reads 0.00 (D03
+    trim relation). Everything in `tuning`, unchanged, plus service-0x23 reads of the gate:
+    per-bank learn bits 0xFFFF1518/151A, the held condition 0xFFFF179C, the path inputs (idle
+    flag 2834, tick 2881, A/F-diagnostic flags 28B6/28B8, accumulated-purge flag 28B9, purge
+    state 2792, purge flow 38AA, purge accumulator 5224, rear-O2 sub-feedback 358B-358E, leak-test
+    flag 4857, closed-loop bytes 26BA, after-start enrichment 1726) and the counters 1435,
+    138A and 1686. Added for the purge question: EVAP vapor pressure (PID 0x32; on this ECM
+    baro minus the sensor, so vacuum reads positive), fuel level (PID 0x2F) and the faster-filtered
+    EVAP sensor word (DID 0x1116). The visit counts (0xFFFF52F5..5374) and learned maps (0xFFFF5460..555F)
+    ride as 57-byte windows at the slowest weight. Their anchor channels decode one byte each;
+    read the window from the stored payload. Reads only: no service here writes anything.
+    A copy of `tuning`, so `tuning` itself is not edited.'
+  experimental: false
+  mode01:
+    RPM: 1.0
+    THROTTLE_POS: 1.0
+    MAF: 1.0
+    COMMANDED_EQUIV_RATIO: 1.0
+    O2_WR_LAMBDA_S1: 1.0
+    FUEL_STATUS: 1.0
+    ENGINE_LOAD: 1.0
+    TIMING_ADVANCE: 1.0
+    BAROMETRIC_PRESSURE: 0.25
+    INTAKE_TEMP: 0.25
+    COOLANT_TEMP: 0.25
+    CONTROL_MODULE_VOLTAGE: 0.25
+    SHORT_FUEL_TRIM_1: 0.5
+    SHORT_FUEL_TRIM_2: 0.5
+    LONG_FUEL_TRIM_1: 0.5
+    LONG_FUEL_TRIM_2: 0.5
+    EVAP_VAPOR_PRESSURE: 0.25
+    FUEL_LEVEL: 0.25
+  mode01_batch_groups: []
+  mode22:
+  - ECM_RPM
+  - ECM_AF_SENSOR_V_B1
+  - ECM_AF_SENSOR_V_B2
+  - ECM_AIR_CHARGE
+  - ECM_MAF_GPS
+  - ECM_INJECTOR_PULSE_1
+  - ECM_INJECTOR_PULSE_2
+  - ECM_THROTTLE_POS_SENSOR_1
+  - ECM_EVAP_PURGE_CMD
+  - ECM_EVAP_PRESSURE
+  mode22_rate_weights:
+    ECM_RPM: 0.5
+    ECM_AF_SENSOR_V_B1: 0.5
+    ECM_AF_SENSOR_V_B2: 0.5
+    ECM_AIR_CHARGE: 0.5
+    ECM_MAF_GPS: 0.5
+    ECM_INJECTOR_PULSE_1: 0.5
+    ECM_INJECTOR_PULSE_2: 0.5
+    ECM_THROTTLE_POS_SENSOR_1: 0.5
+    ECM_EVAP_PURGE_CMD: 0.5
+    ECM_EVAP_PRESSURE: 0.25
+  memory:
+  - ECM_TARGET_EQUIV_RATIO
+  - ECM_ENGINE_PERIOD
+  - ECM_IGNITION_TIMING_RAM
+  - ECM_ENGINE_SPEED_RAM
+  - ECM_HIGH_DET_FLAGS
+  - ECM_KNOCK_RETARD
+  - ECM_KNOCK_RETARD_TARGET
+  - ECM_KNOCK_HIGHDET_METRIC
+  - ECM_KNOCK_CONTROL_FLAGS
+  - ECM_KS_P0327_STATUS
+  - ECM_KS_P0328_STATUS
+  - ECM_KS_P0332_STATUS
+  - ECM_KS_P0333_STATUS
+  - ECM_KS_FAULT_FLAGS
+  - ECM_KS1_LEVEL
+  - ECM_KS2_LEVEL
+  - ECM_LTFT_LEARN_COND_1518
+  - ECM_LTFT_LEARN_STABLE_151A
+  - ECM_LTFT_GATE_COND_179C
+  - ECM_LTFT_LEARN_FLAGS_1686
+  - ECM_LTFT_IDLE_UPDATES_1435
+  - ECM_LTFT_COUNTER_138A
+  - ECM_AFTER_START_ENRICH_1726
+  - ECM_AF_FEEDBACK_STATE_26BA
+  - ECM_EVAP_PURGE_STATE_2792
+  - ECM_LTFT_IDLE_FLAG_2834
+  - ECM_LTFT_FAULT_FLAG_284E
+  - ECM_LTFT_TICK_2881
+  - ECM_LTFT_AFDIAG_28B6
+  - ECM_LTFT_AFDIAG_28B8
+  - ECM_EVAP_PURGE_ACCUM_FLAG_28B9
+  - ECM_REAR_O2_SUBFB_358B
+  - ECM_REAR_O2_SUBFB_358D
+  - ECM_EVAP_PURGE_FLOW_38AA
+  - ECM_EVAP_LEAK_TEST_FLAGS_4857
+  - ECM_EVAP_PURGE_ACCUM_5224
+  - ECM_LTFT_COUNTS_52F5
+  - ECM_LTFT_COUNTS_532D
+  - ECM_LTFT_COUNTS_532E
+  - ECM_LTFT_COUNTS_5366
+  - ECM_LTFT_COUNTS_5367
+  - ECM_LTFT_COUNTS_5374
+  - ECM_LTFT_MAP_5460
+  - ECM_LTFT_MAP_5498
+  - ECM_LTFT_MAP_5499
+  - ECM_LTFT_MAP_54D1
+  - ECM_LTFT_MAP_54D2
+  - ECM_LTFT_MAP_550A
+  - ECM_LTFT_MAP_550B
+  - ECM_LTFT_MAP_5543
+  - ECM_LTFT_MAP_5544
+  - ECM_LTFT_MAP_555F
+  memory_rate_weights:
+    ECM_HIGH_DET_FLAGS: 0.5
+    ECM_KNOCK_RETARD: 0.5
+    ECM_KNOCK_RETARD_TARGET: 0.5
+    ECM_KNOCK_HIGHDET_METRIC: 0.5
+    ECM_KNOCK_CONTROL_FLAGS: 0.5
+    ECM_KS_P0327_STATUS: 0.125
+    ECM_KS_P0328_STATUS: 0.125
+    ECM_KS_P0332_STATUS: 0.125
+    ECM_KS_P0333_STATUS: 0.125
+    ECM_KS_FAULT_FLAGS: 0.125
+    ECM_KS1_LEVEL: 0.125
+    ECM_KS2_LEVEL: 0.125
+    ECM_LTFT_LEARN_COND_1518: 0.5
+    ECM_LTFT_LEARN_STABLE_151A: 0.5
+    ECM_LTFT_GATE_COND_179C: 0.5
+    ECM_LTFT_LEARN_FLAGS_1686: 0.25
+    ECM_LTFT_IDLE_UPDATES_1435: 0.25
+    ECM_LTFT_COUNTER_138A: 0.25
+    ECM_AFTER_START_ENRICH_1726: 0.25
+    ECM_AF_FEEDBACK_STATE_26BA: 0.25
+    ECM_EVAP_PURGE_STATE_2792: 0.25
+    ECM_LTFT_IDLE_FLAG_2834: 0.25
+    ECM_LTFT_FAULT_FLAG_284E: 0.25
+    ECM_LTFT_TICK_2881: 0.25
+    ECM_LTFT_AFDIAG_28B6: 0.25
+    ECM_LTFT_AFDIAG_28B8: 0.25
+    ECM_EVAP_PURGE_ACCUM_FLAG_28B9: 0.25
+    ECM_REAR_O2_SUBFB_358B: 0.25
+    ECM_REAR_O2_SUBFB_358D: 0.25
+    ECM_EVAP_PURGE_FLOW_38AA: 0.25
+    ECM_EVAP_LEAK_TEST_FLAGS_4857: 0.25
+    ECM_EVAP_PURGE_ACCUM_5224: 0.25
+    ECM_LTFT_COUNTS_52F5: 0.125
+    ECM_LTFT_COUNTS_532D: 0.125
+    ECM_LTFT_COUNTS_532E: 0.125
+    ECM_LTFT_COUNTS_5366: 0.125
+    ECM_LTFT_COUNTS_5367: 0.125
+    ECM_LTFT_COUNTS_5374: 0.125
+    ECM_LTFT_MAP_5460: 0.125
+    ECM_LTFT_MAP_5498: 0.125
+    ECM_LTFT_MAP_5499: 0.125
+    ECM_LTFT_MAP_54D1: 0.125
+    ECM_LTFT_MAP_54D2: 0.125
+    ECM_LTFT_MAP_550A: 0.125
+    ECM_LTFT_MAP_550B: 0.125
+    ECM_LTFT_MAP_5543: 0.125
+    ECM_LTFT_MAP_5544: 0.125
+    ECM_LTFT_MAP_555F: 0.125
+  mode01_enabled: true
+  mode22_enabled: true
+  did_interval_seconds: null
+  did_cycle_seconds: 0.5
+  round_timestamps: true
+  target_rate_hz: 4.0
+  did_continuous: false
+  bus_budget_override: 90.0
+  priority_channels: null
+  expected_total_demand_hz: 72.0
+  capacity_evidence: No capture of this profile yet. Parent `tuning` (10-15 revision) delivered
+    about 58-72 reads/s with zero drops on 2026-10-26/27. This adds about 20 windows at 0.125-0.5
+    weight (about 10.5 reads/s at the 0.5 s DID cycle), so expect the 4 Hz batch to slow slightly.
+    Read achieved rates per channel off the capture.
+  required_tuple: []
+  min_achieved_rate_hz: null
+  max_tuple_skew_s: null
+  requires_tune_revision: true
+  corpus_eligible: false
+  behavior_model_recipes: []
+  storage_prefix: _capture-ltft-gate

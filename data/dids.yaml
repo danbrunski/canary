@@ -5150,3 +5150,881 @@ memory:
           u8, q7 (0x80 = 1.0) [inferred]: the cycle copy of 0xFFFF1177 = map
           0x9B89 at the rpm word and X; read only by the base timing term.
     notes: 'No known answer expressible; timing_charge_map_10eb at the same cycle''s rpm word and X is the check.'
+  - name: ECM_LTFT_LEARN_COND_1518
+    address: 0xFFFF1518
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_gate_1518
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Per-bank learn-condition bits, set in FUN_00058714 (writes 0x58E02/0x58E12).
+          The learner FUN_00057cf8 writes a cell only when the bank's bit is set here
+          and in 0xFFFF151A.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_LEARN_STABLE_151A
+    address: 0xFFFF151A
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_gate_1518
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Per-bank stability bits, set in FUN_00058714 (0x58F7C): averaged STFT
+          changed < 3 % and |A/F feedback target - lambda| (46B2 - 4722) < 0x97.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_GATE_COND_179C
+    address: 0xFFFF179C
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          The learn condition FUN_00058714 holds across two ticks before setting
+          0x1518; set = every input passed, clear = one failed.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_LEARN_FLAGS_1686
+    address: 0xFFFF1686
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Learner flags; one bit marks the 30 idle updates used up. Read by the EVAP
+          purge controller FUN_0006a52c (purge ramp limit w1614).
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_IDLE_UPDATES_1435
+    address: 0xFFFF1435
+    length: 2
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Idle-path update counter; the idle path closes when it exceeds 0x1E (30).
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x0000.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_COUNTER_138A
+    address: 0xFFFF138A
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Learner-side counter named in the gate trace; meaning inferred.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_AFTER_START_ENRICH_1726
+    address: 0xFFFF1726
+    length: 2
+    byte_length: 2
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          After-start enrichment word (FUN_00055536); the gate requires it to be 0.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x0000.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_AF_FEEDBACK_STATE_26BA
+    address: 0xFFFF26BA
+    length: 2
+    byte_length: 2
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          A/F feedback state bytes 26BA/26BB. FUN_00058714 tests byte 26BA bits 0 and
+          1 (one per bank: closed loop), and the learner tests the bank bit in 26BA
+          and 26B9. The gate requires the bank's bit set.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x0303.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_EVAP_PURGE_STATE_2792
+    address: 0xFFFF2792
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          EVAP purge controller state 0-4 (FUN_0006a52c only). The off-idle path needs
+          it < 2: 2 when 9114 is set (910C > 0x4A), 3/4 when a purge timer passes 100.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_IDLE_FLAG_2834
+    address: 0xFFFF2834
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_gate_2834
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Bit 4 chooses the path: set = idle path, clear = off-idle path
+          (FUN_00070360; inferred to be idle / closed throttle).
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_FAULT_FLAG_284E
+    address: 0xFFFF284E
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_gate_2834
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Bit 1 = internal fault item 0x114 (set in FUN_00057c54); the gate requires
+          it clear.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_TICK_2881
+    address: 0xFFFF2881
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_gate_2881
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Bit 1 = the learner tick (one in 48 calls of FUN_0002092e, cleared by
+          4785.6).
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x80.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_AFDIAG_28B6
+    address: 0xFFFF28B6
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_gate_2881
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Bit 1: flags path, set when the 906C timer passes 6,000 counts
+          (FUN_0006a52c).
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_AFDIAG_28B8
+    address: 0xFFFF28B8
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_gate_2881
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Bit 3: flags path, set when an LTFT high byte is outside 0x50..0x7C, a
+          9214/9215 counter is non-zero, or 8E7F is set (FUN_0006a52c).
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x25.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_EVAP_PURGE_ACCUM_FLAG_28B9
+    address: 0xFFFF28B9
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_gate_2881
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Bit 6: accumulated purge reached its threshold (w5224 >> 15 >= 0x302, or a
+          step past table 0xDE4A), written only by FUN_0006a52c. Both the idle and
+          off-idle paths need it set.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x04. At KOEO about
+          18:10Z (next key cycle): 0x14.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_REAR_O2_SUBFB_358B
+    address: 0xFFFF358B
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_gate_358b
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Rear-O2 sub-feedback flag (FUN_0009e554 / FUN_0009da10); the idle path needs
+          it 0.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_REAR_O2_SUBFB_358D
+    address: 0xFFFF358D
+    length: 2
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_gate_358b
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Rear-O2 sub-feedback flag; the idle path needs it 0. The read carries 358E
+          too.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x0000.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_EVAP_PURGE_FLOW_38AA
+    address: 0xFFFF38AA
+    length: 2
+    byte_length: 2
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Purge flow word (FUN_0006a52c); the idle path needs w38AA < 40 (cal 0x86D4 =
+          0).
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x0419/0x042c/0x0440.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_EVAP_LEAK_TEST_FLAGS_4857
+    address: 0xFFFF4857
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Bit 7 set by the EVAP leak monitors FUN_000b2efe / FUN_000b3768 (a leak test
+          running, inferred); the gate requires it clear.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x3a.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_EVAP_PURGE_ACCUM_5224
+    address: 0xFFFF5224
+    length: 4
+    byte_length: 4
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Accumulated purge vapour since power-up (base w8DC0 zeroed at power-up by
+          FUN_0006f494): every 10th call adds (MAF x 307[cal 0x92E2]/125 x 0.853) x
+          (w38AA x 1.28) >> 14. 28B9.6 sets when it reaches 0x302 << 15.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value
+          0x00315254/0x003157cd/0x00315cf6. At KOEO about 18:10Z (next key cycle):
+          0x00000000.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_COUNTS_52F5
+    address: 0xFFFF52F5
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_counts_1
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the learned-trim visit counts (B2 0xFFFF52F5.., B1
+          0xFFFF5335.., 64 bytes each). The value is one byte; the whole window is in
+          the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00. At KOEO about
+          18:10Z (next key cycle): 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_COUNTS_532D
+    address: 0xFFFF532D
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_counts_1
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the learned-trim visit counts (B2 0xFFFF52F5.., B1
+          0xFFFF5335.., 64 bytes each). The value is one byte; the whole window is in
+          the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00. At KOEO about
+          18:10Z (next key cycle): 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_COUNTS_532E
+    address: 0xFFFF532E
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_counts_2
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the learned-trim visit counts (B2 0xFFFF52F5.., B1
+          0xFFFF5335.., 64 bytes each). The value is one byte; the whole window is in
+          the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_COUNTS_5366
+    address: 0xFFFF5366
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_counts_2
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the learned-trim visit counts (B2 0xFFFF52F5.., B1
+          0xFFFF5335.., 64 bytes each). The value is one byte; the whole window is in
+          the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_COUNTS_5367
+    address: 0xFFFF5367
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_counts_3
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the learned-trim visit counts (B2 0xFFFF52F5.., B1
+          0xFFFF5335.., 64 bytes each). The value is one byte; the whole window is in
+          the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_COUNTS_5374
+    address: 0xFFFF5374
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_counts_3
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the learned-trim visit counts (B2 0xFFFF52F5.., B1
+          0xFFFF5335.., 64 bytes each). The value is one byte; the whole window is in
+          the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_MAP_5460
+    address: 0xFFFF5460
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_map_1
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the 8x8 learned-trim maps (B2 0xFFFF5460.., B1
+          0xFFFF54E0.., 0x6400 = 1.0, cells clamped 0x5A00..0x6E00). The value is one
+          byte; the whole window is in the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x64. At KOEO about
+          18:10Z (next key cycle): 0x64.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_MAP_5498
+    address: 0xFFFF5498
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_map_1
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the 8x8 learned-trim maps (B2 0xFFFF5460.., B1
+          0xFFFF54E0.., 0x6400 = 1.0, cells clamped 0x5A00..0x6E00). The value is one
+          byte; the whole window is in the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x64. At KOEO about
+          18:10Z (next key cycle): 0x64.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_MAP_5499
+    address: 0xFFFF5499
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_map_2
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the 8x8 learned-trim maps (B2 0xFFFF5460.., B1
+          0xFFFF54E0.., 0x6400 = 1.0, cells clamped 0x5A00..0x6E00). The value is one
+          byte; the whole window is in the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_MAP_54D1
+    address: 0xFFFF54D1
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_map_2
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the 8x8 learned-trim maps (B2 0xFFFF5460.., B1
+          0xFFFF54E0.., 0x6400 = 1.0, cells clamped 0x5A00..0x6E00). The value is one
+          byte; the whole window is in the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_MAP_54D2
+    address: 0xFFFF54D2
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_map_3
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the 8x8 learned-trim maps (B2 0xFFFF5460.., B1
+          0xFFFF54E0.., 0x6400 = 1.0, cells clamped 0x5A00..0x6E00). The value is one
+          byte; the whole window is in the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x64.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_MAP_550A
+    address: 0xFFFF550A
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_map_3
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the 8x8 learned-trim maps (B2 0xFFFF5460.., B1
+          0xFFFF54E0.., 0x6400 = 1.0, cells clamped 0x5A00..0x6E00). The value is one
+          byte; the whole window is in the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x64.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_MAP_550B
+    address: 0xFFFF550B
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_map_4
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the 8x8 learned-trim maps (B2 0xFFFF5460.., B1
+          0xFFFF54E0.., 0x6400 = 1.0, cells clamped 0x5A00..0x6E00). The value is one
+          byte; the whole window is in the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_MAP_5543
+    address: 0xFFFF5543
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_map_4
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the 8x8 learned-trim maps (B2 0xFFFF5460.., B1
+          0xFFFF54E0.., 0x6400 = 1.0, cells clamped 0x5A00..0x6E00). The value is one
+          byte; the whole window is in the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_MAP_5544
+    address: 0xFFFF5544
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_map_5
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the 8x8 learned-trim maps (B2 0xFFFF5460.., B1
+          0xFFFF54E0.., 0x6400 = 1.0, cells clamped 0x5A00..0x6E00). The value is one
+          byte; the whole window is in the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x64.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.
+  - name: ECM_LTFT_MAP_555F
+    address: 0xFFFF555F
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261004
+    window: ltft_map_5
+    evidence:
+      - session: firmware-ZS44A-20260920 (LTFT gate trace 2026-10-27, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          Anchor of a window over the 8x8 learned-trim maps (B2 0xFFFF5460.., B1
+          0xFFFF54E0.., 0x6400 = 1.0, cells clamped 0x5A00..0x6E00). The value is one
+          byte; the whole window is in the row's payload.
+      - session: live-read-2026-10-27T17:52Z (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed TTL 240)
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 on 2026-10-27 at 17:52Z, engine running, warm, off
+          idle, driving: 3 reads, no negative response; value 0x00.
+    notes: >-
+      LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
+      and words are read as bits offline from the stored payload. No known answer
+      expressible.

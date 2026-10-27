@@ -103,7 +103,9 @@ def test_vehicle_tuning_profile_is_the_one_research_capture() -> None:
     Eight single-question research profiles were retired into
     capture_profiles.archive.yaml on 2026-09-21; nothing may load that file.
     `twin` (E09.1) is not a research capture: its channels are derived from
-    the application model (tests/test_twin_profile.py).
+    the application model (tests/test_twin_profile.py). `ltft-gate`
+    (2026-10-27) is `tuning` plus read-only RAM reads of the LTFT learn gate,
+    so it doesn't change `tuning` itself.
     """
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     catalog = load_capture_profiles(
@@ -112,9 +114,18 @@ def test_vehicle_tuning_profile_is_the_one_research_capture() -> None:
     )
     # Only `default` is built in code, and nothing re-seeds a saved catalog, so
     # the truck's catalog is exactly what the file holds.
-    assert [profile.name for profile in catalog.profiles] == ["default", "tuning", "twin"]
+    assert [profile.name for profile in catalog.profiles] == [
+        "default",
+        "tuning",
+        "twin",
+        "ltft-gate",
+    ]
     tuning = catalog.by_name("tuning")
     assert tuning is not None
+    gate = catalog.by_name("ltft-gate")
+    assert gate is not None
+    assert set(tuning.memory) <= set(gate.memory)
+    assert "ECM_LTFT_LEARN_COND_1518" in gate.memory
     assert tuning.target_rate_hz == 4.0
     assert tuning.did_cycle_seconds == 0.5
     assert tuning.did_continuous is False
