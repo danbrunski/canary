@@ -60,6 +60,7 @@ export const NAV: NavGroupDef[] = [
   {
     id: "system",
     label: "System",
+    settings: true,
     items: [
       { id: "system-data-sources", label: "Data Sources", group: "system" },
       { id: "system-sessions", label: "Sessions", group: "system" },
@@ -130,6 +131,21 @@ export function isWorkbenchItem(value: string): value is WorkbenchItem {
 export function defaultItemForGroup(group: NavGroupId): WorkbenchItem {
   const g = NAV.find((x) => x.id === group);
   return (g?.items[0] ?? ITEMS[0]).id;
+}
+
+/** The group an item belongs to: the Workbench area it is shown in (W10). */
+export function groupOf(item: WorkbenchItem): NavGroupId {
+  return findItem(item).group;
+}
+
+/** Where clicking an area lands: the page last open there while it still
+ *  belongs to that area, else the area's first page. */
+export function itemForGroup(
+  group: NavGroupId,
+  remembered: Partial<Record<NavGroupId, WorkbenchItem>>,
+): WorkbenchItem {
+  const item = remembered[group];
+  return item !== undefined && groupOf(item) === group ? item : defaultItemForGroup(group);
 }
 
 // ---------------------------------------------------------------------------

@@ -226,17 +226,43 @@ export const statusItemClass = "inline-flex items-center gap-1.5";
 export const statusLabelClass = "text-[0.6rem] uppercase tracking-[0.16em] text-fg-faint";
 export const statusValueClass = "font-num tabular-nums text-fg";
 
-/** Workbench: sidebar on wide screens, horizontal scroller on phones.
+/** Workbench: the area bar (W10), then the sidebar and the panel column. */
+export const workbenchClass = "flex min-h-0 flex-1 flex-col";
+
+/** The area bar: one tab per NAV group, the settings group at its far end. */
+export const areaBarClass =
+  "flex shrink-0 items-stretch gap-1 overflow-x-auto border-b border-border-soft px-[1.15rem]";
+
+export function areaTabClass(active: boolean): string {
+  return cn(
+    "relative inline-flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap px-3",
+    "text-[0.85rem] font-semibold text-fg-dim transition-colors hover:text-fg",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-2",
+    active &&
+      "text-accent after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-accent",
+  );
+}
+
+/** Below the area bar: sidebar on wide screens, horizontal scroller on phones.
  *  Wide: the grid fills the shell's remaining height and each column
  *  scrolls on its own, so a long panel never pushes the nav out of reach.
+ *  Collapsed (W10.4), the sidebar is a rail holding its expand button.
  *  Below 900px it collapses to one column and the grid itself scrolls —
- *  nested scroll regions on a phone are worse than a single one. */
-export const workbenchClass =
-  "grid min-h-0 flex-1 grid-cols-[13rem_1fr] max-[900px]:grid-cols-1 " +
-  "max-[900px]:overflow-y-auto";
+ *  nested scroll regions on a phone are worse than a single one. There the
+ *  strip's row is `max-content`: the strip scrolls sideways, which makes it
+ *  a scroll container, and an `auto` row holding one may shrink to nothing.
+ *  On a tall page the row measured 17px, padding only, the pages spilling
+ *  under the panel below it (W10). */
+export function workbenchBodyClass(collapsed: boolean): string {
+  return cn(
+    "grid min-h-0 flex-1 max-[900px]:grid-cols-1 max-[900px]:grid-rows-[max-content_auto] " +
+      "max-[900px]:overflow-y-auto",
+    collapsed ? "grid-cols-[2.75rem_1fr]" : "grid-cols-[13rem_1fr]",
+  );
+}
 
 export const sidebarClass =
-  "flex flex-col gap-4 overflow-y-auto overscroll-contain border-r border-border-soft px-3 py-[1.15rem] " +
+  "flex flex-col gap-1 overflow-y-auto overscroll-contain border-r border-border-soft px-3 py-[1.15rem] " +
   "max-[900px]:flex-row max-[900px]:gap-2 max-[900px]:overflow-x-auto max-[900px]:overflow-y-visible " +
   "max-[900px]:border-r-0 max-[900px]:border-b max-[900px]:px-[1.15rem] max-[900px]:py-2";
 
@@ -246,8 +272,10 @@ export const sidebarClass =
 export const workbenchContentClass =
   "min-w-0 overflow-y-auto overscroll-contain p-[1.15rem] max-[900px]:overflow-y-visible";
 
-export const navGroupLabelClass =
-  "px-2 text-[0.6rem] font-bold uppercase tracking-[0.16em] text-fg-faint max-[900px]:hidden";
+/** The sidebar's collapse / expand toggle; the strip below 900px has none. */
+export const sidebarToggleClass =
+  "mt-auto min-h-9 rounded-[8px] px-2 text-left text-[0.8rem] text-fg-faint transition-colors " +
+  "hover:text-fg max-[900px]:hidden";
 
 export function navItemClass(active: boolean): string {
   return cn(

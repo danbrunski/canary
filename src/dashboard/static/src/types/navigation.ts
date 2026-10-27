@@ -63,5 +63,8 @@ export interface NavItemDef {
 export interface NavGroupDef {
   id: NavGroupId;
   label: string;
+  /** Settings visited rarely: the area bar puts it at its far end, behind a
+   *  gear (W10.2). */
+  settings?: boolean;
   items: NavItemDef[];
 }

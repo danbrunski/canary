@@ -31,3 +31,12 @@ export function useMediaQuery(media: string): boolean {
 export function useIsPhone(): boolean {
   return useMediaQuery(PHONE_MEDIA_QUERY);
 }
+
+/** The Workbench sidebar's edge, every `max-[900px]:` utility's width: below
+ *  it the sidebar is a horizontal strip and does not collapse (W10.4). */
+export const NARROW_MEDIA_QUERY = "(max-width: 899.98px)";
+
+/** True below 900px. */
+export function useIsNarrow(): boolean {
+  return useMediaQuery(NARROW_MEDIA_QUERY);
+}

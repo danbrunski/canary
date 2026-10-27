@@ -68,9 +68,10 @@ function connectivityLabel(connectivity: ConnectivityMode, linkedPi: string | nu
  *  Drive↔Workbench toggle) + the always-visible StatusStrip + the active
  *  body. The mode toggle now switches the *whole* context — a locked
  *  glanceable Drive screen vs. the grouped Workbench — instead of hiding a
- *  single panel. Grouped navigation lives in the Workbench sidebar, not a
- *  flat top tab bar, so it scales to every Phase-6 panel. On a phone the
- *  bottom bar (`bottomNav`) does that job instead. */
+ *  single panel. Navigation is the Workbench's own: its area bar picks one
+ *  NAV group and its sidebar lists that group's pages (W10), so it scales to
+ *  every Phase-6 panel without crowding this header. On a phone the bottom
+ *  bar (`bottomNav`) does that job instead. */
 export function DashboardShell({
   appMode,
   onToggleMode,

@@ -51,12 +51,14 @@ test("toggles between the drive screen and the parked workbench", async ({ page,
 
   await page.getByRole("button", { name: "switch to the parked workbench" }).click();
 
-  // Landing on the workbench: grouped section nav appears and the URL hash
-  // reflects the parked context so a kiosk reload returns here.
+  // Landing on the workbench: the area bar and the area's page nav appear
+  // and the URL hash reflects the parked context so a kiosk reload returns
+  // here.
   const nav = page.getByRole("navigation", { name: "Workbench sections" });
+  const areas = page.getByRole("navigation", { name: "Workbench areas" });
   await expect(nav).toBeVisible();
-  await expect(nav.getByText("Observe", { exact: true })).toBeVisible();
-  await expect(nav.getByText("Diagnose", { exact: true })).toBeVisible();
+  await expect(areas.getByRole("button", { name: "Observe" })).toBeVisible();
+  await expect(areas.getByRole("button", { name: "Diagnose" })).toBeVisible();
   await expect(page).toHaveURL(/#wb/);
 
   // And back to driving.
@@ -84,6 +86,63 @@ test("deep-links straight into a workbench section via the URL hash", async ({
   }
   // Kiosk reload preserves the deep-linked view rather than snapping to drive.
   await expect(page).toHaveURL(/#wb\/diag-anomalies/);
+});
+
+test("switches area from the area bar and returns to its last page", async ({ page, isMobile }) => {
+  test.skip(isMobile, "the phone has its bottom bar instead (P2.2)");
+  await page.goto("/#wb/tuning-rom-editor");
+  const areas = page.getByRole("navigation", { name: "Workbench areas" });
+  const nav = page.getByRole("navigation", { name: "Workbench sections" });
+  await expect(nav.getByRole("button", { name: "ROM Editor" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  // Only the area's pages are listed.
+  await expect(nav.getByRole("button", { name: "Anomalies" })).toHaveCount(0);
+
+  await areas.getByRole("button", { name: "System" }).click();
+  await expect(page).toHaveURL(/#wb\/system-data-sources/);
+  await expect(nav.getByRole("button", { name: "System Info" })).toBeVisible();
+
+  // Back to Engine Tuning lands where it was left, across a reload too.
+  await page.reload();
+  await areas.getByRole("button", { name: "Engine Tuning" }).click();
+  await expect(page).toHaveURL(/#wb\/tuning-rom-editor/);
+
+  // Collapsed, the sidebar keeps only its expand button; the areas remain.
+  await nav.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(nav.getByRole("button", { name: "ROM Editor" })).toHaveCount(0);
+  await expect(areas.getByRole("button", { name: "Diagnose" })).toBeVisible();
+  await nav.getByRole("button", { name: "Expand sidebar" }).click();
+  await expect(nav.getByRole("button", { name: "ROM Editor" })).toBeVisible();
+});
+
+test("between 600 and 900px the sidebar strip keeps its pages visible on a tall page", async ({
+  page,
+  isMobile,
+}) => {
+  // Regression (W10): the strip is a scroll container in a grid row, and a
+  // tall panel below it squeezed that row to its 17px of padding. The strip
+  // kept its own height and spilled under the panel, so the area's pages were
+  // in the DOM but covered. jsdom has no layout.
+  test.skip(isMobile, "the phone has its bottom bar instead (P2.2)");
+  await page.setViewportSize({ width: 800, height: 500 });
+  await page.goto("/#wb/system-info");
+  const nav = page.getByRole("navigation", { name: "Workbench sections" });
+  await expect(nav.getByRole("button", { name: "Data Sources" })).toBeVisible();
+  const layout = await nav.evaluate((strip) => {
+    const first = strip.querySelector("button") as HTMLElement;
+    const pane = strip.nextElementSibling as HTMLElement;
+    const box = first.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return {
+      stripBottom: strip.getBoundingClientRect().bottom,
+      paneTop: pane.getBoundingClientRect().top,
+      uncovered: hit !== null && first.contains(hit),
+    };
+  });
+  expect(layout.paneTop).toBeGreaterThanOrEqual(layout.stripBottom - 1);
+  expect(layout.uncovered).toBe(true);
 });
 
 test("switches theme from the header toggle", async ({ page, isMobile }) => {

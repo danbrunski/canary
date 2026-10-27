@@ -1,6 +1,8 @@
 import { createElement } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { AREA_MEMORY_STORAGE_KEY } from "../hooks/useAreaMemory";
 
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { WorkbenchItem } from "../types";
@@ -30,19 +32,79 @@ function renderAt(active: WorkbenchItem) {
   return render(createElement(Workbench, { active, onNavigate: () => {}, data: DATA }));
 }
 
+const sidebar = () => within(screen.getByRole("navigation", { name: "Workbench sections" }));
+const areas = () => within(screen.getByRole("navigation", { name: "Workbench areas" }));
+
+// Area memory and the collapsed sidebar persist per browser; no test inherits
+// another's.
+beforeEach(() => window.localStorage.clear());
+
+// These tests are about navigation, and the pages they open poll the daemon.
+// Without a stub those requests really went out (jsdom resolves the relative
+// URLs against localhost) and settled after the test, updating DtcPanel
+// outside act(). A request that never settles keeps every page in its
+// loading state; each panel's own test covers what it shows once loaded.
+beforeEach(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => new Promise<Response>(() => {})),
+  );
+});
+afterEach(() => vi.unstubAllGlobals());
+
 describe("Workbench navigation", () => {
-  it("renders all five group labels", () => {
+  it("renders all five group labels as areas", () => {
     renderAt("observe-charts");
     for (const label of ["Observe", "Engine Tuning", "Diagnose", "Model", "System"]) {
-      expect(screen.getByText(label)).toBeInTheDocument();
+      expect(areas().getByRole("button", { name: label })).toBeInTheDocument();
     }
   });
 
   it("places Capture Profiles under System", () => {
-    renderAt("observe-charts");
-    expect(
-      screen.getByRole("button", { name: "Capture Profiles" }).closest("div"),
-    ).toHaveTextContent("System");
+    renderAt("system-info");
+    expect(areas().getByRole("button", { name: "System" })).toHaveAttribute("aria-current", "page");
+    expect(sidebar().getByRole("button", { name: "Capture Profiles" })).toBeInTheDocument();
+  });
+
+  it("lists only the active area's pages in the sidebar (W10.3)", () => {
+    renderAt("tuning-rom-editor");
+    expect(areas().getByRole("button", { name: "Engine Tuning" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    for (const label of ["Logging", "Logs", "ROM Library", "ROM Editor"]) {
+      expect(sidebar().getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    for (const label of ["Charts", "Anomalies", "System Info"]) {
+      expect(sidebar().queryByRole("button", { name: label })).not.toBeInTheDocument();
+    }
+  });
+
+  it("lands an area on its first page when nothing is remembered", () => {
+    const onNavigate = vi.fn();
+    render(createElement(Workbench, { active: "observe-charts", onNavigate, data: DATA }));
+    fireEvent.click(areas().getByRole("button", { name: "Diagnose" }));
+    expect(onNavigate).toHaveBeenCalledWith("diag-anomalies");
+  });
+
+  it("returns an area to the page last open there (W10.1)", () => {
+    const onNavigate = vi.fn();
+    const view = render(
+      createElement(Workbench, { active: "system-power", onNavigate, data: DATA }),
+    );
+    view.rerender(createElement(Workbench, { active: "observe-trip", onNavigate, data: DATA }));
+    fireEvent.click(areas().getByRole("button", { name: "System" }));
+    expect(onNavigate).toHaveBeenLastCalledWith("system-power");
+    fireEvent.click(areas().getByRole("button", { name: "Observe" }));
+    expect(onNavigate).toHaveBeenLastCalledWith("observe-trip");
+  });
+
+  it("remembers areas across a reload", () => {
+    window.localStorage.setItem(AREA_MEMORY_STORAGE_KEY, JSON.stringify({ diagnose: "diag-dtc" }));
+    const onNavigate = vi.fn();
+    render(createElement(Workbench, { active: "observe-charts", onNavigate, data: DATA }));
+    fireEvent.click(areas().getByRole("button", { name: "Diagnose" }));
+    expect(onNavigate).toHaveBeenCalledWith("diag-dtc");
   });
 
   it("separates profile editing from the Logging run controls", () => {
@@ -72,7 +134,9 @@ describe("Workbench navigation", () => {
         data: DATA,
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "System Info" }));
+    fireEvent.click(areas().getByRole("button", { name: "System" }));
+    rerender(createElement(Workbench, { active, onNavigate: (id) => (active = id), data: DATA }));
+    fireEvent.click(sidebar().getByRole("button", { name: "System Info" }));
     rerender(createElement(Workbench, { active, onNavigate: () => {}, data: DATA }));
     expect(screen.getByRole("heading", { name: "System" })).toBeInTheDocument();
   });
@@ -117,6 +181,48 @@ describe("Workbench navigation", () => {
     renderAt("model-thresholds");
     expect(screen.getByRole("heading", { name: "Alert Thresholds" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Tuning" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Workbench sidebar collapse (W10.4)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("collapses to a rail and expands again", () => {
+    renderAt("tuning-rom-editor");
+    fireEvent.click(sidebar().getByRole("button", { name: "Collapse sidebar" }));
+    expect(sidebar().queryByRole("button", { name: "ROM Editor" })).not.toBeInTheDocument();
+    const expand = sidebar().getByRole("button", { name: "Expand sidebar" });
+    expect(expand).toHaveAttribute("aria-expanded", "false");
+    // The areas stay reachable while the sidebar is a rail.
+    expect(areas().getByRole("button", { name: "Diagnose" })).toBeInTheDocument();
+    fireEvent.click(expand);
+    expect(sidebar().getByRole("button", { name: "ROM Editor" })).toBeInTheDocument();
+    expect(sidebar().getByRole("button", { name: "Collapse sidebar" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  it("stays collapsed across a remount", () => {
+    const first = renderAt("observe-charts");
+    fireEvent.click(sidebar().getByRole("button", { name: "Collapse sidebar" }));
+    first.unmount();
+    renderAt("observe-charts");
+    expect(sidebar().getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument();
+  });
+
+  it("is expanded when storage throws", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage disabled");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage disabled");
+    });
+    renderAt("observe-charts");
+    expect(sidebar().getByRole("button", { name: "Charts" })).toBeInTheDocument();
+    // Collapsing still works for the session.
+    fireEvent.click(sidebar().getByRole("button", { name: "Collapse sidebar" }));
+    expect(sidebar().queryByRole("button", { name: "Charts" })).not.toBeInTheDocument();
   });
 });
 

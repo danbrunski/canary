@@ -1,5 +1,16 @@
 # Implementation task index
 
+**Status 2026-10-27: W10, Workbench areas and the ROM Editor's layout.**
+[`W10-navigation-areas-and-rom-editor-layout.md`](W10-navigation-areas-and-rom-editor-layout.md)
+answers the operator's "the navigation sidebar is getting pretty busy". The
+five NAV groups become areas on a bar above the Workbench. The sidebar lists
+one area's pages and collapses to a rail. System sits behind a gear. Part A
+(W10.1–W10.6) is that, and it landed first. Part B rebuilds the ROM Editor:
+a File-style Open / Recent header, the views Tables | Edits & Preview |
+Simulate, and a grouped table tree, with the groups coming from a new `group`
+field in `rom_map.yaml`. ROM editing and simulation stay in Engine Tuning,
+because the tuning context ties them to Logs.
+
 **Status 2026-10-15: E09, one engine twin.**
 [`E09-engine-twin-runner-and-levers.md`](E09-engine-twin-runner-and-levers.md)
 records a review of the simulator against the operator's two use cases (run

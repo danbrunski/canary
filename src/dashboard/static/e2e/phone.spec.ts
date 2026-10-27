@@ -134,6 +134,8 @@ test("the bottom bar and the More sheet navigate", async ({ page }) => {
 
   await bar.getByRole("button", { name: "Alerts" }).tap();
   await expect(page).toHaveURL(/#wb\/diag-dtc$/);
+  // Nor does a Workbench page draw the desktop area bar (W10.2).
+  await expect(page.getByRole("navigation", { name: "Workbench areas" })).toHaveCount(0);
   await page
     .getByRole("navigation", { name: "Alerts pages" })
     .getByRole("button", { name: "Anomalies" })

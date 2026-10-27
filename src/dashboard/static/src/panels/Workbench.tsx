@@ -1,3 +1,4 @@
+import { AreaBar } from "../components/AreaBar";
 import { PanelErrorBoundary } from "../components/PanelErrorBoundary";
 import { useEffect, useRef } from "react";
 
@@ -5,10 +6,19 @@ import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
 import type { ScoresBySource } from "../hooks/useScoreStream";
 import { useTuningContext, type TuningContext } from "../hooks/useTuningContext";
-import { DEFAULT_ITEM, NAV, defaultItemForGroup, findItem, phoneTabFor } from "../nav";
+import { useAreaMemory, useSidebarCollapsed } from "../hooks/useAreaMemory";
+import { useIsNarrow } from "../hooks/useMediaQuery";
+import {
+  DEFAULT_ITEM,
+  NAV,
+  defaultItemForGroup,
+  findItem,
+  groupOf,
+  itemForGroup,
+  phoneTabFor,
+} from "../nav";
 import {
   cn,
-  navGroupLabelClass,
   navItemClass,
   pageChipClass,
   pageStripClass,
@@ -16,6 +26,8 @@ import {
   responsiveGridClass,
   scrollPaneClass,
   sidebarClass,
+  sidebarToggleClass,
+  workbenchBodyClass,
   workbenchClass,
   workbenchContentClass,
 } from "../styles";
@@ -96,11 +108,19 @@ interface WorkbenchProps {
   phone?: boolean;
 }
 
-/** The parked workspace: grouped sidebar nav + the active panel. Every
- *  panel — current and Phase-6 — has exactly one home here (see `nav.ts`),
- *  so adding the next panel never reignites the "which tab?" question. */
+/** The parked workspace: the area bar (one tab per NAV group, W10), the
+ *  active area's pages in the sidebar, and the active panel. Every panel —
+ *  current and Phase-6 — has exactly one home here (see `nav.ts`), so adding
+ *  the next panel never reignites the "which tab?" question. The sidebar
+ *  collapses to a rail for pages that want the width. */
 export function Workbench({ active, onNavigate, data, phone = false }: WorkbenchProps) {
   const content = useRef<HTMLDivElement>(null);
+  const area = groupOf(active);
+  const memory = useAreaMemory(active);
+  const [collapsed, setCollapsed] = useSidebarCollapsed();
+  // Below 900px the sidebar is a strip of the area's pages and never a rail.
+  const narrow = useIsNarrow();
+  const railed = collapsed && !narrow;
   // Engine Tuning group state (W02.5): owned here, above the pages, so the
   // selected log and loaded ROM survive navigation between them.
   const tuning = useTuningContext();
@@ -150,13 +170,14 @@ export function Workbench({ active, onNavigate, data, phone = false }: Workbench
       </div>
     );
   }
+  const pages = NAV.find((group) => group.id === area)?.items ?? [];
   return (
     <div className={workbenchClass}>
-      <nav className={sidebarClass} aria-label="Workbench sections">
-        {NAV.map((group) => (
-          <div key={group.id} className="flex flex-col gap-1">
-            <span className={navGroupLabelClass}>{group.label}</span>
-            {group.items.map((item) => (
+      <AreaBar active={area} onChoose={(group) => onNavigate(itemForGroup(group, memory))} />
+      <div className={workbenchBodyClass(railed)}>
+        <nav className={cn(sidebarClass, railed && "px-1")} aria-label="Workbench sections">
+          {!railed &&
+            pages.map((item) => (
               <button
                 key={item.id}
                 type="button"
@@ -173,11 +194,20 @@ export function Workbench({ active, onNavigate, data, phone = false }: Workbench
                 )}
               </button>
             ))}
-          </div>
-        ))}
-      </nav>
-      <div ref={content} className={workbenchContentClass}>
-        {body}
+          <button
+            type="button"
+            className={cn(sidebarToggleClass, railed && "text-center")}
+            aria-expanded={!railed}
+            aria-label={railed ? "Expand sidebar" : "Collapse sidebar"}
+            title={railed ? "Expand sidebar" : "Collapse sidebar"}
+            onClick={() => setCollapsed(!railed)}
+          >
+            {railed ? "»" : "« Collapse"}
+          </button>
+        </nav>
+        <div ref={content} className={workbenchContentClass}>
+          {body}
+        </div>
       </div>
     </div>
   );
