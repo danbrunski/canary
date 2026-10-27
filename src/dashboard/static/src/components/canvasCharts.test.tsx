@@ -1,7 +1,7 @@
 // Behavioural tests for the canvas charts (Sparkline, Curve, Heatmap). jsdom
 // has no canvas, so each test records what the chart asks of a 2D context:
 // the calls it makes and the colours it sets.
-import { act, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DAY_TOKENS } from "../lib/chartTheme";
@@ -52,6 +52,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Unmount before resetting the theme: a mounted chart's observer would see
+  // the reset and re-render outside act().
+  cleanup();
   if (original) Object.defineProperty(HTMLCanvasElement.prototype, "getContext", original);
   vi.unstubAllGlobals();
   delete document.documentElement.dataset.theme;

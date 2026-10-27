@@ -96,6 +96,8 @@ describe("LoggingPage (R08.6)", () => {
   it("links to Logs and to profile editing in System", async () => {
     mocks.getCurrentCapture.mockResolvedValue({ capture: null });
     const { onNavigate } = renderPage(captureStatus(null));
+    // The page's own reads land first (the open capture: none).
+    await screen.findByText("start a capture to tag");
     fireEvent.click(screen.getByRole("button", { name: "View logs" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit profiles in System" }));
     expect(onNavigate.mock.calls).toEqual([["tuning-logs"], ["system-capture-profiles"]]);

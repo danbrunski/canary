@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HttpError, controlJson } from "../../api/core";
@@ -46,25 +46,37 @@ function route(handlers: Record<string, unknown>) {
 
 afterEach(() => vi.clearAllMocks());
 
+/** Click, and let the request it starts answer inside act(): a mocked reply
+ *  lands some microtasks later, after a bare fireEvent has returned. One
+ *  macrotask runs every chain already queued. */
+async function clickAndSettle(element: HTMLElement) {
+  await act(async () => {
+    fireEvent.click(element);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 async function chooseRunningAndSource(source = "obd:O2_WR_LAMBDA_S1") {
   fireEvent.click(screen.getByRole("button", { name: /All on the running calibration/ }));
   fireEvent.change(screen.getByLabelText("Measured-AFR source"), { target: { value: source } });
-  fireEvent.click(screen.getByRole("button", { name: "Run" }));
+  await clickAndSettle(screen.getByRole("button", { name: "Run" }));
 }
 
 describe("AnalysisPage", () => {
-  it("with no sessions chosen asks for them and offers the running calibration", () => {
+  it("with no sessions chosen asks for them and offers the running calibration", async () => {
     route({});
     render(<AnalysisPage token="t" status={RUNNING} context={context()} />);
+    await screen.findByText(CAPTURE_ID);
     expect(screen.getByText(/Choose sessions or a revision/)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "All on the running calibration (ZS44A-20260920)" }),
     ).toBeEnabled();
   });
 
-  it("never picks a measured-AFR source for the operator", () => {
+  it("never picks a measured-AFR source for the operator", async () => {
     route({});
     render(<AnalysisPage token="t" status={RUNNING} context={context()} />);
+    await screen.findByText(CAPTURE_ID);
     fireEvent.click(screen.getByRole("button", { name: /All on the running calibration/ }));
     expect(screen.getByLabelText("Measured-AFR source")).toHaveValue("");
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
@@ -430,12 +442,13 @@ describe("AnalysisPage request state (R08.2)", () => {
     await screen.findAllByRole("option", { name: "B" });
     fireEvent.change(screen.getByLabelText("Revision A"), { target: { value: "A" } });
     fireEvent.change(screen.getByLabelText("Revision B"), { target: { value: "B" } });
-    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+    await clickAndSettle(screen.getByRole("button", { name: "Compare" }));
     expect(await screen.findByText("comparison busy")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cells" }));
     expect(screen.queryByText("comparison busy")).not.toBeInTheDocument();
-    // And back: the refusal belongs to Compare and is still there.
-    fireEvent.click(screen.getByRole("button", { name: "Compare revisions" }));
+    // And back: the refusal belongs to Compare and is still there. (Compare
+    // re-reads the calibration history on return.)
+    await clickAndSettle(screen.getByRole("button", { name: "Compare revisions" }));
     expect(screen.getByText("comparison busy")).toBeInTheDocument();
   });
 

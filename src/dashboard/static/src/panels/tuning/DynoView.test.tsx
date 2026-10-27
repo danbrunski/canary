@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { controlJson } from "../../api/core";
@@ -346,7 +346,7 @@ describe("DynoView", () => {
 });
 
 describe("AnalysisPage dyno tab", () => {
-  it("is one of the Analysis views", () => {
+  it("is one of the Analysis views", async () => {
     respond(pending());
     const context: TuningContext = {
       selectedLogId: null,
@@ -361,7 +361,11 @@ describe("AnalysisPage dyno tab", () => {
         context={context}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Dyno" }));
+    // The session listing and the dyno's own reads answer inside act().
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Dyno" }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     expect(screen.getByText("Driving dyno")).toBeInTheDocument();
   });
 });
