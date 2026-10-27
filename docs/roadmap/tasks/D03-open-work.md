@@ -2529,6 +2529,53 @@ live here now, so the documents could be archived
         reads. Whether learning runs is decided by how much purge flows in
         one key cycle. Next: the `ltft-gate` capture logs w5224 through a
         drive for the fill rate.
+    - **Why purge falls short: by design plus the driving pattern, not a
+      fault (2026-10-27; firmware inhibit trace and a 194-session survey).**
+      - **Firmware** (`FUN_0006a52c`; `~/ecu-re/NOTES.md`, "EVAP purge
+        inhibit list"):
+        - Once 28B9.6 sets, purge is capped at about 2 % of airflow and α
+          is switched off: empty the canister first, then learn.
+        - The master inhibit 91F0 (published as 47F9 and 4858.2) trips on:
+          - a bank out of closed loop;
+          - coolant < 40 °C or the first 62–83 s;
+          - the fault list 15B9: MAF, misfire, A/F sensors, P0443/P0448
+            (no knock item);
+          - an active test, or the idle flow test;
+          - the key-cycle latch 9210: LTFT outside −20..+25 %, or a
+            26BC.0/.1 rise;
+          - the 61 s |STFT| ≥ 17 % timer.
+        - No idle purge before the key cycle's first vapor learn. That
+          learn needs steady off-idle cruise, |STFT| ≤ 6.5 % and duty
+          ≥ 20 %.
+        - The purge code reads none of the learner's maps, counts or gate
+          bits, so there is no LTFT↔purge loop. That corrects "coupled both
+          ways" above.
+      - **Data: rich vapor (saturated canister, stuck-open valve) is
+        refuted.**
+        - No rich STFT step at settled purge-on (10 on / 5 off events).
+        - No idle-only rich bias at zero commanded purge.
+        - Duty reaches 75–94 % in every spell.
+        - Every whole-drive 0 % session is stationary (mean speed
+          ≤ 0.4 km/h), which the idle rule explains. Those sessions are
+          what made the earlier purge correlation look like "the zero
+          spells purge less".
+      - **Accumulated purge per key cycle.** Integrated duty × MAF,
+        calibrated on the one 17:52Z w5224 reading, puts the threshold near
+        30k (19–33k for ±1 min on the reading time):
+        - three learning-spell drives crossed it, at 21–30 min;
+        - no zero-spell drive did (best 0.92×);
+        - the 42-min 10-27 drive reached 0.59×.
+
+        This rests on one calibration point.
+      - **Post-pump:** while purging, the ECM cuts the pulse to 0.898 at
+        idle and 0.950 off idle. That is more than the vapor supplies, so
+        STFT goes leaner with purge on (+2.7 / +3.5 %).
+      - **PID 0x32 on this ECM is baro minus the EVAP sensor** (vacuum reads
+        positive) and reads exactly 0 outside the leak test. Eleven sessions
+        show the test pulling ~2.55 kPa and holding it, so the purge valve,
+        the line and the vent valve work.
+      - **Test:** one highway key cycle with ≥ 30 min of purging cruise, on
+        `ltft-gate` (prediction G4 in the 10-27 next-drive plan).
   - [x] **0x1110 is commanded EVAP purge, not intake VVT duty.** The
     CAN Mode 22 handler (`FUN_000d16b8`) sends DID high byte 0x11 to table
     0x24988. Entry 16 there is 0xFFFF272E (read back from the ROM image), and
