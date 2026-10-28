@@ -267,6 +267,7 @@ export const TABLES: RomTablesResponse = {
   tables: [
     {
       id: "fuel_targets",
+      editable: true,
       name: "Fuel Targets",
       label: "Fuel Targets (Map 1)",
       slot: 1,
@@ -288,6 +289,7 @@ export const TABLES: RomTablesResponse = {
     },
     {
       id: "k_constant",
+      editable: true,
       name: "K (injector constant)",
       label: "K (injector constant) (Map 1)",
       slot: 1,
@@ -309,6 +311,7 @@ export const TABLES: RomTablesResponse = {
     },
     {
       id: "fuel_targets_maps_2_5",
+      editable: false,
       name: "Fuel Targets",
       label: "Fuel Targets (Map 2)",
       slot: 2,
@@ -367,6 +370,7 @@ export function fuelCompTable(slot: number): RomTableValues {
   const raw = FUEL_COMP_RPM_RAW.map((_, r) => FUEL_COMP_LOAD_RAW.map((_, c) => 120 + r + c));
   return {
     id: slot === 1 ? "fuel_compensation" : "fuel_compensation_maps_2_5",
+    editable: slot === 1,
     name: "Fuel Compensation",
     label: `Fuel Compensation (Map ${slot})`,
     slot,
@@ -428,6 +432,7 @@ export const TABLES_WITH_CURVES: RomTablesResponse = {
     ...TABLES.tables,
     {
       id: "throttle_area_axis",
+      editable: false,
       name: "Throttle effective-area curve axis",
       label: "Throttle effective-area curve axis",
       slot: null,
@@ -448,6 +453,7 @@ export const TABLES_WITH_CURVES: RomTablesResponse = {
     },
     {
       id: "throttle_area_curve",
+      editable: false,
       name: "Throttle effective area",
       label: "Throttle effective area",
       slot: null,
@@ -481,6 +487,7 @@ export const TABLES_WITH_CURVES: RomTablesResponse = {
     },
     {
       id: "idle_air_cap",
+      editable: false,
       name: "Idle air learning cap",
       label: "Idle air learning cap",
       slot: null,
@@ -581,6 +588,7 @@ export const TABLES_WITH_TRIM: RomTablesResponse = {
     },
     {
       id: "timing_trim_a",
+      editable: true,
       name: "Timing Main (trim A)",
       label: "Timing Main (trim A) (Map 1)",
       slot: 1,
@@ -633,6 +641,7 @@ export const TABLES_WITH_TRIM: RomTablesResponse = {
  *  which the ROM Editor shows for looking at only. */
 export const BASE_TIMING_TABLE: RomTableValues = {
   id: "base_timing_rate_map",
+  editable: false,
   name: "Base timing rate map",
   label: "Base timing rate map (Map 1)",
   slot: 1,

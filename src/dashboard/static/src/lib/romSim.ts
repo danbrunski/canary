@@ -785,6 +785,8 @@ export function seedForm(
 export const SIM_BLOCK_TEXT: Record<string, string> = {
   base_not_a_recorded_revision:
     "The simulator needs a base recorded in tune_revisions.yaml. This image is not one (a reference image, such as a tuner's base that was never flashed, is not a revision), so edits can be previewed but not simulated.",
+  sim_kit_undeclared:
+    "This vehicle declares no simulator (no sim_kit.yaml), so edits can be previewed from the ROM map but not simulated, and what they reach is not traced.",
   preview_refused:
     "The last preview was refused, so these edits cannot run. Fix or remove the edit that was refused, then preview again.",
 };

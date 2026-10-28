@@ -22,11 +22,22 @@ What it makes impossible rather than documented:
 * **A GUI edit is an E08.1 edit.** The request's ``edits`` are
   :class:`~src.analysis.rom_edit_spec.Edit` dicts, wrapped in an
   :class:`~src.analysis.rom_edit_spec.EditSpec` by :func:`editor_spec`;
-  every E08.1 refusal keeps its reason. Only Map 1's fuel chain and timing
-  trims are editable (:data:`EDITABLE_TABLES`, :data:`SIM_SLOT`): the simulator runs
-  slot 1 as the ECM does after a cold boot, so an edit elsewhere is refused
-  (``table_not_editable``, ``slot_not_simulated``) instead of showing
-  ``not_reached`` everywhere.
+  every E08.1 refusal keeps its reason.
+* **Editable is the map's word; simulatable is the simulator's.** A table
+  takes an edit when ``rom_map.yaml`` says ``editable: true``
+  (``table_not_editable``), and a slotted copy only in :data:`SIM_SLOT`: the
+  simulator runs slot 1 as the ECM does after a cold boot, so an edit to
+  another slot is refused (``slot_not_simulated``) instead of showing
+  ``not_reached`` everywhere. A single-copy table (``slot: null``) has no slot
+  to miss. A vehicle with no simulator (no ``sim_kit.yaml``) still previews:
+  the candidate is built from its map alone, ``levers`` is None and
+  ``sim_base`` says ``sim_kit_undeclared``, so the preview never reads as
+  "nothing blocks".
+* **An exported edit touches only verified tables.** ``spec_yaml`` is what a
+  caller keeps, and :func:`spec_yaml` refuses an edit to a table whose
+  placement is not ``confidence: verified`` (``table_not_verified``). The
+  preview and simulate answers carry ``spec_yaml: None`` then, and ``export``
+  says why.
 * **The candidate never leaves the simulator.** Nothing here writes a file;
   the candidate's bytes are hashed and simulated, never returned. What a
   caller can keep is the edit spec YAML (``spec_yaml``).
@@ -87,12 +98,13 @@ from src.analysis.rom_edit_spec import (
     EditSpec,
     EditSpecRefusalError,
     build_candidate,
+    build_untraced_candidate,
     parse_edit_spec,
 )
 from src.analysis.rom_effects import EffectReport, RomEffectRefusalError, compare_roms
 from src.analysis.rom_image import ImageFormatError, sha256_hex, table_values
 from src.analysis.rom_levers import classify_edit
-from src.analysis.rom_map import RomMap
+from src.analysis.rom_map import RomMap, load_rom_map
 from src.analysis.sim_cells import (
     Grid,
     aggregate_cells,
@@ -124,15 +136,6 @@ from src.yaml_load import load_yaml
 TOOL_VERSION = "1"
 TOOL = "rom_editor"
 
-#: The fuel chain and the timing trims, Map 1 (W09 "Decisions"; trims E09.7):
-#: every other table is refused.
-EDITABLE_TABLES: tuple[str, ...] = (
-    "fuel_targets",
-    "fuel_compensation",
-    "k_constant",
-    "timing_trim_a",
-    "timing_trim_b",
-)
 #: The slot the simulator runs: the one the ECM runs after a cold boot.
 SIM_SLOT = 1
 SLOT_SOURCE: Literal["default_slot"] = "default_slot"
@@ -146,6 +149,10 @@ LEARNED_SOURCE = "stated: ROM Editor"
 TIMING_SOURCE = "stated: ROM Editor"
 #: Why a base that is not a flashed revision cannot be simulated.
 BASE_NOT_RECORDED = "base_not_a_recorded_revision"
+#: Why a vehicle with no ``sim_kit.yaml`` previews without a simulator.
+SIM_KIT_UNDECLARED = "sim_kit_undeclared"
+#: Why an edit's spec cannot be exported.
+TABLE_NOT_VERIFIED = "table_not_verified"
 
 #: The child's job kinds (W09.2 dispatches ``rom_sim``).
 JOB_KINDS: tuple[str, ...] = ("rom_sim", "rom_preview")
@@ -228,25 +235,31 @@ def _base_ref(base: BaseImage) -> dict[str, Any]:
     return {"file": base.identity["file"], "sha256": base.image_sha256}
 
 
-def sim_base(revision_match: Mapping[str, Any]) -> dict[str, Any]:
-    """Whether the base can be simulated, and why not."""
+def sim_base(revision_match: Mapping[str, Any], *, kit_reason: str | None = None) -> dict[str, Any]:
+    """Whether the base can be simulated, and why not. ``kit_reason`` is why
+    the vehicle has no simulator at all (:data:`SIM_KIT_UNDECLARED`), which
+    outranks anything about the base."""
     status = revision_match.get("status")
-    ok = status == "matched" and bool(revision_match.get("revision"))
+    recorded = status == "matched" and bool(revision_match.get("revision"))
+    ok = recorded and kit_reason is None
     return {
         "ok": ok,
         "status": status,
-        "revision": revision_match.get("revision") if ok else None,
-        "reason": None if ok else BASE_NOT_RECORDED,
+        "revision": revision_match.get("revision") if recorded else None,
+        "reason": None if ok else kit_reason or BASE_NOT_RECORDED,
     }
 
 
 # -- the edit spec --------------------------------------------------------------------------
 
 
-def _editable(spec: EditSpec) -> None:
-    """Map 1 of the fuel chain only. The slot is checked first: a table's
-    other-slot placement (``fuel_targets_maps_2_5``) and K in slot 3 are the
-    same refusal, an edit the simulator would never read."""
+def _editable(spec: EditSpec, rom_map: RomMap) -> None:
+    """The tables the map marks ``editable``, a slotted one in Map 1 only. The
+    slot is checked first: a table's other-slot placement
+    (``fuel_targets_maps_2_5``) and K in slot 3 are the same refusal, an edit
+    the simulator would never read. An id the map lacks is left to
+    resolution's ``table_unknown``."""
+    editable = sorted(table.id for table in rom_map.tables if table.editable)
     for index, edit in enumerate(spec.edits):
         if edit.slot is not None and edit.slot != SIM_SLOT:
             raise EditSpecRefusalError(
@@ -255,32 +268,74 @@ def _editable(spec: EditSpec) -> None:
                 f"{SIM_SLOT} ({SLOT_SOURCE}, the slot the ECM runs after a cold boot), so an "
                 "edit to another slot reaches nothing it computes",
             )
-        if edit.table not in EDITABLE_TABLES:
+        try:
+            table = rom_map.table(edit.table)
+        except KeyError:
+            continue
+        if not table.editable:
             raise EditSpecRefusalError(
                 "table_not_editable",
-                f"edit {index}: {edit.table!r} is not editable here; the ROM Editor edits "
-                f"{list(EDITABLE_TABLES)} in slot {SIM_SLOT}",
+                f"edit {index}: {edit.table!r} is not editable; rom_map.yaml marks {editable}",
             )
 
 
-def editor_spec(base: BaseImage, label: str, edits: Any) -> EditSpec:
+def editor_spec(base: BaseImage, label: str, edits: Any, rom_map: RomMap) -> EditSpec:
     """The page's ``edits`` on ``base`` as an E08.1 spec, through
     :func:`parse_edit_spec` (its refusals keep their names), refused before
-    resolution when an edit is outside :data:`EDITABLE_TABLES` slot 1."""
+    resolution when an edit is to a table ``rom_map`` does not mark editable
+    or to a slot other than :data:`SIM_SLOT`."""
     spec = parse_edit_spec(
         {"schema_version": 1, "base": _base_ref(base), "label": label, "edits": edits}
     )
-    _editable(spec)
+    _editable(spec, rom_map)
     return spec
 
 
-def spec_yaml(spec: EditSpec) -> str:
+def _unverified(spec: EditSpec, rom_map: RomMap) -> list[str]:
+    """The edited tables whose placement is not ``confidence: verified``."""
+    ids = dict.fromkeys(edit.table for edit in spec.edits)
+    return [i for i in ids if rom_map.table(i).confidence != "verified"]
+
+
+def spec_yaml(spec: EditSpec, rom_map: RomMap) -> str:
     """The spec as the YAML a caller downloads: :func:`load_edit_spec` gives
-    back the same :meth:`EditSpec.sha256`."""
+    back the same :meth:`EditSpec.sha256`. Refused (``table_not_verified``)
+    when an edit is to a table ``rom_map`` has not verified: an exported spec
+    outlives the page, and an inferred placement may be the wrong bytes."""
+    unverified = _unverified(spec, rom_map)
+    if unverified:
+        raise EditSpecRefusalError(
+            TABLE_NOT_VERIFIED,
+            f"{unverified} {'is' if len(unverified) == 1 else 'are'} not confidence: verified "
+            "in rom_map.yaml; an edit to an inferred table can be previewed, never exported",
+        )
     body = yaml.safe_dump(
         spec.model_dump(mode="json", exclude_none=True), sort_keys=False, allow_unicode=True
     )
     return _SPEC_HEADER + body
+
+
+def spec_export(spec: EditSpec, rom_map: RomMap) -> dict[str, Any]:
+    """``spec_yaml`` and ``export`` for an answer: the YAML, or None and why
+    (``{"ok", "reason", "message", "tables"}``, ``tables`` the unverified ids)."""
+    try:
+        text = spec_yaml(spec, rom_map)
+    except EditSpecRefusalError as exc:
+        if exc.reason != TABLE_NOT_VERIFIED:
+            raise
+        return {
+            "spec_yaml": None,
+            "export": {
+                "ok": False,
+                "reason": exc.reason,
+                "message": exc.message,
+                "tables": _unverified(spec, rom_map),
+            },
+        }
+    return {
+        "spec_yaml": text,
+        "export": {"ok": True, "reason": None, "message": None, "tables": []},
+    }
 
 
 # -- shared ---------------------------------------------------------------------------------
@@ -303,6 +358,18 @@ def _sim_kit(profile_dir: Path, kit: SimKit | None) -> SimKit:
     ``sim_kit.yaml`` declares (:func:`load_sim_kit`, the loader
     ``tools/rom_sim.py`` and :func:`simulate_edits` use)."""
     return kit if kit is not None else load_sim_kit(profile_dir).kit
+
+
+def _preview_kit(profile_dir: Path, kit: SimKit | None) -> tuple[SimKit | None, str | None]:
+    """The kit a preview traces through, or None and :data:`SIM_KIT_UNDECLARED`
+    when the vehicle declares no simulator. Only that refusal degrades: a kit
+    that is declared and broken is still refused by name."""
+    try:
+        return _sim_kit(profile_dir, kit), None
+    except SimulationRefusalError as exc:
+        if exc.reason != SIM_KIT_UNDECLARED:
+            raise
+        return None, SIM_KIT_UNDECLARED
 
 
 def _effects(base_image: bytes, candidate_image: bytes, kit: SimKit) -> EffectReport:
@@ -357,33 +424,46 @@ def preview_edits(
     would use, built the way ``tools/rom_sim.py inspect`` builds it, so
     ``levers["messages"]`` is the CLI's text for the same edit and nothing
     here words it. ``kit`` replaces the profile's simulator kit (tests on a
-    synthetic image)."""
+    synthetic image).
+
+    A vehicle with no ``sim_kit.yaml`` previews from its map alone
+    (:func:`~src.analysis.rom_edit_spec.build_untraced_candidate`):
+    ``provenance["effect"]`` and ``levers`` are None and ``sim_base`` says
+    :data:`SIM_KIT_UNDECLARED`. ``spec_yaml`` is None when an edited table is
+    not verified, and ``export`` says why (:func:`spec_export`)."""
+    profile_dir = Path(profile_dir)
     base = library_base(image, revision_match, sha256=sha256)
-    spec = editor_spec(base, label, edits)
-    kit = _sim_kit(Path(profile_dir), kit)
-    candidate_image, provenance = _candidate(base, spec, _EditContext.of(kit))
+    kit, kit_reason = _preview_kit(profile_dir, kit)
+    rom_map = load_rom_map(profile_dir) if kit is None else kit.rom_map
+    spec = editor_spec(base, label, edits, rom_map)
+    levers: dict[str, Any] | None = None
+    if kit is None:
+        made = build_untraced_candidate(spec, rom_map, base)
+        candidate_image, provenance = made.image, made.provenance
+    else:
+        candidate_image, provenance = _candidate(base, spec, _EditContext.of(kit))
+        levers = classify_edit(
+            _effects(base.image, candidate_image, kit),
+            rom_map=kit.rom_map,
+            model=kit.model,
+            contract=kit.contract,
+            qualification=plant_qualification(kit.plant),
+            cells=provenance["cells"],
+        ).to_dict()
     edited = {(e.table, e.slot) for e in spec.edits}
-    levers = classify_edit(
-        _effects(base.image, candidate_image, kit),
-        rom_map=kit.rom_map,
-        model=kit.model,
-        contract=kit.contract,
-        qualification=plant_qualification(kit.plant),
-        cells=provenance["cells"],
-    )
     return {
         "tool": TOOL,
         "tool_version": TOOL_VERSION,
         "spec": spec.model_dump(mode="json"),
-        "spec_yaml": spec_yaml(spec),
+        **spec_export(spec, rom_map),
         "spec_sha256": spec.sha256(),
         "candidate_sha256": sha256_hex(candidate_image),
         "provenance": provenance,
         "tables": [
-            t for t in table_values(candidate_image, kit.rom_map) if (t["id"], t["slot"]) in edited
+            t for t in table_values(candidate_image, rom_map) if (t["id"], t["slot"]) in edited
         ],
-        "levers": levers.to_dict(),
-        "sim_base": sim_base(revision_match),
+        "levers": levers,
+        "sim_base": sim_base(revision_match, kit_reason=kit_reason),
     }
 
 
@@ -617,6 +697,7 @@ def _simulate(
         "cells": cells.to_dict(),
         "ignition_timing": timing,
         "spec_yaml": None,
+        "export": None,
     }
 
 
@@ -645,8 +726,8 @@ def simulate_edits(
         )
     _recorded(base)
     _bounded(request)
-    spec = editor_spec(base, request.label, request.edits)
     kit = _sim_kit(profile_dir, kit)
+    spec = editor_spec(base, request.label, request.edits, kit.rom_map)
     candidate_image, provenance = _candidate(base, spec, _EditContext.of(kit))
     out = _simulate(
         base,
@@ -657,7 +738,7 @@ def simulate_edits(
         profile_dir=profile_dir,
         registry=registry,
     )
-    out["spec_yaml"] = spec_yaml(spec)
+    out.update(spec_export(spec, kit.rom_map))
     out["spec_sha256"] = spec.sha256()
     return out
 
@@ -958,15 +1039,16 @@ def run_job(
 
 __all__ = [
     "BASE_NOT_RECORDED",
-    "EDITABLE_TABLES",
     "JOB_KINDS",
     "LEARNED_SOURCE",
     "MAX_DRAWS",
     "MAX_GRID_POINTS",
     "NEVER_TYPICAL_FIELDS",
     "REFUSALS",
+    "SIM_KIT_UNDECLARED",
     "SIM_SLOT",
     "SLOT_SOURCE",
+    "TABLE_NOT_VERIFIED",
     "TOOL_VERSION",
     "TYPICAL_FIELDS",
     "TYPICAL_KINDS",
@@ -979,6 +1061,7 @@ __all__ = [
     "run_job",
     "sim_base",
     "simulate_edits",
+    "spec_export",
     "spec_yaml",
     "typical_values",
 ]

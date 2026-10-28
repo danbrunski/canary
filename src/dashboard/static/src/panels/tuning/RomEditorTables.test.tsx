@@ -137,7 +137,7 @@ describe("ROM Editor: every table, shaded", () => {
         .every((cell) => cell.hasAttribute("data-shaded")),
     ).toBe(true);
     expect(
-      screen.getByText(/Viewing only: Base timing rate map is not one of the tables edited here/),
+      screen.getByText(/Viewing only: the ROM map does not mark Base timing rate map editable/),
     ).toBeVisible();
     expect(screen.queryByRole("form", { name: "Operation" })).not.toBeInTheDocument();
     expect(screen.queryByRole("grid", { name: /Base timing/ })).not.toBeInTheDocument();
@@ -227,9 +227,7 @@ describe("ROM Editor: every table, shaded", () => {
     expect(within(curve).getAllByRole("cell")).toHaveLength(32);
     expect(screen.getByText(/Columns: Throttle effective-area curve axis/)).toBeVisible();
     expect(
-      screen.getByText(
-        /Viewing only: Throttle effective area is not one of the tables edited here/,
-      ),
+      screen.getByText(/Viewing only: the ROM map does not mark Throttle effective area editable/),
     ).toBeVisible();
     fireEvent.click(treeTable("Idle air learning cap"));
     const scalar = screen.getByRole("table", { name: "Idle air learning cap cells" });

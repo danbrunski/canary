@@ -19,6 +19,11 @@ schema_version: 1
 #             save or a drive;
 #   unknown   bytes whose meaning is not known.
 # No table here is verified: none has met a known edit or live data yet.
+#
+# editable: true marks the tables the ROM Editor takes an edit to: the
+# 2008's editable tables where this map has them (no K yet). None is
+# verified, so an edit can be previewed but its spec cannot be exported
+# (table_not_verified) until the table is.
 image_size: 1048576
 calibration_ids: [19CF2B00000]
 calibration_id:
@@ -186,6 +191,7 @@ tables:
     kind: fuel_targets
     name: Fuel Targets
     group: fuel
+    editable: true
     offset: 0xAEA4
     rows: 16
     cols: 16
@@ -276,6 +282,7 @@ tables:
     kind: timing_trim_a
     name: Timing Main (trim A)
     group: ignition
+    editable: true
     offset: 0x9A54
     rows: 16
     cols: 16
@@ -305,6 +312,7 @@ tables:
     kind: timing_trim_b
     name: Timing High Det (trim B)
     group: ignition
+    editable: true
     offset: 0x9B54
     rows: 16
     cols: 16
@@ -354,6 +362,7 @@ tables:
     kind: fuel_compensation
     name: Fuel Compensation
     group: fuel
+    editable: true
     offset: 0xA3D4
     rows: 16
     cols: 16

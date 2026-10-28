@@ -261,7 +261,7 @@ Control endpoints:
 | `GET /control/rom/library/{sha}/tables` | every mapped table in every map slot: raw cells, decoded cells where a decode is declared, axes, confidence and evidence (W08.4) |
 | `GET /control/rom/library/{sha}/trace` | the ROM Editor's live-overlay inputs for one library image (ROM Maps merged into the editor, 2026-10-26), read-only: `{sha256, map_slot, afr_stoich, recorded_revision, matches_recorded_revision, live, warnings, tables[]}`. `map_slot` is the slot the trace definitions are written for (the overlay places nothing in another slot); `matches_recorded_revision` is true only when the flash history's running revision names this image's plain sha256; `live` is the vehicle's verified RPM / BFS / commanded-AFR providers; each `tables[]` entry is a `rom_viewer.yaml` kind with its `trace` (X/Y channels, `axis_mapping`, `axis_units`, `stored_decode`, `request_channel`, `out_of_range`) or `null`. The image's own cells and axes stay on `/tables`; the editor joins the two by `kind` and slot. 404 for an image not in the library, 409 when the vehicle has no `rom_viewer.yaml` |
 | `GET /control/rom/compare?a=<sha>&b=<sha>` | changed byte ranges a -> b merged with a 16-byte gap, each labelled with the regions and tables it overlaps; table ranges carry per-cell old/new values, decoded where declared (W08.5) |
-| `POST /control/rom/library/{sha}/edits/preview` | ROM Editor preview (W09.2): body `{label, edits}`, `edits` being E08.1 edit dicts on Map 1's fuel chain (`fuel_targets`, `fuel_compensation`, `k_constant`) or timing trims (`timing_trim_a`, `timing_trim_b`), slot 1. Returns the edit spec (JSON, YAML, sha256), the candidate's sha256, its E08.1 provenance (cells old -> new, changed ranges, reach), the edited tables' after values and `levers` (which lever the edit pulls and what blocks a number per output, E09.14b). Runs in the thread pool, never deferred; nothing is stored. 404 unknown sha, 409 no map, 400 `edit_refused`, 422 body. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
+| `POST /control/rom/library/{sha}/edits/preview` | ROM Editor preview (W09.2): body `{label, edits}`, `edits` being E08.1 edit dicts on the tables `rom_map.yaml` marks `editable` (the 2008: the fuel chain and timing trims), a slotted copy in slot 1 only. A vehicle without a simulator previews from its map alone; `spec_yaml` is null unless every edited table is verified (`export` says why). Returns the edit spec (JSON, YAML, sha256), the candidate's sha256, its E08.1 provenance (cells old -> new, changed ranges, reach), the edited tables' after values and `levers` (which lever the edit pulls and what blocks a number per output, E09.14b). Runs in the thread pool, never deferred; nothing is stored. 404 unknown sha, 409 no map, 400 `edit_refused`, 422 body. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
 | `POST /control/rom/library/{sha}/simulate` | ROM Editor simulate (W09.2): body is one `SimRequest`, every field required (nothing is defaulted). Runs the edits on a recorded base over a stated rpm x load grid, base vs candidate, paired Monte Carlo draws, aggregated per cell. In the workbench child (job `rom_sim`): `409 analysis_deferred` while a capture records, `409 analysis_busy` while another child runs, `503 analysis_unavailable`; a refusal is `400 sim_refused`; 404 unknown sha, 409 no map, 422 body. Nothing is stored; the candidate never leaves the simulator. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
 | `GET /control/rom/editor/typical-values` | ROM Editor typical values (W09.11): the vehicle's declared typical values for the Simulate form's stated environment and learned state (`data/<vehicle>/sim_typical_values.yaml`), each with its `kind` (`typical`, or `placeholder` for a number the simulator reads nowhere) and its `source`, plus any fillable field it leaves empty with a `reason`. No image needed, nothing stored, and it changes no request field: the page only fills its form with these, visibly, when the operator presses *Fill typical values*. 409 `typical_values_undeclared` when the vehicle has no file, 409 `typical_values_invalid` when it fails its schema. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
 | `GET /control/rom/backup` / `POST /control/rom/backup` / `POST /control/rom/backup/cancel` | ECU flash backup job (W08.7), read-only: state + live preconditions / start (202, or 409 naming every refusing precondition) / cancel a running read (409 when none runs) |
@@ -427,7 +427,7 @@ map_slots: [1, 2, 3, 4, 5], tables: [...], reason}`. Each table:
 {"id": "fuel_targets", "kind": "fuel_targets", "name": "Fuel Targets",
  "label": "Fuel Targets (Map 1)", "short_name": null, "group": "fuel",
  "slot": 1, "offset": 918048, "end": 918111,
- "rows": 8, "cols": 8, "dtype": "u8", "role": "table", "unit": "AFR",
+ "rows": 8, "cols": 8, "dtype": "u8", "role": "table", "editable": true, "unit": "AFR",
  "raw": [[128, 128, ...], ...], "decoded": [[14.7, 14.7, ...], ...],
  "decode": {"formula": "afr = 1881.6 / raw", "kind": "reciprocal", "quantity": "afr",
             "unit": "AFR", "confidence": "verified", "evidence": "..."},
@@ -580,19 +580,32 @@ offered for download, and nothing is written (a candidate is `flashable: false`
 with stale checksums on purpose). What a caller keeps is the **edit spec YAML**
 in the preview's `spec_yaml`: reviewable, hashable, and the same input the
 simulator takes on the laptop. A flash stays the Flash page's own, explicit,
-per-operation act. Both routes need a map for the vehicle (`rom_map.yaml`) and
-the vehicle's simulator definitions; without the map they answer `409` with the
-words of `GET .../tables` (`"ROM map definition unavailable for this vehicle:
-..."`), without any other definition `409 "ROM Editor definition unavailable for
-this vehicle: ..."`. An unknown or malformed `{sha}` is `404`, checked before the
+per-operation act. Both routes need a map for the vehicle (`rom_map.yaml`);
+without it they answer `409` with the words of `GET .../tables` (`"ROM map
+definition unavailable for this vehicle: ..."`). Simulate also needs the
+vehicle's simulator definitions (`409 "ROM Editor definition unavailable for
+this vehicle: ..."` without one). A vehicle with no `sim_kit.yaml` at all still
+previews, from its map alone (below). An unknown or malformed `{sha}` is `404`, checked before the
 map. Every error body below is FastAPI's `{"detail": <value>}`: `detail` is a
 string for 404/409-no-map, an object with `error` for the named ones, and
 pydantic's list for 422.
 
-**Editable:** Map 1 only: the fuel chain (`fuel_targets`, `fuel_compensation`,
+**Editable** is the map's word: a table takes an edit when `rom_map.yaml` marks
+it `editable: true` (each table's `editable` in `GET .../tables`; an axis
+never is). The 2008 marks the fuel chain (`fuel_targets`, `fuel_compensation`,
 `k_constant`) and the ignition timing trims (`timing_trim_a`, `timing_trim_b`,
-E09.7), `slot: 1` (the slot the ECM runs after a cold boot, the one the
-simulator runs). A trim edit previews and simulates: the simulate request
+E09.7). **Simulatable** is the simulator's: a slotted copy only in `slot: 1`
+(the slot the ECM runs after a cold boot, the one the simulator runs), and a
+single-copy table (`slot: null`, the 2013's stock image) has no slot to miss.
+A vehicle without `sim_kit.yaml` (the 2013 today) previews from its map alone:
+`provenance.effect` and `levers` are `null`, `provenance.ranges` is empty and
+`sim_base` is `{"ok": false, "reason": "sim_kit_undeclared", ...}`, so nothing
+reads as "nothing blocks". **Exported** needs verified: `spec_yaml` is `null`
+when an edited table's `confidence` is not `verified`, and `export` says why
+(`{"ok": false, "reason": "table_not_verified", "message": "...", "tables":
+["fuel_compensation"]}`; `{"ok": true, "reason": null, "message": null,
+"tables": []}` otherwise). Such an edit previews; its spec is never handed out.
+A trim edit previews and simulates: the simulate request
 states the HI DET latch and knock control (`high_det`, `knock_control`, both
 required), and the result's `ignition_timing` block gives the ECU-side change
 per trim cell (below; `rom_sim run --high-det --knock-control` gives the same
@@ -630,6 +643,7 @@ Body (`extra` fields are a 422): `{"label": "light load 2 % richer", "edits": [E
              "units": {"rpm": "rpm", "load": "%"}}, "set_raw": null, "add_raw": null,
              "scale": 1.02, "rounding": "nearest"}]},
   "spec_yaml": "# CANary ROM Editor edit spec (E08.1). ...\nschema_version: 1\nbase: ...",
+  "export": {"ok": true, "reason": null, "message": null, "tables": []},
   "spec_sha256": "18d1a048...", "candidate_sha256": "dd0c9394...",
   "provenance": {"tool": "rom_edit_spec", "kind": "simulation_candidate", "flashable": false,
                  "route": "edit_spec", "label": "...", "base": {"source": "revision", "revision": "...",
@@ -644,7 +658,7 @@ Body (`extra` fields are a 422): `{"label": "light load 2 % richer", "edits": [E
                             "moved_lookups": [{"node": "target_afr_lookup", "tables": ["fuel_targets", "..."]}],
                             "rom_effects": {"...": "..."}}},
   "tables": [ <one entry per edited (table, slot), the candidate's values, in the GET .../tables shape:
-               id, kind, name, label, slot, offset, end, rows, cols, dtype, role, unit, raw, decoded,
+               id, kind, name, label, slot, offset, end, rows, cols, dtype, role, editable, unit, raw, decoded,
                decode, axes, confidence, evidence, and for fuel_compensation editor_disagreement> ],
   "levers": {"schema_version": 1, "tool": "rom_levers", "tool_version": "1",
              "outcome": "unevaluable", "reason": null, "regime": null,
@@ -789,7 +803,8 @@ the design's are not in design, E08.10), "unresolved": [...], "inert_parameters"
 "design": {points, weight, base_revision, ..., "grid": {rpm_edges, load_edges,
 load_axis, load_unit, load_basis, environment}},
 "candidate": <the preview's provenance>, "cells": <CellTable>,
-"ignition_timing": <timing block>, "spec_yaml": str, "spec_sha256": str}`. Note `label` here is the result's, the request's is
+"ignition_timing": <timing block>, "spec_yaml": str | null, "export": {...},
+"spec_sha256": str}` (`spec_yaml` and `export` as the preview's). Note `label` here is the result's, the request's is
 `candidate.label`. `cells` is `sim_cells.CellTable.to_dict()` (E08.4;
 `schema_version: 1`, JSON Schema from `sim_cells.cell_table_schema()`): `grid`,
 `table`, `slot`, `rows` / `cols` axis info (`raw`, `breakpoints`, `values`,

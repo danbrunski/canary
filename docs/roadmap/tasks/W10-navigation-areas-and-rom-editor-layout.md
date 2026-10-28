@@ -457,6 +457,53 @@ only Map 1 copies take an edit, so a stock 2013 image is view only; making
 its single copy editable touches `rom_editor.py` and the simulator's Map 1
 assumption, and needs K mapped for the 2013. That is its own item.
 
+## Part D — editable is not simulatable (operator, 2026-10-27)
+
+Asked after Part C: "Separate 'editable' from 'simulatable'. The frontend's
+isEditableTable requires 5 hard-coded table ids and slot === 1, so the 2013's
+single-copy tables can never be edited. The backend already lets slot=None
+through. Move editability into rom_map.yaml, and require confidence: verified
+on any table in an exported edit."
+
+- [x] **W10.17 — Editability is map data.** `Table.editable` in
+  `rom_map.py` (default false), refused on a table another uses as an axis.
+  The 2008 marks its five (Fuel Targets, Fuel Comp, K, trims A and B), the
+  2013 the four it maps (no K). `GET .../tables` carries `editable` per
+  placement. `rom_editor.EDITABLE_TABLES` and the page's copy are gone:
+  `_editable(spec, rom_map)` refuses `table_not_editable` from the map, and
+  the slot rule (`slot_not_simulated`, a slotted copy outside Map 1) stays the
+  simulator's, checked first on both sides. `isEditableTable` is
+  `editable && isSimulatedSlot`, the latter true for `slot: null`.
+  *Tests:* `test_rom_map.py` (the shipped five, all verified; an editable
+  axis refused), `test_rom_editor.py` (unmarking Fuel Comp refuses it; an
+  unknown id keeps resolution's `table_unknown`),
+  `romEditor.test.ts` (any id the map marks, K in slot 3, a single copy).
+- [x] **W10.18 — A vehicle without a simulator previews.** A profile with no
+  `sim_kit.yaml` (the 2013's) used to be refused a preview
+  (`sim_kit_undeclared`). It now previews from its map alone
+  (`rom_edit_spec.build_untraced_candidate`): `provenance.effect` and
+  `levers` are null, `ranges` empty, and `sim_base.reason` is
+  `sim_kit_undeclared`, so the page disables Simulate with that reason and
+  says "Not traced", never "reaches nothing". A declared kit that is broken
+  is still refused. *Tests:* `test_rom_editor.py` (same cells and candidate
+  as the traced preview; `sim_kit_invalid` still refuses),
+  `test_rom_map_2013.py` (a 2013 Fuel Comp edit previews on a synthetic
+  image), `PreviewResult.test.tsx`.
+- [x] **W10.19 — An exported edit touches only verified tables.**
+  `rom_editor.spec_yaml(spec, rom_map)` refuses `table_not_verified`; the
+  preview and simulate answers carry `spec_yaml: null` and `export: {ok,
+  reason, message, tables}` (`spec_export`). The page shows no Download spec
+  then and names the tables. Every 2013 table is inferred, so a 2013 edit
+  previews but does not export until its table is verified. *Tests:*
+  `test_rom_editor.py`, `test_rom_map_2013.py`, `PreviewResult.test.tsx`.
+
+  `pendingEditCount` now matches the slot as well as the id, so the W10.14
+  caveat (a Maps 2-5 edit counted on every copy sharing its id) cannot happen
+  once editing reaches other slots (`romEditor.test.ts`).
+
+**Not in Part D:** K for the 2013, a 2013 simulator kit, and editing slots
+other than Map 1.
+
 ## Not in scope
 
 - **A curve drawn as a chart** (the existing `Curve` component) rather than a

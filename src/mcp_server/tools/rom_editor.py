@@ -341,10 +341,12 @@ async def preview_rom_edit(
     or ``region: {rpm: [lo, hi], load: [lo, hi], units: {rpm: "rpm", load:
     "%"}}``, and one operation of ``set_raw: int``, ``add_raw: int`` or
     ``scale: float`` with ``rounding: "nearest" | "floor" | "ceil"`` (no default
-    rounding). Editable: Map 1 only (``slot: 1``) of ``fuel_targets``,
-    ``fuel_compensation`` and ``k_constant``; anything else is refused by name.
+    rounding). Editable: the tables ``rom_map.yaml`` marks ``editable: true``
+    (``table_not_editable`` otherwise), a slotted copy in Map 1 only
+    (``slot: 1``; ``slot_not_simulated`` otherwise) and a single-copy table with
+    ``slot: null``.
 
-    The response carries ``spec``, ``spec_yaml``, ``spec_sha256``,
+    The response carries ``spec``, ``spec_yaml``, ``export``, ``spec_sha256``,
     ``candidate_sha256``, ``provenance`` (old -> new raw values per cell, the
     changed ranges, ``effect.changed_nodes`` and ``moved_lookups``), ``tables``
     (the candidate's edited tables), ``levers`` and ``sim_base``. ``levers`` says
@@ -358,7 +360,11 @@ async def preview_rom_edit(
     ``levers.messages``, one line each, the same text ``rom_sim inspect``
     prints. ``sim_base.ok`` is whether
     ``simulate_rom_edit`` is offered: false unless the image is a recorded
-    revision (``reason: "base_not_a_recorded_revision"``).
+    revision (``reason: "base_not_a_recorded_revision"``) and the vehicle has a
+    simulator (``"sim_kit_undeclared"``, when ``levers`` and
+    ``provenance.effect`` are null: nothing was traced). ``spec_yaml`` is null
+    unless every edited table is ``confidence: verified``; ``export`` names the
+    rest (``reason: "table_not_verified"``, ``tables``).
 
     Refusals are raised as :class:`~src.mcp_server.client.DaemonError` with the
     daemon's body in the message; read the status. **400** ``edit_refused`` with

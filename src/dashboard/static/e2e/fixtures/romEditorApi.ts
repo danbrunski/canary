@@ -212,6 +212,7 @@ export function previewFor(
       edits: request.edits,
     },
     spec_yaml: specYaml(request.label),
+    export: { ok: true, reason: null, message: null, tables: [] },
     spec_sha256: specSha,
     candidate_sha256: candidate,
     provenance,

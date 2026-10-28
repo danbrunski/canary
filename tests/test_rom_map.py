@@ -634,3 +634,24 @@ def test_copies_in_different_slots_may_share_a_label() -> None:
     data = _shipped()
     assert _by_id(data, "fuel_targets")["name"] == _by_id(data, "fuel_targets_maps_2_5")["name"]
     RomMap.model_validate(data)
+
+
+def test_the_shipped_map_marks_the_fuel_chain_and_trims_editable_in_map_1() -> None:
+    """The ROM Editor's editable tables are the map's ``editable: true``:
+    each verified, so its edits export."""
+    rom_map = load_rom_map(PROFILE)
+    editable = [t for t in rom_map.tables if t.editable]
+    assert {t.id for t in editable} == {
+        "fuel_targets",
+        "fuel_compensation",
+        "k_constant",
+        "timing_trim_a",
+        "timing_trim_b",
+    }
+    assert all(t.confidence == "verified" for t in editable)
+
+
+def test_an_axis_cannot_be_editable() -> None:
+    data = _shipped()
+    _by_id(data, "fuel_targets_rpm_axis")["editable"] = True
+    _refuse(data, "axes of other tables and cannot be editable")

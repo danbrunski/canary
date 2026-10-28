@@ -27,6 +27,7 @@ function table(raw: number[][], overrides: Partial<RomTableValues> = {}): RomTab
     id: "t",
     name: "Table",
     slot: 1,
+    editable: false,
     raw,
     decoded: raw.map((row) => row.map((value) => value * 2)),
     unit: "u",

@@ -339,6 +339,9 @@ export interface RomTableValues {
   kind?: string | null;
   /** `axis` for a table another table uses as an axis. */
   role?: "axis" | "table";
+  /** `rom_map.yaml` marks it editable (never an axis). Whether the page
+   *  takes an edit to this copy is `isEditableTable`'s: Map 1 or single-copy. */
+  editable: boolean;
   decode?: RomDecode | null;
   /** Absolute byte offset of the table's first cell in this slot. */
   offset?: number | null;

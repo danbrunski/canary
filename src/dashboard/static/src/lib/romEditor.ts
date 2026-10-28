@@ -10,8 +10,9 @@
 // - a raw outside the cell's dtype is refused (`value_out_of_range`), never
 //   clamped;
 // - an edit that changes no selected cell is refused (`no_op_edit`);
-// - only the fuel chain and the ignition timing trims in Map 1 are offered
-//   (`table_not_editable`, `slot_not_simulated`);
+// - only a table the map marks `editable` is offered, a slotted one in Map 1
+//   only (`table_not_editable`, `slot_not_simulated`): editable is the map's
+//   word, simulated the simulator's;
 // - a masked cell (the trims' flag bit 7, decode mask 0x7F) is edited on its
 //   masked value and keeps its other bits, as `rom_edit_spec` does: a result
 //   outside 0..mask is `value_out_of_range`, never carried into the flag, and
@@ -32,27 +33,24 @@ import type {
 } from "../types/romEditor";
 import type { RomTableGroup, RomTableValues } from "../types/romLibrary";
 
-/** `rom_editor.EDITABLE_TABLES` and `SIM_SLOT`: the fuel chain and the
- *  ignition timing trims (E09.7), Map 1. */
-export const EDITABLE_TABLES = [
-  "fuel_targets",
-  "fuel_compensation",
-  "k_constant",
-  "timing_trim_a",
-  "timing_trim_b",
-] as const;
+/** `rom_editor.SIM_SLOT`: the slot the simulator runs, the one the ECM runs
+ *  after a cold boot. */
 export const SIM_SLOT = 1;
 
 /** The largest raw each dtype stores. */
 export const DTYPE_MAX: Record<string, number> = { u8: 0xff, be16: 0xffff };
 
-/** Whether the page offers this table for editing. */
+/** Whether the simulator reads an edit to this copy: a single-copy table
+ *  (`slot: null`, a stock image's) or Map 1's. */
+export function isSimulatedSlot(table: RomTableValues): boolean {
+  return table.slot === null || table.slot === SIM_SLOT;
+}
+
+/** Whether the page offers this table for editing: `rom_map.yaml` marks it
+ *  `editable`, and the copy is one the simulator reads. */
 export function isEditableTable(table: RomTableValues): boolean {
   return (
-    table.role !== "axis" &&
-    table.slot === SIM_SLOT &&
-    table.id !== undefined &&
-    (EDITABLE_TABLES as readonly string[]).includes(table.id)
+    table.role !== "axis" && table.editable && isSimulatedSlot(table) && table.id !== undefined
   );
 }
 
@@ -160,10 +158,13 @@ export function treeGroups(
   }).filter((group) => group.entries.length > 0);
 }
 
-/** How many pending edits change this table (its id is unique per file, so a
- *  Map 1 table is never confused with its copy in Maps 2-5). */
+/** How many pending edits change this copy of a table: the id and the slot,
+ *  since the copies in Maps 2-5 share one id (`fuel_compensation_maps_2_5`). */
 export function pendingEditCount(pending: readonly PendingEdit[], table: RomTableValues): number {
-  return table.id === undefined ? 0 : pending.filter((item) => item.edit.table === table.id).length;
+  if (table.id === undefined) return 0;
+  return pending.filter(
+    (item) => item.edit.table === table.id && (item.edit.slot ?? null) === table.slot,
+  ).length;
 }
 
 /** One table of one slot, for picking between them: a table id is shared by
@@ -385,12 +386,13 @@ export function buildEdits(
   op: RomEditOperation,
 ): BuildResult {
   if (!isEditableTable(table) || table.id === undefined) {
-    return table.slot !== SIM_SLOT && table.slot !== null
+    // The slot first, as `rom_editor._editable` checks it.
+    return !isSimulatedSlot(table)
       ? refuse(
           "slot_not_simulated",
           `${table.name} slot ${table.slot}: the simulator runs Map ${SIM_SLOT} only`,
         )
-      : refuse("table_not_editable", `${table.name} is not editable here`);
+      : refuse("table_not_editable", `the ROM map does not mark ${table.name} editable`);
   }
   const rows = table.raw.length;
   const cols = table.raw[0]?.length ?? 0;

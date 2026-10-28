@@ -21,6 +21,7 @@ import {
   describeOperation,
   duplicateCells,
   isEditableTable,
+  isSimulatedSlot,
   isViewableTable,
   loadEditorState,
   pendingCellSet,
@@ -131,8 +132,9 @@ const NO_CHANNELS = new Map<string, ChannelSnapshot>();
 /** Engine Tuning ▸ ROM Editor (W09.3), and since 2026-10-26 the one page for
  *  viewing ROM tables too (it absorbed ROM Maps): pick a stored image, look at
  *  every table its map declares but the axes, shaded low to high, edit the
- *  fuel chain and timing trims in Map 1, preview the result, download the edit
- *  spec.
+ *  tables `rom_map.yaml` marks `editable` (a slotted one in Map 1, the slot
+ *  the simulator runs), preview the result, download the edit spec when every
+ *  edited table is verified.
  *
  *  Loaded, the image is a one-line header (name, sha, chips, Open another
  *  ROM…, Recent ▾) over three views (W10): Tables (a tree grouped as
@@ -674,9 +676,9 @@ function Workspace({
               ) : (
                 <p role="note" className="text-xs text-fg-dim">
                   Viewing only:{" "}
-                  {table.slot !== null && table.slot !== SIM_SLOT
+                  {!isSimulatedSlot(table)
                     ? `edits and the simulator cover Map ${SIM_SLOT} only.`
-                    : `${table.name} is not one of the tables edited here.`}
+                    : `the ROM map does not mark ${table.name} editable.`}
                 </p>
               )}
               {maskBits !== null && (
@@ -764,9 +766,10 @@ function Workspace({
               <PreviewResult
                 preview={preview.data}
                 baseTables={baseTables}
-                onDownload={() =>
-                  downloadText(preview.data.spec_yaml, specFileName(label), "application/x-yaml")
-                }
+                onDownload={() => {
+                  if (preview.data.spec_yaml === null) return;
+                  downloadText(preview.data.spec_yaml, specFileName(label), "application/x-yaml");
+                }}
               />
             )}
           </div>

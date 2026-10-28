@@ -276,6 +276,7 @@ tables:
     kind: fuel_targets
     name: Fuel Targets
     group: fuel
+    editable: true
     slot_offset: 0x220
     slots: [1]
     rows: 8
@@ -387,6 +388,7 @@ tables:
     kind: timing_trim_a
     name: Timing Main (trim A)
     group: ignition
+    editable: true
     slot_offset: 0x020
     slots: [1]
     rows: 16
@@ -462,6 +464,7 @@ tables:
     kind: timing_trim_b
     name: Timing High Det (trim B)
     group: ignition
+    editable: true
     slot_offset: 0x120
     slots: [1]
     rows: 16
@@ -965,6 +968,7 @@ tables:
     kind: fuel_compensation
     name: Fuel Compensation
     group: fuel
+    editable: true
     slot_offset: 0x660
     slots: [1]
     rows: 16
@@ -1160,6 +1164,7 @@ tables:
     kind: k_constant
     name: K (injector constant)
     group: fuel
+    editable: true
     slot_offset: 0x762
     rows: 1
     cols: 1

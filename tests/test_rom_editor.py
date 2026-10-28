@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import dataclasses
 import json
 import os
 import pickle
@@ -33,7 +34,7 @@ from src.analysis.ecu_application import ApplicationModelRefusalError
 from src.analysis.fuel_plant import FuelPlantRefusalError, plant_qualification
 from src.analysis.paired_scenarios import OUTPUTS, SimKit
 from src.analysis.paired_steady import TRIM_AUTHORITY_UNDECODED
-from src.analysis.rom_edit_spec import build_candidate, load_edit_spec
+from src.analysis.rom_edit_spec import build_candidate, load_edit_spec, parse_edit_spec
 from src.analysis.rom_effects import RomEffectRefusalError, compare_roms
 from src.analysis.rom_image import ImageFormatError, revision_match, sha256_hex
 from src.analysis.rom_levers import classify_edit
@@ -253,7 +254,9 @@ def test_a_preview_names_the_lever_and_says_what_blocks_a_number(
     assert levers["schema_version"] == 1 and levers["regime"] is None
     assert levers["messages"] and all(isinstance(m, str) for m in levers["messages"])
     candidate = build_candidate(
-        rom_editor.editor_spec(rom_editor.library_base(image, matched), "levers", [edit]),
+        rom_editor.editor_spec(
+            rom_editor.library_base(image, matched), "levers", [edit], kit.rom_map
+        ),
         kit.rom_map,
         rom_editor.library_base(image, matched),
         model=kit.model,
@@ -292,20 +295,83 @@ def test_an_edit_across_two_tables_names_both_levers_and_travels_through_the_job
     ), job["levers"]["messages"]
 
 
-def test_a_vehicle_with_no_declared_simulator_plant_is_refused_a_preview_by_name(
+def test_a_vehicle_with_no_declared_simulator_previews_from_its_map_and_says_so(
     kit_and_image: tuple[SimKit, bytes], matched: dict[str, Any], tmp_path: Path
 ) -> None:
-    """The classification qualifies the plant ``sim_kit.yaml`` declares, never
-    the contract's default, so a profile without one cannot be previewed: the
-    refusal names it (a preview that said nothing about the plant would read as
-    "nothing blocks")."""
-    _, image = kit_and_image
+    """Editable is not simulatable: a profile without ``sim_kit.yaml`` (the
+    2013's, today) still previews, built from its map alone. Nothing is traced,
+    and the answer says so rather than reading as "nothing blocks": ``levers``
+    and ``effect`` are None and ``sim_base`` names ``sim_kit_undeclared``."""
+    kit, image = kit_and_image
     profile = tmp_path / "no_sim_kit"
     shutil.copytree(PROFILE, profile, ignore=shutil.ignore_patterns("_candidates", "_prior"))
     (profile / "sim_kit.yaml").unlink()
     params = _params(image, tmp_path, matched, profile_dir=str(profile), label="x", edits=[FC_EDIT])
+    preview = rom_editor.run_job("rom_preview", params)
+    assert "refused" not in preview, preview
+    assert preview["levers"] is None
+    assert preview["provenance"]["effect"] is None and preview["provenance"]["ranges"] == []
+    assert preview["sim_base"] == {
+        "ok": False,
+        "status": "matched",
+        "revision": matched["revision"],
+        "reason": "sim_kit_undeclared",
+    }
+    # The same cells as the traced preview: only the reach is missing.
+    traced = rom_editor.preview_edits(image, matched, "x", [FC_EDIT], PROFILE, kit=kit)
+    assert preview["provenance"]["cells"] == traced["provenance"]["cells"]
+    assert preview["candidate_sha256"] == traced["candidate_sha256"]
+    assert preview["spec_yaml"] == traced["spec_yaml"] and preview["export"]["ok"] is True
+    # A declared kit that is broken is still refused by name, never degraded.
+    (profile / "sim_kit.yaml").write_text("not_a_field: 1\n")
     refused = rom_editor.run_job("rom_preview", params)["refused"]
-    assert (refused["kind"], refused["reason"]) == ("simulation", "sim_kit_undeclared")
+    assert refused["reason"] == "sim_kit_invalid"
+
+
+def _kit_with(kit: SimKit, table_id: str, **fields: Any) -> SimKit:
+    """``kit`` with one table of its map changed (``editable``, ``confidence``)."""
+    tables = [t.model_copy(update=fields) if t.id == table_id else t for t in kit.rom_map.tables]
+    return dataclasses.replace(kit, rom_map=kit.rom_map.model_copy(update={"tables": tables}))
+
+
+def test_the_map_decides_what_is_editable(
+    kit_and_image: tuple[SimKit, bytes], matched: dict[str, Any]
+) -> None:
+    """``editable: true`` in ``rom_map.yaml`` is the only list: unmarking Fuel
+    Comp refuses it by name, with no table id written in the editor's code."""
+    kit, image = kit_and_image
+    assert kit.rom_map.table("fuel_compensation").editable
+    unmarked = _kit_with(kit, "fuel_compensation", editable=False)
+    assert (
+        _reason(rom_editor.preview_edits, image, matched, "x", [FC_EDIT], PROFILE, kit=unmarked)
+        == "table_not_editable"
+    )
+    # An id the map lacks keeps resolution's own reason.
+    unknown = [{"table": "no_such_table", "all": True, "add_raw": 1}]
+    assert (
+        _reason(rom_editor.preview_edits, image, matched, "x", unknown, PROFILE, kit=kit)
+        == "table_unknown"
+    )
+
+
+def test_an_edit_to_an_unverified_table_previews_but_is_never_exported(
+    kit_and_image: tuple[SimKit, bytes], matched: dict[str, Any]
+) -> None:
+    """``confidence: verified`` on every edited table, or no ``spec_yaml``:
+    the preview still shows the cells, and ``export`` names the table."""
+    kit, image = kit_and_image
+    inferred = _kit_with(kit, "k_constant", confidence="inferred")
+    preview = rom_editor.preview_edits(
+        image, matched, "x", [FC_EDIT, K_EDIT], PROFILE, kit=inferred
+    )
+    assert preview["provenance"]["cells"]
+    assert preview["spec_yaml"] is None
+    assert preview["export"]["ok"] is False
+    assert preview["export"]["reason"] == "table_not_verified"
+    assert preview["export"]["tables"] == ["k_constant"]
+    spec = parse_edit_spec(preview["spec"])
+    assert _reason(rom_editor.spec_yaml, spec, inferred.rom_map) == "table_not_verified"
+    assert rom_editor.spec_yaml(spec, kit.rom_map).startswith("# CANary ROM Editor edit spec")
 
 
 def test_an_unrecorded_base_previews_by_file_and_says_why_it_cannot_simulate(

@@ -705,16 +705,18 @@ def _provenance(
     base: BaseImage,
     image: bytes,
     cells: Sequence[Mapping[str, Any]],
-    report: EffectReport,
-    slot_source: str,
+    report: EffectReport | None,
+    slot_source: str | None,
     spec: EditSpec | None = None,
     spec_edits: Sequence[dict[str, Any]] = (),
     edit_set_sha256: str | None = None,
     candidate_file: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One shape for both routes: the changed cells (old -> new raw) and the
-    changed ranges with their reach, whichever route made the bytes."""
-    plain = report.to_dict()
+    changed ranges with their reach, whichever route made the bytes. With no
+    ``report`` (:func:`build_untraced_candidate`) the reach is unknown, so
+    ``ranges`` is empty and ``effect`` is None, never an empty reach."""
+    plain = None if report is None else report.to_dict()
     return {
         "tool": TOOL,
         "tool_version": TOOL_VERSION,
@@ -735,8 +737,10 @@ def _provenance(
         "edit_set_sha256": edit_set_sha256,
         "candidate_file": candidate_file,
         "cells": sorted((_cell_record(c) for c in cells), key=lambda c: c["address"]),
-        "ranges": plain["ranges"],
-        "effect": {
+        "ranges": [] if plain is None else plain["ranges"],
+        "effect": None
+        if report is None or plain is None
+        else {
             "outcome": report.outcome,
             "slot": report.slot,
             "slot_source": slot_source,
@@ -799,6 +803,32 @@ def build_candidate(
     )
 
 
+def build_untraced_candidate(spec: EditSpec, rom_map: RomMap, base: BaseImage) -> Candidate:
+    """``spec`` applied to ``base`` with the map alone, for a vehicle with no
+    application model to trace it through (the ROM Editor on a profile with no
+    simulator). The cells are as :func:`build_candidate` makes them; the
+    provenance's ``effect`` is None and its ``ranges`` empty, because nothing
+    says what the changed bytes reach."""
+    _check_base(spec, base)
+    resolution = _resolve(spec, rom_map, base.image)
+    made = make_candidate(base.image, rom_map, resolution.cells, base_label=base.label)
+    return Candidate(
+        image=made.image,
+        provenance=_provenance(
+            route="edit_spec",
+            label=spec.label,
+            base=base,
+            image=made.image,
+            cells=made.provenance["edits"],
+            report=None,
+            slot_source=None,
+            spec=spec,
+            spec_edits=resolution.records,
+            edit_set_sha256=made.provenance["edit_set_sha256"],
+        ),
+    )
+
+
 def load_candidate_file(
     path: Path,
     rom_map: RomMap,
@@ -846,6 +876,7 @@ __all__ = [
     "EditSpecRefusalError",
     "Region",
     "build_candidate",
+    "build_untraced_candidate",
     "load_candidate_file",
     "load_edit_spec",
     "parse_edit_spec",

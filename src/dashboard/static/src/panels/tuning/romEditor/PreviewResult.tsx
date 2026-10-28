@@ -60,18 +60,21 @@ export function PreviewResult({
   const effect = provenance.effect;
   const decoded = (table: RomTableValues | undefined, row: number, col: number) =>
     table?.decoded ? formatDecoded(table.decoded[row]?.[col] ?? null) : null;
+  const changedBytes =
+    effect === null
+      ? ""
+      : `, in ${effect.changed_bytes} ${effect.changed_bytes === 1 ? "byte" : "bytes"}`;
   return (
     <div className="space-y-4" aria-label="Preview result" role="region">
       <p className="text-sm text-fg-dim">
-        {provenance.cells.length} {provenance.cells.length === 1 ? "cell" : "cells"} changed, in{" "}
-        {effect.changed_bytes} {effect.changed_bytes === 1 ? "byte" : "bytes"}. Spec{" "}
-        <span className="font-num">{preview.spec_sha256.slice(0, 12)}</span>, candidate{" "}
-        <span className="font-num">{preview.candidate_sha256.slice(0, 12)}</span>. The candidate is
-        not flashable and stays in the simulator: there is no image to download. Only the spec is
-        offered.
+        {provenance.cells.length} {provenance.cells.length === 1 ? "cell" : "cells"} changed
+        {changedBytes}. Spec <span className="font-num">{preview.spec_sha256.slice(0, 12)}</span>,
+        candidate <span className="font-num">{preview.candidate_sha256.slice(0, 12)}</span>. The
+        candidate is not flashable and stays in the simulator: there is no image to download. Only
+        the spec is offered.
       </p>
 
-      <LeverMessages levers={preview.levers} />
+      {preview.levers && <LeverMessages levers={preview.levers} />}
 
       {preview.tables.map((table) => {
         const base = baseTables.find((item) => sameTable(item, table.id ?? "", table.slot ?? null));
@@ -134,7 +137,12 @@ export function PreviewResult({
 
       <section aria-label="Reached outputs" className="space-y-1">
         <h3 className="text-base font-semibold">What it reaches</h3>
-        {effect.changed_nodes.length === 0 ? (
+        {effect === null ? (
+          <p className="text-sm text-fg-dim">
+            Not traced: this vehicle has no simulator, so nothing says what the changed bytes reach.
+            That is not the same as reaching nothing.
+          </p>
+        ) : effect.changed_nodes.length === 0 ? (
           <p className="text-sm text-fg-dim">
             The change feeds no node of the application model ({effect.outcome}).
           </p>
@@ -147,7 +155,7 @@ export function PreviewResult({
             ))}
           </ul>
         )}
-        {effect.moved_lookups.length > 0 && (
+        {effect !== null && effect.moved_lookups.length > 0 && (
           <p className="text-xs text-fg-dim">
             {effect.moved_lookups.length}{" "}
             {effect.moved_lookups.length === 1 ? "lookup is" : "lookups are"} read at a moved
@@ -156,9 +164,17 @@ export function PreviewResult({
         )}
       </section>
 
-      <button type="button" className={buttonClass} onClick={onDownload}>
-        Download spec
-      </button>
+      {preview.spec_yaml === null ? (
+        <p role="note" className="text-sm text-fg-dim">
+          No spec to download: {preview.export.tables.join(", ")}{" "}
+          {preview.export.tables.length === 1 ? "is" : "are"} not verified in the ROM map, and an
+          edit to an unverified table can be previewed but never exported.
+        </p>
+      ) : (
+        <button type="button" className={buttonClass} onClick={onDownload}>
+          Download spec
+        </button>
+      )}
     </div>
   );
 }

@@ -78,6 +78,7 @@ function previewFor(request: RomEditPreviewRequest): RomEditPreview {
     tool_version: "1",
     spec: { label: request.label },
     spec_yaml: SPEC_YAML,
+    export: { ok: true, reason: null, message: null, tables: [] },
     spec_sha256: "5".repeat(64),
     candidate_sha256: "c".repeat(64),
     provenance: {

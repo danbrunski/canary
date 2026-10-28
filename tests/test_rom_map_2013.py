@@ -13,6 +13,7 @@ import struct
 import numpy as np
 import pytest
 
+from src.analysis import rom_editor
 from src.analysis.rom_image import (
     checksum_values,
     checksum_verdict,
@@ -137,3 +138,31 @@ def test_the_shared_backup_recipe_reads_exactly_this_image(rom_map: RomMap) -> N
         REPO / "data" / "platforms" / "nissan-xterra-n50" / ROM_BACKUP_FILE, rom_map
     )
     assert recipe.read.size == rom_map.image_size
+
+
+def test_its_single_copies_are_editable_and_preview_without_a_simulator(
+    rom_map: RomMap,
+) -> None:
+    """The 2008's editable tables where this map has them (no K yet), each a
+    single copy (``slot: null``). The profile has no simulator, so a preview is
+    built from the map alone; nothing is verified, so its spec is not exported."""
+    image = _synthetic(rom_map)
+    payload = tables_payload(image, rom_map)["tables"]
+    assert {t["id"]: t["slot"] for t in payload if t["editable"]} == {
+        "fuel_targets": None,
+        "timing_trim_a": None,
+        "timing_trim_b": None,
+        "fuel_compensation": None,
+    }
+    assert not (PROFILE_2013 / "sim_kit.yaml").exists()
+    match = {"status": "unrecognised", "revision": None, "reference": None}
+    edit = {"table": "fuel_compensation", "cells": [[0, 0]], "add_raw": 1}
+    preview = rom_editor.preview_edits(image, match, "2013 FC +1", [edit], PROFILE_2013)
+    assert [
+        (c["table"], c["slot"], c["old"], c["new"]) for c in preview["provenance"]["cells"]
+    ] == [("fuel_compensation", None, 0x80, 0x81)]
+    assert preview["levers"] is None and preview["provenance"]["effect"] is None
+    assert preview["sim_base"]["reason"] == "sim_kit_undeclared"
+    assert preview["spec_yaml"] is None
+    assert preview["export"]["reason"] == "table_not_verified"
+    assert preview["export"]["tables"] == ["fuel_compensation"]

@@ -88,8 +88,22 @@ export interface RomEditProvenance {
   candidate_sha256: string;
   spec_sha256: string | null;
   cells: RomEditedCell[];
+  /** Empty when `effect` is null. */
   ranges: Record<string, unknown>[];
-  effect: RomEditEffect;
+  /** Null when nothing traced the edit: a vehicle with no simulator
+   *  (`sim_base.reason` `sim_kit_undeclared`). Never an empty reach. */
+  effect: RomEditEffect | null;
+}
+
+/** Whether the spec may be exported (`rom_editor.spec_export`): only an edit
+ *  to tables the map has `confidence: verified`. */
+export interface RomSpecExport {
+  ok: boolean;
+  /** `table_not_verified` when not ok. */
+  reason: string | null;
+  message: string | null;
+  /** The edited tables that are not verified. */
+  tables: string[];
 }
 
 /** Whether the base can be simulated (`rom_editor.sim_base`). `ok` is true
@@ -98,7 +112,8 @@ export interface RomSimBase {
   ok: boolean;
   status?: string | null;
   revision: string | null;
-  /** `base_not_a_recorded_revision` when not ok. */
+  /** `sim_kit_undeclared` (the vehicle has no simulator) or
+   *  `base_not_a_recorded_revision` when not ok. */
   reason: string | null;
 }
 
@@ -172,15 +187,18 @@ export interface RomEditPreview {
   tool_version: string;
   /** The `EditSpec` as JSON. */
   spec: Record<string, unknown>;
-  /** The spec as YAML: what "Download spec" saves. */
-  spec_yaml: string;
+  /** The spec as YAML: what "Download spec" saves. Null when an edited
+   *  table is not verified (`export` says why). */
+  spec_yaml: string | null;
+  export: RomSpecExport;
   spec_sha256: string;
   candidate_sha256: string;
   provenance: RomEditProvenance;
   /** The edited tables after the edits, in the `GET …/tables` shape. */
   tables: RomTableValues[];
-  /** Which lever the edit pulls and what blocks a number (E09.14b). */
-  levers: RomLevers;
+  /** Which lever the edit pulls and what blocks a number (E09.14b). Null
+   *  when the vehicle has no simulator to classify it with. */
+  levers: RomLevers | null;
   sim_base: RomSimBase;
 }
 
@@ -667,12 +685,15 @@ export interface RomSimResult {
   learned_state?: Record<string, unknown>;
   provenance: SimProvenance;
   design: SimDesignSummary;
-  /** The preview's provenance: what the edits changed in the candidate. */
-  candidate: RomEditProvenance;
+  /** The preview's provenance: what the edits changed in the candidate. A
+   *  simulation always traces it, so its `effect` is never null. */
+  candidate: RomEditProvenance & { effect: RomEditEffect };
   cells: SimCellTable;
   /** The ECU-side ignition timing change (E09.7), on every result. */
   ignition_timing: IgnitionTimingBlock;
   spec_yaml: string | null;
+  /** As the preview's: why `spec_yaml` is null. */
+  export?: RomSpecExport | null;
   spec_sha256?: string;
 }
 

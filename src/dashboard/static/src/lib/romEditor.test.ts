@@ -10,6 +10,7 @@ import {
   decodeParams,
   duplicateCells,
   isEditableTable,
+  pendingEditCount,
   loadEditorState,
   maskedRawForValue,
   moveSelection,
@@ -238,7 +239,7 @@ describe("buildEdits", () => {
     ).toMatchObject({ ok: false, reason: "selection_outside_table" });
   });
 
-  it("offers only the fuel chain and the timing trims in Map 1", () => {
+  it("offers the tables the map marks editable, a slotted one in Map 1 only", () => {
     const map2 = TABLES.tables[2];
     expect(isEditableTable(fuelTargets)).toBe(true);
     expect(isEditableTable(fuelComp)).toBe(true);
@@ -254,12 +255,53 @@ describe("buildEdits", () => {
       ok: false,
       reason: "slot_not_simulated",
     });
-    const axis: RomTableValues = { ...fuelTargets, id: "throttle_area_curve", slot: null };
-    expect(isEditableTable(axis)).toBe(false);
-    expect(buildEdits(axis, sel([0, 0], [0, 0]), { kind: "set_raw", raw: 130 })).toMatchObject({
+    // K is editable in every slot of the map; only Map 1's copy is simulated.
+    const k3: RomTableValues = { ...kConstant, slot: 3 };
+    expect(isEditableTable(k3)).toBe(false);
+    expect(buildEdits(k3, sel([0, 0], [0, 0]), { kind: "set_raw", raw: 130 })).toMatchObject({
+      ok: false,
+      reason: "slot_not_simulated",
+    });
+    const unmarked: RomTableValues = {
+      ...fuelTargets,
+      id: "throttle_area_curve",
+      slot: null,
+      editable: false,
+    };
+    expect(isEditableTable(unmarked)).toBe(false);
+    expect(buildEdits(unmarked, sel([0, 0], [0, 0]), { kind: "set_raw", raw: 130 })).toMatchObject({
       ok: false,
       reason: "table_not_editable",
     });
+    // No table id is listed in the page: any id the map marks is offered.
+    const renamed: RomTableValues = { ...fuelTargets, id: "some_other_table" };
+    expect(isEditableTable(renamed)).toBe(true);
+    expect(isEditableTable({ ...fuelTargets, editable: false })).toBe(false);
+  });
+
+  it("counts a pending edit on its own copy only, not on every copy sharing the id", () => {
+    const copy = (slot: number): RomTableValues => ({ ...fuelComp, id: "shared_id", slot });
+    const pending = (slot: number | null): PendingEdit => ({
+      id: `p${slot}`,
+      summary: "add 1",
+      edit: { table: "shared_id", slot, cells: [[0, 0]], add_raw: 1 },
+      tableName: "Fuel Compensation",
+      chain: null,
+    });
+    const list = [pending(2), pending(2), pending(3)];
+    expect(pendingEditCount(list, copy(2))).toBe(2);
+    expect(pendingEditCount(list, copy(3))).toBe(1);
+    expect(pendingEditCount(list, copy(4))).toBe(0);
+    expect(pendingEditCount([pending(null)], { ...fuelComp, id: "shared_id", slot: null })).toBe(1);
+  });
+
+  it("offers a single-copy table, as on a stock image without map slots", () => {
+    const stock: RomTableValues = { ...fuelComp, slot: null };
+    expect(isEditableTable(stock)).toBe(true);
+    expect(isEditableTable({ ...stock, role: "axis" })).toBe(false);
+    const built = buildEdits(stock, sel([0, 0], [0, 0]), { kind: "add_raw", delta: 1 });
+    expect(built).toMatchObject({ ok: true });
+    expect(built.ok && built.edits).toMatchObject([{ table: "fuel_compensation", slot: null }]);
   });
 });
 

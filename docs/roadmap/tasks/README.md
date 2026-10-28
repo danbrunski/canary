@@ -12,7 +12,10 @@ every non-axis table, curves and scalars included, with the groups and short
 names coming from new `group` and `short_name` fields in `rom_map.yaml`.
 Part C (W10.14–W10.16, the same day) drops the Map slot select: a slotted
 table is one family in the tree over its Map 1–5 copies, the 35 single-copy
-tables stand alone, and Editable / View only / All narrows the list. ROM
+tables stand alone, and Editable / View only / All narrows the list. Part D
+(W10.17–W10.19) moves editability into `rom_map.yaml` (`editable: true`),
+lets a vehicle with no simulator (the 2013) preview from its map alone, and
+exports a spec only when every edited table is verified. ROM
 editing and simulation stay in Engine Tuning, because the tuning context ties
 them to Logs.
 

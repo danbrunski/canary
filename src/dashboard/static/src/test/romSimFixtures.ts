@@ -554,6 +554,7 @@ export function timingTrimTable(which: "a" | "b"): RomTableValues {
   const letter = which.toUpperCase();
   return {
     id: `timing_trim_${which}`,
+    editable: true,
     name: `Ignition timing trim ${letter}`,
     label: `Ignition timing trim ${letter} (Map 1)`,
     slot: 1,

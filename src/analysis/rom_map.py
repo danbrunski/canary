@@ -292,6 +292,12 @@ class Table(_Strict):
     group: TableGroup | None = None
     #: The tree's label, for a ``name`` longer than :data:`TREE_LABEL_MAX`.
     short_name: str | None = Field(default=None, min_length=1, max_length=TREE_LABEL_MAX)
+    #: The ROM Editor takes an edit to this table. Whether the simulator then
+    #: reads the edit is the editor's own question (its slot), not the map's;
+    #: an exported edit also needs ``confidence: verified``. Never on a table
+    #: another uses as an axis (:class:`RomMap` checks): a moved breakpoint
+    #: moves every lookup through it.
+    editable: bool = False
 
     @property
     def tree_label(self) -> str:
@@ -481,6 +487,13 @@ class RomMap(_Strict):
             _check_editor_labels(table, by_id)
         _refuse_overlaps(spans, nesting=False, what="tables")
         self._check_tree_labels()
+        axes = self.axis_table_ids()
+        editable_axes = sorted(t.id for t in self.tables if t.editable and t.id in axes)
+        if editable_axes:
+            raise ValueError(
+                f"tables {editable_axes} are axes of other tables and cannot be editable: a "
+                "moved breakpoint moves every lookup through it"
+            )
         constant_ids = [constant.id for constant in self.program_constants]
         clashes = sorted({i for i in constant_ids if constant_ids.count(i) > 1 or i in by_id})
         if clashes:

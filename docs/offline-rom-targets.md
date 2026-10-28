@@ -24,8 +24,14 @@ Main trim A, Timing High Det trim B), the base timing maps and the like. A
 table UpRev keeps a copy of in each map slot is one family in the table tree,
 opened to pick **Map 1** to **Map 5**; a table with one copy stands alone.
 **Show tables** narrows the tree to the editable tables or the view-only ones.
-Map 1 is the editable slot: edits and the simulator cover Map 1 only, and the
-other slots are for looking at. A table
+Which tables take an edit is the map's word (`editable: true` in
+`rom_map.yaml`). Of a slotted table, Map 1 is the editable copy: edits and the
+simulator cover Map 1 only, and the other slots are for looking at. A table
+with one copy (every table of a stock image without map slots, such as the
+2013's) is edited in place. A vehicle without a simulator still previews an
+edit, without saying what it reaches. **Download spec** appears only when
+every edited table is `confidence: verified`; an edit to an inferred table is
+previewed but never exported. A table
 whose decode is unconfirmed is shown by its raw counts, with its confidence
 and evidence named. Titles and axes follow UpRev's tuning guide pp. 9–10; the
 axis labels the editor shows are labels only, and every edit and the simulator
