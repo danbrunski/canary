@@ -529,6 +529,17 @@ describe("ROM Library page — list, memory map, regions and tables", () => {
     );
   });
 
+  it("names the profile whose map reads the image, or that none does", async () => {
+    withEntries([
+      { ...ENTRY_TUNED, map_profile: "nissan-xterra-2013" },
+      { ...ENTRY_K106, map_profile: null },
+    ]);
+    render(<RomLibraryPage token="t" status={null} />);
+    expect(await screen.findByText("nissan-xterra-2013")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "k106.bin" }));
+    expect(await screen.findByText("none describes this calibration")).toBeVisible();
+  });
+
   it("flags an image whose own vector table points past its end, and explains it", async () => {
     const summary =
       "the image points past its end (0x0FFFFF): the vector table at 0x020004 to 0x00120000, so the flash is larger than the 1,048,576 bytes read";

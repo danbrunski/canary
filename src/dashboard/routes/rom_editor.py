@@ -21,8 +21,9 @@ so they register after it) and all requiring the control token. Each is a body o
   pool, like the preview.
 * ``GET /control/rom/editor/typical-values`` -- the vehicle's declared typical
   values for the Simulate form's "Fill typical values" button (W09.11), each with
-  its source; ``409 typical_values_undeclared`` / ``typical_values_invalid`` when the
-  vehicle declares none or the file is broken. A read of one small file: it runs in
+  its source (``?sha=``: the vehicle whose map reads that image); ``409
+  typical_values_undeclared`` / ``typical_values_invalid`` when the vehicle
+  declares none or the file is broken. A read of one small file: it runs in
   the thread pool and changes no request field (the 23-field ``SimRequest`` has no
   defaults, and the page only fills its form with these).
 
@@ -34,6 +35,11 @@ refusal classes take ``(reason, message)`` and do not survive pickling, so
 pool and answer 503. The preview goes through the same ``run_job`` in the
 thread pool, so one converter serves both routes and every class in
 :data:`src.analysis.rom_editor.REFUSALS` is a 400 ``edit_refused``, never a 500.
+
+Every route reads an image with the profile ``RomLibrary.map_for`` picks for
+it: the active vehicle on a Pi, the one whose map names its calibration on a
+desk or a companion (``daemon.rom_map_lookup``). Map, flash history, simulator
+kit and typical values all come from that one profile.
 
 Order of checks on simulate: 404 / 409-no-map, then the base (an unrecorded one
 is a 400 before anything is deferred or spawned: it is a fact about the request,
@@ -47,6 +53,7 @@ the ECU.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -55,9 +62,10 @@ from starlette.concurrency import run_in_threadpool
 
 from src.analysis import rom_editor
 from src.analysis.rom_editor import SimRequest
+from src.analysis.rom_map import ROM_MAP_FILE
 from src.analysis.sim_contract import SimulationRefusalError
 from src.config import CanaryConfig
-from src.control.rom_library import RomLibrary, RomNotFoundError, valid_sha
+from src.control.rom_library import RomLibrary, RomMapLookupError, RomNotFoundError, valid_sha
 from src.control.workbench_jobs import WorkbenchRefusedError, capture_deferral, run_off_loop
 from src.dashboard.security import control_auth_dependency
 
@@ -128,29 +136,40 @@ def register_rom_editor_routes(
         )
     authorize = control_auth_dependency(resolved_control_token)
 
-    def entry_state(sha: str) -> dict[str, Any]:
-        """The library entry's ``revision_match``; 404 unknown sha, 409 when the
-        vehicle has no map (as ``GET .../tables``). Blocking."""
+    def image_profile(sha: str) -> Path:
+        """The profile whose map reads the entry (``RomLibrary.map_for``): its
+        map, flash history, simulator kit and typical values are the ones used.
+        404 unknown sha, 409 when no profile has a map (as ``GET .../tables``),
+        422 when two maps name the calibration. Blocking."""
         if not valid_sha(sha):
             raise _not_found(sha)
         try:
-            library.image(sha)
+            image = library.image(sha)
         except (RomNotFoundError, FileNotFoundError) as exc:
             raise _not_found(sha) from exc
         try:
-            library.rom_map()
-        except FileNotFoundError as exc:
-            raise _map_unavailable(exc) from exc
-        return library.revision_match(sha)
+            match = library.map_for(image)
+        except RomMapLookupError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if match.rom_map is None:
+            raise _map_unavailable(FileNotFoundError(library.profile_dir / ROM_MAP_FILE))
+        return match.profile_dir
 
-    def job_params(sha: str, revision_match: dict[str, Any], **extra: Any) -> dict[str, Any]:
+    def entry_state(sha: str) -> tuple[Path, dict[str, Any]]:
+        """The entry's profile (:func:`image_profile`) and its ``revision_match``
+        in that profile's flash history. Blocking."""
+        profile = image_profile(sha)
+        return profile, library.revision_match(sha, profile)
+
+    def job_params(sha: str, state: tuple[Path, dict[str, Any]], **extra: Any) -> dict[str, Any]:
         """What ``rom_editor.run_job`` needs, as plain data (``_job_key`` hashes
         it, so an identical click in flight is shared)."""
+        profile, revision_match = state
         return {
             "image_path": str(library.root / f"{sha}.bin"),
             "sha256": sha,
             "revision_match": revision_match,
-            "profile_dir": str(library.profile_dir),
+            "profile_dir": str(profile),
             **extra,
         }
 
@@ -167,14 +186,14 @@ def register_rom_editor_routes(
 
     def export(sha: str, body: PreviewRequest) -> dict[str, Any]:
         """Blocking: the entry checks, the export, the library write."""
-        revision_match = entry_state(sha)
+        profile, revision_match = entry_state(sha)
         try:
             exported = rom_editor.export_edits(
                 library.image(sha),
                 revision_match,
                 body.label,
                 body.edits,
-                library.profile_dir,
+                profile,
                 sha256=sha,
             )
         except ValueError as exc:
@@ -192,7 +211,8 @@ def register_rom_editor_routes(
 
     def simulate_params(sha: str, body: SimRequest) -> dict[str, Any]:
         """Blocking: the entry checks, the base check, the child's params."""
-        revision_match = entry_state(sha)
+        state = entry_state(sha)
+        revision_match = state[1]
         base = rom_editor.sim_base(revision_match)
         if not base["ok"]:
             raise HTTPException(
@@ -204,14 +224,19 @@ def register_rom_editor_routes(
                     "message": _unrecorded_message(revision_match),
                 },
             )
-        return job_params(sha, revision_match, request=body.model_dump(mode="json"))
+        return job_params(sha, state, request=body.model_dump(mode="json"))
 
     @app.get("/control/rom/editor/typical-values", dependencies=[Depends(authorize)])
-    async def get_rom_typical_values() -> dict[str, Any]:
+    async def get_rom_typical_values(sha: str | None = None) -> dict[str, Any]:
         """The vehicle's typical stated values, each with its source, and the
-        fillable fields it leaves empty with the reason. Fills nothing by itself."""
+        fillable fields it leaves empty with the reason. Fills nothing by itself.
+        With ``sha``, the vehicle whose map reads that image (the one its
+        simulation runs on); without, the active vehicle."""
+        profile = (
+            library.profile_dir if sha is None else await run_in_threadpool(image_profile, sha)
+        )
         try:
-            return await run_in_threadpool(rom_editor.typical_values, library.profile_dir)
+            return await run_in_threadpool(rom_editor.typical_values, profile)
         except SimulationRefusalError as exc:
             raise HTTPException(409, {"error": exc.reason, "message": exc.message}) from exc
 

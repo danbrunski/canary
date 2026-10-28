@@ -10,7 +10,7 @@ never imports this module.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from pydantic import PrivateAttr, model_validator
 
@@ -109,6 +109,15 @@ class CanaryConfig(_Strict):
         self.companion = self.companion.model_copy(update={"library_root": root})
         self.collection = self.collection.model_copy(update={"storage_path": root / "sessions"})
         return self
+
+    @property
+    def rom_map_lookup(self) -> Literal["active_profile", "calibration_id"]:
+        """``daemon.rom_map_lookup``, unset resolved by mode: a companion's
+        library holds whatever ROM its user opens, so each image is read with
+        the map that names its calibration; a Pi's holds its own truck's."""
+        if self.daemon.rom_map_lookup is not None:
+            return self.daemon.rom_map_lookup
+        return "calibration_id" if self.companion.enabled else "active_profile"
 
     @model_validator(mode="after")
     def _broadcast_timeout_inside_session_gap(self) -> Self:

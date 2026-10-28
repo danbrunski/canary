@@ -19,7 +19,10 @@ exports a spec only when every edited table is verified. Part E
 (W10.20–W10.22) adds the checksum writer (UpRev's one-cell 2008 edits
 reproduced byte for byte) and Export to library: the edited, checksummed image
 stored as an entry with its provenance, refused for an inferred table, a
-parent whose checksum fails, or a calibration the map does not describe. ROM
+parent whose checksum fails, or a calibration the map does not describe.
+Part F (W10.23–W10.24) lets a desk or companion find an image's map by its
+calibration ID (`daemon.rom_map_lookup`), so the 2008-scoped desk opens the
+2013's ROM with the 2013's map; a Pi keeps its own. ROM
 editing and simulation stay in Engine Tuning, because the tuning context ties
 them to Logs.
 

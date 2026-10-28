@@ -465,6 +465,9 @@ function RomImageView({ token, entry }: { token: string; entry: RomLibraryEntry 
           <Fact term="Calibration">
             {entry.calibration_id ?? "not readable at the declared offset"}
           </Fact>
+          {entry.map_profile !== undefined && (
+            <Fact term="Map">{entry.map_profile ?? "none describes this calibration"}</Fact>
+          )}
           <Fact term="Revision">
             <RevisionChip match={entry.revision_match} />
           </Fact>

@@ -138,7 +138,9 @@ def build_config(
     Overrides, and only these: ``daemon.state_dir`` (with every explicit
     runtime path the sim file names dropped, so S03's re-rooting applies),
     ``collection.storage_path``, ``dashboard.host``/``port``, the replay
-    session (none unless given), ``daemon.control_token_env`` and, with
+    session (none unless given), ``daemon.control_token_env``,
+    ``daemon.rom_map_lookup: calibration_id`` (a desk opens any vehicle's ROM,
+    each with the map that names its calibration) and, with
     ``companion``, the ``companion`` block (enabled; ``library_root`` when
     given, else the config's own default under the state dir, whose
     ``sessions/`` then replaces ``collection.storage_path``). Models stay as
@@ -150,6 +152,7 @@ def build_config(
         daemon.pop(name, None)
     daemon["state_dir"] = str(state)
     daemon["control_token_env"] = TOKEN_ENV
+    daemon["rom_map_lookup"] = "calibration_id"
     collection = raw.setdefault("collection", {})
     collection["storage_path"] = str(state / "sessions")
     collection["replay_session"] = None if replay is None else str(replay.expanduser().resolve())

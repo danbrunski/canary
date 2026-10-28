@@ -544,6 +544,36 @@ match the map."
 **Not in Part E:** an MCP tool for export, and a flash. A flash stays its own
 explicit, per-operation act with the engine off (AGENTS.md).
 
+## Part F — the map by calibration ID (operator, 2026-10-27)
+
+"Find the map by calibration id, not the active profile. The desk and
+companion mode need this; a user's own Pi doesn't."
+
+- [x] **W10.23 — `daemon.rom_map_lookup`.** `active_profile` (a Pi; the
+  default) or `calibration_id`; unset, companion mode resolves it to
+  `calibration_id` (`CanaryConfig.rom_map_lookup`, a property, so a dump and
+  re-validate keeps following the mode). `scripts/canary_desk.py` writes
+  `calibration_id`, companion on or off.
+- [x] **W10.24 — `RomLibrary.map_for(image)`.** Under `calibration_id`, every
+  `data/<slug>/rom_map.yaml` (active first, `_` directories skipped) is asked;
+  the one listing the image's calibration reads it, and its profile's tracked
+  `tune_revisions.yaml`, simulator kit and typical values go with it. None:
+  the active profile, unmapped as before. Two: `RomMapLookupError` naming both
+  files (422), and `test_no_calibration_is_in_two_tracked_maps` keeps the
+  tracked data from offering one. Entries carry `map_profile`; uploads accept
+  a file any profile's map accepts; tables, describe, compare, preview,
+  export and simulate take the image's profile. `GET
+  /control/rom/editor/typical-values?sha=` answers for the image's vehicle,
+  and the Simulate form sends it. The library page shows the Map.
+  *Tests:* `tests/test_rom_map_lookup.py` (the Pi still reads the 2013's ROM
+  as unmapped; a desk reads it with the 2013's map, previews an edit to its
+  single-copy Fuel Comp, gets its typical values refused as undeclared; the
+  flash history is the image profile's; ambiguity refused by file),
+  `test_canary_desk.py`, `RomLibraryPage.test.tsx`.
+
+**Not in Part F:** the backup job and the twin's library still read the
+scoped vehicle's map: both are about the ECU this daemon is connected to.
+
 ## Not in scope
 
 - **A curve drawn as a chart** (the existing `Curve` component) rather than a

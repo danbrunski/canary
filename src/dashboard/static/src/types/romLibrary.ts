@@ -163,6 +163,9 @@ export interface RomLibraryEntry {
   revision_match: RomRevisionMatch;
   /** Why the vehicle's map does not apply to this image, when it does not. */
   map_reason?: string | null;
+  /** The profile whose map describes the image (`daemon.rom_map_lookup`: on a
+   *  desk or companion, the one naming its calibration); null when none does. */
+  map_profile?: string | null;
   /** Null when the vehicle's backup recipe names no vector tables to read. */
   extent?: RomExtentReading | null;
   size: number;

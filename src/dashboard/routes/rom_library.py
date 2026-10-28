@@ -155,6 +155,7 @@ def register_rom_library_routes(
         profile_dir=profile,
         registry=registry,
         extent_spec=lambda: recipe_extent(recipe_file),
+        map_lookup=config.rom_map_lookup,
     )
     job = RomBackupJob(
         recipe_file=recipe_file,

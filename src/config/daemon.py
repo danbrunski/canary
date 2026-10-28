@@ -5,7 +5,7 @@ reads and writes, and the tables that classify those paths (R21).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import Field, model_validator
 
@@ -105,6 +105,14 @@ class DaemonConfig(_Strict):
     #: the Pi, gitignored ``data/control/`` on the laptop, and per vehicle
     #: (``scope_config``).
     rom_library_dir: Path = CONTROL_DIR / "rom_library"
+    #: Which ``rom_map.yaml`` describes a library image. ``active_profile``: the
+    #: vehicle this daemon is scoped to, the only one a Pi in its own truck ever
+    #: reads. ``calibration_id``: whichever profile's map lists the image's
+    #: calibration ID, so a desk (``scripts/canary_desk.py``) or a companion
+    #: opens another vehicle's ROM with that vehicle's map. Unset (``None``):
+    #: ``calibration_id`` in companion mode, else ``active_profile``. Read it
+    #: as ``CanaryConfig.rom_map_lookup``, which resolves that.
+    rom_map_lookup: Literal["active_profile", "calibration_id"] | None = None
     #: Investigation memory (E01): evidence minted by analysis tools,
     #: investigations, predictions, interventions and outcomes, append-only
     #: (``src.evidence.ledger.MemoryLedger``). Per vehicle (``scope_config``);

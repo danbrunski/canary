@@ -264,7 +264,7 @@ Control endpoints:
 | `GET /control/rom/compare?a=<sha>&b=<sha>` | changed byte ranges a -> b merged with a 16-byte gap, each labelled with the regions and tables it overlaps; table ranges carry per-cell old/new values, decoded where declared (W08.5) |
 | `POST /control/rom/library/{sha}/edits/preview` | ROM Editor preview (W09.2): body `{label, edits}`, `edits` being E08.1 edit dicts on the tables `rom_map.yaml` marks `editable` (the 2008: the fuel chain and timing trims), a slotted copy in slot 1 only. A vehicle without a simulator previews from its map alone; `spec_yaml` is null unless every edited table is verified (`export` says why). Returns the edit spec (JSON, YAML, sha256), the candidate's sha256, its E08.1 provenance (cells old -> new, changed ranges, reach), the edited tables' after values and `levers` (which lever the edit pulls and what blocks a number per output, E09.14b). Runs in the thread pool, never deferred; nothing is stored. 404 unknown sha, 409 no map, 400 `edit_refused`, 422 body. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
 | `POST /control/rom/library/{sha}/simulate` | ROM Editor simulate (W09.2): body is one `SimRequest`, every field required (nothing is defaulted). Runs the edits on a recorded base over a stated rpm x load grid, base vs candidate, paired Monte Carlo draws, aggregated per cell. In the workbench child (job `rom_sim`): `409 analysis_deferred` while a capture records, `409 analysis_busy` while another child runs, `503 analysis_unavailable`; a refusal is `400 sim_refused`; 404 unknown sha, 409 no map, 422 body. Nothing is stored; the candidate never leaves the simulator. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
-| `GET /control/rom/editor/typical-values` | ROM Editor typical values (W09.11): the vehicle's declared typical values for the Simulate form's stated environment and learned state (`data/<vehicle>/sim_typical_values.yaml`), each with its `kind` (`typical`, or `placeholder` for a number the simulator reads nowhere) and its `source`, plus any fillable field it leaves empty with a `reason`. No image needed, nothing stored, and it changes no request field: the page only fills its form with these, visibly, when the operator presses *Fill typical values*. 409 `typical_values_undeclared` when the vehicle has no file, 409 `typical_values_invalid` when it fails its schema. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
+| `GET /control/rom/editor/typical-values?sha=<image>` | ROM Editor typical values (W09.11): the declared typical values of the vehicle whose map reads `sha` (the active vehicle without it) for the Simulate form's stated environment and learned state (`data/<vehicle>/sim_typical_values.yaml`), each with its `kind` (`typical`, or `placeholder` for a number the simulator reads nowhere) and its `source`, plus any fillable field it leaves empty with a `reason`. Nothing stored, and it changes no request field: the page only fills its form with these, visibly, when the operator presses *Fill typical values*. 409 `typical_values_undeclared` when the vehicle has no file, 409 `typical_values_invalid` when it fails its schema. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
 | `GET /control/rom/backup` / `POST /control/rom/backup` / `POST /control/rom/backup/cancel` | ECU flash backup job (W08.7), read-only: state + live preconditions / start (202, or 409 naming every refusing precondition) / cancel a running read (409 when none runs) |
 
 The frame, every `/analysis/*` route in this table (W04) and the ROM Editor's `simulate` (W09.2) run in the digest's bounded single-flight child and refuse while a capture is recording: `409 {"error": "analysis_deferred", "profile", "message", "laptop_path"}`. A second, different analysis (or a running digest) is `409 analysis_busy`; a child failure is `503 analysis_unavailable`. Calculated load is refused as an axis.
@@ -380,7 +380,7 @@ the plain image).
                "computed": {"sum": "0x...", "xor": "0x..."}, "reason": null,
                "algorithm": "be32_sum_xor"},
   "revision_match": {"revision": "ZS44A-20260920", "status": "matched", "reference": null},
-  "map_reason": null,
+  "map_reason": null, "map_profile": "nissan-xterra-2008",
   "extent": {"verdict": "no_sign", "summary": "nothing points past 0x0FFFFF: ...", "...": "..."},
   "read_meta": null
 }
@@ -392,7 +392,16 @@ the plain image).
 UpRev base, named in `reference`), `unrecognised`, or `unknown` when the flash
 history could not be read (`reason` says why; the image was never compared). `checksum` is `null`, and
 `map_reason` says why, when no map definition covers the image's calibration
-ID. A failing checksum is reported, never refused. `extent` is the image's own
+ID. `map_profile` names the profile whose map describes the image (`null` when
+none does). Which maps are asked is `daemon.rom_map_lookup`: `active_profile`
+(a Pi, and the default) asks only the scoped vehicle's; `calibration_id` (the
+desk, `scripts/canary_desk.py`, and the default in companion mode) asks every
+`data/<slug>/rom_map.yaml` and takes the one listing the image's calibration,
+so a desk scoped to the 2008 reads the 2013's ROM with the 2013's map. That
+profile's tracked `tune_revisions.yaml` is then the flash history
+`revision_match` reads, and the ROM Editor's preview, export, simulate and
+typical values all use that profile. Two maps listing one calibration is a 422
+naming both files. A failing checksum is reported, never refused. `extent` is the image's own
 size check, the backup job's `integrity.extent` (below), computed for every
 image; `null` when the vehicle's backup recipe names no vector tables.
 `read_meta` is the latest ECU read's metadata (below), `null` for uploads.
@@ -968,8 +977,10 @@ thread pool. Exporting writes nothing to the ECU; a flash stays its own act.
 The vehicle's **typical stated values** for the Simulate form's *Fill typical
 values* button (W09.11). They are vehicle facts, so they are data
 (`data/<vehicle>/sim_typical_values.yaml`, `rom_editor.typical_values`), never
-page or code constants, and each value names where it comes from. No `{sha}` and
-no body: nothing here depends on an image, and nothing is stored.
+page or code constants, and each value names where it comes from. `?sha=<image>`
+names the vehicle: the profile whose map reads that library image (the one its
+simulation runs on; the page always sends it). Without it, the active vehicle.
+No body, and nothing is stored.
 
 `200`:
 

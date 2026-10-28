@@ -53,6 +53,14 @@ def test_the_config_is_the_sim_file_with_only_the_named_overrides(tmp_path: Path
 
     assert raw["daemon"]["state_dir"] == str(state)
     assert raw["daemon"]["control_token_env"] == desk.TOKEN_ENV
+    # A desk opens any vehicle's ROM, with its own map, companion or not.
+    assert raw["daemon"]["rom_map_lookup"] == "calibration_id"
+    assert (
+        CanaryConfig.model_validate(
+            desk.build_config(tmp_path / "state", companion=False)
+        ).rom_map_lookup
+        == "calibration_id"
+    )
     # Every explicit runtime path the sim file names is dropped, so S03 re-roots it.
     assert not set(DAEMON_STATE_LAYOUT) & set(raw["daemon"])
     assert raw["collection"]["storage_path"] == str(state / "sessions")

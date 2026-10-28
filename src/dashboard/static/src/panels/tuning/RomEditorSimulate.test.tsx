@@ -35,7 +35,7 @@ const type = (element: HTMLElement, text: string) =>
   fireEvent.change(element, { target: { value: text } });
 const bodyOf = (init?: RequestInit) => (typeof init?.body === "string" ? init.body : "");
 
-const TYPICAL = "/control/rom/editor/typical-values";
+const TYPICAL = `/control/rom/editor/typical-values?sha=${SHA_TUNED}`;
 const SIMULATE = (sha: string) => `/control/rom/library/${sha}/simulate`;
 const PREVIEW = (sha: string) => `/control/rom/library/${sha}/edits/preview`;
 

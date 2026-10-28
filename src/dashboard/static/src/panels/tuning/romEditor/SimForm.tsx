@@ -346,6 +346,7 @@ export function SimFailureAlert({
  *  marked, and Run names whatever is missing. */
 export function SimForm({
   token,
+  sha,
   tables,
   label,
   edits,
@@ -356,6 +357,8 @@ export function SimForm({
 }: {
   /** The control token, for the typical-values request only. */
   token: string;
+  /** The base image: its vehicle's typical values are the ones offered. */
+  sha: string;
   tables: RomTableValues[];
   label: string;
   edits: RomEdit[];
@@ -443,7 +446,7 @@ export function SimForm({
     typicalRequest.current = controller;
     setTypicalState({ kind: "loading" });
     try {
-      const response = await getRomTypicalValues(token, controller.signal);
+      const response = await getRomTypicalValues(token, sha, controller.signal);
       if (controller.signal.aborted) return;
       typicalCache.current = response;
       applyTypical(response);

@@ -820,6 +820,7 @@ function Workspace({
           <div className="space-y-4">
             <SimForm
               token={token}
+              sha={sha}
               tables={baseTables}
               label={label}
               edits={edits}

@@ -286,13 +286,14 @@ export async function simulateRomEdits(
   return requireFields(path, body, ["cells", "caveats", "provenance", "design"]);
 }
 
-/** `GET /control/rom/editor/typical-values` — the vehicle's declared typical
- *  values for the Simulate form's stated environment and learned state, each
- *  with its source (W09.11). Fills nothing by itself. A vehicle that declares
- *  none is a 409 `typical_values_undeclared`, a broken file a 409
+/** `GET /control/rom/editor/typical-values?sha=` — the declared typical values
+ *  of the vehicle whose map reads image `sha` (the one its simulation runs on),
+ *  for the Simulate form's stated environment and learned state, each with its
+ *  source (W09.11). Fills nothing by itself. A vehicle that declares none is a
+ *  409 `typical_values_undeclared`, a broken file a 409
  *  `typical_values_invalid`. */
-export async function getRomTypicalValues(token: string, signal?: AbortSignal) {
-  const path = "/control/rom/editor/typical-values";
+export async function getRomTypicalValues(token: string, sha: string, signal?: AbortSignal) {
+  const path = `/control/rom/editor/typical-values${queryString({ sha })}`;
   const body = await controlJson<RomTypicalValues>(path, token, { signal });
   return requireFields(path, body, ["profile", "file_sha256", "values", "left_empty"]);
 }
