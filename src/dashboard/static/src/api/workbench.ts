@@ -245,7 +245,9 @@ export async function previewRomEdits(
     body: jsonBody(request),
     signal,
   });
-  return requireFields(path, body, ["spec_yaml", "provenance", "tables", "levers", "sim_base"]);
+  // `spec_yaml` and `levers` may be null (an unverified table, a vehicle with
+  // no simulator), so they are not required; `export` says why the first is.
+  return requireFields(path, body, ["provenance", "tables", "sim_base", "export"]);
 }
 
 /** `POST /control/rom/library/{sha}/simulate` — the edits run against the base

@@ -43,12 +43,21 @@ export class UnexpectedResponseError extends Error {
   }
 }
 
+/** The keys of `T` whose type admits neither null nor undefined: the only
+ *  ones `requireFields` may require, since it refuses both. A field the
+ *  daemon may send as null (`levers` from a vehicle with no simulator) is
+ *  then a type error to require, not a page that throws on a valid answer. */
+export type NonNullableKeys<T> = {
+  [K in keyof T]-?: null extends T[K] ? never : undefined extends T[K] ? never : K;
+}[keyof T] &
+  string;
+
 /** Refuse a response missing any of `fields`, so a page can index them
  *  without guarding each one. */
 export function requireFields<T extends object>(
   path: string,
   body: T,
-  fields: readonly (keyof T & string)[],
+  fields: readonly NonNullableKeys<T>[],
 ): T {
   const record: Record<string, unknown> =
     typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
