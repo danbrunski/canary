@@ -537,10 +537,22 @@ describe("ROM Editor page: spec download and no image", () => {
 const LEVERS_HEADING = "What this edit can and cannot show";
 
 /** Select, scale, label and preview, with `levers` as the daemon sent them. */
-async function previewWithLevers(levers: RomLevers | null) {
+/** `"absent"`: a daemon older than E09.14b, whose preview carries no
+ *  `levers` and (older than W10 part D too) no `export`. `null`: a vehicle
+ *  with no simulator, which sends `levers: null` and no reach. */
+async function previewWithLevers(levers: RomLevers | null | "absent") {
   route((init) => {
     const body = previewFor(JSON.parse(bodyOf(init)));
-    return levers === null ? { ...body, levers: undefined } : { ...body, levers };
+    if (levers === "absent") return { ...body, levers: undefined, export: undefined };
+    if (levers === null) {
+      return {
+        ...body,
+        levers: null,
+        provenance: { ...body.provenance, effect: null },
+        sim_base: { ok: false, status: "matched", revision: null, reason: "sim_kit_undeclared" },
+      };
+    }
+    return { ...body, levers };
   });
   const grid = await openFuelComp();
   await applyScale(grid);
@@ -636,11 +648,19 @@ describe("ROM Editor page: what the edit can and cannot show (E09.14b)", () => {
     ).toBeVisible();
   });
 
-  it("refuses a preview that carries no levers, naming the version mismatch, rather than showing an edit unclassified", async () => {
-    await previewWithLevers(null);
-    const alert = await screen.findByText(/response has no levers/);
+  it("refuses a preview from an older daemon, naming the version mismatch, rather than showing an edit unclassified", async () => {
+    await previewWithLevers("absent");
+    const alert = await screen.findByText(/response has no export/);
     expect(alert).toHaveTextContent(/different versions/);
     expect(screen.queryByRole("region", { name: "Preview result" })).not.toBeInTheDocument();
+  });
+
+  it("shows a preview from a vehicle with no simulator as not traced, never as reaching nothing", async () => {
+    await previewWithLevers(null);
+    const result = await screen.findByRole("region", { name: "Preview result" });
+    expect(within(result).getByText(/Not traced: this vehicle has no simulator/)).toBeVisible();
+    expect(within(result).queryByRole("region", { name: LEVERS_HEADING })).toBeNull();
+    expect(within(result).queryByText(/feeds no node/)).toBeNull();
   });
 
   it("still offers no image download or candidate link with the block drawn", async () => {
