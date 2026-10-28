@@ -36,6 +36,7 @@ measurement in hand.
 | R09.5 verifier, inner loop | `1df5e66` | not recorded | `tests/test_can_collector.py::test_collect_can_counts_malformed_frames_without_aborting` (`assert 3 == 4`), 3 of 3 alone — T01.14 |
 | `scripts/ci_gate.sh`, `-n auto` | `b7a82cd` | 11.02 (1-min, at the serial re-run) | `tests/test_background_chunk_publish.py::test_a_disk_that_keeps_failing_is_not_retried_on_every_record` (`assert 2 == 1`), passed serially in 1.4 s; a production bug, not a timing flake — T01.29 |
 | `scripts/ci_gate.sh`, `-n auto` | `6707fc7` | not kept (1-min 4.3, 5-min 7.3 at the serial repeats) | `tests/test_daemon.py::test_run_live_inference_scores_during_replay_despite_engine_off_reading` (`TimeoutError` at its 30 s guard), passed serially in the gate; then failed 2 of 5 alone at 32 s, passed 15 of 15 at load 2.3-3.7 in 1.5 s. A hang, not a slowdown — T01.30 |
+| `scripts/ci_gate.sh` vitest (full dashboard suite) | `7565383` | 5.59 (1-min), 8.47 (5-min) at the serial re-run | `src/panels/tuning/RomEditorPage.test.tsx` › "select, scale 2 % nearest, preview: sends the exact cells and shows the after values" and "renders a refusal by its reason", both at vitest's 5 s default timeout (5.3 s, 5.5 s); the file's 42 tests passed serially in 15 s. Both drive the operation form through `userEvent.type`; the gate ran 503 s against its ~60 s, so the box was busy |
 
   The pre-push hook now re-runs parallel-run failures serially once, and names
   a failure that passes serially as flaky. That keeps the gate usable. It is
