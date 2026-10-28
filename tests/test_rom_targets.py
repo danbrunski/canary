@@ -226,6 +226,43 @@ def test_bad_internal_checksum_and_style(editor):
             editor.definition.checksums.verify(bytes(bad))
 
 
+def _stale(editor: TargetEditor) -> bytes:
+    """The editor's decoded ROM with one covered byte changed and the words left."""
+    rom = bytearray(editor.rom)
+    rom[67] ^= 0x01
+    return bytes(rom)
+
+
+def test_checksum_write_recomputes_both_words_and_touches_nothing_else(editor):
+    checksums = editor.definition.checksums
+    stale = _stale(editor)
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        checksums.verify(stale)
+    written = checksums.write(stale)
+    checksums.verify(written.rom)
+    assert (written.total, written.xor) == checksums.values(stale)
+    assert checksums.stored(written.rom) == (written.total, written.xor)
+    assert written.stored == checksums.stored(editor.rom)
+    changed = {i for i, (a, b) in enumerate(zip(stale, written.rom, strict=True)) if a != b}
+    assert changed and changed <= set(range(8, 16))
+    # Already right: writing again changes nothing.
+    assert checksums.write(written.rom).rom == written.rom
+
+
+def test_checksum_write_refuses_another_checksum_style_and_bad_offsets(editor):
+    checksums = editor.definition.checksums
+    other_style = bytearray(_stale(editor))
+    struct.pack_into(">I", other_style, 16, 0)
+    with pytest.raises(ValueError, match="Unsupported ROM checksum style"):
+        checksums.write(bytes(other_style))
+    with pytest.raises(ValueError, match="Invalid checksum word offsets"):
+        checksums.write(_stale(editor)[:-2])
+    # A word the sum covers would move the sum it was written from.
+    covered = checksums.model_copy(update={"excluded": [8]})
+    with pytest.raises(ValueError, match="distinct and excluded"):
+        covered.write(_stale(editor))
+
+
 def test_cli_dry_run_and_exclusive_bundle(editor, tmp_path, monkeypatch, capsys):
     rom = tmp_path / "source.OsirisROM"
     rom.write_bytes(editor.source)

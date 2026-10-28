@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import struct
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -16,6 +17,18 @@ from src.yaml_load import load_yaml
 
 class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+@dataclass(frozen=True)
+class WrittenChecksums:
+    """What :meth:`Checksums.write` produced."""
+
+    rom: bytes
+    #: The words written, as the ROM stores them (BE32).
+    total: int
+    xor: int
+    #: The (sum, xor) words the input stored: stale ones are what was replaced.
+    stored: tuple[int, int]
 
 
 class Checksums(Strict):
@@ -52,6 +65,31 @@ class Checksums(Strict):
             struct.unpack_from(">I", rom, self.xor_offset)[0],
         ):
             raise ValueError("Internal ROM checksum mismatch")
+
+    def stored(self, rom: bytes) -> tuple[int, int]:
+        """The (sum, xor) words ``rom`` stores."""
+        return (
+            struct.unpack_from(">I", rom, self.sum_offset)[0],
+            struct.unpack_from(">I", rom, self.xor_offset)[0],
+        )
+
+    def write(self, rom: bytes) -> WrittenChecksums:
+        """``rom`` with both checksum words recomputed and written, then
+        re-verified. Every other byte is the input's: the words are excluded
+        from their own sum, so writing them cannot move it. Refuses what
+        :meth:`values` refuses (bad offsets, another checksum style by its
+        markers) and raises if the written image does not verify, so no caller
+        can keep an image with stale or misplaced words."""
+        stored = self.stored(rom)
+        total, xor = self.values(rom)
+        out = bytearray(rom)
+        struct.pack_into(">I", out, self.sum_offset, total)
+        struct.pack_into(">I", out, self.xor_offset, xor)
+        written = bytes(out)
+        self.verify(written)
+        if self.stored(written) != (total, xor):
+            raise ValueError("Checksum words did not land where they are read")
+        return WrittenChecksums(rom=written, total=total, xor=xor, stored=stored)
 
 
 class Definition(Strict):
@@ -215,10 +253,9 @@ class TargetEditor:
                 }
             )
         checksums = self.definition.checksums
-        total, xor = checksums.values(bytes(rom))
-        struct.pack_into(">I", rom, checksums.sum_offset, total)
-        struct.pack_into(">I", rom, checksums.xor_offset, xor)
-        checksums.verify(bytes(rom))
+        written = checksums.write(bytes(rom))
+        rom = bytearray(written.rom)
+        total, xor = written.total, written.xor
         allowed = seen | {
             o + i for o in (checksums.sum_offset, checksums.xor_offset) for i in range(4)
         }
