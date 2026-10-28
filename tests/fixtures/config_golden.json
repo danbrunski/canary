@@ -19893,16 +19893,6 @@
   "src": [
    "src",
    "src.config",
-   "src.config.auxiliary",
-   "src.config.base",
-   "src.config.collection",
-   "src.config.daemon",
-   "src.config.hardware",
-   "src.config.models",
-   "src.config.preprocessing",
-   "src.config.root",
-   "src.config.scoping",
-   "src.config.vehicle",
    "src.lsm6dsox_settings",
    "src.paths",
    "src.yaml_load"
