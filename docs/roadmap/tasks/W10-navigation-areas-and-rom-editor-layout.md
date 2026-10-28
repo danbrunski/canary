@@ -504,6 +504,46 @@ on any table in an exported edit."
 **Not in Part D:** K for the 2013, a 2013 simulator kit, and editing slots
 other than Map 1.
 
+## Part E — the checksum writer and Export (operator, 2026-10-27)
+
+Asked after Part D: "Checksum writer. Recompute, write both words, then
+re-verify. The test case is UpRev's one-cell 2008 edit, where we know the
+right stored words." Then: "Export. Save the edited image as a library entry
+with its provenance: parent sha, edit-spec hash, map and calibration id. It
+downloads through the existing route. Export refuses if an edited table is
+only inferred, the parent image's checksum fails, the calibration doesn't
+match the map."
+
+- [x] **W10.20 — Checksum writer.** `rom_targets.Checksums.write(rom)`:
+  recompute the BE32 sum and xor, write both words, re-verify, refusing what
+  `values()` refuses. `TargetEditor.apply`'s inline copy calls it.
+  *Known answer:* `tests/test_rom_checksums_private_rom.py`, UpRev's two
+  one-cell edits of k106 (Fuel Comp 0xE075F, a word's low byte, sum
+  `F438FCA9` xor `0C3BBAC7`; Fuel Targets 0xE025C, its high byte, `F538FCAA`
+  / `0D3BBAC0`): k106 plus the one cell, written, equals UpRev's decoded file
+  byte for byte. Skips where the operator's files are absent.
+- [x] **W10.21 — Export.** `rom_editor.export_edits` refuses
+  `calibration_not_mapped`, then `parent_checksum_failed`, then the spec's own
+  (`table_not_verified` among them), builds the image from the map alone and
+  writes its checksums. `POST /control/rom/library/{sha}/edits/export` stores
+  it (`source: rom_editor_export`, `export_meta` on the source record and the
+  entry); it downloads through `GET .../download`. The page's Export to library
+  sits beside Download spec, only under a preview whose spec exports, and
+  resets with any new edit. *Tests:* `test_rom_editor_api.py` (an export is
+  a checksummed entry differing from its parent only in the cells and the
+  words, downloaded and verified; each refusal), the private file (the export
+  of each UpRev edit is UpRev's image), `test_rom_map_2013.py` (refused
+  `table_not_verified`), `PreviewResult.test.tsx`, `RomEditorPage.test.tsx`
+  (exports exactly the previewed edits, downloads through the library).
+- [x] **W10.22 — A null field the client required.** `requireFields` treats
+  null as missing, and Part D's `levers` / `spec_yaml` can be null, so the
+  page threw on exactly the previews Part D enabled (the E09.14b page test
+  pinned that). `requireFields` now takes only `NonNullableKeys<T>`; the
+  preview requires `provenance`, `tables`, `sim_base` and `export`.
+
+**Not in Part E:** an MCP tool for export, and a flash. A flash stays its own
+explicit, per-operation act with the engine off (AGENTS.md).
+
 ## Not in scope
 
 - **A curve drawn as a chart** (the existing `Curve` component) rather than a

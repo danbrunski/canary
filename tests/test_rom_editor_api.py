@@ -31,6 +31,7 @@ from src.analysis import rom_editor
 from src.analysis.ecu_application import program_sha256
 from src.analysis.paired_scenarios import SimKit
 from src.analysis.rom_image import ImageFormatError, revision_match, sha256_hex
+from src.analysis.rom_map import load_rom_map
 from src.collection import tuning_profile
 from src.config import CanaryConfig
 from src.control import workbench_jobs
@@ -39,9 +40,10 @@ from src.dashboard.routes.rom_editor import register_rom_editor_routes
 from src.dashboard.routes.rom_library import register_rom_library_routes
 from src.vehicle.profiles import operational_dir
 from src.vehicle.tune_revisions import load_tune_revisions
+from src.yaml_load import load_yaml
 from tests import repo_guard
 from tests.configs import isolated_config
-from tests.rom_fixtures import PROFILE
+from tests.rom_fixtures import PROFILE, synthetic_image
 from tests.test_rom_editor import FC_EDIT
 from tests.test_rom_editor import request as sim_request
 from tests.test_sim_montecarlo import build_kit_and_image
@@ -898,4 +900,129 @@ def test_the_editor_is_wired_into_the_dashboard_app(tmp_path: Path, profile: Pat
     paths = {getattr(r, "path", None) for r in app.routes}
     assert "/control/rom/library/{sha}/edits/preview" in paths
     assert "/control/rom/library/{sha}/simulate" in paths
+    assert "/control/rom/library/{sha}/edits/export" in paths
     assert "/control/rom/editor/typical-values" in paths
+
+
+# -- export ---------------------------------------------------------------------------------
+
+
+def export_url(sha: str) -> str:
+    return f"/control/rom/library/{sha}/edits/export"
+
+
+def _checked(image: bytes, profile: Path) -> bytes:
+    """The synthetic image with its checksum words written: the kit's own is
+    built with stale words, which an export refuses (its own test below)."""
+    return load_rom_map(profile).checksums.write(image).rom
+
+
+@pytest.fixture
+def checked(client: TestClient, kit_and_image: tuple[SimKit, bytes], profile: Path) -> bytes:
+    """The checksummed synthetic image, uploaded: a parent an export accepts.
+    Not a recorded revision, so its spec names the file by sha."""
+    image = _checked(kit_and_image[1], profile)
+    upload(client, image)
+    return image
+
+
+def _diff(a: bytes, b: bytes) -> set[int]:
+    return {i for i, (x, y) in enumerate(zip(a, b, strict=True)) if x != y}
+
+
+def test_an_export_is_a_checksummed_library_entry_with_its_provenance(
+    client: TestClient, checked: bytes, profile: Path
+) -> None:
+    """The edited image is stored once, downloads through the library's own
+    route, passes its checksum, and differs from its parent only in the edited
+    cells and the two checksum words."""
+    image, sha = checked, sha256_hex(checked)
+    response = client.post(export_url(sha), json=preview_body(FC_EDIT), headers=AUTH)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    entry, provenance = body["entry"], body["provenance"]
+    assert body["created"] is True
+    assert entry["source"] == "rom_editor_export" and entry["label"] == "light load 2 % richer"
+    assert entry["export_meta"] == provenance
+    assert entry["checksum"]["ok"] is True and entry["map_reason"] is None
+    assert provenance["parent_sha256"] == sha
+    assert provenance["parent"]["source"] == "file" and provenance["parent"]["revision"] is None
+    assert provenance["calibration_id"] == "1ZS44A00000" == entry["calibration_id"]
+    assert provenance["rom_map"]["profile"] == profile.name
+    assert provenance["rom_map"]["sha256"] == sha256_hex((profile / "rom_map.yaml").read_bytes())
+    spec = load_yaml(provenance["spec_yaml"])
+    assert spec["base"] == {"file": f"{sha}.bin", "sha256": sha}
+    preview = client.post(preview_url(sha), json=preview_body(FC_EDIT), headers=AUTH).json()
+    assert provenance["spec_sha256"] == preview["spec_sha256"]
+    assert provenance["cells"] == preview["provenance"]["cells"]
+
+    exported = client.get(f"/control/rom/library/{entry['sha256']}/download", headers=AUTH)
+    assert exported.status_code == 200
+    assert sha256_hex(exported.content) == entry["sha256"] == provenance["image_sha256"]
+    checksums = load_rom_map(profile).checksums
+    checksums.verify(exported.content)
+    words = {0x95A0 + i for i in range(4)} | {0x9598 + i for i in range(4)}
+    cells = {cell["address"] for cell in provenance["cells"]}
+    assert cells <= _diff(image, exported.content) <= cells | words
+    assert provenance["checksums"]["parent"] != provenance["checksums"]["written"]
+
+    # The same export again is the same entry, with the source recorded twice.
+    again = client.post(export_url(sha), json=preview_body(FC_EDIT), headers=AUTH).json()
+    assert again["created"] is False and again["entry"]["sha256"] == entry["sha256"]
+    listed = client.get("/control/rom/library", headers=AUTH).json()["entries"]
+    assert {e["sha256"] for e in listed} == {sha, entry["sha256"]}
+
+
+def _export_refusal(client: TestClient, sha: str, edit: dict[str, Any]) -> dict[str, Any]:
+    response = client.post(export_url(sha), json=preview_body(edit), headers=AUTH)
+    assert response.status_code == 400, response.text
+    refused = detail(response)
+    assert refused["error"] == "export_refused"
+    return refused
+
+
+def test_an_export_is_refused_when_the_calibration_is_not_the_maps(client: TestClient) -> None:
+    sha = upload(client, synthetic_image(calibration_id=b"1ZS44B00000"))
+    refused = _export_refusal(client, sha, FC_EDIT)
+    assert refused["reason"] == "calibration_not_mapped", refused
+    assert "1ZS44B00000" in refused["message"]
+
+
+def test_an_export_is_refused_when_the_parents_checksum_fails(
+    client: TestClient, kit_and_image: tuple[SimKit, bytes]
+) -> None:
+    sha = upload(client, kit_and_image[1])
+    assert (
+        client.get(f"/control/rom/library/{sha}", headers=AUTH).json()["entry"]["checksum"]["ok"]
+        is False
+    )
+    refused = _export_refusal(client, sha, FC_EDIT)
+    assert refused["reason"] == "parent_checksum_failed", refused
+
+
+def test_an_export_is_refused_when_an_edited_table_is_only_inferred(
+    tmp_path: Path, profile: Path, kit_and_image: tuple[SimKit, bytes]
+) -> None:
+    """Fuel Comp marked inferred in a copy of the map: the edit still previews,
+    but nothing is exported and the library gains no entry."""
+    inferred = tmp_path / "inferred" / profile.name
+    shutil.copytree(profile, inferred)
+    path = inferred / "rom_map.yaml"
+    text = path.read_text()
+    start = text.index("\n  - id: fuel_compensation\n")
+    # The table's own line (four spaces), not its decode's (six).
+    at = text.index("\n    confidence: verified\n", start)
+    path.write_text(text[:at] + "\n    confidence: inferred\n" + text[at + 26 :])
+    assert load_rom_map(inferred).table("fuel_compensation").confidence == "inferred"
+    config = isolated_config(
+        tmp_path, daemon={"afr_calibration": inferred / "afr_calibration.yaml"}
+    )
+    with TestClient(make_app(config)) as test_client:
+        sha = upload(test_client, _checked(kit_and_image[1], inferred))
+        preview = test_client.post(preview_url(sha), json=preview_body(FC_EDIT), headers=AUTH)
+        assert preview.status_code == 200 and preview.json()["spec_yaml"] is None
+        refused = _export_refusal(test_client, sha, FC_EDIT)
+        assert refused["reason"] == "table_not_verified", refused
+        assert "fuel_compensation" in refused["message"]
+        listed = test_client.get("/control/rom/library", headers=AUTH).json()["entries"]
+        assert [e["sha256"] for e in listed] == [sha]

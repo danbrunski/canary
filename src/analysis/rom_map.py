@@ -27,6 +27,7 @@ drift apart (``load_rom_map`` refuses by name).
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -730,6 +731,12 @@ def check_against_targets(rom_map: RomMap, targets: Definition) -> None:
         raise ValueError(f"{ROM_MAP_FILE} disagrees with rom_targets.yaml: " + "; ".join(problems))
 
 
+def rom_map_sha256(profile_dir: Path) -> str:
+    """sha256 of ``<profile_dir>/rom_map.yaml`` as stored: which map a result
+    was made with, so a later edit to the map is visible against it."""
+    return hashlib.sha256((profile_dir / ROM_MAP_FILE).read_bytes()).hexdigest()
+
+
 def load_rom_map(profile_dir: Path) -> RomMap:
     """``<profile_dir>/rom_map.yaml``, validated, and cross-checked against
     ``rom_targets.yaml`` when that file is beside it.
@@ -769,4 +776,5 @@ __all__ = [
     "check_program_constants",
     "load_rom_map",
     "read_program_constant",
+    "rom_map_sha256",
 ]

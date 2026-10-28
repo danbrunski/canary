@@ -5,7 +5,7 @@
 // `src/analysis/rom_edit_spec.py` (`Edit`) and `src/analysis/rom_editor.py`
 // (`preview_edits`) as of 2026-10-15.
 
-import type { RomDecode, RomTableValues } from "./romLibrary";
+import type { RomDecode, RomExportMeta, RomLibraryEntry, RomTableValues } from "./romLibrary";
 
 /** The declared decode as `GET …/tables` sends it, plus the numeric
  *  parameters when the route sends them. As of 2026-10-15 the route sends
@@ -200,6 +200,14 @@ export interface RomEditPreview {
    *  when the vehicle has no simulator to classify it with. */
   levers: RomLevers | null;
   sim_base: RomSimBase;
+}
+
+/** A 200 from the export route (`POST …/edits/export`): the new library
+ *  entry, whether it was new, and its provenance (the entry's `export_meta`). */
+export interface RomEditExportResponse {
+  entry: RomLibraryEntry;
+  created: boolean;
+  provenance: RomExportMeta;
 }
 
 /** A 400 from the preview route: `{error: "edit_refused", reason, message}`. */

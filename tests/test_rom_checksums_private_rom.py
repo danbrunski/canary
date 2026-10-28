@@ -1,4 +1,5 @@
-"""The checksum writer against UpRev's own one-cell edits of the 2008 ROM.
+"""The checksum writer and the ROM Editor's export against UpRev's own
+one-cell edits of the 2008 ROM.
 
 Each case starts from the k106 file (``ZS44A-Tuned``), changes the one cell
 UpRev changed, and writes the checksum words. UpRev saved the same edit, so
@@ -18,9 +19,12 @@ from pathlib import Path
 
 import pytest
 
+from src.analysis import rom_editor
 from src.analysis.osiris import Container
-from src.analysis.rom_image import checksum_values, sha256_hex
+from src.analysis.rom_image import checksum_values, revision_match, sha256_hex
+from src.analysis.rom_map import RomMap, load_rom_map
 from src.analysis.rom_targets import Definition
+from src.vehicle.tune_revisions import load_tune_revisions
 from src.yaml_load import load_yaml
 from tests.rom_fixtures import OPERATOR_ROMS, PROFILE
 
@@ -91,3 +95,45 @@ def test_the_writer_reproduces_uprevs_stored_words_for_a_one_cell_edit(
     assert written.stored == K106_WORDS
     assert checksum_values(written.rom, checksums) == words
     assert written.rom == uprev
+
+
+@pytest.mark.parametrize(("edited", "offset", "old", "new", "words", "image_sha256"), CASES)
+def test_an_export_of_the_same_edit_is_uprevs_image(
+    edited: str,
+    offset: int,
+    old: int,
+    new: int,
+    words: tuple[int, int],
+    image_sha256: str,
+) -> None:
+    """The whole export path (the map's table and slot, the edit spec, the
+    checksum writer) on the cell UpRev changed gives UpRev's decoded image."""
+    base = _decoded(OPERATOR_ROMS["k106"])
+    uprev = _decoded(OPERATOR_ROMS[edited])
+    rom_map = load_rom_map(PROFILE)
+    table, slot, row, col = _cell_at(rom_map, offset)
+    edit = {"table": table, "slot": slot, "cells": [[row, col]], "set_raw": new}
+    match = revision_match(sha256_hex(base), load_tune_revisions(PROFILE / "tune_revisions.yaml"))
+    assert match["status"] == "matched"
+    exported = rom_editor.export_edits(base, match, f"UpRev {edited}", [edit], PROFILE)
+    assert [(c["address"], c["old"], c["new"]) for c in exported.provenance["cells"]] == [
+        (offset, old, new)
+    ]
+    assert exported.provenance["checksums"]["written"] == {
+        "sum": f"0x{words[0]:08X}",
+        "xor": f"0x{words[1]:08X}",
+    }
+    assert sha256_hex(exported.image) == image_sha256
+    assert exported.image == uprev
+
+
+def _cell_at(rom_map: RomMap, offset: int) -> tuple[str, int | None, int, int]:
+    """The editable u8 table placement, row and column holding ``offset``."""
+    for table in rom_map.tables:
+        if not table.editable or table.dtype != "u8":
+            continue
+        for slot in rom_map.table_slots(table):
+            start = rom_map.table_address(table, slot)
+            if start <= offset < start + table.size:
+                return table.id, slot, *divmod(offset - start, table.cols)
+    raise AssertionError(f"no editable table holds 0x{offset:X}")

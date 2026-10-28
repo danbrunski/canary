@@ -38,9 +38,17 @@ What it makes impossible rather than documented:
   placement is not ``confidence: verified`` (``table_not_verified``). The
   preview and simulate answers carry ``spec_yaml: None`` then, and ``export``
   says why.
-* **The candidate never leaves the simulator.** Nothing here writes a file;
-  the candidate's bytes are hashed and simulated, never returned. What a
-  caller can keep is the edit spec YAML (``spec_yaml``).
+* **A preview's or simulation's candidate never leaves the simulator.** Its
+  bytes are hashed and simulated, never returned, and its checksums are stale
+  on purpose. What a caller keeps from either is the edit spec YAML
+  (``spec_yaml``).
+* **An export is the one way an edited image leaves** (:func:`export_edits`):
+  checksummed (:meth:`~src.analysis.rom_targets.Checksums.write`), with its
+  provenance (parent sha, spec hash and YAML, map hash, calibration id). It
+  is refused when the image's calibration is not the map's
+  (:data:`CALIBRATION_NOT_MAPPED`), when the parent's checksum fails
+  (:data:`PARENT_CHECKSUM_FAILED`), and when an edited table is only inferred
+  (``table_not_verified``). Nothing here stores it; the library does.
 * **The simulator needs a recorded base** (``base_not_a_recorded_revision``):
   a grid design names its ``tune_revisions.yaml`` revision.
 * **Nothing is defaulted.** :class:`SimRequest` has no field with a default:
@@ -102,9 +110,16 @@ from src.analysis.rom_edit_spec import (
     parse_edit_spec,
 )
 from src.analysis.rom_effects import EffectReport, RomEffectRefusalError, compare_roms
-from src.analysis.rom_image import ImageFormatError, sha256_hex, table_values
+from src.analysis.rom_image import (
+    ImageFormatError,
+    checksum_verdict,
+    map_applies,
+    read_calibration_id,
+    sha256_hex,
+    table_values,
+)
 from src.analysis.rom_levers import classify_edit
-from src.analysis.rom_map import RomMap, load_rom_map
+from src.analysis.rom_map import ROM_MAP_FILE, RomMap, load_rom_map, rom_map_sha256
 from src.analysis.sim_cells import (
     Grid,
     aggregate_cells,
@@ -153,6 +168,10 @@ BASE_NOT_RECORDED = "base_not_a_recorded_revision"
 SIM_KIT_UNDECLARED = "sim_kit_undeclared"
 #: Why an edit's spec cannot be exported.
 TABLE_NOT_VERIFIED = "table_not_verified"
+#: Why an image cannot be exported: the map does not describe its calibration.
+CALIBRATION_NOT_MAPPED = "calibration_not_mapped"
+#: Why an image cannot be exported: its own checksum words are wrong.
+PARENT_CHECKSUM_FAILED = "parent_checksum_failed"
 
 #: The child's job kinds (W09.2 dispatches ``rom_sim``).
 JOB_KINDS: tuple[str, ...] = ("rom_sim", "rom_preview")
@@ -465,6 +484,104 @@ def preview_edits(
         "levers": levers,
         "sim_base": sim_base(revision_match, kit_reason=kit_reason),
     }
+
+
+# -- export ---------------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class ExportedImage:
+    """An edited, checksummed image and where it came from."""
+
+    image: bytes
+    provenance: dict[str, Any]
+
+
+def export_edits(
+    image: bytes,
+    revision_match: Mapping[str, Any],
+    label: str,
+    edits: Any,
+    profile_dir: Path,
+    *,
+    sha256: str | None = None,
+) -> ExportedImage:
+    """The edits applied to ``image`` with its checksum words rewritten, for
+    the library to store. Refused, in this order, when the map does not
+    describe the image's calibration (:data:`CALIBRATION_NOT_MAPPED`), when
+    the parent's own checksum fails (:data:`PARENT_CHECKSUM_FAILED`: new words
+    over a faulty image would hide the fault), and by every refusal of
+    :func:`editor_spec` and :func:`spec_yaml` (``table_not_editable``,
+    ``slot_not_simulated``, ``table_not_verified``, ...). Needs the map only:
+    nothing here simulates, so a vehicle without a simulator exports too.
+
+    ``provenance``: ``parent_sha256``, ``parent`` (the base's identity),
+    ``spec_sha256`` and ``spec_yaml``, ``rom_map`` (profile, file, sha256),
+    ``calibration_id``, ``checksums`` (the parent's words and the written
+    ones), ``cells`` (old -> new raw) and ``image_sha256``."""
+    profile_dir = Path(profile_dir)
+    base = library_base(image, revision_match, sha256=sha256)
+    rom_map = load_rom_map(profile_dir)
+    calibration_id = read_calibration_id(image, rom_map)
+    unmapped = map_applies(calibration_id, rom_map)
+    if unmapped is not None:
+        raise EditSpecRefusalError(
+            CALIBRATION_NOT_MAPPED,
+            f"{unmapped}; {ROM_MAP_FILE} describes {rom_map.calibration_ids}, so its offsets "
+            "are not this image's",
+        )
+    verdict = checksum_verdict(image, rom_map.checksums)
+    if not verdict["ok"]:
+        raise EditSpecRefusalError(
+            PARENT_CHECKSUM_FAILED,
+            f"the parent image's checksum fails ({verdict['reason']}; stored "
+            f"{verdict['stored']}, computed {verdict['computed']}): new words over it would "
+            "hide the fault",
+        )
+    spec = editor_spec(base, label, edits, rom_map)
+    text = spec_yaml(spec, rom_map)
+    made = build_untraced_candidate(spec, rom_map, base)
+    written = rom_map.checksums.write(made.image)
+    if read_calibration_id(written.rom, rom_map) != calibration_id:
+        raise EditSpecRefusalError(
+            CALIBRATION_NOT_MAPPED, "the edits changed the image's calibration id"
+        )
+    parent_sum, parent_xor = rom_map.checksums.stored(image)
+    return ExportedImage(
+        image=written.rom,
+        provenance={
+            "tool": TOOL,
+            "tool_version": TOOL_VERSION,
+            "kind": "rom_editor_export",
+            "label": spec.label,
+            "parent_sha256": base.image_sha256,
+            "parent": dict(base.identity),
+            "spec_sha256": spec.sha256(),
+            "spec_yaml": text,
+            "rom_map": {
+                "profile": profile_dir.name,
+                "file": ROM_MAP_FILE,
+                "sha256": rom_map_sha256(profile_dir),
+            },
+            "calibration_id": calibration_id,
+            "checksums": {
+                "algorithm": rom_map.checksums.algorithm,
+                "parent": {"sum": f"0x{parent_sum:08X}", "xor": f"0x{parent_xor:08X}"},
+                "written": {"sum": f"0x{written.total:08X}", "xor": f"0x{written.xor:08X}"},
+            },
+            "cells": made.provenance["cells"],
+            "image_sha256": sha256_hex(written.rom),
+        },
+    )
+
+
+def export_refusal(exc: ValueError) -> dict[str, Any] | None:
+    """``{"kind", "reason", "message"}`` for a refusal :data:`REFUSALS` names,
+    else None (the route re-raises it)."""
+    if refusal_kind(exc) is None:
+        return None
+    refused: dict[str, Any] = _as_refused(exc)["refused"]
+    return refused
 
 
 # -- simulate -------------------------------------------------------------------------------
@@ -1039,11 +1156,13 @@ def run_job(
 
 __all__ = [
     "BASE_NOT_RECORDED",
+    "CALIBRATION_NOT_MAPPED",
     "JOB_KINDS",
     "LEARNED_SOURCE",
     "MAX_DRAWS",
     "MAX_GRID_POINTS",
     "NEVER_TYPICAL_FIELDS",
+    "PARENT_CHECKSUM_FAILED",
     "REFUSALS",
     "SIM_KIT_UNDECLARED",
     "SIM_SLOT",
@@ -1053,8 +1172,11 @@ __all__ = [
     "TYPICAL_FIELDS",
     "TYPICAL_KINDS",
     "TYPICAL_VALUES_FILE",
+    "ExportedImage",
     "SimRequest",
     "editor_spec",
+    "export_edits",
+    "export_refusal",
     "library_base",
     "preview_edits",
     "refusal_kind",

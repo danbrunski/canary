@@ -256,6 +256,7 @@ Control endpoints:
 | `POST /control/brain/jobs` | queue `{kind: twin_session_evaluation \| memory_consolidation, params, rerun?}` (202); the job id is the kind plus canonical params, so the same work is one job. Runs in the digest's bounded child only while collection is inactive (`vehicle_state` `parked` or `no_data`, no capture, no replay, no digest or workbench child), yields when collection resumes; an open session stays `pending` until its trip-end digest or a newer session exists. The daemon also queues one itself after each trip-end digest when the session's capture manifest recorded the twin's command word. While a brain child is alive the workbench routes answer 409 `analysis_busy` / `brain_child_yielding` and the child yields. 404 unknown session, 400 no twin definition |
 | `POST /control/rom/library?filename=<name>` | ROM library upload (W08.3): raw `application/octet-stream`, 2 MiB cap (413). Accepts a plain image of the vehicle's exact size (1,048,576 bytes on the Xterra) or an `.OsirisROM`; the UpRev encrypted backup `.bin` and anything else are refused by name (422). Stored per vehicle under `daemon.rom_library_dir`, content-addressed by the plain image's sha256; the same image again keeps one entry and adds the source. Returns the entry plus `created`. See [ROM library and ECU backup](#rom-library-and-ecu-backup-w08). |
 | `GET /control/rom/library` / `GET /control/rom/library/{sha}` | entries newest first (`{entries, count}`) / the full W08.2 description of one image plus its `entry` |
+| `POST /control/rom/library/{sha}/edits/export` | ROM Editor export (W10 Part E): body `{label, edits}` as the preview's. The edits applied with both checksum words recomputed, written and re-verified, stored as a new library entry (`source: "rom_editor_export"`) whose source record carries `export_meta`: `parent_sha256`, `parent`, `spec_sha256`, `spec_yaml`, `rom_map` (`profile`, `file`, `sha256`), `calibration_id`, `checksums` (`parent` and `written` words), `cells`, `image_sha256`. Returns `{entry, created, provenance}`; the image downloads through `GET .../download` like any entry. 400 `export_refused` (`kind`, `reason`, `message`): `calibration_not_mapped` (the map does not describe the image's calibration), `parent_checksum_failed` (the parent's own words are wrong), `table_not_verified` (an edited table is only inferred), and every preview refusal. 404 unknown sha, 409 no map, 422 body. Nothing here flashes. |
 | `GET /control/rom/library/{sha}/download` | the plain image, `application/octet-stream`, `Content-Disposition: attachment; filename="<label>-<sha8>.bin"` (no `.OsirisROM` export) |
 | `PATCH /control/rom/library/{sha}` / `DELETE /control/rom/library/{sha}` | set the label (`{"label": str \| null}`, the only editable field) / remove the entry |
 | `GET /control/rom/library/{sha}/tables` | every mapped table in every map slot: raw cells, decoded cells where a decode is declared, axes, confidence and evidence (W08.4) |
@@ -926,6 +927,41 @@ A refusal raised inside the child crosses the process boundary as data
 (`src.analysis.rom_editor.run_job` returns `{"refused": {...}}`): the
 simulator's refusal classes do not survive pickling, and one raised out of a
 `spawn` child would arrive as `503 child_failed`.
+
+### `POST /control/rom/library/{sha}/edits/export`
+
+Body: the preview's `{label, edits}`. The edits are applied to the entry's
+image from the vehicle's ROM map alone (no simulator is needed), both
+checksum words are recomputed, written and re-verified
+(`rom_targets.Checksums.write`), and the image is stored as a library entry
+with `source: "rom_editor_export"`. Its source record, and the entry, carry
+`export_meta`:
+
+```json
+{"kind": "rom_editor_export", "label": "...",
+ "parent_sha256": "...", "parent": {...},
+ "spec_sha256": "...", "spec_yaml": "...",
+ "rom_map": {"profile": "nissan-xterra-2008", "file": "rom_map.yaml", "sha256": "..."},
+ "calibration_id": "1ZS44A00000",
+ "checksums": {"algorithm": "be32_sum_xor",
+               "parent": {"sum": "0x...", "xor": "0x..."},
+               "written": {"sum": "0x...", "xor": "0x..."}},
+ "cells": [...], "image_sha256": "..."}
+```
+
+`spec_sha256` hashes `spec_yaml`, the same edit spec the preview offers for
+download; `rom_map.sha256` hashes the map file's bytes. Response
+`{entry, created, provenance}`; `created` is false when the same image is
+already in the library (the record gains this export's source). The image
+downloads through `GET .../download` like any entry.
+
+Refusals, in order, as 400 `{"error": "export_refused", kind, reason,
+message}`: `calibration_not_mapped` (the image's calibration id is not the
+one the map describes), `parent_checksum_failed` (the parent's own stored
+words are wrong, so a rewrite would launder an unknown change), then the
+spec's own: `table_not_verified` (an edited table is only `inferred`) and
+every preview refusal. 404 unknown sha, 409 no map, 422 body. It runs in the
+thread pool. Exporting writes nothing to the ECU; a flash stays its own act.
 
 ### `GET /control/rom/editor/typical-values`
 

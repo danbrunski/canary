@@ -1,6 +1,6 @@
-"""The ROM Editor's routes: preview an edit, simulate it (W09.2).
+"""The ROM Editor's routes: preview an edit, simulate it (W09.2), export it.
 
-Three routes, all under the ROM library's registration (``app.state.rom_library``,
+Four routes, all under the ROM library's registration (``app.state.rom_library``,
 so they register after it) and all requiring the control token. Each is a body of
 :mod:`src.analysis.rom_editor`; the route adds a status code and nothing else:
 
@@ -12,6 +12,13 @@ so they register after it) and all requiring the control token. Each is a body o
   Carlo draws and per-cell aggregation. Heavy, so it is the workbench child's
   job kind ``rom_sim`` (:func:`src.control.workbench_jobs.run_off_loop`):
   refused while a capture is recording, busy while another child runs.
+* ``POST /control/rom/library/{sha}/edits/export`` -- the edits applied with
+  the checksum words rewritten, stored as a library entry whose source record
+  carries the provenance (:func:`src.analysis.rom_editor.export_edits`). It
+  downloads through ``GET .../download``, as any entry does. Refused (400
+  ``export_refused``) when the calibration is not the map's, the parent's
+  checksum fails or an edited table is only inferred; runs in the thread
+  pool, like the preview.
 * ``GET /control/rom/editor/typical-values`` -- the vehicle's declared typical
   values for the Simulate form's "Fill typical values" button (W09.11), each with
   its source; ``409 typical_values_undeclared`` / ``typical_values_invalid`` when the
@@ -32,8 +39,10 @@ Order of checks on simulate: 404 / 409-no-map, then the base (an unrecorded one
 is a 400 before anything is deferred or spawned: it is a fact about the request,
 not about the load), then the capture deferral, then the child.
 
-Nothing is persisted and the candidate image never leaves the simulator: what
-a caller keeps is the edit spec YAML. Nothing here reaches the ECU.
+Preview and simulate persist nothing and their candidate never leaves the
+simulator: what a caller keeps is the edit spec YAML. Export is the one route
+that stores an edited image, and only into the library. Nothing here reaches
+the ECU.
 """
 
 from __future__ import annotations
@@ -156,6 +165,31 @@ def register_rom_editor_routes(
             raise HTTPException(400, {"error": "edit_refused", **refused})
         return result
 
+    def export(sha: str, body: PreviewRequest) -> dict[str, Any]:
+        """Blocking: the entry checks, the export, the library write."""
+        revision_match = entry_state(sha)
+        try:
+            exported = rom_editor.export_edits(
+                library.image(sha),
+                revision_match,
+                body.label,
+                body.edits,
+                library.profile_dir,
+                sha256=sha,
+            )
+        except ValueError as exc:
+            refused = rom_editor.export_refusal(exc)
+            if refused is None:
+                raise
+            raise HTTPException(400, {"error": "export_refused", **refused}) from exc
+        entry, created = library.add_image(
+            exported.image,
+            source="rom_editor_export",
+            label=body.label,
+            export_meta=exported.provenance,
+        )
+        return {"entry": entry, "created": created, "provenance": exported.provenance}
+
     def simulate_params(sha: str, body: SimRequest) -> dict[str, Any]:
         """Blocking: the entry checks, the base check, the child's params."""
         revision_match = entry_state(sha)
@@ -186,6 +220,13 @@ def register_rom_editor_routes(
         """The spec, its YAML and hash, the candidate's provenance (cells old
         -> new, ranges, reach) and the edited tables' after values."""
         return await run_in_threadpool(preview, sha, body)
+
+    @app.post("/control/rom/library/{sha}/edits/export", dependencies=[Depends(authorize)])
+    async def post_rom_edit_export(sha: str, body: PreviewRequest) -> dict[str, Any]:
+        """The edited, checksummed image as a new library entry: ``entry`` (its
+        ``export_meta`` the provenance), ``created`` (false when the library
+        already held these bytes) and ``provenance``."""
+        return await run_in_threadpool(export, sha, body)
 
     @app.post("/control/rom/library/{sha}/simulate", dependencies=[Depends(authorize)])
     async def post_rom_simulate(sha: str, body: SimRequest) -> dict[str, Any]:

@@ -1,7 +1,9 @@
 """Per-vehicle ROM library: plain flash images, content-addressed (W08.3).
 
-Images arrive as an upload (a plain image or an ``.OsirisROM``) or from the
-ECU backup job (:mod:`src.control.rom_backup`). Each is stored once, under the
+Images arrive as an upload (a plain image or an ``.OsirisROM``), from the
+ECU backup job (:mod:`src.control.rom_backup`), or as a ROM Editor export
+(:func:`src.analysis.rom_editor.export_edits`: an edited, checksummed image
+whose source record carries ``export_meta``, its provenance). Each is stored once, under the
 sha256 of its *plain* image, as ``<sha256>.bin`` beside ``<sha256>.json``;
 adding the same image again keeps the one entry and records the new source.
 The directory is ``daemon.rom_library_dir``, scoped per vehicle like the other
@@ -51,7 +53,7 @@ from src.analysis.rom_map import ROM_MAP_FILE, RomMap, load_rom_map
 from src.atomic_write import atomic_write_text
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 
-RomSource = Literal["upload_plain", "upload_osirisrom", "ecu_read"]
+RomSource = Literal["upload_plain", "upload_osirisrom", "ecu_read", "rom_editor_export"]
 
 #: The upload cap (an ``.OsirisROM`` is a little over 1 MiB).
 MAX_ROM_UPLOAD = 2 * 1024 * 1024
@@ -189,12 +191,15 @@ class RomLibrary:
         filename: str | None = None,
         container_sha256: str | None = None,
         read_meta: dict[str, Any] | None = None,
+        export_meta: dict[str, Any] | None = None,
         label: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Store a plain image (deduplicated by sha256) and record its source.
 
         With a map, the image must be the map's size; without one, any
-        non-empty image (an ECU read is the recipe's range).
+        non-empty image (an ECU read is the recipe's range). An export
+        (``rom_editor_export``) must carry ``export_meta`` naming this image,
+        and nothing else may.
         """
         rom_map = self.rom_map_or_none()
         if not image:
@@ -204,6 +209,10 @@ class RomLibrary:
                 f"image is {len(image):,} bytes; this vehicle's image is {rom_map.image_size:,}"
             )
         sha = sha256_hex(image)
+        if (source == "rom_editor_export") != (export_meta is not None):
+            raise RomLibraryError("export_meta comes with a rom_editor_export, and only then")
+        if export_meta is not None and export_meta.get("image_sha256") != sha:
+            raise RomLibraryError("export_meta names another image than the one stored")
         record: dict[str, Any] = {
             "source": source,
             "filename": filename,
@@ -211,6 +220,8 @@ class RomLibrary:
             "container_sha256": container_sha256,
             "read_meta": read_meta,
         }
+        if export_meta is not None:
+            record["export_meta"] = export_meta
         with self._lock:
             self.root.mkdir(parents=True, exist_ok=True)
             meta_path = self._meta(sha)
@@ -278,6 +289,7 @@ class RomLibrary:
         reads = [
             s["read_meta"] for s in sources if s.get("source") == "ecu_read" and s.get("read_meta")
         ]
+        exports = [s["export_meta"] for s in sources if s.get("export_meta")]
         kinds: list[str] = []
         for record in sources:
             if record["source"] not in kinds:
@@ -306,6 +318,8 @@ class RomLibrary:
             "map_reason": reason,
             "extent": self.extent(image),
             "read_meta": reads[-1] if reads else None,
+            # The latest export that made these bytes (parent, spec, map, calibration).
+            "export_meta": exports[-1] if exports else None,
         }
 
     def entries(self) -> list[dict[str, Any]]:

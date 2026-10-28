@@ -566,6 +566,59 @@ const shown = (block: HTMLElement) =>
     .getAllByRole("listitem")
     .map((item) => item.textContent);
 
+describe("ROM Editor page: Export to library", () => {
+  it("exports exactly the previewed edits, names the entry and downloads it through the library", async () => {
+    const exportSha = "e".repeat(64);
+    const exportBody = vi.fn((init?: RequestInit) => {
+      const request = JSON.parse(bodyOf(init)) as { label: string; edits: unknown[] };
+      return {
+        created: true,
+        entry: {
+          ...ENTRY_TUNED,
+          sha256: exportSha,
+          label: request.label,
+          source: "rom_editor_export",
+        },
+        provenance: {
+          kind: "rom_editor_export",
+          label: request.label,
+          parent_sha256: SHA_TUNED,
+          parent: { source: "revision", revision: "ZS44A-20260920" },
+          spec_sha256: "5".repeat(64),
+          spec_yaml: SPEC_YAML,
+          rom_map: { profile: "nissan-xterra-2008", file: "rom_map.yaml", sha256: "9".repeat(64) },
+          calibration_id: "1ZS44A00000",
+          checksums: {
+            algorithm: "be32_sum_xor",
+            parent: { sum: "0x00000001", xor: "0x00000002" },
+            written: { sum: "0x00000003", xor: "0x00000004" },
+          },
+          cells: [],
+          image_sha256: exportSha,
+        },
+      };
+    });
+    route(undefined, { [`POST /control/rom/library/${SHA_TUNED}/edits/export`]: exportBody });
+    blob.mockResolvedValue(new Blob(["image"]));
+    const grid = await openFuelComp();
+    await applyScale(grid);
+    await showRomView("Edits & Preview");
+    await userEvent.type(screen.getByLabelText("Label for this edit set"), "idle richer");
+    await userEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const result = await screen.findByRole("region", { name: "Preview result" });
+    await userEvent.click(within(result).getByRole("button", { name: "Export to library" }));
+    const status = await within(result).findByRole("status", { name: "Export" });
+    expect(status).toHaveTextContent(/Saved to the ROM library as idle richer, image eeeeeeeeeeee/);
+    const previewed = control.mock.calls.find(([path]) => path === PREVIEW_PATH(SHA_TUNED));
+    const exported = exportBody.mock.calls[0]?.[0];
+    expect(JSON.parse(bodyOf(exported))).toEqual(JSON.parse(bodyOf(previewed?.[2])));
+
+    await userEvent.click(within(status).getByRole("button", { name: "Download image" }));
+    await waitFor(() => expect(blob).toHaveBeenCalled());
+    expect(blob.mock.calls[0]?.[0]).toBe(`/control/rom/library/${exportSha}/download`);
+  });
+});
+
 describe("ROM Editor page: what the edit can and cannot show (E09.14b)", () => {
   it("lists the classifier's messages verbatim and in order, one per line, before Simulate", async () => {
     await previewWithLevers(LEVERS_FUEL_COMP);

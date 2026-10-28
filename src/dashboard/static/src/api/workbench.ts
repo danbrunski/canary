@@ -24,6 +24,7 @@ import type {
 } from "../types/workbench";
 import type {
   RomEditPreview,
+  RomEditExportResponse,
   RomEditPreviewRequest,
   RomSimRequest,
   RomSimResult,
@@ -248,6 +249,20 @@ export async function previewRomEdits(
   // `spec_yaml` and `levers` may be null (an unverified table, a vehicle with
   // no simulator), so they are not required; `export` says why the first is.
   return requireFields(path, body, ["provenance", "tables", "sim_base", "export"]);
+}
+
+/** `POST /control/rom/library/{sha}/edits/export` — the edits applied with the
+ *  checksum words rewritten, stored as a new library entry (downloaded through
+ *  `downloadRomImage`). A refusal is a 400 `{error: "export_refused", reason,
+ *  message}`: `calibration_not_mapped`, `parent_checksum_failed`,
+ *  `table_not_verified`, or any of the preview's. */
+export async function exportRomEdits(token: string, sha: string, request: RomEditPreviewRequest) {
+  const path = `${librarySha(sha)}/edits/export`;
+  const body = await controlJson<RomEditExportResponse>(path, token, {
+    method: "POST",
+    body: jsonBody(request),
+  });
+  return requireFields(path, body, ["entry", "created", "provenance"]);
 }
 
 /** `POST /control/rom/library/{sha}/simulate` — the edits run against the base

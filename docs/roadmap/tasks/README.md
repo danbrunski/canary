@@ -15,7 +15,11 @@ table is one family in the tree over its Map 1–5 copies, the 35 single-copy
 tables stand alone, and Editable / View only / All narrows the list. Part D
 (W10.17–W10.19) moves editability into `rom_map.yaml` (`editable: true`),
 lets a vehicle with no simulator (the 2013) preview from its map alone, and
-exports a spec only when every edited table is verified. ROM
+exports a spec only when every edited table is verified. Part E
+(W10.20–W10.22) adds the checksum writer (UpRev's one-cell 2008 edits
+reproduced byte for byte) and Export to library: the edited, checksummed image
+stored as an entry with its provenance, refused for an inferred table, a
+parent whose checksum fails, or a calibration the map does not describe. ROM
 editing and simulation stay in Engine Tuning, because the tuning context ties
 them to Logs.
 

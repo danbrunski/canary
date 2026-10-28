@@ -166,3 +166,16 @@ def test_its_single_copies_are_editable_and_preview_without_a_simulator(
     assert preview["spec_yaml"] is None
     assert preview["export"]["reason"] == "table_not_verified"
     assert preview["export"]["tables"] == ["fuel_compensation"]
+
+
+def test_an_export_of_a_2013_edit_is_refused_until_its_table_is_verified(
+    rom_map: RomMap,
+) -> None:
+    """The 2013's parent passes its checksum and its calibration is the map's,
+    so the refusal is the table's: inferred, never exported."""
+    image = _synthetic(rom_map)
+    match = {"status": "unrecognised", "revision": None, "reference": None}
+    edit = {"table": "fuel_compensation", "cells": [[0, 0]], "add_raw": 1}
+    with pytest.raises(ValueError) as refused:
+        rom_editor.export_edits(image, match, "2013 FC +1", [edit], PROFILE_2013)
+    assert getattr(refused.value, "reason", None) == "table_not_verified"

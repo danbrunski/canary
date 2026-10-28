@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  downloadRomImage,
+  exportRomEdits,
   getRomLibrary,
   getRomTables,
   previewRomEdits,
@@ -36,6 +38,7 @@ import {
   ROM_UPLOAD_LIMIT,
   axisBreakpoints,
   describeEditorDisagreement,
+  downloadName,
   entryTitle,
   refusalText,
 } from "../../lib/romLibrary";
@@ -61,7 +64,7 @@ import type {
   SimRunContext,
 } from "../../types/romEditor";
 import type { RomLibraryEntry, RomTableValues } from "../../types/romLibrary";
-import { downloadText } from "../../util/browser";
+import { downloadBlob, downloadText } from "../../util/browser";
 import { BasePicker, SimulateChip } from "./romEditor/BasePicker";
 import type { GridOverlay } from "../cellOverlay";
 import { CellGrid } from "./romEditor/CellGrid";
@@ -69,7 +72,7 @@ import { LiveOverlay } from "./romEditor/LiveOverlay";
 import { OpenRom } from "./romEditor/OpenRom";
 import { OperationPanel } from "./romEditor/OperationPanel";
 import { PendingEdits } from "./romEditor/PendingEdits";
-import { PreviewResult } from "./romEditor/PreviewResult";
+import { type ExportState, PreviewResult } from "./romEditor/PreviewResult";
 import { RecentMenu } from "./romEditor/RecentMenu";
 import { SimCancelled, SimFailureAlert, SimForm, SimRunning } from "./romEditor/SimForm";
 import { SimResults } from "./romEditor/SimResults";
@@ -406,6 +409,7 @@ function Workspace({
   const [label, setLabel] = useState(saved.label);
   const [opRefusal, setOpRefusal] = useState<{ reason: string; message: string } | null>(null);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
+  const [exported, setExported] = useState<ExportState>({ kind: "idle" });
   const request = useRef(0);
   const counter = useRef(0);
   const baseTables = tables.data?.tables ?? [];
@@ -435,6 +439,7 @@ function Workspace({
   function invalidate() {
     request.current += 1;
     setPreview({ kind: "idle" });
+    setExported({ kind: "idle" });
   }
 
   function apply(op: RomEditOperation) {
@@ -490,6 +495,32 @@ function Workspace({
         refusal ? { kind: "refused", refusal } : { kind: "error", text: describeError(err) },
       );
     }
+  }
+
+  /** The previewed edits as a checksummed library entry. The button only
+   *  shows under a preview, and any new edit clears both, so what is exported
+   *  is what was previewed. */
+  async function runExport() {
+    const mine = request.current;
+    setExported({ kind: "busy" });
+    try {
+      const data = await exportRomEdits(token, sha, {
+        label: label.trim(),
+        edits: pending.map((item) => item.edit),
+      });
+      if (request.current === mine) setExported({ kind: "ok", data });
+    } catch (err) {
+      if (request.current !== mine) return;
+      const refusal = previewRefusal(err);
+      setExported(
+        refusal ? { kind: "refused", refusal } : { kind: "error", text: describeError(err) },
+      );
+    }
+  }
+
+  async function downloadExport(exportSha: string) {
+    if (exported.kind !== "ok") return;
+    downloadBlob(await downloadRomImage(token, exportSha), downloadName(exported.data.entry));
   }
 
   async function runSimulation(simRequest: RomSimRequest) {
@@ -770,6 +801,9 @@ function Workspace({
                   if (preview.data.spec_yaml === null) return;
                   downloadText(preview.data.spec_yaml, specFileName(label), "application/x-yaml");
                 }}
+                exportState={exported}
+                onExport={() => void runExport()}
+                onDownloadImage={(exportSha) => void downloadExport(exportSha)}
               />
             )}
           </div>

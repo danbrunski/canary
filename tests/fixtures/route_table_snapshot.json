@@ -976,6 +976,14 @@
       "auth": "control",
       "body": true,
       "method": "POST",
+      "path": "/control/rom/library/{sha}/edits/export",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
       "path": "/control/rom/library/{sha}/edits/preview",
       "query": [],
       "status_code": null

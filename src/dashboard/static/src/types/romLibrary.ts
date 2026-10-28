@@ -10,7 +10,36 @@
 
 /** How an image entered the library. An image added twice keeps one entry
  *  and gains the second source. */
-export type RomSource = "upload_plain" | "upload_osirisrom" | "ecu_read";
+export type RomSource = "upload_plain" | "upload_osirisrom" | "ecu_read" | "rom_editor_export";
+
+/** Where a ROM Editor export came from (`rom_editor.export_edits`): the parent
+ *  image, the edit spec, the map and the calibration it was made with. */
+export interface RomExportMeta {
+  kind: "rom_editor_export";
+  label: string;
+  parent_sha256: string;
+  /** The parent's identity: `{source: "revision", revision}` or a file. */
+  parent: Record<string, unknown>;
+  spec_sha256: string;
+  spec_yaml: string;
+  rom_map: { profile: string; file: string; sha256: string };
+  calibration_id: string;
+  checksums: {
+    algorithm: string;
+    parent: { sum: string; xor: string };
+    written: { sum: string; xor: string };
+  };
+  cells: {
+    table: string;
+    slot: number | null;
+    row: number;
+    col: number;
+    address: number;
+    old: number;
+    new: number;
+  }[];
+  image_sha256: string;
+}
 
 /** How sure the map definition is of an entry: checked against an independent
  *  known answer, strong evidence not yet confirmed, or bytes without a
@@ -67,6 +96,7 @@ export interface RomSourceRecord {
   added_at: string;
   container_sha256?: string | null;
   read_meta?: RomReadMeta | null;
+  export_meta?: RomExportMeta | null;
 }
 
 /** What an image's own vector tables say about its size (`rom_extent`).
@@ -138,6 +168,8 @@ export interface RomLibraryEntry {
   size: number;
   /** The latest ECU read's metadata; null when never read from the ECU. */
   read_meta: RomReadMeta | null;
+  /** The latest ROM Editor export that made these bytes; null otherwise. */
+  export_meta?: RomExportMeta | null;
 }
 
 /** `POST /control/rom/library`: the entry, and whether it is new. An image

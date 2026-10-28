@@ -99,6 +99,7 @@ export const SOURCE_TEXT: Record<RomSource, string> = {
   upload_plain: "uploaded image",
   upload_osirisrom: "uploaded .OsirisROM",
   ecu_read: "ECU read",
+  rom_editor_export: "ROM Editor export",
 };
 
 /** Every source an entry arrived by, deduplicated, oldest first. */

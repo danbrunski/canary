@@ -31,7 +31,14 @@ with one copy (every table of a stock image without map slots, such as the
 2013's) is edited in place. A vehicle without a simulator still previews an
 edit, without saying what it reaches. **Download spec** appears only when
 every edited table is `confidence: verified`; an edit to an inferred table is
-previewed but never exported. A table
+previewed but never exported. **Export to library** (beside Download spec)
+saves the edited image as a new ROM Library entry: its checksum words
+recomputed, written and re-verified, and its provenance (parent image, edit
+spec hash, map hash, calibration id) on the entry. It downloads as a plain
+`.bin` like any entry. The export is refused when an edited table is only
+inferred, when the parent image's own checksum fails, or when the image's
+calibration is not the one the map describes. Exporting writes nothing to the
+ECU. A table
 whose decode is unconfirmed is shown by its raw counts, with its confidence
 and evidence named. Titles and axes follow UpRev's tuning guide pp. 9–10; the
 axis labels the editor shows are labels only, and every edit and the simulator

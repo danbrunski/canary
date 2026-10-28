@@ -55,7 +55,12 @@ acceptance runs on the real images.
   `flashable: false`, with stale checksums on purpose (E08.1). What the page
   offers is the **edit spec YAML**: reviewable, hashable, and runnable by
   E08.5's CLI later. A flash stays the Flash page's explicit per-operation act
-  (W07, AGENTS.md).
+  (W07, AGENTS.md). *(Superseded in part by the operator, 2026-10-27: an
+  edited image may now be **exported** to the ROM Library with its checksum
+  words rewritten and its provenance, refused unless every edited table is
+  verified, the parent's checksum passes and its calibration is the map's.
+  W10 Part E. A preview's and a simulation's candidate still never leave the
+  simulator, and nothing here flashes.)*
 - **The simulator needs a recorded base.** A grid design names
   `base_revision` (`tune_revisions.yaml`). Simulation is offered only when the
   library entry's `revision_match.status == "matched"`. Otherwise the page

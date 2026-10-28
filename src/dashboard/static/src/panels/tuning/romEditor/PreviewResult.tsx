@@ -1,7 +1,12 @@
 import { TableScroll } from "../../../components/TableScroll";
 import { formatDecoded } from "../../../lib/romEditor";
 import { buttonClass } from "../../../styles";
-import type { RomEditPreview, RomLevers } from "../../../types/romEditor";
+import type {
+  RomEditExportResponse,
+  RomEditPreview,
+  RomEditRefusal,
+  RomLevers,
+} from "../../../types/romEditor";
 import type { RomTableValues } from "../../../types/romLibrary";
 import { CellGrid } from "./CellGrid";
 
@@ -47,14 +52,85 @@ function LeverMessages({ levers }: { levers: RomLevers }) {
  *  new cell list in raw and decoded, what the change reaches, and the spec
  *  download. No candidate image is offered or linked anywhere: only its hash,
  *  and the spec that reproduces it. */
+/** The export's state, held by the page so a new edit resets it. */
+export type ExportState =
+  | { kind: "idle" }
+  | { kind: "busy" }
+  | { kind: "ok"; data: RomEditExportResponse }
+  | { kind: "refused"; refusal: RomEditRefusal }
+  | { kind: "error"; text: string };
+
+function ExportControls({
+  exportState,
+  onExport,
+  onDownloadImage,
+}: {
+  exportState: ExportState;
+  onExport: () => void;
+  onDownloadImage: (sha: string) => void;
+}) {
+  if (exportState.kind === "ok") {
+    const { entry, created, provenance } = exportState.data;
+    return (
+      <div
+        role="status"
+        aria-label="Export"
+        className="space-y-1 rounded-lg border border-border p-3"
+      >
+        <p className="text-sm">
+          {created ? "Saved to the ROM library" : "Already in the ROM library"} as{" "}
+          <span className="font-semibold">{entry.label ?? provenance.label}</span>, image{" "}
+          <span className="font-num">{entry.sha256.slice(0, 12)}</span>. Checksum words rewritten
+          (sum <span className="font-num">{provenance.checksums.written.sum}</span>, xor{" "}
+          <span className="font-num">{provenance.checksums.written.xor}</span>) and verified; parent{" "}
+          <span className="font-num">{provenance.parent_sha256.slice(0, 12)}</span>, calibration{" "}
+          <span className="font-num">{provenance.calibration_id}</span>.
+        </p>
+        <button type="button" className={buttonClass} onClick={() => onDownloadImage(entry.sha256)}>
+          Download image
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        className={buttonClass}
+        onClick={onExport}
+        disabled={exportState.kind === "busy"}
+      >
+        {exportState.kind === "busy" ? "Exporting…" : "Export to library"}
+      </button>
+      {exportState.kind === "refused" && (
+        <div role="alert" className="space-y-1 rounded-lg border border-bad/55 p-3">
+          <p className="font-semibold text-bad">Export refused: {exportState.refusal.reason}</p>
+          <p className="text-sm">{exportState.refusal.message}</p>
+        </div>
+      )}
+      {exportState.kind === "error" && (
+        <p role="alert" className="text-sm text-bad">
+          {exportState.text}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function PreviewResult({
   preview,
   baseTables,
   onDownload,
+  exportState = { kind: "idle" },
+  onExport,
+  onDownloadImage,
 }: {
   preview: RomEditPreview;
   baseTables: RomTableValues[];
   onDownload: () => void;
+  exportState?: ExportState;
+  onExport?: () => void;
+  onDownloadImage?: (sha: string) => void;
 }) {
   const { provenance } = preview;
   const effect = provenance.effect;
@@ -69,9 +145,9 @@ export function PreviewResult({
       <p className="text-sm text-fg-dim">
         {provenance.cells.length} {provenance.cells.length === 1 ? "cell" : "cells"} changed
         {changedBytes}. Spec <span className="font-num">{preview.spec_sha256.slice(0, 12)}</span>,
-        candidate <span className="font-num">{preview.candidate_sha256.slice(0, 12)}</span>. The
-        candidate is not flashable and stays in the simulator: there is no image to download. Only
-        the spec is offered.
+        candidate <span className="font-num">{preview.candidate_sha256.slice(0, 12)}</span>. This
+        candidate stays in the simulator with stale checksums. Export to library writes an image
+        with its checksum words rewritten, as a new library entry.
       </p>
 
       {preview.levers && <LeverMessages levers={preview.levers} />}
@@ -171,9 +247,18 @@ export function PreviewResult({
           edit to an unverified table can be previewed but never exported.
         </p>
       ) : (
-        <button type="button" className={buttonClass} onClick={onDownload}>
-          Download spec
-        </button>
+        <div className="flex flex-wrap items-start gap-2">
+          <button type="button" className={buttonClass} onClick={onDownload}>
+            Download spec
+          </button>
+          {onExport && onDownloadImage && (
+            <ExportControls
+              exportState={exportState}
+              onExport={onExport}
+              onDownloadImage={onDownloadImage}
+            />
+          )}
+        </div>
       )}
     </div>
   );
