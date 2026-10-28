@@ -9,7 +9,10 @@ one area's pages and collapses to a rail. System sits behind a gear. Part A
 same day) rebuilds the ROM Editor: a File-style Open / Recent ▾ header, the
 views Tables | Edits & Preview | Simulate, and a grouped table tree listing
 every non-axis table, curves and scalars included, with the groups and short
-names coming from new `group` and `short_name` fields in `rom_map.yaml`. ROM
+names coming from new `group` and `short_name` fields in `rom_map.yaml`.
+Part C (W10.14–W10.16, the same day) drops the Map slot select: a slotted
+table is one family in the tree over its Map 1–5 copies, the 35 single-copy
+tables stand alone, and Editable / View only / All narrows the list. ROM
 editing and simulation stay in Engine Tuning, because the tuning context ties
 them to Logs.
 

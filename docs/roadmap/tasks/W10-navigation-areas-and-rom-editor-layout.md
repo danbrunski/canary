@@ -368,6 +368,95 @@ it. The slow tier still fails 4 tests in
 reads). They read local session data, failed the same way with the W10.7
 changes stashed, and are not this work's.
 
+## Part C — the tree knows which tables have map slots (operator, 2026-10-27)
+
+Asked after Part B: "there are a lot more maps in the rom editor than uprev
+would offer … not everything has 5 slots", "instead of having a map slot
+selector at the top, we just show Fuel maps 1 - 5 in the tree", "and maybe
+have a filter for editable fields and view only".
+
+Where Part B left it: of the 2008 map's 45 listed tables, only six families
+live in UpRev's map slots (Fuel Targets, Fuel Compensation, trims A and B, K,
+and the Load Point Scaler's slot copy). The other 35 have one copy in the
+ROM, yet the Map slot select sat above all of them, so "Map 3" listed 35
+tables that are not in Map 3. Only five tables take an edit. A stock image
+(the 2013's) has no slots at all; UpRev adds them when it flashes.
+
+- [x] **W10.14 — Map slots in the tree, no slot select.** The tree takes every
+  listed table of every slot. Slotted copies that share a tree label are one
+  family: a disclosure row ("Fuel Targets, 5 maps", `aria-expanded`) over a
+  `role="group"` named by the family, holding one entry per slot ("Map 1"…,
+  titled with the copy's full label). A single-copy table is one entry with
+  no slot, as before. A family whose filter leaves one copy shows that copy
+  as a plain entry. The chosen table's family starts open; the rest start
+  closed; a text filter opens every match. The family row carries ✎ when a
+  copy is editable and the pending count summed over its copies. The Map
+  slot select and `Workspace`'s slot state go; the slot is the chosen
+  table's own. The default table is the first listed one that is Map 1 or
+  single-copy. Below 900 px a slotted copy is its own option ("Fuel Targets ·
+  Map 2"). The model is `lib/romEditor.ts` `treeGroups`, replacing
+  `groupTables`.
+  *Tests:* `TableTree.test.tsx` (families, a single copy left by a filter, the
+  open rules, the ✎ and summed pending marks, the narrow options);
+  `RomEditorTables.test.tsx` and `RomEditorOverlay.test.tsx` re-pointed from
+  the slot select to the families; an image without slots lists plain
+  entries.
+  *Done 2026-10-27:* `treeGroups` folds copies by tree label where the first
+  copy stands and sorts them by slot; `familyKey` names the family. The family
+  row is `data-tree="family"`, named "Fuel Targets, 5 maps", titled
+  "Fuel Targets · 5 maps". The chosen table's family also opens when the choice
+  arrives from elsewhere (narrow select, then a wider window), and the rest
+  keep their state. A slotted table with one copy (trim A, the base timing map
+  in the fixtures) is a plain entry, and below 900 px it carries no "· Map N"
+  either. `Workspace` lost `slotChoice`, `slots` and `inSlot`. The default
+  table is the first Map 1 or slotless one. The Tables panel dropped its count:
+  copies are not tables. `pendingEditCount` still matches by id alone, so a
+  pending edit on a Maps 2-5 id would count on every copy sharing it. Only
+  Map 1 takes an edit today, so it cannot happen yet. It matters once
+  editing reaches other slots.
+- [x] **W10.15 — Editable / View only / All.** A `SegmentedControl` ("Show
+  tables") above the filter box: All, Editable (`isEditableTable`), View only
+  (the rest). It applies with the text filter, below 900 px too, and is
+  remembered per browser (`canary.romEditor.tableKinds.v1`; junk reads as
+  All). An empty tree names why: "No table matches “x”." for text, else "No
+  editable table in this image." / "No view-only table in this image.". The
+  chosen table stays chosen when the filter hides it.
+  *Tests:* `TableTree.test.tsx` (each kind, combined with text, the empty
+  sentences, the remembered choice and junk).
+  *Done 2026-10-27:* `TABLE_KINDS` / `TableKinds` in `lib/romEditor.ts`;
+  `TABLE_KINDS_STORAGE_KEY` in `TableTree.tsx` through `useLocalStorageJson`,
+  read back through `readKinds`. Below 900 px, a choice the kind hides stays
+  the select's value as an extra option ahead of the groups. Full-size
+  buttons wrapped onto two rows in the 15rem column, so `SegmentedControl`
+  gained `compact` (small buttons, sized by `!` because `cn` does not merge).
+- [x] **W10.16 — Sweep, e2e and docs.** `romEditorViews.ts`' `treeTable` opens
+  a closed family before looking. The e2e helpers pick a slot copy through
+  its family, the overlay spec's slot navigation goes through the tree, and
+  the 412 px test picks "Fuel Compensation · Map 1 ✎". `RomEditorPage`'s
+  docstring, this file and `tasks/README.md`.
+  *Done 2026-10-27:* `treeTable` opens closed families one at a time and
+  closes any it opened that did not hold the copy, so `treeContents` still
+  reads what the operator would see. `treeContents` leaves out the Show
+  tables buttons. The e2e spec gained `treeCopy(page, family, slot)`, and
+  `chooseTable` takes an optional slot. The overlay spec reaches Map 2 through
+  the open Fuel Targets family and returns at 430 px through "Fuel Targets ·
+  Map 1 ✎". Every slot-select assertion was re-pointed and none dropped.
+
+**Gate for Part C:** as Part B's frontend gate (no Python change), then
+`scripts/push.sh`.
+
+**Part C closed 2026-10-27.** Gate: `pnpm typecheck`, ESLint on the changed
+files and `pnpm format:check` clean; `pnpm test` 123 files, 1334 tests, no
+act() warnings; `pnpm e2e` 45 passed and 3 skipped (the existing phone-only
+and desktop-only skips). `docs/offline-rom-targets.md` described the slot
+dropdown and now describes the families and Show tables; W09.8 carries a
+one-line note.
+
+**Not in Part C:** which copy is editable on an image without slots. Today
+only Map 1 copies take an edit, so a stock 2013 image is view only; making
+its single copy editable touches `rom_editor.py` and the simulator's Map 1
+assumption, and needs K mapped for the 2013. That is its own item.
+
 ## Not in scope
 
 - **A curve drawn as a chart** (the existing `Curve` component) rather than a

@@ -37,7 +37,6 @@ import {
   describeEditorDisagreement,
   entryTitle,
   refusalText,
-  tableSlots,
 } from "../../lib/romLibrary";
 import {
   SIM_BLOCK_TEXT,
@@ -137,8 +136,11 @@ const NO_CHANNELS = new Map<string, ChannelSnapshot>();
  *
  *  Loaded, the image is a one-line header (name, sha, chips, Open another
  *  ROM…, Recent ▾) over three views (W10): Tables (a tree grouped as
- *  `rom_map.yaml` files the tables, a select below 900px, beside the chosen
- *  table's grid and operation), Edits & Preview, and Simulate. The view rides
+ *  `rom_map.yaml` files the tables, each slotted table one family over its
+ *  Map 1-5 copies, with Editable / View only / All; a select below 900px;
+ *  beside the chosen table's grid and operation), Edits & Preview, and
+ *  Simulate. There is no slot choice: the slot is the chosen table's own. The
+ *  view rides
  *  in `?view=` beside `?rom=`. Hidden views stay mounted, so a half-typed
  *  operation or Simulate form survives a switch, and a run keeps going when
  *  its view is left. The live overlay (inferred cell, ECM cell, log coverage)
@@ -378,23 +380,19 @@ function Workspace({
     useCallback((signal: AbortSignal) => getRomTables(token, sha, signal), [token, sha]),
     { enabled: Boolean(token), intervalMs: null },
   );
-  // Every table the map declares that is worth a grid; Map 1 until another
-  // slot is chosen (it is the one the editor edits and the simulator runs).
+  // Every table the map declares that is worth a grid, every slot's copy
+  // (W10.14). The first Map 1 or single-copy table opens: Map 1 is the slot
+  // the editor edits and the simulator runs.
   const viewable = useMemo(
     () => (tables.data?.tables ?? []).filter(isViewableTable),
     [tables.data],
   );
-  const slots = tableSlots(viewable);
-  const [slotChoice, setSlotChoice] = useState<number | null>(null);
-  const slot =
-    slotChoice !== null && slots.includes(slotChoice)
-      ? slotChoice
-      : slots.includes(SIM_SLOT)
-        ? SIM_SLOT
-        : (slots[0] ?? null);
-  const inSlot = viewable.filter((item) => item.slot === null || item.slot === slot);
   const [choice, setChoice] = useState<string | null>(null);
-  const table = inSlot.find((item) => tableChoice(item) === choice) ?? inSlot[0] ?? null;
+  const table =
+    viewable.find((item) => tableChoice(item) === choice) ??
+    viewable.find((item) => item.slot === null || item.slot === SIM_SLOT) ??
+    viewable[0] ??
+    null;
   const editable = table !== null && isEditableTable(table);
   const [overlayOn, setOverlayOn] = useState(false);
   const [view, setView] = useState<RomView>(viewFromUrl);
@@ -637,21 +635,13 @@ function Workspace({
       {/* Every view stays mounted while hidden: SimForm's typed fields and
           OperationPanel's value would not survive an unmount. */}
       <div hidden={view !== "tables"}>
-        <Panel title="Tables" count={`${inSlot.length}`}>
+        <Panel title="Tables">
           <div className="grid grid-cols-[15rem_minmax(0,1fr)] items-start gap-4 max-[900px]:grid-cols-1">
             <TableTree
-              tables={inSlot}
+              tables={viewable}
               chosen={table}
-              slots={slots}
-              slot={slot}
               pending={pending}
               narrow={narrow}
-              onSlot={(number) => {
-                setSlotChoice(number);
-                setChoice(null);
-                setSelection(null);
-                setOpRefusal(null);
-              }}
               onChoose={chooseTable}
             />
             <div className="min-w-0 space-y-4">

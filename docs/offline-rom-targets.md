@@ -18,11 +18,14 @@ still open the editor. The old upload-without-saving flow is not in the
 dashboard any more; `POST /control/rom/inspect` still decodes an `.OsirisROM`
 in memory without storing it, for scripts.)
 
-The editor shows every two-dimensional table the image's map declares, in every
+The editor shows every table the image's map declares but the axes, in every
 map slot: Fuel Targets, Fuel Compensation, both ignition timing trims (Timing
-Main trim A, Timing High Det trim B), the base timing maps and the like. The
-**Map slot** dropdown switches the slot. Map 1 is the editable slot: edits and
-the simulator cover Map 1 only, and the other slots are for looking at. A table
+Main trim A, Timing High Det trim B), the base timing maps and the like. A
+table UpRev keeps a copy of in each map slot is one family in the table tree,
+opened to pick **Map 1** to **Map 5**; a table with one copy stands alone.
+**Show tables** narrows the tree to the editable tables or the view-only ones.
+Map 1 is the editable slot: edits and the simulator cover Map 1 only, and the
+other slots are for looking at. A table
 whose decode is unconfirmed is shown by its raw counts, with its confidence
 and evidence named. Titles and axes follow UpRev's tuning guide pp. 9–10; the
 axis labels the editor shows are labels only, and every edit and the simulator

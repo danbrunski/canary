@@ -308,27 +308,27 @@ describe("ROM Editor: the live overlay is behind a toggle", () => {
     expect(
       screen.getByText(/places cells on the tables the vehicle maps a trace to/),
     ).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Map slot"), { target: { value: "2" } });
+    fireEvent.click(treeTable("Fuel Targets (Map 2)"));
     expect(screen.getByText(/Fuel Targets in Map 2 has none/)).toBeInTheDocument();
     expect(view.container.querySelectorAll("[data-trace]")).toHaveLength(0);
   });
 
-  it("keeps the confirmation across a map-slot change: it is about the image, not the slot", async () => {
+  it("keeps the confirmation across a move to another slot's copy: it is about the image, not the slot", async () => {
     // ROM Maps cleared it when its dropdown changed the traced slot. Here the
     // overlay's subject is fixed at the trace definition's slot (Map 1), so
-    // looking at Map 2 and coming back neither needs asking again nor draws a
-    // cell it has not been told is running.
+    // looking at Map 2's copy and coming back neither needs asking again nor
+    // draws a cell it has not been told is running.
     const view = await mount(props());
     await overlayOn();
     await confirm();
     const box = () => screen.getByRole("checkbox", { name: /I confirm/ });
     expect(box()).toBeChecked();
     expect(view.container.querySelectorAll('[data-trace="nearest"]')).toHaveLength(1);
-    fireEvent.change(screen.getByLabelText("Map slot"), { target: { value: "2" } });
+    fireEvent.click(treeTable("Fuel Targets (Map 2)"));
     expect(screen.getByText(/Fuel Targets in Map 2 has none/)).toBeInTheDocument();
     expect(view.container.querySelectorAll("[data-trace]")).toHaveLength(0);
     expect(box()).toBeChecked();
-    fireEvent.change(screen.getByLabelText("Map slot"), { target: { value: "1" } });
+    fireEvent.click(treeTable("Fuel Targets (Map 1)"));
     expect(box()).toBeChecked();
     expect(view.container.querySelectorAll('[data-trace="nearest"]')).toHaveLength(1);
   });

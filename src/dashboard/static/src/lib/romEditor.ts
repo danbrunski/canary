@@ -92,19 +92,72 @@ export function matchesTableFilter(table: RomTableValues, filter: string): boole
   return [treeLabel(table), table.name].some((text) => text.toLowerCase().includes(needle));
 }
 
-/** The tables of one tree view, by group in `TREE_GROUPS` order and the
- *  daemon's order within each, keeping only those `filter` matches. Empty
- *  groups are dropped. */
-export function groupTables(
+/** The tree's Editable / View only / All choice (W10.15). */
+export type TableKinds = "all" | "editable" | "view";
+
+export const TABLE_KINDS: readonly TableKinds[] = ["all", "editable", "view"];
+
+function matchesKinds(table: RomTableValues, kinds: TableKinds): boolean {
+  if (kinds === "all") return true;
+  return isEditableTable(table) === (kinds === "editable");
+}
+
+/** One line of the tree: a table with a single copy, or a family of slotted
+ *  copies sharing a tree label (Fuel Targets in Maps 1-5), in slot order. */
+export type TreeEntry =
+  | { kind: "table"; table: RomTableValues }
+  | { kind: "family"; key: string; label: string; tables: RomTableValues[] };
+
+/** The family a slotted copy belongs to (its tree label); null for a table
+ *  with one copy. `rom_map.py` refuses two tables with one label in a slot,
+ *  so a label names one family. */
+export function familyKey(table: RomTableValues): string | null {
+  return table.slot === null ? null : treeLabel(table);
+}
+
+/** The tree (W10.14): by group in `TREE_GROUPS` order, the daemon's order
+ *  within each, every slotted copy folded into its family where the first
+ *  copy stands. Only what `filter` and `kinds` keep is listed; a family left
+ *  with one copy is listed as that copy, and empty groups are dropped. */
+export function treeGroups(
   tables: readonly RomTableValues[],
   filter = "",
-): Array<{ id: TreeGroupId; label: string; tables: RomTableValues[] }> {
-  return TREE_GROUPS.map((group) => ({
-    ...group,
-    tables: tables.filter(
-      (table) => treeGroupOf(table) === group.id && matchesTableFilter(table, filter),
-    ),
-  })).filter((group) => group.tables.length > 0);
+  kinds: TableKinds = "all",
+): Array<{ id: TreeGroupId; label: string; entries: TreeEntry[] }> {
+  const kept = tables.filter(
+    (table) => matchesTableFilter(table, filter) && matchesKinds(table, kinds),
+  );
+  return TREE_GROUPS.map((group) => {
+    const entries: TreeEntry[] = [];
+    const families = new Map<string, RomTableValues[]>();
+    for (const table of kept.filter((item) => treeGroupOf(item) === group.id)) {
+      const key = familyKey(table);
+      if (key === null) {
+        entries.push({ kind: "table", table });
+        continue;
+      }
+      const copies = families.get(key);
+      if (copies) {
+        copies.push(table);
+        continue;
+      }
+      const family: RomTableValues[] = [table];
+      families.set(key, family);
+      entries.push({ kind: "family", key, label: key, tables: family });
+    }
+    return {
+      ...group,
+      entries: entries.map((entry): TreeEntry => {
+        if (entry.kind === "table") return entry;
+        const [only] = entry.tables;
+        if (entry.tables.length === 1 && only) return { kind: "table", table: only };
+        return {
+          ...entry,
+          tables: [...entry.tables].sort((a, b) => (a.slot ?? 0) - (b.slot ?? 0)),
+        };
+      }),
+    };
+  }).filter((group) => group.entries.length > 0);
 }
 
 /** How many pending edits change this table (its id is unique per file, so a

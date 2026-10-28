@@ -16,13 +16,24 @@ export async function showRomView(view: RomViewName): Promise<void> {
 }
 
 /** The table tree's button for a table, by its full label ("Fuel
- *  Compensation (Map 1)"). The button is named by the shorter tree label; the
- *  full label leads its title. */
+ *  Compensation (Map 1)"). The button is named by the shorter tree label (a
+ *  slotted copy by "Map 1"); the full label leads its title. A copy inside a
+ *  closed family is found by opening each closed family in turn (W10.14). */
 export function treeTable(label: string): HTMLElement {
   const tree = screen.getByRole("navigation", { name: "Tables" });
-  const found = within(tree)
-    .queryAllByRole("button")
-    .find((item) => item.title.split(" · ")[0] === label);
+  const find = () =>
+    within(tree)
+      .queryAllByRole("button")
+      .find((item) => item.dataset.tree !== "family" && item.title.split(" · ")[0] === label);
+  let found = find();
+  for (const family of tree.querySelectorAll<HTMLElement>(
+    '[data-tree="family"][aria-expanded="false"]',
+  )) {
+    if (found) break;
+    fireEvent.click(family);
+    found = find();
+    if (!found) fireEvent.click(family);
+  }
   if (!found) throw new Error(`no table "${label}" in the tree`);
   return found;
 }
@@ -32,11 +43,15 @@ export function findTreeTable(label: string): Promise<HTMLElement> {
   return waitFor(() => treeTable(label));
 }
 
-/** The tree top to bottom: each group's heading ("Fuel, 2 tables"), then its
- *  tables by full label. */
+/** The tree top to bottom: each group's heading ("Fuel, 2 tables"), each
+ *  family's row ("Fuel Targets, 5 maps") and, when it is open, its copies,
+ *  and each table by full label. The Show tables choice is left out. */
 export function treeContents(): string[] {
-  return within(screen.getByRole("navigation", { name: "Tables" }))
+  const tree = screen.getByRole("navigation", { name: "Tables" });
+  const kinds = within(tree).getByRole("group", { name: "Show tables" });
+  return within(tree)
     .getAllByRole("button")
+    .filter((button) => !kinds.contains(button))
     .map((button) => button.getAttribute("aria-label") ?? button.title.split(" · ")[0] ?? "");
 }
 

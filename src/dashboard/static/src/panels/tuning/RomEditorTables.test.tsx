@@ -2,8 +2,9 @@
  * One page for viewing and editing ROM tables (ROM Maps merged into the ROM
  * Editor, 2026-10-26): every table the image's map declares but the axes,
  * both timing trims and Fuel Compensation and Fuel Targets among them, picked
- * from a tree grouped as the map files them (W10.10) and drawn shaded low to
- * high; Map 1 is edited, the rest are looked at.
+ * from a tree grouped as the map files them (W10.10), a slotted table's copies
+ * under one family (W10.14), and drawn shaded low to high; Map 1 is edited,
+ * the rest are looked at.
  */
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -52,20 +53,22 @@ async function open(tables: RomTablesResponse = TABLES_ALL_2D) {
 const shadedCells = (grid: HTMLElement) => within(grid).getAllByRole("gridcell");
 
 describe("ROM Editor: every table, shaded", () => {
-  it("offers Fuel Targets, Fuel Compensation, both timing trims and the base timing map in Map 1, by group", async () => {
+  it("offers Fuel Targets, Fuel Compensation, both timing trims and the base timing map, by group", async () => {
     const picker = await open();
     expect(treeContents()).toEqual([
       "Fuel, 2 tables",
+      "Fuel Targets, 2 maps",
       "Fuel Targets (Map 1)",
+      "Fuel Targets (Map 2)",
       "Fuel Compensation (Map 1)",
       "Ignition, 3 tables",
       "Timing Main (trim A) (Map 1)",
       "Timing High Det (trim B) (Map 1)",
       "Base timing rate map (Map 1)",
     ]);
-    // Named by the tree label (the slot is the Map slot choice's to say); the
-    // detail column's heading is the full label.
-    const targets = within(picker).getByRole("button", { name: "Fuel Targets" });
+    // A single-copy table is named by its tree label, a slotted copy by its
+    // slot under the family; the detail column's heading is the full label.
+    const targets = within(picker).getByRole("button", { name: "Map 1" });
     expect(targets).toHaveAttribute("aria-current", "true");
     expect(screen.getByRole("heading", { name: "Fuel Targets (Map 1)" })).toBeVisible();
     fireEvent.click(within(picker).getByRole("button", { name: "Fuel Compensation" }));
@@ -143,34 +146,39 @@ describe("ROM Editor: every table, shaded", () => {
     expect(screen.getByRole("form", { name: "Operation" })).toBeVisible();
   });
 
-  it("shows another slot's tables for looking at, editing only Map 1", async () => {
+  it("shows another slot's copy for looking at, editing only Map 1", async () => {
     await open();
     await screen.findByRole("grid", { name: "Fuel Targets (Map 1) cells" });
-    fireEvent.change(screen.getByLabelText("Map slot"), { target: { value: "2" } });
-    expect(treeContents()).toEqual(["Fuel, 1 table", "Fuel Targets (Map 2)"]);
+    fireEvent.click(treeTable("Fuel Targets (Map 2)"));
     expect(screen.getByRole("table", { name: "Fuel Targets (Map 2) cells" })).toBeVisible();
     expect(screen.getByText(/edits and the simulator cover Map 1 only/)).toBeVisible();
     expect(screen.queryByRole("form", { name: "Operation" })).not.toBeInTheDocument();
+    // The single-copy tables stay where they were: no slot hides them.
+    expect(treeTable("Base timing rate map (Map 1)")).toBeVisible();
     // Back to Map 1: editing returns.
-    fireEvent.change(screen.getByLabelText("Map slot"), { target: { value: "1" } });
+    fireEvent.click(treeTable("Fuel Targets (Map 1)"));
     expect(screen.getByRole("form", { name: "Operation" })).toBeVisible();
   });
 
-  it("offers all five map slots and looks at Map 5, editing nothing there", async () => {
+  it("lists all five map slots in each family and looks at Map 5, editing nothing there", async () => {
     await open(TABLES_ALL_SLOTS);
     await screen.findByRole("grid", { name: "Fuel Targets (Map 1) cells" });
-    const select = screen.getByLabelText("Map slot");
-    expect(
-      within(select)
-        .getAllByRole("option")
-        .map((option) => option.textContent),
-    ).toEqual(["Map 1 (editable)", "Map 2", "Map 3", "Map 4", "Map 5"]);
-    fireEvent.change(select, { target: { value: "5" } });
+    expect(screen.queryByLabelText("Map slot")).not.toBeInTheDocument();
     expect(treeContents()).toEqual([
       "Fuel, 2 tables",
+      "Fuel Targets, 5 maps",
+      "Fuel Targets (Map 1)",
+      "Fuel Targets (Map 2)",
+      "Fuel Targets (Map 3)",
+      "Fuel Targets (Map 4)",
       "Fuel Targets (Map 5)",
-      "Fuel Compensation (Map 5)",
+      "Fuel Compensation, 5 maps",
+      "Ignition, 3 tables",
+      "Timing Main (trim A) (Map 1)",
+      "Timing High Det (trim B) (Map 1)",
+      "Base timing rate map (Map 1)",
     ]);
+    fireEvent.click(treeTable("Fuel Targets (Map 5)"));
     const grid = screen.getByRole("table", { name: "Fuel Targets (Map 5) cells" });
     expect(
       within(grid)
@@ -185,7 +193,6 @@ describe("ROM Editor: every table, shaded", () => {
   it("warns that UpRev labels Fuel Compensation's axes differently in a slot other than Map 1", async () => {
     await open(TABLES_ALL_SLOTS);
     await screen.findByRole("grid", { name: "Fuel Targets (Map 1) cells" });
-    fireEvent.change(screen.getByLabelText("Map slot"), { target: { value: "3" } });
     fireEvent.click(treeTable("Fuel Compensation (Map 3)"));
     const note = screen.getByRole("note", { name: "Fuel Compensation editor labels" });
     expect(note).toHaveTextContent(/UpRev labels these axes differently/);
@@ -207,7 +214,9 @@ describe("ROM Editor: every table, shaded", () => {
     await open(TABLES_WITH_CURVES);
     expect(treeContents()).toEqual([
       "Fuel, 2 tables",
+      "Fuel Targets, 2 maps",
       "Fuel Targets (Map 1)",
+      "Fuel Targets (Map 2)",
       "K (injector constant) (Map 1)",
       "Airflow, 2 tables",
       "Throttle effective area",

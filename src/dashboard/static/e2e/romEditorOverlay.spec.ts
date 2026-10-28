@@ -145,13 +145,20 @@ test("colored target table, live overlay behind a toggle, slot navigation", asyn
     fullPage: true,
   });
 
-  // Another slot is for looking at: the overlay has no cell to place there.
-  await page.getByLabel("Map slot").selectOption("2");
+  // Another slot's copy is for looking at: the overlay has no cell to place
+  // there. The chosen table's family is open, so Map 2 is one click away.
+  const targets = page
+    .getByRole("navigation", { name: "Tables" })
+    .getByRole("group", { name: "Fuel Targets", exact: true });
+  await targets.getByRole("button", { name: "Map 2", exact: true }).click();
   await expect(page.getByRole("table", { name: "Fuel Targets (Map 2) cells" })).toBeVisible();
   await expect(page.getByText(/edits and the simulator cover Map 1 only/)).toBeVisible();
   await expect(page.getByText(/Fuel Targets in Map 2 has none/)).toBeVisible();
+  // Below 900px the copies are options of the table select.
   await page.setViewportSize({ width: 430, height: 900 });
-  await page.getByLabel("Map slot").selectOption("1");
+  await page
+    .getByRole("combobox", { name: "Table" })
+    .selectOption({ label: "Fuel Targets · Map 1 ✎" });
   await expect(grid).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath("rom-editor-overlay-mobile.png"),

@@ -1686,7 +1686,8 @@ W09.6 is the orchestrator's own, on the ROM machine.
     editable scalar K; a **Map slot** select picks the slot and Map 1 stays the
     only editable one (the page says so for 2-5). *Widened by W10.10
     (2026-10-27): every non-axis table, curves and scalars too, picked from a
-    grouped tree.* `CellGrid` shades each cell
+    grouped tree. W10.14 replaced the Map slot select with a family per
+    slotted table in that tree.* `CellGrid` shades each cell
     with the existing `mapColor` over the table's own decoded range (a table
     with no decoded values by its raw counts; a scalar, a uniform table and a
     cell with no value are left plain: there is no range), with the same legend

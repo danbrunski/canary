@@ -23,6 +23,7 @@ import {
   recentEntry,
   showRomView,
   treeContents,
+  treeTable,
 } from "../../test/romEditorViews";
 import type { RomEditPreview, RomEditPreviewRequest, RomLevers } from "../../types/romEditor";
 import { downloadText } from "../../util/browser";
@@ -218,17 +219,20 @@ describe("ROM Editor page: base and table (W09.3)", () => {
     expect(recentEntry(/Edit from k106\.bin/)).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("offers Fuel Targets, Fuel Compensation and K in Map 1 only, with the Fuel Comp axis note", async () => {
+  it("offers Fuel Targets, Fuel Compensation and K, a Map 2 copy in its family, with the Fuel Comp axis note", async () => {
     route();
     renderEditor();
-    const tree = await screen.findByRole("navigation", { name: "Tables" });
+    await screen.findByRole("navigation", { name: "Tables" });
+    // Fuel Targets is chosen, so its family is open; Fuel Compensation's is not.
     expect(treeContents()).toEqual([
       "Fuel, 3 tables",
+      "Fuel Targets, 2 maps",
       "Fuel Targets (Map 1)",
+      "Fuel Targets (Map 2)",
       "K (injector constant) (Map 1)",
-      "Fuel Compensation (Map 1)",
+      "Fuel Compensation, 2 maps",
     ]);
-    await userEvent.click(within(tree).getByRole("button", { name: "Fuel Compensation" }));
+    await userEvent.click(treeTable("Fuel Compensation (Map 1)"));
     expect(screen.getByRole("note", { name: "Fuel Compensation editor labels" })).toHaveTextContent(
       /UpRev labels these axes differently/,
     );

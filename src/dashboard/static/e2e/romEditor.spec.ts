@@ -52,19 +52,32 @@ const cellAt = (grid: Locator, row: number, col: number) =>
 const afterCell = (table: Locator, row: number, col: number) =>
   table.getByRole("cell", { name: new RegExp(`^Row ${row + 1}, column ${col + 1}:`) });
 
-/** A table in the tree (W10.10), by its tree label. */
+/** A single-copy table in the tree (W10.10), by its tree label. */
 const treeTable = (page: Page, name: string) =>
   page.getByRole("navigation", { name: "Tables" }).getByRole("button", { name, exact: true });
 
+/** One slot's copy of a slotted table in the tree (W10.14): "Map N" under
+ *  its family, the family opened first if it is closed. */
+async function treeCopy(page: Page, family: string, slot: number): Promise<Locator> {
+  const tree = page.getByRole("navigation", { name: "Tables" });
+  const row = tree.locator(`[data-tree="family"][aria-label^="${family}, "]`);
+  if ((await row.getAttribute("aria-expanded")) === "false") await row.click();
+  return tree
+    .getByRole("group", { name: family, exact: true })
+    .getByRole("button", { name: `Map ${slot}`, exact: true });
+}
+
 /** Pick a table as the operator would at this width: from the tree, or below
- *  900px from its select (W10.11), whose option carries the marks as text. */
-async function chooseTable(page: Page, name: string) {
+ *  900px from its select (W10.11), whose option carries the slot of a copy
+ *  and the marks as text. `slot` names a slotted table's copy. */
+async function chooseTable(page: Page, name: string, slot?: number) {
   if ((page.viewportSize()?.width ?? 1280) >= 900) {
-    await treeTable(page, name).click();
+    await (slot === undefined ? treeTable(page, name) : await treeCopy(page, name, slot)).click();
     return;
   }
   const select = page.getByRole("combobox", { name: "Table" });
-  const value = await select.locator("option", { hasText: name }).first().getAttribute("value");
+  const text = slot === undefined ? name : `${name} · Map ${slot}`;
+  const value = await select.locator("option", { hasText: text }).first().getAttribute("value");
   await select.selectOption(value ?? "");
 }
 
@@ -85,7 +98,7 @@ async function showView(page: Page, view: "Tables" | "Edits & Preview" | "Simula
 async function openAndEdit(page: Page, label: string) {
   await chooseFile(page, TUNED_FILE);
   await expect(page.getByLabel("Loaded ROM")).toBeVisible();
-  await chooseTable(page, "Fuel Compensation");
+  await chooseTable(page, "Fuel Compensation", 1);
   const grid = page.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" });
   await cellAt(grid, 1, 1).click();
   await cellAt(grid, 2, 3).click({ modifiers: ["Shift"] });
@@ -149,7 +162,7 @@ test("open a file, select one cell then a range, scale +2 %, preview, download t
   await expect(loaded.getByText("can simulate")).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`\\?rom=${ENTRY_TUNED.sha256}`));
 
-  await treeTable(page, "Fuel Compensation").click();
+  await (await treeCopy(page, "Fuel Compensation", 1)).click();
   const grid = page.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" });
   await expect(grid.getByRole("gridcell")).toHaveCount(256);
 
@@ -697,7 +710,7 @@ test.describe("at phone width (412 x 915)", () => {
     const select = page.getByRole("combobox", { name: "Table" });
     await expect(select).toBeVisible();
     await expect(page.getByRole("grid", { name: "Fuel Targets (Map 1) cells" })).toBeVisible();
-    await select.selectOption({ label: "Fuel Compensation ✎" });
+    await select.selectOption({ label: "Fuel Compensation · Map 1 ✎" });
     await expect(page.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" })).toBeVisible();
     const report = await overflowReport(page);
     expect(report.documentWidth, "document width").toBeLessThanOrEqual(report.viewport);
@@ -784,7 +797,7 @@ test("an unrecorded base is preview only: Simulate is off and gives the reason",
 
   // It still previews: preview-only is not unusable, and the reason survives it.
   await showView(page, "Tables");
-  await treeTable(page, "Fuel Compensation").click();
+  await (await treeCopy(page, "Fuel Compensation", 1)).click();
   const grid = page.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" });
   await cellAt(grid, 0, 0).click();
   const operation = page.getByRole("form", { name: "Operation" });
