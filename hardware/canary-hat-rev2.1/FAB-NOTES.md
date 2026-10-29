@@ -146,8 +146,10 @@ with each reflow (TI SBAS680).
 **Machine placement requested for U6, U7, U8, U9 and Y1** at least. Their pads
 are hidden or at 0.5 mm pitch.
 
-**Pin 1 orientation — please check against the assembly drawing for U6, U7,
-U8, U9 and Y1.**
+**Pin 1 orientation — please check U6, U7, U8, U9 and Y1 against the
+silkscreen.** Every part with three or more pins has a mark beside its pin 1:
+a filled dot on most, an L-shaped corner mark on Y1 and FL1. No other pin
+carries a mark. In the position file, 0° puts pin 1 at the top left.
 
 - **U6 and U7** are third-party library imports (SnapEDA / UltraLibrarian)
   whose zero-rotation convention may not match IPC-7351, and therefore may not

@@ -1841,3 +1841,56 @@ yet run on a board** (`docs/roadmap/tasks/H08-hat-adc.md`):
 - The channel map and calibration numbers are `data/hat_adc_rev2_1.yaml`.
   Fuel pressure decodes through the same code and the same gauge numbers as
   the USB path, and a test holds the two equal.
+
+### 13.5.14 Pin 1 on the silkscreen — 2026-10-28
+
+While quoting assembly, PCBWay asked where pin 1 was on U3, U4 and U6. The
+silkscreen gave them no answer, or a wrong one:
+
+| Part | Footprint | Silkscreen as sent |
+|---|---|---|
+| U3, MCP2518FD | Ultra Librarian `SOIC14_SL_MCH` | a filled square beside **pin 10**, and nothing at pin 1 |
+| U4, TCAN1042V | TI `D0008A_L` | **no mark**: two identical lines, eight identical pads |
+| U6, LSM6DSOX | Ultra Librarian `LGA-14L_STM` | a filled square beside **pin 10**, and nothing at pin 1 |
+
+- **Ultra Librarian draws a filled square beside every tenth pin** as a
+  counting aid. On these parts it was the only filled mark, so it read as a
+  pin-1 dot. The library `*` beside pin 1 had been removed from U3's board
+  copy and moved to the fab layer on U6's.
+- **TI marks pin 1 on the fab layer only**, which the Gerbers do not carry.
+- **FAB-NOTES sent PCBWay to "the assembly drawing", which was never made.**
+  It now points at the silkscreen.
+
+Rev 2.0 has the same marks, plus U5's (BMP384, the same Ultra Librarian
+square beside pin 10). PCBWay built it anyway.
+
+**Fixed in the board and the project library.**
+
+- U3 and U6: each tick moves beside pin 1.
+- U4: gains a dot beside pin 1. Each dot is Ultra Librarian's own size
+  (0.254 × 0.381 mm), 0.254 mm outside its pad.
+- The same fix goes into every variant in `lib/footprints.pretty`: the three
+  densities of `SOIC14_SL_MCH`, `LGA-14L_STM` and the BMP384's `LGA10`, plus
+  `D0008A_L`.
+- DRC is unchanged: 0 violations, 0 unconnected items, 0 parity issues. The
+  only warnings are the three fiducial library mismatches.
+- **The gerbers PCBWay quoted predate the fix.** Unless they are re-sent,
+  the boards built from that order carry the old marks, with pin 1 given to
+  PCBWay in the query reply. Those coordinates are measured in the position
+  file's frame, from the board's bottom-left corner with Y up:
+
+  | Part | Pin 1 | Position |
+  |---|---|---|
+  | U3 | top-left pad | X 18.40, Y 47.20 |
+  | U4 | top-left pad | X 30.40, Y 45.00 |
+  | U6 | bottom-left pad, rotated 90° | X 4.50, Y 40.89 |
+
+**Checked by tool from now on.** `hardware/tools/pin1_silk.py` flags two
+cases:
+
+- a filled mark, `*` or `1` that sits beside any pad other than pin 1;
+- silk that looks the same after a turn of a symmetric land pattern.
+
+It found exactly these three parts on rev 2.1. `pcbway_bom.py` runs it and
+exits 1 on any problem. Run it on the project library before laying out a new
+revision (README "Pin 1 on the silkscreen" in `hardware/tools/`).

@@ -7,7 +7,8 @@ Run with KiCad's own python (it needs `pcbnew`, see README.md):
 It writes `PCBWay_bom.csv` and `PCBWay_positions.csv` into out_dir, byte for byte what the plugin
 (com_github_pcbway_PCBWay-Plug-in-for-Kicad, `process.py` `get_components_file`) puts in the zip it
 uploads. Checked against the plugin's own output for the cap bank (2026-10-20). Use it to read the
-BOM before an order, or to upload the files by hand.
+BOM before an order, or to upload the files by hand. After writing them it runs pin1_silk.py's board
+check and exits 1 if any part's pin 1 is unmarked or mismarked on the silkscreen.
 
 The plugin builds its BOM from the footprints' fields, not the schematic's. One line per value +
 footprint + package + MPN, and one line per do-not-populate part. MPN comes from a field named
@@ -25,6 +26,7 @@ from itertools import groupby
 from typing import Any
 
 import pcbnew
+from pin1_silk import board_problems
 
 MPN_KEYS = [
     "mpn",
@@ -145,7 +147,8 @@ def bom_rows(items: list[dict[str, Any]]) -> tuple[list[str], list[dict[str, Any
 
 def main() -> None:
     board_path, out_dir = sys.argv[1:3]
-    positions, items = read_board(pcbnew.LoadBoard(board_path))
+    board = pcbnew.LoadBoard(board_path)
+    positions, items = read_board(board)
     columns, rows = bom_rows(items)
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "PCBWay_bom.csv"), "w", newline="", encoding="utf-8-sig") as f:
@@ -163,6 +166,13 @@ def main() -> None:
         w.writerows(p.values() for p in positions if "**" not in p["designator"])
     parts = sum(r["Quantity"] for r in rows)
     print(f"{len(rows)} BOM lines, {parts} parts, {len(positions)} placements -> {out_dir}")
+    # The assembler orients parts from these positions and the silkscreen (pin1_silk.py).
+    problems = board_problems(board)
+    if problems:
+        print(f"pin-1 silk: {len(problems)} -- fix before ordering:")
+        for p in problems:
+            print("  " + p)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

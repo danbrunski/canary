@@ -100,6 +100,37 @@ drawn twice in one place is reported, not removed: fix it in the library.
 Removing footprint items from pcbnew's python left KiCad 10.0.5's wrappers
 returning raw pointers.
 
+## Pin 1 on the silkscreen
+
+`pin1_silk.py` (KiCad python) lists every part whose silkscreen does not show where pin 1 is:
+
+```bash
+python3 hardware/tools/pin1_silk.py <board.kicad_pcb | library.pretty>
+```
+
+The assembler orients each part from the position file and the silkscreen. Those are all the
+Gerbers carry: a pin-1 mark drawn only on the fab layer never reaches the fab. On 2026-10-28 PCBWay
+had to ask where pin 1 was on HAT rev 2.1's U3, U4 and U6, because:
+
+- **Ultra Librarian footprints draw a filled square beside every tenth pin**, as a counting aid. On a
+  14-pin or 10-pin part, that square beside pin 10 is the only filled mark, and it reads as a pin-1
+  dot. U3 (SOIC-14) and U6 (LGA-14) had nothing else: their board copies had lost the library's `*`
+  beside pin 1. CANary-PWR's U1 (QFN-38) has squares beside pins 10, 20 and 30 as well as its `*`.
+- **TI's `D0008A_L` (SOIC-8) marks pin 1 on the fab layer only.** U4's silkscreen was two
+  identical lines.
+
+Every part with three or more numbered pads gets two checks:
+
+- **a mark beside the wrong pad**: a filled silk shape, or a `*` or `1`, nearer another pad than pin
+  1;
+- **no mark**: silk that looks the same after any turn that maps the land pattern onto itself. Only
+  shapes and `*`/`1` count. A text label is not an orientation mark, and TI's library copy passed
+  on a stray `Designator9` text.
+
+Given a `.pretty` directory, it checks every footprint in that library. Run it on the project
+library before laying out a new revision. `pcbway_bom.py` runs the board check whenever it writes
+an order's files, and exits 1 on any problem.
+
 ## PCBWay BOM
 
 `pcbway_bom.py` (KiCad python) writes the BOM and position file that PCBWay's KiCad plugin would
@@ -110,8 +141,9 @@ upload, byte for byte (checked against the plugin's own zips for the cap bank an
 python3 hardware/tools/pcbway_bom.py <board.kicad_pcb> <out_dir>
 ```
 
-Read it before an order, or upload its two files by hand. The plugin builds the BOM from the
-**footprints'** fields, so a field changed only in the schematic does not reach it until the board
+Read it before an order, or upload its two files by hand. It then runs `pin1_silk.py`'s board check
+and exits 1 if any part's pin 1 is unmarked or mismarked (see Pin 1 on the silkscreen). The plugin
+builds the BOM from the **footprints'** fields, so a field changed only in the schematic does not reach it until the board
 is updated from the schematic. Schematic parity in DRC checks that the two agree.
 
 - **Columns.** MPN comes from a field named `MPN`. Package comes from `Package`, and is left empty

@@ -171,6 +171,18 @@ Y-cable, ferrules, and standoffs.
   SnapEDA/UltraLibrarian imports whose zero-rotation convention often disagrees
   with IPC-7351 and therefore with the assembler's. Rotation error on those three
   is the most likely assembly defect on this board.
+- **Pin 1 on the silkscreen, checked by tool** (every revision from 2.1). Run
+  `hardware/tools/pin1_silk.py` on the board and on the project's
+  `lib/footprints.pretty`, and order only when both report 0;
+  `pcbway_bom.py` refuses a board that fails it. Two library habits defeat a
+  visual check:
+  - **Ultra Librarian** footprints draw a filled square beside every tenth pin,
+    which an assembler reads as a pin-1 dot.
+  - **TI's `D0008A_L`** marks pin 1 only on the fab layer, which the Gerbers
+    do not carry.
+
+  Rev 2.0 and rev 2.1 as first sent both had U3 and U6 marked beside pin 10
+  and U4 unmarked, and PCBWay had to ask (§13.5.14 of `CANary-HAT-Rev2.1.md`).
 - **Assembly scope split** — state which parts the house places (U5, U6, U7 at
   minimum) and which are hand-soldered, so the centroid and BOM agree.
 - **Stencil** if the LGAs are self-assembled, with paste apertures decided
