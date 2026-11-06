@@ -18,7 +18,7 @@ state model version **1**.
 | `target_command` | `0x0269AC`, gate `0x055E5C`–`0x055EEC` | `src.decode.target_phi_command.target_command` | `target_phi::target_command` |
 | `x_from_bfs` | `0xFFFF103E` writer | `target_phi_command.x_from_bfs` | `target_phi::x_from_bfs` |
 | `load_input_curves`, `fuel_comp_load` | `FUN_0003c3a4` chain | `src.decode.fuel_comp_load` | `fuel_comp_load::*` |
-| `uprev_power_on`, `uprev_step`, `loaded_slot` | `0x0DE1A4`, `0x0DE358` | `src.analysis.ecu_state_models` (E05.3) | `uprev::*` |
+| `uprev_power_on`, `uprev_step`, `loaded_slot` | map-slot selection | `src.analysis.ecu_state_models` (E05.3) | `uprev::*` |
 
 Each entry in the YAML gives the inputs and outputs with their widths and
 signedness, every arithmetic step (widening casts, shifts, truncating
@@ -39,7 +39,7 @@ is not yet an operation: `byte_curve16`, `pedal_flag_next`, `trim_lookup`
 - **Widths.** Values are unsigned words (`u16`), bytes (`u8`) or longs
   (`u32`). The exception is idle air, a signed word carried in `i64`.
   Multiplies widen first (`u16 × u16 → u32`). Nothing relies on wrap-around
-  except the declared `truncate_u32` in the UpRev history.
+  except the declared `truncate_u32` in the map-slot history.
 - **Rounding.** Divisions truncate, right shifts are logical, and
   interpolation truncates toward its first operand. Nothing rounds to nearest.
 - **Refusal versus reason.** A *refusal* means the input is outside the
@@ -127,7 +127,7 @@ implementation does not choose an answer for any of these:
 - `final_command_path`, `enrichment_gate_latch`, `ram_copy_identity`: the
   E02 qualification blockers.
 - `bfs_saturation`: where the ECM saturates a BFS above a word is unknown.
-- `uprev_indicator_meaning`: the indicator bit is inferred.
+- `uprev_indicator_meaning`: the map-switch indicator bit is inferred.
 - `enrichment_tick_and_cycle`: E05.3's timer tick and cycle period are not
   decoded, so the enrichment request/commit machine stays Python-only and
   outside this contract version.

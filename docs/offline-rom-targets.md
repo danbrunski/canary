@@ -6,7 +6,7 @@ Open **Workbench → Engine Tuning → ROM Editor** (`#wb/tuning-rom-editor`), e
 the dashboard control token, and pick a stored image or open a `.OsirisROM` or
 plain 1 MiB image. Opening a file adds it to the ROM library, kept by its
 plain-image hash. The library accepts any valid image (a plain image of the
-vehicle's exact size, or an `.OsirisROM`; the UpRev encrypted backup and
+vehicle's exact size, or an `.OsirisROM`; UpRev's backup `.bin` and
 anything else are refused by name), so a historical or experimental image can
 be looked at and edited. What is gated is the live overlay: its confirmation and
 its trace are available only for the image the flash history records as
@@ -15,7 +15,7 @@ there.
 (The page that used to do this, **ROM Maps** at `#wb/tuning-rom-maps`, was merged
 into the editor on 2026-10-26: `#wb/tuning-rom-maps` and `#wb/live-rom-maps`
 still open the editor. The old upload-without-saving flow is not in the
-dashboard any more; `POST /control/rom/inspect` still decodes an `.OsirisROM`
+dashboard any more; `POST /control/rom/inspect` still loads an `.OsirisROM`
 in memory without storing it, for scripts.)
 
 The editor shows every table the image's map declares but the axes, in every
@@ -130,17 +130,18 @@ judgment separate from file-format validation.
 `apply` without `--output-dir` is a dry run. To create review artifacts,
 specify a **new directory outside the repository**. Existing directories
 are refused, inputs are never overwritten, and no proprietary ROM content
-or key material belongs in Git. Each bundle contains:
+belongs in Git. Each bundle contains:
 
-- `candidate.OsirisROM`: complete encoded candidate.
+- `candidate.OsirisROM`: the complete candidate file.
 - `review.json`: hashes, per-cell changes, AFRs, rationale, checksum values,
-  and every changed decoded offset.
+  and every changed image offset.
 - `patch.json`: the exact requested patch.
 
 Before emitting a candidate, the tool verifies the known source hash,
-complete target table, both axes, checksum-style markers, section CRCs,
-internal checksums, exact codec roundtrips, unchanged non-ROM sections and
-prefix, and absence of changes outside requested cells/checksum words.
+complete target table, both axes, checksum-style markers, the file's own
+integrity checks, internal checksums, that the written file loads back to the
+same image, that everything else in the file is unchanged, and absence of
+changes outside requested cells/checksum words.
 It rejects duplicate cells, wrong old values, wrong axes/slots, and unknown
 patch fields. Vehicle-specific offsets/checksum ranges are profile data.
 
@@ -160,7 +161,7 @@ the operator's already-flashed 5200 RPM / BFS 18.20 edit. It is not a patch
 to apply again to the current tune. Actual validation on the supplied files
 produced byte-for-byte equality with the UpRev file, SHA-256
 `03d00051a59b86251ac0d5d9cf2ac9651682cfcba978edce81f07371f1c128a2`.
-Only decoded offsets `0x9598`, `0x95a0`, and `0xe025c` changed.
+Only image offsets `0x9598`, `0x95a0`, and `0xe025c` changed.
 
 Reopen candidates in UpRev and compare the table against the report before
 approving them. Automated GUI reopening has not been performed here; the
@@ -194,20 +195,18 @@ collection resumes; updating historical manifests is not part of this work.
 
 - 77 focused ROM/AFR/tuning-analysis/digest tests passed; the existing
   large local-corpus reference capture test was deselected after a separate
-  run spent several minutes reading Parquet. Synthetic codec/patch tests
-  contain no production ROM bytes or extracted keys.
-- Real old -> new reproduction matches the complete UpRev container;
+  run spent several minutes reading Parquet. Synthetic file-format and patch
+  tests contain no production ROM bytes.
+- Real old -> new reproduction matches the complete UpRev file;
   an in-memory new -> old inverse edit also reconstructs the original
-  container byte-for-byte. The inverse was not written to disk.
+  file byte-for-byte. The inverse was not written to disk.
 - Full `mypy src` passed (291 files); touched Python files pass Ruff lint
   and format checks; `git diff --check` passed.
 - The broader non-integration/non-slow run was interrupted after 3,914
   passes, one skip and three timeout failures while local-corpus work
   remained. All three timeout failures passed on a serial rerun. This is
   **not** a completed full commit gate.
-- Whole-repository lint/format is blocked by the separately authored,
-  untracked `tools/decode_uprev_rom_research.py`; it was not altered here.
-  At that validation stage no commit, push, Pi deployment, GUI reopen or
+- At that validation stage no commit, push, Pi deployment, GUI reopen or
   ECU flash was performed.
 
 ## Dashboard deployment — 2026-09-21

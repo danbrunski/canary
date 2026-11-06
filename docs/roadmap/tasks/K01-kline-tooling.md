@@ -142,7 +142,7 @@ result says which kind of empty it is.
     claim the ECM's, refuse or pause while a foreign tool owns it, and never
     run while passive mode is armed.
   - Respect the reply-size limits (the ECM caps a local-id reply at about 61
-    bytes; `7F AC 12` beyond that, per `docs/uprev-usb-kline-research.md`).
+    bytes; `7F AC 12` beyond that, per the vehicle skill's K-line notes).
   - A capture profile names module channels (for example
     `kline: [ABS:WHEEL_SPEED_FL, …]`); `default` stays unchanged until the
     operator opts in.

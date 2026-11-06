@@ -20,8 +20,8 @@ ECU replica.
 | Application-code finding | Twin consequence |
 |---|---|
 | Target function `0x055DB2` calls `0x0269AC`; helpers implement raw rpm/load search, bilinear interpolation and clamping | Reproduce actual integer semantics and call dependencies, not a generic interpolation chosen for convenience. |
-| Nissan's Target AFR pointer is redirected to RAM `0xFFFFB260`, slot `+0x220` | Use the UpRev active RAM copy's matching ROM slot; the old calibration table at `0x00A169` does not drive this patched path. |
-| UpRev init/copy/selector routines `0x0DE1A4`, `0x0DE3E4`, `0x0DE358` | Model default slot 1, magic, selector debounce and committed slot separately; active-map 0 after cold boot is meaningful state. |
+| Target AFR is read from the loaded map slot's RAM copy, `0xFFFFB260` = slot `+0x220` | Use the loaded slot's table in the image; the calibration's own table at `0x00A169` does not drive Target AFR in an UpRev tune. |
+| Map-slot selection: slot 1 at start-up, a switch commits another, `0xFFFFB008` holds the committed map | Model the default slot and the committed slot separately; active-map 0 after a cold boot is meaningful state. |
 | Pedal flag at `0xFFFF2841` bit 0 forces X=`0xFF`; curve `0xCEDB` and +8-count hysteresis govern it | First consume the observed flag; later predict its transitions after identifying its input and update order. |
 | X derives from BFS using Load Point Scaler; Fuel Comp is slot `+0x660`, K is `+0x762` | Extend upstream from observed X into computed BFS/air charge only after tracing the exact arithmetic/update order and scaler source against observations. Fuel Comp acts inside BFS, before the filter, transient terms and rpm-dependent ceiling. |
 | Fuel Comp axes are rpm `0xCACD` and load `0xCB29`, opposite UpRev's labels; cells remain row-major | Use the code's axis roles and exact image. The October 4 restoration changed load breakpoints and slot-1 cells; preserve separate calibration cohorts. |
@@ -40,8 +40,8 @@ ECU replica.
   signedness, rounding/saturation, branch conditions, state/update order,
   observed versus predicted dependencies, confidence and evidence ids.
   Identify compatibility using verified program/patch identity plus full
-  image hash for calibration; never use calibration ID alone. Keep Nissan
-  and UpRev disassembly/decompiled output local; commit behavioral contracts,
+  image hash for calibration; never use calibration ID alone. Keep
+  disassembly/decompiled output local; commit behavioral contracts,
   profile metadata, our implementation and evidence references.
   **Accept:** the target-φ dependency graph resolves to E02 inputs and W08
   tables; every undecoded dependency marks affected outputs/regions as
@@ -83,7 +83,8 @@ ECU replica.
   - **Identity.** Compatibility is the sha256 of the program spans
     (0x0–0x7FFF and 0x20000–0xDFFFF: what UpRev flashes never write). That
     hash is equal on all six local ZS44A images, five calibrations. Added to
-    it: UpRev's patch marker (0x055EC4 = 0xFFFFB260), the calibration
+    it: the map-slot marker of an UpRev tune (the Target AFR pointer
+    0x055EC4 = 0xFFFFB260), the calibration
     conditions behind each dead path, and the full image hash. `check_image`
     refuses `wrong_program`, `patch_missing` or `unmodelled_logic`. Without
     bytes, `check_image_sha` refuses `program_unverified`. Tests:
@@ -400,8 +401,8 @@ ECU replica.
   held-out transition acceptance needs captures):*
   - **Models.** `src/analysis/ecu_state_models.py` (`MODEL_VERSION` 1,
     layer 5) holds the pedal flag (`PedalFlagModel`, `pedal_flag_next`,
-    `pedal_comparand`, `byte_curve16` for `0x026BBC`), UpRev init/selector/
-    copy (`uprev_power_on`, `uprev_step`, `loaded_slot`) and the enrichment
+    `pedal_comparand`, `byte_curve16` for `0x026BBC`), map-slot selection
+    (`uprev_power_on`, `uprev_step`, `loaded_slot`) and the enrichment
     request and commit (`enrichment_request`, `enrichment_commit`,
     `enrichment_step`). No state defaults. A latch, timer, selector or
     committed state is known from an observed `Checkpoint` (source and
@@ -411,8 +412,8 @@ ECU replica.
     (`hysteresis_band_state_unknown`, `warm_latch_unknown`,
     `rpm_band_latch_unknown`, `timer_unknown`, `commit_flag_unknown`,
     `uprev_debounce_unknown`, `uprev_state_unobserved`, …).
-    `uprev_power_on` refuses unknown RAM. An unknown magic is never treated
-    as a cold boot.
+    `uprev_power_on` refuses unknown RAM: a start it did not observe is
+    never treated as a cold boot.
   - **Decoded.**
     - *Pedal flag.* The curve `0xCEDB` input `0xFFFF11CF` is
       `min(255, rpm word >> 1)`, exact for every `w1204`. The comparand
@@ -422,16 +423,10 @@ ECU replica.
       needs, through the inverted area curve. So the flag is about 78 % of
       *requested* opening, not measured pedal. The curve is 200 at every rpm
       on every listed image: the flag sets at 200 and clears below 192.
-    - *UpRev.* Init writes the magic, zeroes `0xFFFFB000`–`0xFFFFB00F` and
-      copies slot 1, unless the magic is already present (a warm start).
-      This includes `0xFFFFB008`; the `data/dids.yaml` note says the
-      opposite. The selector (task 111, after the fuel task):
-      - bit 1 rising edges count while bit 3 alone is held;
-      - releasing to 0 from 8 commits;
-      - a selector of 0 or above 5 commits nothing, but is shifted into
-        `0xFFFFB00C`;
-      - the countdown `selector × 64` blinks `0xFFFF4858` bit 0.
-      A commit's copy is first read by the next cycle.
+    - *Map slot.* Which slot is loaded, at start-up and after a map
+      switch, is modelled from the code; the details stay local. A cold
+      start loads slot 1 and zeroes `0xFFFFB008` (the `data/dids.yaml` note
+      says the opposite). A switch's copy is first read by the next cycle.
     - *Enrichment states.* Cal `0x8794`/`0x8781`/`0x8796` (25/15/9) are the
       timer limits. Cal `0x8795`/`0x8782`/`0x877F`/`0x8780` = 0 kill four
       branches. The request's latch thresholds are calibration bytes too:
@@ -459,7 +454,7 @@ ECU replica.
     In ticks: request 2 holds 30, and request 4 gives 2 for 17 then 6 for
     33.
   - **Fixture accounting (no model scored).** On the October 4 slice,
-    196/196 UpRev reads classify (`loaded_slot`) as slot 1 by init, with no
+    196/196 map-slot reads classify (`loaded_slot`) as slot 1 by init, with no
     map change; `uprev_step` itself is not exercised (no switch, input not
     read per cycle). All 191 flag reads and the 4 observed transitions are
     counted unevaluable (`input_not_captured:0xFFFF3CDC`), none scored. So
@@ -485,8 +480,7 @@ ECU replica.
       through enrichment in each rpm band (below 3,100, 3,100–3,400, above).
       This measures the tick, then gives held-out transition sequences.
     - **(c) Map switching** needs an operator decision (report) and the
-      `0xFFFFB000`–`0xFFFFB00F` block with `0xFFFF2EE0` read through a known
-      switch sequence.
+      map-slot RAM read through a known switch sequence.
     - **(d) Overrides: desk part done 2026-10-13; qualification needs the
       vehicle, and the gaps below need the listing.**
       - *Dashboard.* The E05.1 panel lists them under "Firmware overrides"

@@ -104,7 +104,7 @@ does no bus, disk or network I/O, and has no dependency on Python objects.
   workspace. `ecu_twin_core` is `no_std` + `alloc` with
   `forbid(unsafe_code)`, no dependencies and no I/O. It implements all 12
   contract operations: the lookup family, `target_command` (branch, gate band
-  reason, cell trace), `x_from_bfs`, the `0xFFFF118A` chain, and the UpRev
+  reason, cell trace), `x_from_bfs`, the `0xFFFF118A` chain, and the map-slot
   selection state as the stateful path (`uprev_power_on`, `uprev_step`,
   `loaded_slot`; nullable state, named unknown-state reasons). Overflow
   handling is always explicit: widening `u32::from`, `min` saturation,
@@ -116,7 +116,7 @@ does no bus, disk or network I/O, and has no dependency on Python objects.
   still miss, and adds Rust-side generated cases: every Q16 fraction against
   an independent i128 formula, the full u16 range on 5 axes, every rpm word
   0..1200 × every load byte on Map 1, and every input byte from 144 known
-  UpRev states. Mutation check: rounding interpolation to nearest failed 645
+  map-slot states. Mutation check: rounding interpolation to nearest failed 645
   lookup vectors, and a saturating selector failed 11 state vectors.
   `ecu_twin_py` is a thin optional PyO3 0.27 binding (abi3-py312):
   `TargetPhiTable` and `LoadCurves` are validated once, with per-tuple calls
@@ -125,7 +125,7 @@ does no bus, disk or network I/O, and has no dependency on Python objects.
   wheel built into a scratch directory (never installed into `.venv`), it
   passed 7/7 against both a release and a debug wheel: all vectors through
   the binding, plus seeded differentials of 20,000 random table/tuple pairs,
-  10,000 load chains and 20,000 random UpRev cycles. Prediction and
+  10,000 load chains and 20,000 random map-slot cycles. Prediction and
   observation stay separate: the kernels take only lookup inputs, and
   observed words appear only as pinned answers and `must_differ` controls.
   The state path's vectors and tests read E05.3's `ecu_state_models.py`

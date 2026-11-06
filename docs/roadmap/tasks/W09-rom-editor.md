@@ -781,7 +781,7 @@ W09.6 is the orchestrator's own, on the ROM machine.
       six statuses plus `CL`/`∅` labels, Download result JSON equals the mocked
       response); an unrecorded base shows `preview only`, Simulate disabled
       with `base_not_a_recorded_revision` (also after a preview); UpRev's
-      encrypted backup refused by its server text with nothing loaded. The
+      backup `.bin` refused by its server text with nothing loaded. The
       mocks reuse the vitest fixtures (`src/test/romLibraryFixtures.ts`,
       `romSimFixtures.ts`) by import, so there is one copy; the sim result's
       `cells` validates against `sim_cells.CellTable` (rechecked 2026-10-15).
@@ -1218,7 +1218,7 @@ W09.6 is the orchestrator's own, on the ROM machine.
     .status === 'matched'`; an unrecorded image previews and the Simulate slot
     gives `base_not_a_recorded_revision`.
   - Refusals by reason, as the library page does (`refusalText`): UpRev's
-    encrypted backup `.bin` by the server's own name and reason, 413, 401; an
+    backup `.bin` by the server's own name and reason, 413, 401; an
     empty or over-2 MiB file is refused client-side without uploading. A
     refusal loads nothing and keeps the current base. No extension check
     (the server detects the format from the bytes), which the library page
@@ -1232,7 +1232,7 @@ W09.6 is the orchestrator's own, on the ROM machine.
     note; empty library is one Open ROM… button, no picker, no `accept`; a
     picked file loads in one step (POST body/headers, URL, header name,
     `preview only`, Simulate disabled with its reason); a recorded revision
-    shows `can simulate`; already-in-library note; encrypted-backup refusal by
+    shows `can simulate`; already-in-library note; backup-`.bin` refusal by
     name, selection and URL unchanged; 413/401/empty; drop; pending edits
     survive an upload-driven switch and do not leak to the new base; no image
     download after an upload (the existing no-download assertions unchanged

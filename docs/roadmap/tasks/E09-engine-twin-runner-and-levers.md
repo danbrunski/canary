@@ -29,7 +29,7 @@ and plant replay are use case 1, the conditional ROM comparison is use case
 
 | Capability | State on 2026-10-15 |
 |---|---|
-| Load the flashed ROM | Done. `.OsirisROM` and plain images decode, round-trip and are checksum- and program-checked (W08, E07.2). The factory ROM is a different program inside an encrypted backup and cannot load. |
+| Load the flashed ROM | Done. `.OsirisROM` and plain images load and are checksum- and program-checked (W08, E07.2). The factory ROM is a different program inside an UpRev backup `.bin` and cannot load. |
 | Decoded ECU chain | Steady fuel chain only: K, Fuel Comp, BFS, Load Point Scaler, Target AFR, injector pulse; integer-exact and verified on drives (E05.2, E07.3). Ignition stops at the trim lookup. Airflow pipeline, enrichment timing, closed-loop trim, fuel-cut triggers, idle, cold: traced or absent. About 1,350 of 57,000 calibration bytes are consumed. |
 | Twin against the engine | Four separate offline evaluators (`target_phi`, `air_charge_twin`, `injector_pulse`, `fuel_plant_eval`), each with its own pairing. The target-φ twin has **0 of 174** eligible samples on its fixture because inputs and outputs were never polled together. Nothing runs all outputs over one session, and nothing runs on the Pi but the target-φ stream (E04.1). E03.3's change detector watches one residual, STFT bank balance. |
 | Plant | λ = air / (s · √ΔP · Te), one fitted scalar. Fails its own bounds in-sample and held out (|err| p90 11.6 % against 8 %; λ ≡ 1 does 2.3 %); residual ≈ −0.92 × STFT. Three versions differ only in how MAP is guessed. Manifold ODE converged, unvalidatable on the NA engine (operator decision 2026-10-08). Torque, spark, knock, throttle, rpm dynamics, thermal, rail: declared, unbuilt. |
@@ -161,7 +161,7 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
     - *Derived groups.* Target phi: outputs `mem:ECM_TARGET_EQUIV_RATIO`
       (fuel_target) + alias `obd:COMMANDED_EQUIV_RATIO`; inputs in windows
       fuel_axis (X, and 0x103A for the X relation), spark (rpm word),
-      flags_2841 (pedal flag), uprev_state (magic, active map, selector), which
+      flags_2841 (pedal flag), uprev_state (the map-slot state), which
       equal `target_phi_twin.yaml` `acquisition.windows` (tested); context
       `obd:COOLANT_TEMP`, `obd:FUEL_STATUS`, `obd:RPM`/`obd:MAF` steadiness.
       Steady BFS: outputs 0x103A (fuel_axis) + `did:ECM_AIR_CHARGE`; inputs
@@ -178,7 +178,7 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
       STFT/LTFT both banks; 1 Hz: baro, IAT, coolant, PID 0x42, PID 0x2E.
       Mode 22 every window (2 Hz): 0x1209, 0x1208, 0x1206. Memory every window
       (2 Hz), six windows: fuel_target, spark, fuel_axis (the X trace),
-      uprev_state (magic, active map), fuel_comp_x (the fill byte), flags_2841
+      uprev_state (the map-slot state), fuel_comp_x (the fill byte), flags_2841
       (pedal + HI DET).
     - *Capacity.* Demand from `preview_polling_plan`: 53 channel reads/s,
       57 req/s unbatched (with 4 req/s of entry/exit), 29 batched six PIDs to
@@ -1727,7 +1727,7 @@ grid at 2,000 draws at 51 s and 1.2 GiB RSS on the laptop (Pi estimate
 | The steady Monte Carlo (E08.3) | **No, by E08.3's own rule.** | Under 60 s on the laptop, numpy-vectorised. The Pi risk is memory (per point × draw arrays, 1.2 GiB at the cap), which Rust does not fix; streaming aggregation into the cell table does. Revisit only when a measured Pi run misses its budget. |
 | Steady `fuel_plant.predict` | No. | 2 s of an 18.7 s run before the cache was vectorised; now vectorised over points. |
 | Sample building and pairing (`build_samples`, `match_ordered`, drive designs at ~11 s) | Not yet. | pandas-bound; vectorise or move to DuckDB first. |
-| ROM codec, `compare_roms`, cells, report, provenance and refusal machinery | No. | 31 ms fixed per run; the rest is I/O and schema work. |
+| ROM loading, `compare_roms`, cells, report, provenance and refusal machinery | No. | 31 ms fixed per run; the rest is I/O and schema work. |
 
 **Rule for E09.2.** Keep every kernel behind E06.1's computation contract
 so a node's backend can be swapped and the Python reference stays the

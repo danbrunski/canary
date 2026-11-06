@@ -70,7 +70,7 @@ over it.
 ## What this unlocks (why the order is worth it)
 
 - **Scan tools and UpRev become visible.** Anything another tester reads over
-  K-line can be decoded live and time-aligned with CAN, without the UpRev USB
+  K-line can be decoded live and time-aligned with CAN, without the UpRev
   cable (H06).
 - **Everything UpRev reads, CANary can read itself**, including one-request
   synchronous sets (`AC` define + `21` poll) and the multi-DID read the ECM

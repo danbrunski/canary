@@ -142,7 +142,7 @@ site.
   SecurityAccess.** UpRev's backup on 2026-10-04 sent `10 85` once, then
   `10 FB` before each `23 [BE32 address] [BE16 0x003F]`, on 0x7E0/0x7E8, at
   about 35 ms per read. 1 MiB took 624 s. The result was byte-identical to
-  the decoded tune. It was only done key on, engine off. See
+  the tune's `.OsirisROM` image. It was only done key on, engine off. See
   `docs/skunkworks/uprev-backup-20261004.md` and
   `data/platforms/nissan-xterra-n50/rom_backup.yaml` (the recipe as data, from
   W08, shared with every 2005-2015 Xterra).
@@ -178,8 +178,7 @@ UpRev RPM, with scale stability 0.9985–1.0011 across 750–3700 rpm.
 ## K-line (OBD pin 7)
 
 `data/nissan-xterra-2008/kline.yaml` is the source of truth (the model is
-`src/collection/kline/profile.py`); the wire-level story is in
-`docs/uprev-usb-kline-research.md` → "On-wire view".
+`src/collection/kline/profile.py`); the wire-level facts are below.
 
 - **10400 baud 8N1, KWP2000 (ISO 14230).** ECM address **`0x10`**. The **ABS
   module (`0x28`)** is on the same K-line and answers too, with its own reader
@@ -205,7 +204,7 @@ UpRev RPM, with scale stability 0.9985–1.0011 across 750–3700 rpm.
 - **A local identifier's reply is capped at ~61 data bytes.** A definition that
   would exceed it is refused with `7F AC 12`. UpRev then drops the session and
   restarts, which looks like a flaky start. The fix is fewer measurands
-  (2026-09-24; layout in `docs/uprev-usb-kline-research.md`).
+  (2026-09-24).
 
 ## The UpRev logger on this truck
 

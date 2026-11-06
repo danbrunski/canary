@@ -550,10 +550,10 @@ engineering value.
 | `0x1206` | `ECM_INJECTOR_PULSE_1` | Injected pulse (matched-air-charge test PASS 2026-09-18; this engine has no MAP sensor). Pin the bank mapping and the ms scale, plus injector dead time from an idle electrical-load step with module voltage. |
 | `0x1207` | `ECM_INJECTOR_PULSE_2` | As above; its twin register (bank unverified). |
 
-`0x1201` left this list on 2026-09-20. Capturing the UpRev logger's own RPM
-definition proved that it is `ECM_RPM_COARSE`, exactly `raw * 12.5` rpm; the
+`0x1201` left this list on 2026-09-20. Streamed on K-line beside UpRev's
+logged RPM, it proved to be `ECM_RPM_COARSE`, exactly `raw * 12.5` rpm; the
 older raw 60/193 observations reproduce 750/2412.5 rpm and were never a
-load/BFS signal. See `data/dids.yaml` and `docs/uprev-usb-kline-research.md`.
+load/BFS signal. See `data/dids.yaml`.
 
 The `tuning-hybrid-research` capture profile is useful for the steady-state
 cross-calibrations above because it alternates Mode 01 and Mode 22 through the

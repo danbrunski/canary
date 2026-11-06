@@ -849,7 +849,7 @@ promote unverified bindings or to change a tune.
       `scenarios.py` and the tests.
   **2026-09-22 (desk):** the catalog side of that plan is in: 0x1208 is
   `ECM_AIR_CHARGE`, 0x1206/0x1207 are `ECM_INJECTOR_PULSE_1/2` at `high`
-  (UpRev USB, 2026-09-20), and `tuning_providers.yaml` role `injector_pw_b1`
+  (K-line, 2026-09-20), and `tuning_providers.yaml` role `injector_pw_b1`
   points at `did:ECM_INJECTOR_PULSE_1`; the old names were migrated with
   `tools/migrate_channel_names.py` rather than kept as aliases. **Dead time
   from the 2026-09-19 idle load-step capture is a named empty**: the step
@@ -863,7 +863,7 @@ promote unverified bindings or to change a tune.
   air charge in one session.
   **2026-10-03, naming:** P02.14 (`ca80026`, operator decision 2026-10-02)
   verified 0x1208 as the ECM's **base fuel schedule**: raw × 0.00049 ms,
-  405/405 rows against UpRev's own stream definition. The "air charge"
+  405/405 rows against UpRev's logged values. The "air charge"
   findings above still describe its behaviour. BFS is computed from air per
   event and ignores enrichment and DFCO, which is exactly what those fits
   measured. The channel keeps the name `did:ECM_AIR_CHARGE` and still decodes
@@ -1098,7 +1098,7 @@ not a common sampling instant.
   ([evidence](../../../data/analyses/2026-09-22-d03-d04-desk-pass.md)). The
   capture and the positive-control comparison wait on the truck.
   *Closed 2026-10-03, answered by P02.14 (`ca80026`).* The BFS register is
-  0x1208 itself, verified against UpRev's own stream definition (raw ×
+  0x1208 itself, verified against UpRev's logged B-FUEL SCHDL (raw ×
   0.00049 ms, 405/405 rows) rather than by correlation, so the search has its
   answer. 0x122B and 0x122C stay unexplained load-sensitive registers. They
   are no longer BFS candidates, and a future K-line reference can name them
@@ -2448,7 +2448,7 @@ live here now, so the documents could be archived
     next morning's 23-min drive from a 28 °C start
     (`_capture-tuning-2026-10-26T140411`, 2,646 / 2,631 reads, all 0.00).
     **2026-10-27 firmware answer (desk, read-only, from `~/ecu-re/out` and the
-    decoded ROM images): learning is not disabled by the calibration, and it
+    ROM images): learning is not disabled by the calibration, and it
     isn't slow.** The writer is `FUN_00057b04` (store at 0x57C06):
     LTFT = cell + w62AC − 0x6400. The cell comes from an 8×8 learned map per
     bank, B1 at 0xFFFF54E0 and B2 at 0xFFFF5460, with visit counts at
@@ -2513,10 +2513,10 @@ live here now, so the documents could be archived
         needs 28B9.6 too, so with it clear no path opens.
       - At KOEO w5224 read 0 (28B9 = 0x14, 1584 = 0, 14A0 = 0): **the
         accumulator restarts every key cycle.** It is not backup RAM.
-    - **Not the tune (byte diff of the decoded images, 2026-10-27).**
+    - **Not the tune (byte diff of the images, 2026-10-27).**
       - The threshold is calibration word 0x9048 = 0x0302 on the UpRev base,
         k106, 20260920 and 20261004 (and on the ECU's own 09-20 read, which
-        matches the decoded 20260920 byte for byte).
+        matches the 20260920 image byte for byte).
       - k106 → 20260920 changed 3 bytes: one fuel-target slot cell (0xE025C)
         and the checksum words 0x9598/0x95A0 (the sum loop at 0x2148C skips
         them). 20261004 adds the fuel-comp load axis 0xCB2A–CB38 and slot
@@ -2797,7 +2797,7 @@ live here now, so the documents could be archived
     only, so no saved profile's request changes
     (`test_selecting_the_old_members_still_sends_the_old_requests`).
     Corrected in passing: 0xFFFF2842 does not select the timing trim (0x283F
-    bit 6 does; old reading moved to `evidence_against`), and the UpRev init
+    bit 6 does; old reading moved to `evidence_against`), and a cold start
     zeroes 0xFFFFB008.
   - [x] **Schema.** `MemoryChannel.signed` (two's-complement slices; a signed
     sentinel must be stated in the signed range) and `linear_did` `did_offset`,
@@ -3519,7 +3519,7 @@ In short:
    sharing D03.8's capture where cadence permits. Give D03.16 a short separate
    diagnostic-ownership window (about 5–10 minutes including restoration).
    D03.12's pedal/voltage candidates are optional; its external duty reference
-   and all of D03.10 are deferred. No new UpRev/K-line/USB capture is required.
+   and all of D03.10 are deferred. No new K-line capture is required.
 5. **Remaining steady driving:** repeat D02.2's paced/bursty comparison at
    matched achieved wire rate, recording raw counter deltas, duration and
    workload. Change one factor at a time and report intra-round skew. Hardware

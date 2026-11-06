@@ -3,13 +3,13 @@
 Started 2026-10-04 at the operator's request: disassemble the ECM's program to
 understand what it computes. This file records **addresses and
 interpretations**, each with its confidence and evidence. It never records the
-disassembly or decompiled code: Nissan's program and UpRev's patch stay
-outside Git, as decoded ROMs already do.
+disassembly or decompiled code: the program stays outside Git, as ROM images
+do.
 
 ## Setup (local only)
 
 - **Image:** the 1 MiB flash read from the ECU on 2026-10-04 (sha256
-  `a46baa24…be50`). It is byte-identical to the decoded
+  `a46baa24…be50`). It is byte-identical to the image in
   `ZS44A-Tuned-20260920.OsirisROM`. See `docs/skunkworks/uprev-backup-20261004.md`.
 - **Tool:** Ghidra 12.1.4, processor `SuperH:BE:32:SH-2`, base address 0.
 - **Assumed blocks:** RAM at `0xFFFF0000–0xFFFFBFFF` and I/O at
@@ -37,16 +37,13 @@ observation. **Inferred** means strong evidence, not yet confirmed.
 | The inputs are compared with the axes' raw bytes, so the X trace is in BFS axis counts (0.1685 ms per count) | — | Verified | See "Target AFR lookup, decoded" below. |
 | Pedal-switch enrichment: when a flag is set, the load input becomes `0xFF`, which is the last BFS column | `0x055DB2` | Verified (code); matches the 2026-09-18 data finding | The flag sets and clears with +8 counts of hysteresis on a value read from the 1-D table at `0xCEDB`. Its flag bit is bit 0 of `0xFFFF283F + 2`. |
 
-### UpRev's map switching (UpRev's patch)
+### Map slots (an UpRev tune)
 
 | What | Where | Confidence | Evidence |
 |---|---|---|---|
-| UpRev state block | RAM `0xFFFFB000` | Verified | Magic `0xAA5555AA` at `+4`, selector nibble at `+3`, current map number at `+8`, a history word at `+0xC`. |
-| Slot copy routine: copies slot *n* (1–5) from `0x0E0000 + 0x800·(n−1)` to RAM `0xFFFFB040`, 2 KiB | `0x0DE3E4` | Verified | Literal values `0xFFFFB000`, `0x0E0000`, `0xFFFFB040` and stride `0x800`. |
-| Start-up: if the magic is absent, initialise the block and copy slot 1 | `0x0DE1A4` | Verified | Same literals, plus a 0x200-word copy. It also writes `0x15`/`0x55`/`0x15` to 16-bit registers at `0xFFFFF73A`, whose meaning is unknown. |
-| Nissan's Target AFR table pointer redirected to the RAM copy | literal `0x055EC4` = `0xFFFFB260` | Verified | `0xFFFFB040 + 0x220`. The calibration's own table at `0x00A169` is no longer referenced. |
-| The active map number is readable as RAM byte `0xFFFFB008` | — | Inferred | It is the routine's own record of the selected slot. Not yet a CANary channel, so verify before adding one. |
-| A list of axis addresses for UpRev's switchable tables | `0x0DE460` | Inferred | `0xCC83, 0xCC93, 0xC894, 0xCAA5, 0xCACD, 0xCB29, 0xE25E, 0xCAE9`. These include the Target AFR axes and both Fuel Comp axes (see "Map-slot tables"). |
+| The switchable tables run from a RAM copy of the loaded map slot: slot *n* (1–5) at `0x0E0000 + 0x800·(n−1)`, 2 KiB, copied to RAM `0xFFFFB040`. Slot 1 is loaded at start-up. | RAM `0xFFFFB040` | Verified | See "Map-slot tables" for what the copy holds. |
+| Target AFR is read from the RAM copy, `0xFFFFB260` = `0xFFFFB040 + 0x220`. The calibration's own table at `0x00A169` is not referenced in an UpRev tune, so editing it changes nothing. | literal `0x055EC4` | Verified | The table-pointer literal. |
+| The loaded map number is RAM byte `0xFFFFB008` (`mem:ECM_ACTIVE_MAP`) | — | Verified | See "Which map is loaded". |
 
 ### 1-D curves
 
@@ -194,7 +191,7 @@ Confirmed exact: `0x1123`–`0x1126` (high byte of a 0x6400 = 1.0 word, 1 % per 
 | `+0x760` | Load Point Scaler copy (44019) | Verified (bytes) | See above. |
 | `+0x762` (`0xFFFFB7A2`) | **K**, big-endian 16-bit, multiplied into the air-charge accumulator: Tp = K · Qa / Ne. | Verified | The read at `0x03C6E0` inside `0x03C4D0`. It holds 28,715 in all five slots, and the base value 27,089 is in the ratio 1.0600. |
 
-UpRev's axis list at `0x0DE460` resolves to these four switchable maps, as axis pairs:
+The four switchable maps and their axis pairs:
 - `{0xCC83, 0xCC93}` timing trims (`0xCC93` rpm, `0xCC83` BFS-X);
 - `{0xC894, 0xCAA5}` Target AFR;
 - `{0xCACD, 0xCB29}` Fuel Comp (probably `0xCACD` rpm, `0xCB29` VFR; see above);
@@ -203,7 +200,7 @@ UpRev's axis list at `0x0DE460` resolves to these four switchable maps, as axis 
 ### UpRev's Fuel Comp display, checked against memory
 
 The operator pasted UpRev's Map 1 Fuel Comp grid for the corrected
-`ZS44A-Tuned-20261004.OsirisROM`. It equals the decoded table at
+`ZS44A-Tuned-20261004.OsirisROM`. It equals the image's table at
 `0xE0660` **row-major, 256/256**; transposed, only 60/256 match.
 
 So UpRev's rows are the ECM's rpm rows and its columns are the load
@@ -215,12 +212,12 @@ wrong is which breakpoint list belongs to which axis:
 The true values follow by swapping the two lists: row *i*'s rpm = column
 *i*'s "VFR %" × 128, and column *j*'s load = row *j*'s "RPM" ÷ 128 (as VFR %).
 
-### UpRev's map selector
+### Which map is loaded
 
 | What | Confidence | Evidence |
 |---|---|---|
-| The map is chosen by a **discrete input**, not by a DID or a K-line command. Bits 1 and 3 of RAM byte `0xFFFF2EE0` are debounced through `0xFFFFB002`. On a transition the code increments the selector at `0xFFFFB003` and runs the slot copy. | Verified | `0x0DE358`, which runs periodically. |
-| `0xFFFFB008` holds the committed active map, 1–5, and is safe to read. It reads **0 after a cold boot**, meaning "slot 1, loaded by default, not yet re-selected". | Verified (code) | The slot copy clamps the selector to 1–5 before committing. |
+| The map is switched by a **discrete input** on the vehicle, not by a DID or a diagnostic command. | Verified | — |
+| `0xFFFFB008` holds the committed active map, 1–5, and is safe to read. It reads **0 after a cold boot**, meaning "slot 1, loaded by default, not yet re-selected". | Verified (code and live) | The 2026-10-04 drive, below. |
 
 ### Curves and other maps
 
@@ -245,9 +242,7 @@ every 5 s, about 190 samples of each). Pairing used acquisition time.
 
 | Prediction from the code | What the drive showed | Verdict |
 |---|---|---|
-| UpRev magic `0xAA5555AA` at `0xFFFFB004` | 196 of 196 reads = 2,857,719,210 = `0xAA5555AA` | **Confirmed** |
-| `0xFFFFB008` reads 0 after a cold boot (slot 1 loaded by default) and changes only when the selector commits | 0 on all 196 reads. Selector `0xFFFFB003` was also 0 throughout. | **Confirmed** (no switch event occurred) |
-| The map switch watches bits 1 and 3 of `0xFFFF2EE0` | Bits 1 and 3 never set. Bit 4 (16) was set on 148 of 186 reads, mostly off idle (median 2,441 rpm). Bit 5 (32) was set on 21 of 186, at idle (median 788 rpm, pedal released). | Consistent. Bits 4 and 5 are other inputs, still unidentified. |
+| `0xFFFFB008` reads 0 after a cold boot (slot 1 loaded by default) and changes only on a map switch | 0 on all 196 reads. | **Confirmed** (no switch event occurred) |
 | Pedal-switch flag: bit 0 of `0xFFFF2841` sets near full pedal and forces Target AFR's last load column | Set on 2 samples, at broadcast pedal 4.285 V and 4.582 V (full scale 4.58 V). Never set at or below 3.795 V, the highest pedal seen while it was clear. While set, the commanded φ RAM word read **exactly 1.1640625** (`0x95/128`, the last-column value) while the X trace sat mid-table (~100 counts). | **Confirmed live.** The threshold lies between 3.80 and 4.29 V, which fits the 2026-09-18 data figure of ≥ ~227/255. |
 | Timing-trim select flag at `0xFFFF2842` | Constant 4 (bit 2) all drive | **Superseded 2026-10-05:** `0xFFFF2842` does not select the trim table. `0xFFFF283F` bit 6 (HI DET) does. Read `283F` live to know which trim table is running before any timing-trim edit (N01.2). |
 | `X = floor(BFS × 128 / 44019)` | 168 of 194 same-read pairs exact. The rest are within ±1–4 counts, **both signs**, at transients. | Formula **confirmed**. The misses fit the two words being updated at different points in the ECM's loop, not a wrong formula. (P02.14's 1,564 of 1,564 came from a capture with steadier conditions.) |

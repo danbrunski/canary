@@ -159,7 +159,7 @@ folder of images up front instead, add `--rom-dir "/path/to/ROM folder"`
 (optional; repeatable; also `$CANARY_ROM_DIRS`): it adds the `.OsirisROM` and
 plain images to the ROM Library and prints each image's `revision_match`. Only
 a `matched` revision can be simulated; any image can be previewed. An
-encrypted UpRev `.bin` backup is reported and skipped; use the `.OsirisROM`.
+UpRev `.bin` backup is reported and skipped; use the `.OsirisROM`.
 That folder is only read.
 
 Everything the daemon writes, the ROM Library included, lives under

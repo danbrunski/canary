@@ -2141,9 +2141,8 @@ recomputes the rolling frame over the whole buffered window every tick.
 
 - [x] **P02.14 DID 0x1208 in ms is the Xterra's target-map load axis.**
   Operator decision 2026-10-02: accept `did:ECM_AIR_CHARGE` as the verified
-  base fuel schedule. The evidence is UpRev's own stream definition, which puts
-  B-FUEL SCHDL at DID 0x1208, and raw × 0.00049 reproduces its displayed ms on
-  405/405 rows (2026-09-20). Declare it as the load-axis channel so
+  base fuel schedule. The evidence: UpRev logs B-FUEL SCHDL from DID 0x1208,
+  and raw × 0.00049 reproduces its displayed ms on 405/405 rows (2026-09-20). Declare it as the load-axis channel so
   `derived:TARGET_AFR` / `AFR_ERROR_B*` come back, computed correctly. This
   lifts P02.13.
 
@@ -2549,18 +2548,17 @@ recomputes the rolling frame over the whole buffered window every tick.
       went into `ZS44A-Tuned.OsirisROM`, later overwritten by k106. The
       operator edited no fuel-target cell before k106, only K. So both
       revisions carry the base's map.
-    - **The base decodes with the same definition as k106.**
-      - `src.analysis.osiris.Container` parses it and round-trips it
-        byte-exact.
-      - The decoded image is 1,048,576 bytes, SHA-256 `8201208033e0926b…`.
+    - **The base loads with the same definition as k106.**
+      - CANary loads it like any `.OsirisROM` (`src.analysis.osiris`).
+      - The loaded image is 1,048,576 bytes, SHA-256 `8201208033e0926b…`.
       - Its BE32 sum/XOR checksum passes under `rom_targets.yaml`.
       - Its raw rpm axis (0xCAA5) and BFS axis (0xC894) equal k106's.
       - Container SHA-256 `8468e11b…b292`, mtime 2026-07-26 14:40:53 MDT,
         byte-identical to `~/Uprev/ROMs/ZS44A.OsirisROM`.
-      - The base's K was not read: the repo has no verified K address
-        (`docs/uprev-rom-table-verification.md`, remaining work).
+      - The base's K was not read: the repo had no verified K address yet
+        (since found, slot `+0x762`).
     - **Recorded** in `afr_calibration.yaml` as `ZS44A-osiris-initial` with
-      `verified_rom_decode` provenance: file, sha256, decoded hash, method,
+      `verified_rom_decode` provenance: file, sha256, image hash, method,
       and the operator's statement. `ZS44A-k105` is the same map through a
       YAML merge (`<<: *targets_uprev_base`), so it cannot drift. Only its
       provenance notes differ.
@@ -2569,7 +2567,7 @@ recomputes the rolling frame over the whole buffered window every tick.
       - In this registry "osiris" is UpRev's file format, not a kind of map.
     - **No clamp declarations on the base map.** The edge evidence was logged
       on k106, so this map stays NaN off both axes.
-      - The decoded base and k106 differ only in 248 bytes in 9 regions:
+      - The base and k106 images differ only in 248 bytes in 9 regions:
         checksums at 0x9598, 15 bytes at 0xCB2A, and UpRev's map slots at
         0xE00xx–0xE27xx. That suggests the same lookup code, but it is not a
         logged match, so it is not used as evidence.
@@ -2588,16 +2586,10 @@ recomputes the rolling frame over the whole buffered window every tick.
       the Xterra's ECU before any UpRev flash. `ZS44A.OsirisROM` is the
       "stock" ROM UpRev supplies to flash before tuning; how it relates to the
       factory ZS04C data is unknown, so neither is evidence for the other.
-      - The dumps are not plain images: high entropy throughout, no erased
-        (0xFF) runs, and neither the base table nor its axes appear in them.
-        They also do not decode with the Osiris container's scheme
-        (`src/analysis/osiris.py`: CRC-keyed XOR and the 16-bit word
-        transform), tried with every candidate key from the leading and
-        trailing 16 bytes, the ZS44A key and the CRCs (2026-10-03, desk).
-        UpRev's backup format is different, likely real encryption.
-      - UpRev support will not help (operator). Reverse-engineering the
-        backup format is not planned. The remaining route is Osiris itself
-        opening the backup and saving it as an `.OsirisROM`, if it can.
+      - The dumps are not plain images, and CANary does not load UpRev's
+        backup format. UpRev support will not help (operator). The remaining
+        route is Osiris itself opening the backup and saving it as an
+        `.OsirisROM`, if it can.
       - UpRev's `* Back To Stock.OsirisROM` files are not used: UpRev says
         flashing one clears the license (operator, 2026-10-03).
   - **Measured: corpus revision assignment.** `discover_sessions` gives 116

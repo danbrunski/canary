@@ -257,27 +257,24 @@ this truck:
 
 ## ROM tables and what an edit moves
 
-- The calibration is UpRev "Osiris" (`1ZS44A`, stock was `1ZS04C`). CANary can
-  decode and verify the container offline (`src.analysis.osiris`,
-  `docs/uprev-rom-codec-decoded.md`) and build hash-bound Target AFR edits
-  (`docs/offline-rom-targets.md`). Only the operator flashes.
+- The calibration is an UpRev tune (`1ZS44A`, stock was `1ZS04C`), kept as
+  `.OsirisROM` files. CANary loads and checks those offline
+  (`src.analysis.osiris`, `docs/uprev-rom-codec-decoded.md`) and builds
+  hash-bound Target AFR edits (`docs/offline-rom-targets.md`). Only the
+  operator flashes.
 - Table names and axes follow UpRev's *Nissan Tuning Guide*. The rom viewer
   cites Rev 8, pp. 9–10; the public Rev 2 PDF on uprev.com has the same
   structure. Not every ROM version has every table.
-- **Five map slots exist, and the engine reads a RAM copy of one.** UpRev's
-  patch copies the selected slot (2 KiB, at `0x0E0000 + 0x800·(n−1)`) into RAM
-  at `0xFFFFB040`. Its state block is at `0xFFFFB000`: magic `0xAA5555AA` at
-  `+4`, selector nibble at `+3`, current map number at `+8`. At start-up it
-  loads slot 1. Nissan's Target AFR pointer now points at the RAM copy
-  (`0xFFFFB260` = copy + `0x220`), and the calibration's own table at
+- **Five map slots exist, and the engine reads a RAM copy of one.** The
+  loaded slot (2 KiB, at `0x0E0000 + 0x800·(n−1)`) runs from a copy in RAM at
+  `0xFFFFB040`, and slot 1 is loaded at start-up. Target AFR is read from the
+  copy (`0xFFFFB260` = copy + `0x220`), so the calibration's own table at
   `0x00A169` is unused.
-- **The map is selected by a switch input, not a command.** Bits 1 and 3 of
-  RAM byte `0xFFFF2EE0` are debounced, and each transition steps the
-  selector. The committed active map is at `0xFFFFB008`, as 1–5; it reads 0
-  after a cold boot, meaning slot 1 is loaded by default. It is now the
-  channel `mem:ECM_ACTIVE_MAP`, and it read 0 all through the 2026-10-04
-  drive. The magic value `0xAA5555AA` at `0xFFFFB004` was confirmed on the
-  same drive. A non-zero reading is the only sign the map was switched.
+- **The map is selected by a switch input, not a command.** The committed
+  active map is at `0xFFFFB008`, as 1–5; it reads 0 after a cold boot,
+  meaning slot 1 is loaded by default. It is the channel
+  `mem:ECM_ACTIVE_MAP`, and it read 0 all through the 2026-10-04 drive. A
+  non-zero reading is the only sign the map was switched.
 - **What's in a slot, confirmed from the code that reads the RAM copy:**
 
   | Offset | Table |
@@ -296,7 +293,7 @@ this truck:
   - calibration block `0x008000–0x01FFFF`: calibration ID at `0x008204`,
     where the checksum range starts; checksum words at `0x9598`/`0x95A0`;
   - application `0x020000–0x0DFFFF`, with vectors at `0x020004`;
-  - UpRev's patch code near `0x0DE000`;
+  - UpRev's additions at `0x0DE000–0x0DEFFF`;
   - map slots from `0x0E0000`.
   About 120 1-D curves (8- and 16-entry) are packed at `0x00CC1B–0x00D379`
   and read through two shared routines. Their names come from the variables

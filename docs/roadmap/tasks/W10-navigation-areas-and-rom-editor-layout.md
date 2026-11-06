@@ -520,7 +520,7 @@ match the map."
   *Known answer:* `tests/test_rom_checksums_private_rom.py`, UpRev's two
   one-cell edits of k106 (Fuel Comp 0xE075F, a word's low byte, sum
   `F438FCA9` xor `0C3BBAC7`; Fuel Targets 0xE025C, its high byte, `F538FCAA`
-  / `0D3BBAC0`): k106 plus the one cell, written, equals UpRev's decoded file
+  / `0D3BBAC0`): k106 plus the one cell, written, equals UpRev's saved file
   byte for byte. Skips where the operator's files are absent.
 - [x] **W10.21 — Export.** `rom_editor.export_edits` refuses
   `calibration_not_mapped`, then `parent_checksum_failed`, then the spec's own

@@ -15,22 +15,22 @@ key-on, engine-off refusal, for the reason given there.
 Evidence this builds on:
 
 - **Image layout and candidate tables:** `docs/uprev-rom-table-verification.md`,
-  section "2026-10-04: image map and three candidate tables".
-- **The read recipe:** `docs/skunkworks/uprev-backup-20261004.md`. UpRev read
-  1 MiB with plain UDS on 0x7E0/0x7E8: `10 85` once, then `10 FB` and
-  `23 [BE32 address] [BE16 0x003F]` per 63-byte block, about 35 ms per cycle
-  and 624 s in all, with no SecurityAccess. The image it returned is
-  byte-identical to the decoded `ZS44A-Tuned-20260920.OsirisROM` (sha256
+  section "Image layout (2026-10-04)".
+- **The read recipe:** `docs/skunkworks/uprev-backup-20261004.md`. The ECM
+  hands out 1 MiB over plain UDS on 0x7E0/0x7E8: `10 85` once, then `10 FB`
+  and `23 [BE32 address] [BE16 0x003F]` per 63-byte block, about 35 ms per
+  cycle and 624 s in all, with no SecurityAccess. The image read is
+  byte-identical to the image in `ZS44A-Tuned-20260920.OsirisROM` (sha256
   `a46baa24…be50`).
-- **The codec and checksums:** `src/analysis/osiris.py`, `src/analysis/rom_targets.py`,
+- **Loading `.OsirisROM` and the checksums:** `src/analysis/osiris.py`, `src/analysis/rom_targets.py`,
   and `data/nissan-xterra-2008/rom_targets.yaml` (`checksums`).
 
 ## Pre-made decisions (operator, 2026-10-04)
 
 - **Inputs.** The library accepts a plain image (exactly 1,048,576 bytes,
-  as the backup produces) or an `.OsirisROM`. UpRev's encrypted backup
-  `.bin` (1,048,592 bytes, starting `32bec582…`) is recognised and refused
-  by name: it cannot be decoded (see the backup capture doc).
+  as the backup produces) or an `.OsirisROM`. UpRev's backup `.bin`
+  (1,048,592 bytes, starting `32bec582…`) is recognised and refused by name:
+  CANary does not load that format (`docs/skunkworks/uprev-backup-20261004.md`).
 - **Inspection is separate from editing.** Any image whose layout matches the
   vehicle's map definition is viewable: the calibration ID at its declared
   offset, plus a checksum verdict, which is shown whether it passes or fails.
@@ -127,16 +127,16 @@ Evidence this builds on:
     (`82012080…c203`) is a new `reference_images` entry, not a revision,
     because it was never flashed as-is and a revision is a flash boundary
     (match status `reference`). `tests/test_rom_image.py` (23 passed, 6 of
-    them `slow`, run on the operator's files): 20260920 decoded sha256 ==
+    them `slow`, run on the operator's files): 20260920 image sha256 ==
     the 2026-10-04 ECU read's `a46baa24…be50`, CRC32 `95b993c5`, checksums
     pass, revision ZS44A-20260920; k106 matched, base `reference`; a flipped
     byte reports `checksum.ok: false` with the description intact; ZS04C cal
     ID gives `map: null` + "no map definition for calibration 1ZS04C00000";
-    encrypted backup refused by name (synthetic, and all 3 operator `.bin`
+    UpRev backup `.bin` refused by name (synthetic, and all 3 operator `.bin`
     files); other sizes refused with the size. `tests/test_tune_revision_images.py`
     (5 passed) covers the registry fields and their merge.
-  - **Format detection:** `.OsirisROM`, decoded with `osiris.py`; plain
-    1 MiB image; UpRev encrypted backup, refused by name; anything else,
+  - **Format detection:** `.OsirisROM`, loaded with `osiris.py`; plain
+    1 MiB image; UpRev backup `.bin`, refused by name; anything else,
     refused by name with its size.
   - **Identity:** the plain image's sha256 and CRC32, the container sha256
     if there is one, and the calibration ID read at the declared offset.
@@ -145,7 +145,7 @@ Evidence this builds on:
   - **Tune registry match:** the image matches a revision when its plain
     sha256 equals that revision's. Add an optional `image_sha256` per
     revision in `tune_revisions.yaml`, filled for k106 and 20260920 and the
-    UpRev base from the decoded files (`rom_sha256` stays the container's).
+    UpRev base from their images (`rom_sha256` stays the `.OsirisROM` file's).
     Otherwise the result is "unrecognised".
   - **Block statistics:** for each 4 KiB block, the percentage of 0xFF bytes,
     entropy, and its class (erased / dense / data / sparse), plus regions
@@ -153,11 +153,11 @@ Evidence this builds on:
   - **No map:** an image with a different calibration ID (e.g. stock ZS04C)
     gets block statistics and identity but `map: null`, with the reason "no
     map definition for calibration <id>".
-  - **Accept:** known answers. The decoded 20260920 file and the 2026-10-04
+  - **Accept:** known answers. The image loaded from the 20260920 file and the 2026-10-04
     ECU read (when available as a test fixture slice, or by hash) give the
     same sha256, checksums pass, and the revision is ZS44A-20260920. A
-    flipped byte fails the checksum and is reported, not refused. Decoded
-    ROM bytes stay outside Git: tests use synthetic images with the real
+    flipped byte fails the checksum and is reported, not refused. ROM
+    bytes stay outside Git: tests use synthetic images with the real
     layout, or skip when the operator's files are absent.
 
 - [x] **W08.3 Library storage and routes** (control-token auth, like
@@ -170,7 +170,7 @@ Evidence this builds on:
     `tests/fixtures/route_table_snapshot.json` (11 rows added; no MCP parity
     test covers these routes). `tests/test_rom_library_api.py` (11 passed):
     auth on all 11 routes, plain then `.OsirisROM` upload of one image keeps
-    one entry with both sources, encrypted backup 422 by name, 413 over
+    one entry with both sources, backup `.bin` 422 by name, 413 over
     2 MiB, 415, missing filename, list newest first, describe, download
     bytes + filename, label-only PATCH, DELETE, 404 on unknown/malformed sha,
     tables and compare routes, `test_nothing_is_written_under_the_repo`
@@ -196,7 +196,7 @@ Evidence this builds on:
     - `DELETE /control/rom/library/{sha}`.
   - Add the routes to `docs/headless-api.md`, the route-table snapshot and
     any MCP parity the route snapshot requires.
-  - **Accept:** route tests for each, including the encrypted-backup refusal
+  - **Accept:** route tests for each, including the backup-`.bin` refusal
     and the 2 MiB cap, and a test that nothing is written under the repo.
 
 - [x] **W08.4 Table values.** `GET /control/rom/library/{sha}/tables`
@@ -251,7 +251,7 @@ Evidence this builds on:
     `types/romLibrary.ts`, routes in `api/workbench.ts`. Evidence:
     `RomLibraryPage.test.tsx` (22 tests: direct load of `#wb/rom-library` with
     an empty library names the cause and offers "Upload an image" / "Back up
-    the ECU"; the encrypted-backup 422 and a 413 shown verbatim; 256-cell grid
+    the ECU"; the backup-`.bin` 422 and a 413 shown verbatim; 256-cell grid
     readout on focus/hover/tap with `aria-live`, arrow keys; region chips and
     evidence; Fuel Targets through `MapTable`, K raw labelled Inferred; no-map
     reason; rename/delete-with-confirmation/download), `RomCompare.test.tsx`
@@ -466,8 +466,8 @@ Evidence this builds on:
 - [x] **W08.9 Known answer on the truck** (needs the truck, key on, engine
   off).
   - Run the backup from the dashboard.
-  - **Accept:** the image's sha256 equals `a46baa24…be50`, the 2026-10-04
-    UpRev-read image, unless a flash was recorded since; then it must equal
+  - **Accept:** the image's sha256 equals `a46baa24…be50`, the image read
+    on 2026-10-04, unless a flash was recorded since; then it must equal
     that revision's `image_sha256`. Checksums pass, and the 64-block
     re-read matches.
   - Record the duration and retries, and confirm normal polling resumed

@@ -539,8 +539,8 @@ blockers close with it:
   `absent_signals`). *Corrected 2026-09-24 (H01.4):* when this was written
   they had no CAN source at all; both have since been found on **active** CAN,
   by request: final ignition timing is Mode 22 DID `0x110A`
-  (`did:ECM_IGNITION_TIMING`, identified 2026-09-20 from UpRev's stream
-  definition, `data/dids.yaml`), and the final commanded equivalence ratio is
+  (`did:ECM_IGNITION_TIMING`, identified 2026-09-20 on K-line,
+  `data/dids.yaml`), and the final commanded equivalence ratio is
   RAM word `mem:ECM_TARGET_EQUIV_RATIO` read by service 0x23
   (`data/dids.yaml` `memory:`). What K-line still adds is what CAN refuses on
   this ECM: one-request synchronous sets (`AC` define + `21` poll) and the
@@ -586,7 +586,7 @@ None of this is blocking for fabrication.
 > real hardware — but there is still no K-line *collector*, no IMU or barometer
 > collector, and no chrony PPS refclock. The K-line protocol this ECM actually
 > speaks (tester 0xFC, a 518.9 ms wake-up, 10400 baud KWP2000) is in the
-> vehicle skill and `docs/uprev-usb-kline-research.md`.
+> vehicle skill and `data/nissan-xterra-2008/kline.yaml`.
 
 - **Overlay delivery:** write a single board overlay covering `mcp251xfd`, the
   GNSS UART, and `pps-gpio`, and name it in the HAT+ ID EEPROM so firmware loads

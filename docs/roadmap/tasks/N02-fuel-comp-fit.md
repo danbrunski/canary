@@ -68,7 +68,7 @@ the model of how Fuel Comp acts is wrong and N02.5's factors must not be used.
   - the code constant `0xDC1D00` as a program constant, with evidence.
   Extend the schema with tests if it cannot express 1-D u16 curves or scalars.
   Add a resolver: revision → plain image from operator-supplied directories
-  (CLI argument or environment, no hard-coded paths). It decodes OsirisROM and
+  (CLI argument or environment, no hard-coded paths). It loads the `.OsirisROM` and
   checks the registry's `image_sha256`, then yields:
   - that revision's Fuel Comp table, rpm axis `0xCACD` and load axis `0xCB29`;
   - the curves and K.

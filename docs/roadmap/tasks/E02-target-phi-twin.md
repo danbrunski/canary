@@ -97,8 +97,8 @@ regimes, boost and other ECU programs remain outside the first evidence.
   `mapping_mismatch`. Then `image_hash_mismatch`, `wrong_program`,
   `table_missing`, `table_unverified` (slots 2–5 are `inferred`),
   `axis_unverified` and `unmodelled_logic` (the gate constants or the 0xD247
-  curve differ from the modelled ones). `resolve_slot` gives slot 1 for magic
-  0xAA5555AA with active map 0 and selector 0, and refuses `map_uninitialised`
+  curve differ from the modelled ones). `resolve_slot` gives slot 1 for an
+  initialised map-slot state with active map 0, and refuses `map_uninitialised`
   or `slot_ambiguous`. The evaluator requires agreeing identity reads on both
   sides of each sample (`map_identity_unbracketed`, `map_switching`). Every
   prediction carries provenance: plain-image sha256, revision, slot, table

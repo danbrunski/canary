@@ -9,11 +9,11 @@ records it with its own lineage.
 Proven 2026-09-23 with the bring-up scripts in `hardware/canary-hat-firmware/`
 (KOEO only): wake-up (518.9 ms low / 18.1 ms high), StartCommunication
 `81 10 FC 81 0E` → `83 FC 10 C1 5D 8F 3C`, a read `05 22 11 03 04 01 40` →
-`04 62 11 03 99 13`, StopCommunication. UpRev's full session was sniffed:
-`AC` defines local ids `81`/`82`/`83` from DID (`02 hh ll`) and RAM
+`04 62 11 03 99 13`, StopCommunication. A logger session sniffed on the
+wire: `AC` defines local ids `81`/`82`/`83` from DID (`02 hh ll`) and RAM
 (`83 addr32`) descriptors, chains ids with `01 <lid>`, then polls
-`04 21 83 04 01` for 52-byte replies at ~9 Hz
-(`docs/uprev-usb-kline-research.md` "On-wire view"; the vehicle skill).
+`04 21 83 04 01` for 52-byte replies at ~9 Hz (the vehicle skill;
+`data/nissan-xterra-2008/kline.yaml`).
 
 What exists in `src/` is coupled to the USB cable:
 
@@ -39,7 +39,7 @@ What exists in `src/` is coupled to the USB cable:
   capture is never gated.
 - Vehicle facts (addresses, wake-up timing, key bytes, known answers) are
   profile data. The next vehicle may be a 5-baud ISO 9141 ECU.
-- The UpRev USB path keeps working and keeps its tests; the refactor moves
+- The UpRev cable path keeps working and keeps its tests; the refactor moves
   shared logic out from under it, it does not replace it.
 - The TLIN1027 start/stop order (HAT-Spec §11) is enforced by the transport
   class, so it cannot be done out of order by a caller.

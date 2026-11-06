@@ -208,19 +208,12 @@ hands-busy-in-vehicle tag generation.
 
 **Role:** RE only. Never in production.
 
-### 5. UpRev Osiris datalogger over K-line — *direct USB research path live*
+### 5. UpRev datalogger over K-line — *cable path available*
 
 The UpRev tuning cable is the operator's tuning toolchain. Two of its
 functions use **different transports**, and conflating them wastes time:
 
-* **Reflashing runs over CAN.** Captured end-to-end on 2026-07-26
-  (`ZS04C` → `ZS44A`, 410 547 frames / 239 s). Control chatter on
-  `7E0`/`7E8` is session control plus KWP reads; the firmware payload
-  streams as **raw 8-byte frames on Nissan-specific `0x743`** with no
-  ISO-TP framing — 73 728 frames, 576 KiB, 31.8 s, ~59 % bus load.
-  Notably **no standard UDS reprogramming services at all**: no
-  `0x27` SecurityAccess, no `0x34` RequestDownload, no `0x36`
-  TransferData. See `scripts/decode_flash.py`.
+* **Reflashing runs over CAN.**
 * **Datalogging does not touch CAN.** Proven the same evening: with the
   daemon in passive mode (bus verified silent — zero tester frames in a
   4 s pre-check), a 76 s `candump` recorded 124 086 frames while UpRev
@@ -229,12 +222,11 @@ functions use **different transports**, and conflating them wastes time:
   broadcast.** The logger is on the K-line.
 
 **Consequence:** CANary cannot observe or sniff UpRev's datalogging over
-CAN — there is no protocol on that wire to copy. The cable's separate USB
-protocol is decoded and the Linux/PyUSB path can now bootstrap a live ECM
-session, discover supported DIDs, and construct/read dynamic streams: see
-`docs/uprev-usb-kline-research.md`, `src/collection/uprev_usb.py`, and
-`src/collection/uprev_session.py`. It remains a research CLI rather than a
-daemon collector; the important transport/session blockers are closed.
+CAN — there is no protocol on that wire to copy. CANary can instead use the
+cable itself as a read-only K-line interface: start an ECM session, discover
+supported DIDs, and stream DIDs and RAM bytes (`docs/uprev-usb-kline-research.md`).
+It remains a CLI rather than a daemon collector. The CANary-HAT's own K-line
+(H05, H06) reads and sniffs K-line without the cable.
 
 It *can*, however, match and exceed the rate. An earlier revision of this
 section claimed otherwise; that was wrong, and the correction matters

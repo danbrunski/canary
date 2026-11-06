@@ -7,7 +7,7 @@ Recorded 2026-10-04, **before** the flash, so it can count as a prediction
 
 `Tuned ROMs/ZS44A-Tuned-20261004.OsirisROM`:
 - container sha256 `33d5d7a5e33ccddc4747821984973716e8902bd0d5c5f26f79c109cfbe26b858`;
-- decoded image sha256 `5587f7e1e6dbd0fcb9ffe0c857cc0cafebbe11bf306636c0f3265b903254d253`.
+- image sha256 `5587f7e1e6dbd0fcb9ffe0c857cc0cafebbe11bf306636c0f3265b903254d253`.
 
 Changes against ZS44A-20260920 (218 bytes):
 - the Fuel Comp **load** axis `0xCB29` is restored from 16…144 to UpRev base

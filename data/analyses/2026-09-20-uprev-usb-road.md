@@ -1,12 +1,12 @@
-# UpRev USB/K-line live road experiment — 2026-09-20
+# K-line (UpRev cable) and CAN live road experiment — 2026-09-20
 
 ## Conditions and instruments
 
 - Vehicle: 2008 Nissan Xterra, engine running, sustained road drive with
   natural acceleration/deceleration; GPS showed about 100 km/h near the first
   full scan and later windows covered wider load/RPM changes.
-- Cable: Cipher/UpRev `0403:ccb8`, serial `12345678`, attached from Windows to
-  WSL through USBIP and opened directly with PyUSB.
+- K-line: the UpRev cable used as CANary's K-line interface from WSL
+  (`docs/uprev-usb-kline-research.md`).
 - CANary: Pi session `2026-09-20T175050`. Active CAN diagnostics were put in
   TTL-bounded passive mode because CAN and K-line share ECM diagnostic-session
   state. Broadcast CAN, decoded broadcast rows, GPS, and storage stayed live.
@@ -32,9 +32,9 @@ Local analysis reports during the experiment were written under `/tmp` as
 
 ## Transport/session result
 
-The Linux path is live, not just a parser. It performed the FTDI/UPRV cable
-handshake, the captured cold ECM bootstrap, support-mask discovery, individual
-DID reads, dynamic-local-ID definitions, and repeated stream polls.
+The cable path ran live on the road: ECM session start, support-mask
+discovery, individual DID reads, dynamic-local-ID definitions, and repeated
+stream polls.
 
 The eight support masks advertised 75 readable DIDs:
 
@@ -54,13 +54,10 @@ out; seven definitions of at most 12 DIDs streamed all of them cleanly. The
 main runs produced 36,071 usable stream replies, including 15,000 consecutive
 mixed-DID replies in the longest run.
 
-One run ended after 871 samples with an FTDI bulk-write timeout. The cable was
-still enumerated and the next ping first returned the final queued stream
-reply, then `06`. Recovery was therefore a stale-reply ordering defect, not a
-detached cable or dead ECU. `UpRevUsbTransport.cable_ping()` now drains complete
-checksum-valid stale replies until the ping acknowledgement; the regression
-test uses the exact observed stream shape. A 3,000-reply retry and the later
-15,000-reply run both completed cleanly.
+One run ended after 871 samples with a USB write timeout. The cable and ECU
+were fine: CANary's transport mishandled a stale queued reply, which is fixed
+and covered by a regression test of the observed shape. A 3,000-reply retry
+and the later 15,000-reply run both completed cleanly.
 
 ## Confirmed telemetry
 
@@ -120,10 +117,9 @@ not be used as actual low-speed telemetry.
 
 ### Target AFR RAM word — final commanded phi and fuel cut
 
-Later Windows captures showed that UpRev's Target AFR item uses two read-only
-absolute-RAM byte descriptors, `0xFFFF26BE` then `0xFFFF26BF`, rather than a
-DID. The Linux implementation reproduced those descriptors and then proved
-that a dynamic definition may mix them with ordinary DID descriptors. The Pi
+Target AFR is not a DID. It is the RAM word at `0xFFFF26BE`/`0xFFFF26BF`,
+read as two read-only absolute-RAM byte descriptors, and a dynamic definition
+may mix those with ordinary DID descriptors. The Pi
 was unreachable during this later phase, so the known-answer checks were made
 entirely within the same K-line reply rather than against stale Pi telemetry.
 
@@ -157,12 +153,10 @@ low-resolution rich-side table view and clamps to stoich during fuel cut; it
 is not the final commanded target. The captured RAM addresses are specific to
 this vehicle's ROM/calibration and are not shared-code constants.
 
-The later Linux JSONL captures and comparison output were preserved beside
-the Windows PCAPNG evidence as `linux-target-*.jsonl/json` in the external
-capture directory documented by `docs/uprev-usb-kline-research.md`.
+The JSONL captures and comparison output are kept outside Git as
+`linux-target-*.jsonl/json`.
 
-A later Windows combined capture independently exercised the reverse mixed
-descriptor order: both Target AFR RAM bytes first, then injector B2, A/F B1,
+A later combined stream exercised the reverse mixed descriptor order: both Target AFR RAM bytes first, then injector B2, A/F B1,
 A/F B2, BFS, and injector B1. All 387 replies were checksum-valid. Its 131
 zero-target observations put both injector pulses at 0.45-0.49 ms and both
 wideband sensors at the 5.065 V lean rail, reproducing the fuel-cut
@@ -170,9 +164,9 @@ interpretation with both banks in the same ECU reply.
 
 ### DIDs 0x1206/0x1207 — injector pulse width and scale
 
-The isolated operator-selected definitions directly identify `0x1206` as
-Bank 1 and `0x1207` as Bank 2. An UpRev autosave CSV overlapping the Bank 2
-PCAP supplies the engineering-unit known answer. All 481 ordered display rows
+Single-channel streams identify `0x1206` as Bank 1 and `0x1207` as Bank 2.
+An UpRev autosave CSV overlapping the Bank 2 stream supplies the
+engineering-unit known answer. All 481 ordered display rows
 equal the corresponding raw reply times `0.01` within the CSV's 0.05 ms
 precision. `compare_channels` at a 10 ms policy gave 312 same-instant pairs,
 `r2=0.995112`, slope `0.0100504 ms/count`, and offset `-0.00325 ms`; this pins
@@ -181,8 +175,8 @@ dead time is still not established by this result.
 
 ### Diagnostic-CAN parity and the remaining integration gap
 
-All values in the combined UpRev fuel stream are available over CAN diagnostics,
-not merely over the USB cable. DIDs `0x1206`, `0x1207`, `0x1208`, `0x1225`, and
+All values in the combined K-line fuel stream are available over CAN
+diagnostics, not only over K-line. DIDs `0x1206`, `0x1207`, `0x1208`, `0x1225`, and
 `0x1226` are already handled by CANary's Mode 22 collector. The final Target AFR
 word is also readable: after entering session `0xC0`, a service `0x23` KWP32
 request with body `FF FF 26 BE 00 02` returned positive payload `4000` through
@@ -465,30 +459,13 @@ same 18-byte read answered `0949...4000` (2,629 rpm, phi 1.0) on the first
 manual probe. Fixed by giving `selection_exclusion` the request instead of a
 channel string, so the unsafe call cannot be written.
 
-### UpRev channel harvest — the full detailed scheme decoded
+### K-line channel identities, checked against an UpRev log
 
-`uprev-detailed_scheme.pcapng` + the simultaneous
-`UpRev_Log9-20-2026_6-53-59_PM.csv` (parked, idle and revs, 29 s, 406 stream
-replies against 405 CSV rows) together identify essentially the whole ROM
-Editor logging scheme.
-
-**UpRev chains dynamic local identifiers.** Three definitions were sent, each
-including the previous one:
-
-```text
-02 00 ac 81  <12 memory-byte descriptors>
-02 00 ac 82  01 81  <5 memory bytes> <11 DID descriptors>
-02 00 ac 83  01 82  <10 DID descriptors>
-```
-
-The log then polls `02 00 21 83 04 01` — service 0x21, ReadDataByLocalIdentifier
-— and gets `66 34 61 83 <50 bytes> KK` back at **13.97 Hz**. The inner checksum
-validated on 406/406 replies, which is what pins the payload at exactly 50
-data bytes and therefore fixes every field width.
-
-Descriptor order is reply order, so the layout is determined. Widths for eight
-previously unmeasured DIDs follow from the 50-byte total. Identities were then
-confirmed by reproducing ROM Editor's own displayed values:
+A 29 s K-line stream (parked, idle and revs: 406 replies of 50 data bytes at
+**13.97 Hz**, every reply checksum-valid) beside the simultaneous UpRev log
+`UpRev_Log9-20-2026_6-53-59_PM.csv` (405 rows) fixes the width of eight
+previously unmeasured DIDs. Each identity was then confirmed by reproducing
+the log's own values:
 
 | CSV column | field | conversion | agreement |
 |---|---|---|---|
@@ -528,7 +505,7 @@ Four findings worth stating separately:
   *Superseded on CAN 2026-10-05 (B08.1, [lineage audit](2026-10-05-b08-1-artifact-lineage.md)):
   this table is the K-line one. The CAN catalog took 0x1102/0x1125 from it until
   `c897a62`; on CAN, 0x1102 is road speed and 0x1125 is LTFT bank 1.*
-- **AFR WB-B1/B2 are NOT streamed.** ROM Editor derives them from the A/F
+- **AFR WB-B1/B2 are NOT streamed.** UpRev computes them from the A/F
   sensor volts through a non-linear transfer (0.695 V -> 11.63, 1.21 V ->
   12.84). There is no ECM-computed AFR channel to find; our own
   `voltage_transfer` curve remains the only route, and this CSV's 207 distinct
@@ -538,11 +515,11 @@ The knock columns (`KNOCK EVENT` 0, `KNOCK STRENGTH` 1280, `KNOCK THRESHOLD`
 1.95) were constant for the whole log, consistent with the settled finding
 that this ECM does not stream knock.
 
-### Can CANary reproduce UpRev's one-request scheme over CAN? No.
+### Can one request sample many channels over CAN? No.
 
-UpRev samples all 38 fields at 13.97 Hz by defining a local identifier and
-polling it once per sample. Tested against the engine ECM at `0x7E0` in
-session `0xC0`, KOEO, 2026-09-20:
+On K-line, one defined local identifier returns all 38 fields above per poll,
+at 13.97 Hz. Tested against the engine ECM at `0x7E0` in session `0xC0`,
+KOEO, 2026-09-20:
 
 | service | meaning | result |
 |---|---|---|
@@ -551,7 +528,7 @@ session `0xC0`, KOEO, 2026-09-20:
 | `0x2C` | DynamicallyDefineDataIdentifier (UDS) | **NRC 0x12** for sub-functions 01/02/03 |
 
 `0x2C` answering 0x12 rather than 0x11 says the service is recognised and no
-sub-function is usable, which is the same outcome. **UpRev's whole-scheme
+sub-function is usable, which is the same outcome. **Defined-identifier
 sampling is a K-line capability, not a CAN one**, and no amount of chaining
 gets around it: the define itself is refused.
 
@@ -583,7 +560,7 @@ internally same-instant.
 With DID `0x110A` confirmed as ignition timing, the RAM hunt became a
 known-answer search rather than a correlation hunt: sweep, interleave the
 DID, and look for the byte that equals it. Fourteen 63-byte windows were swept
-around every RAM address UpRev's own scheme reads (engine idling, operator
+around every RAM address the K-line stream above reads (engine idling, operator
 blipping the throttle, 1,200 samples each, all 1,200/1,200 answered).
 
 **`0xFFFF11C7` is the ignition-timing register.**

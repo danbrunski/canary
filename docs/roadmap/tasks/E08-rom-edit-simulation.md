@@ -16,7 +16,7 @@ any simulated effect is a qualified prediction. The plant is not qualified
 
 | Exists (E07) | Used for |
 |---|---|
-| `rom_image.load_image` | `.OsirisROM` and plain 1 MiB images in; UpRev's encrypted backup `.bin` refused by name |
+| `rom_image.load_image` | `.OsirisROM` and plain 1 MiB images in; UpRev's backup `.bin` refused by name |
 | `rom_effects.make_candidate` / `write_candidate` | A sim-only candidate image from mapped-cell edits (`flashable: false`, stale checksums, outside git and the ROM library) |
 | `rom_effects.compare_roms` | Every changed byte traced to the outputs it reaches, unknown bytes never inert |
 | `paired_scenarios.run_paired` | Both ROMs at the same steady points: BFS, X, Target AFR, pulse, λ, fuel, trims, each `supported` or carrying its reasons |
@@ -1515,7 +1515,7 @@ refusal carries a stable `reason` string that tests assert by name.
       - None is marked slow, and `tests/slow_tests.txt` is not edited.
     - `test_rom_sim_private_rom.py`: 17–34 s for the drive design and the
       per-pair frame (module setup), then 2.1–2.5 s, 0.5 s, and 24–25 s for
-      the node check (it decodes both `.OsirisROM` files). The whole file is
+      the node check (it loads both `.OsirisROM` files). The whole file is
       marked `pytest.mark.slow`.
   - **Gate.** `ruff check .`, `ruff format --check .`, `mypy src` and mypy
     on both files are clean. `pytest tests/test_rom_sim_known_answers.py
@@ -1683,7 +1683,7 @@ refusal carries a stable `reason` string that tests assert by name.
   - **ROMs.** `--rom-dir` (repeatable), or `$CANARY_ROM_DIRS`: each file is
     imported into the ROM Library with `RomLibrary.add_upload`, idempotent by
     sha256, before the daemon starts or through its own upload route. An UpRev
-    encrypted backup `.bin` is reported by `rom_image`'s refusal name and
+    backup `.bin` is reported by `rom_image`'s refusal name and
     skipped, not fatal. Print each image's library sha and `revision_match`,
     so the operator can see which bases can simulate (W09: only `matched`
     revisions).
@@ -1714,7 +1714,7 @@ refusal carries a stable `reason` string that tests assert by name.
   - **Evidence (2026-10-15).**
     - `scripts/canary_desk.py` (new), `tests/test_canary_desk.py` (new, 37
       tests: config builder, `inside_checkout`, token 0600 and reuse, ROM
-      import idempotence and the encrypted-`.bin` skip, WSL vs other browser,
+      import idempotence and the backup-`.bin` skip, WSL vs other browser,
       port in use, bundle staleness, plus the `slow` smoke that launches the
       real daemon, fetches `/` and `/control/rom/library` with the token,
       stops it with SIGINT, checks the daemon pid is gone and that
