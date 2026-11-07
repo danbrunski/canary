@@ -43,9 +43,13 @@ class WifiServiceError(Exception):
     """The service did not do what was asked, or could not be asked."""
 
     def __init__(self, kind: str, detail: str) -> None:
-        super().__init__(detail)
+        # Both in args, so pickle rebuilds it (tests/test_exceptions_pickle.py).
+        super().__init__(kind, detail)
         self.kind = kind
         self.detail = detail
+
+    def __str__(self) -> str:
+        return self.detail
 
 
 def _unreachable(path: Path, reason: str) -> WifiServiceError:

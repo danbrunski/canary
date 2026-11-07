@@ -364,9 +364,13 @@ class WifiOpError(Exception):
     """A saved-network operation that did not happen, and why."""
 
     def __init__(self, kind: str, detail: str) -> None:
-        super().__init__(detail)
+        # Both in args, so pickle rebuilds it (tests/test_exceptions_pickle.py).
+        super().__init__(kind, detail)
         self.kind = kind
         self.detail = detail
+
+    def __str__(self) -> str:
+        return self.detail
 
 
 @dataclass(frozen=True)
