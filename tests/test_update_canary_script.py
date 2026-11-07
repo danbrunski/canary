@@ -562,6 +562,8 @@ def test_docs_only_update_skips_build_pip_and_install(harness: Harness) -> None:
     assert not harness.calls("install_pi.sh")
     assert harness.canary_restarts() == 1
     assert harness.calls("systemctl restart canary-mcp.service")
+    # It runs this checkout's code too; a stale one served the new WiFi page a 503.
+    assert harness.calls("systemctl restart canary-provision.service")
 
 
 def test_dashboard_only_update_builds_only_the_dashboard(harness: Harness) -> None:

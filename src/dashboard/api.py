@@ -167,6 +167,10 @@ def create_app(
     #: ``/status.network`` (P2.3). ``None`` (tests, bare apps) reports them as
     #: not wired; the daemon passes one.
     network_reader: NetworkStatusReader | None = None,
+    #: The root ``canary-provision`` service's WiFi socket behind
+    #: ``/control/network/wifi`` (``src/provisioning/netsock.py``); ``None`` is
+    #: ``$CANARY_NETWORK_SOCKET`` or ``/run/canary/network.sock``.
+    network_socket_path: Path | None = None,
     #: Software-update request/status files (``src/control/updater.py``).
     update_paths: UpdatePaths = DEFAULT_UPDATE_PATHS,
     #: Phones and laptops with their own control tokens (P2.4); ``None`` uses
@@ -301,6 +305,7 @@ def create_app(
         ups_keepalive_path=ups_keepalive_path,
         provision_window_path=provision_window_path,
         network_reader=network_reader,
+        network_socket_path=network_socket_path,
         update_paths=update_paths,
         emitter=emitter,
         live_source=live_source,

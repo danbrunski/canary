@@ -3,20 +3,29 @@ Description=CANary BLE provisioning (Improv WiFi + network status)
 # Standalone from canary.service, like the UPS watchdog: a Pi whose daemon is
 # down still needs a way onto a network and a way to say where it is.
 After=bluetooth.service NetworkManager.service
-Requires=bluetooth.service
-Wants=NetworkManager.service
+# Wants, not Requires: the network-control socket (N5.1) must stay up when
+# bluetooth.service is absent, stopped or restarting (a Pi without an adapter,
+# or `systemctl restart bluetooth`). The BLE half retries until BlueZ is back.
+Wants=bluetooth.service NetworkManager.service
 ConditionPathExists=/etc/canary/canary.env
 
 [Service]
 Type=simple
 # Runs as root: it registers BlueZ GATT objects and writes NetworkManager
 # keyfiles (0600, root-owned, as NM requires) under
-# /etc/NetworkManager/system-connections.
+# /etc/NetworkManager/system-connections, and owns every WiFi change the
+# unprivileged daemon asks for over /run/canary/network.sock.
 EnvironmentFile=/etc/canary/canary.env
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 # The window file the daemon writes (POST /control/network/provisioning/window).
 Environment=CANARY_PROVISION_WINDOW_FILE=/run/canary/provision_window
+# The network-control socket behind the dashboard's saved-networks page (N5.1).
+# The service creates it root:canary 0660 in the same shared /run/canary tmpfs
+# (tmpfiles-canary.conf makes that directory 0775 canary:canary, so root can
+# bind there) and serves it with or without Bluetooth.
+Environment=CANARY_NETWORK_SOCKET=/run/canary/network.sock
+Environment=CANARY_NETWORK_SOCKET_GROUP=canary
 # The service exists for a Pi nobody can reach yet, so it must not depend on
 # someone running `rfkill unblock` first. systemd-rfkill restores a saved soft
 # block on every boot. BlueZ then refuses Powered=true, and the service fails

@@ -31,3 +31,59 @@ export interface ProvisioningWindowResponse {
   provisioning: ProvisioningWindow;
   expiry: number;
 }
+
+/** One saved WiFi client profile (`GET /control/network/wifi`, N5). Never
+ *  carries a passphrase. */
+export interface WifiNetwork {
+  /** The NetworkManager connection UUID. */
+  id: string;
+  ssid: string;
+  priority: number;
+  autoconnect: boolean;
+  hidden: boolean;
+  /** Key management (`wpa-psk`, `sae`, `wpa-eap`, ...); `null` is an open network. */
+  security: string | null;
+  active: boolean;
+  in_range: boolean;
+  /** 0-100 while in range. */
+  signal: number | null;
+  /** `other` was set up outside CANary (the Imager's preconfigured profile, `nmcli`). */
+  managed_by: "canary" | "other";
+}
+
+/** One access point in the last scan. */
+export interface WifiScanEntry {
+  ssid: string;
+  signal: number;
+  /** `""` is an open network; otherwise e.g. `WPA2` or `WPA2 WPA3`. */
+  security: string;
+  saved: boolean;
+}
+
+export interface WifiState {
+  /** Highest priority first. */
+  networks: WifiNetwork[];
+  /** Strongest first. */
+  scan: WifiScanEntry[];
+  /** Epoch seconds of the last scan. */
+  scanned_at: number | null;
+  interface: string | null;
+}
+
+export interface WifiResponse {
+  wifi: WifiState;
+}
+
+export interface WifiAddRequest {
+  ssid: string;
+  /** Omitted or `null` for an open network. */
+  password?: string | null;
+  hidden?: boolean;
+  /** `true` joins now (rolled back on failure); `false` saves for later. */
+  join: boolean;
+}
+
+export interface WifiAddResponse {
+  network: WifiNetwork;
+  wifi: WifiState;
+}

@@ -272,3 +272,89 @@ test.describe("Logs and Analysis at 412px", () => {
     await sideways(page);
   });
 });
+
+/** N5.4: saved WiFi networks on System -> Network, driven at 412 px against a
+ *  stateful stub of `/control/network/wifi`. */
+test.describe("Saved WiFi networks at 412px", () => {
+  const HOME = {
+    id: "id-home",
+    ssid: "Home-Starlink-With-A-Rather-Long-Network-Name",
+    priority: 100,
+    autoconnect: true,
+    hidden: false,
+    security: "wpa-psk",
+    active: true,
+    in_range: true,
+    signal: 81,
+    managed_by: "canary",
+  };
+
+  test("adds a network from the scan with Join now, no sideways scroll", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("canary.controlToken", "ui-test"));
+    const networks = [HOME];
+    const scan = [
+      { ssid: HOME.ssid, signal: 80, security: "WPA2", saved: true },
+      { ssid: "Neighbour", signal: 44, security: "WPA2", saved: false },
+    ];
+    const posted: unknown[] = [];
+    const wifi = () => ({ networks, scan, scanned_at: 1_700_000_000, interface: "wlan0" });
+    await page.route(/\/control\/network(\?|$)/, (route) =>
+      route.fulfill({
+        json: {
+          network: {
+            hostname: "canary-1a2b",
+            mode: "client",
+            ssid: HOME.ssid,
+            wifi_interface: "wlan0",
+            addresses: { wlan0: ["192.168.1.23"] },
+            dashboard_url: "http://192.168.1.23:8000/",
+            read_at: 1_700_000_000,
+            age_s: 0,
+            error: null,
+          },
+          provisioning: { window_remaining_s: 0, max_minutes: 30 },
+        },
+      }),
+    );
+    await page.route(/\/control\/network\/wifi(\?|$)/, async (route) => {
+      if (route.request().method() === "POST") {
+        const body = route.request().postDataJSON() as { ssid: string };
+        posted.push(body);
+        const added = {
+          ...HOME,
+          id: "id-new",
+          ssid: body.ssid,
+          priority: 110,
+          active: true,
+          signal: 44,
+        };
+        networks.forEach((n) => (n.active = false));
+        networks.unshift(added);
+        return route.fulfill({ json: { network: added, wifi: wifi() } });
+      }
+      return route.fulfill({ json: { wifi: wifi() } });
+    });
+
+    await page.goto("/#wb/system-network");
+    await expect(page.getByRole("heading", { name: "Saved WiFi networks" })).toBeVisible();
+    await expect(page.getByRole("list", { name: "Saved networks" })).toContainText("connected");
+
+    await page.getByRole("button", { name: "choose Neighbour" }).tap();
+    await page.getByLabel("Passphrase").fill("correct horse battery");
+    await page.getByRole("button", { name: "Join now" }).tap();
+
+    await expect(page.getByText("Joined Neighbour.")).toBeVisible();
+    expect(posted).toEqual([
+      { ssid: "Neighbour", password: "correct horse battery", hidden: false, join: true },
+    ]);
+    await expect(page.getByLabel("Passphrase")).toHaveValue("");
+    const first = page.getByRole("list", { name: "Saved networks" }).getByRole("listitem").first();
+    await expect(first).toContainText("Neighbour");
+    await expect(first).toContainText("connected");
+
+    expect(pageErrors).toEqual([]);
+    const report = await overflowReport(page);
+    expect(report.documentWidth).toBeLessThanOrEqual(report.viewport);
+    expect(report.offenders).toEqual([]);
+  });
+});

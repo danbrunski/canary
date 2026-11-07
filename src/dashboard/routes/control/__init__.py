@@ -134,6 +134,7 @@ def register_control_routes(
     ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
     provision_window_path: Path = DEFAULT_WINDOW_PATH,
     network_reader: NetworkStatusReader | None = None,
+    network_socket_path: Path | None = None,
     update_paths: UpdatePaths = DEFAULT_UPDATE_PATHS,
     emitter: AnomalyEventEmitter | None = None,
     #: The daemon's in-memory observations, so the capture-autostart tick can
@@ -190,6 +191,7 @@ def register_control_routes(
         inference_timing=inference_timing,
         provision_window_path=provision_window_path,
         network_reader=network_reader,
+        network_socket_path=network_socket_path,
         update_paths=update_paths,
     )
     # `SessionDir` resolves against the app's context.

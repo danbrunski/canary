@@ -426,6 +426,13 @@ restart_services() {
   fi
   "${CANARY_HOME}/scripts/restart_canary.sh" "${args[@]+"${args[@]}"}" || return $?
   systemctl restart canary-mcp.service || return $?
+  # canary-provision runs this checkout's src/provisioning too (WiFi over
+  # Bluetooth, and the socket the dashboard's WiFi page asks). Left running,
+  # an update served the new page against the old service, which answered
+  # 503 until someone restarted it by hand (2026-11-07, N5). Not fatal: the
+  # daemon is what the health check and the rollback are about.
+  systemctl restart canary-provision.service \
+    || echo "WARNING: canary-provision did not restart; WiFi setup and the WiFi page may be stale" >&2
 }
 
 # wait_healthy: poll /status; sets HEALTH_SECONDS to the wait it took.

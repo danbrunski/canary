@@ -111,6 +111,22 @@ second `canary-2.local`. A name you chose yourself is kept, a re-run
 explicitly. To find the name without a screen: `ip link show eth0` on the Pi,
 or your router's client list.
 
+**WiFi networks.** The dashboard's System → Network page manages the Pi's
+saved WiFi (behind the control token): it lists every network NetworkManager
+holds, including one Raspberry Pi Imager wrote, with which is connected and
+which are in range; adds one from the Pi's scan or by name (a hidden network,
+or one not here), either **Join now** (undone if the join fails) or **Save
+for later** (a phone hotspot, a friend's network); reorders them, so the
+first in range wins; and forgets them. The Pi joins the highest saved network
+in range on its own. Save your phone's hotspot and the Pi can be reached
+anywhere the phone is. The root `canary-provision` service does the work, over
+`/run/canary/network.sock`; if it is not running the page says so (a 503)
+rather than showing an empty list, and `sudo systemctl restart
+canary-provision` brings it back. Switching or forgetting the network your
+browser is using drops the page; the cable address below still works. Before
+NetworkManager has WiFi, `sudo nmcli device wifi connect "<SSID>" password
+"<passphrase>"` over the cable does the same. API: `docs/headless-api.md`.
+
 **Wired address.** The installer gives eth0 the fixed address
 `192.168.137.2/24` (NetworkManager profile `canary-wired`), the address the
 docs, `sync-train.sh` and companion discovery use for a Pi on a direct cable.

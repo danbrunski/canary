@@ -86,9 +86,18 @@ Rejected, with reasons, so they are not re-proposed:
   dbus-fast, joins through NetworkManager keyfiles so the passphrase never
   reaches an argv, a failed join restores the profiles),
   `systemd/canary-provision.service`, operator guide `docs/ble-provisioning.md`,
-  tests `tests/test_provisioning_*.py`. Open: a bench run against a real
-  phone (Android Chrome on improv-wifi.com). `install_pi.sh` installs and
-  enables the unit (2026-10-13).
+  tests `tests/test_provisioning_*.py`. `install_pi.sh` installs and
+  enables the unit (2026-10-13). *First real-phone run, 2026-11-07
+  (canary-8974, Android Chrome on improv-wifi.com): it works.* The run also
+  showed the path is clunky in four places:
+  - nothing points a user at improv-wifi.com (N6 replaces this);
+  - Bluetooth settings lists `canary-XXXX`, and pairing there fails on a PIN
+    nothing answers, so turn pairing off or add an agent;
+  - "press the authorize button": there is none, so the closed-gate wording
+    should name the real ways in;
+  - Imager's `preconfigured` profile closed the gate on a Pi its owner
+    thought had no WiFi (N5's list now shows it).
+  Opening the window took the control token.
   Original scope: A BlueZ GATT server that
   advertises, lists the networks the Pi can currently see, accepts an SSID
   and passphrase, hands them to NetworkManager, and reports the resulting
@@ -177,14 +186,35 @@ The unprivileged daemon asks it over a local socket, the same "daemon asks,
 root acts" shape P3.1 chose for updates over a polkit rule. The fallback
 hotspot (N6) lives in the same service.
 
-- [ ] **N5.1 Network-control socket in `canary-provision`.** A Unix stream
+- [x] **N5.1 Network-control socket in `canary-provision`.** A Unix stream
   socket, `/run/canary/network.sock`, root:canary 0660, one JSON request and
   one JSON reply per line, with `SO_PEERCRED` refusing a peer outside the
   canary group. Operations: `list`, `scan`, `add`, `connect`, `forget`,
   `order`. The socket is served whether or not BLE is advertising.
   Passphrases arrive only in `add` and are never logged, echoed, or
   returned.
-- [ ] **N5.2 Saved-network operations in `src/provisioning/network.py`.**
+  Done 2026-11-07: `src/provisioning/netsock.py` (server, `SO_PEERCRED`
+  policy, request dispatch), `service.py` (`run` now serves the socket and BLE
+  as two supervised jobs, so a missing BlueZ, adapter or dbus-fast never stops the socket;
+  BLE retries 5 s -> 60 s and re-runs `rfkill unblock bluetooth` itself),
+  `client.py`, wired in `__main__._run`. The socket is bound under umask
+  `0117` (so `0660` from its first instant), then `lchown`ed to the group;
+  a regular file at the path is never deleted. Unit: `Requires=bluetooth.service`
+  became `Wants=` (a Requires would stop the socket with BlueZ) and
+  `CANARY_NETWORK_SOCKET`/`_GROUP` are set. Passphrase: log lines are built by
+  `describe()` from op + SSID only, failure text is scrubbed of it at the
+  socket and again inside `NetworkManagerCli._nmcli`. `tests/test_provisioning_netsock.py`
+  (32 tests: every op, malformed/oversized requests, one-at-a-time under 4
+  concurrent clients, mode 0660 + group + removal on stop, stale socket
+  replaced, peer refused -> `unauthorized` and nothing runs, group policy with
+  a fake user database, the passphrase absent from every reply and log record
+  including a crashing op and a leaky error, socket serving while BLE fails
+  repeatedly, the unit file). Not run: under real systemd as root on a Pi
+  (root creating the socket in `/run/canary`, 0775 canary:canary, is argued
+  from the tmpfiles rule, not observed). **Deploy: the unit and its env
+  changed, so `daemon-reload` + `restart canary-provision` are needed; the
+  update flow does not restart it.**
+- [~] **N5.2 Saved-network operations in `src/provisioning/network.py`.**
   - `list`: every WiFi *client* profile NetworkManager holds, including ones
     CANary did not write (the Imager's `preconfigured`), but never `mode=ap`.
     Fields: id (connection UUID), SSID, priority, autoconnect, hidden,
@@ -201,7 +231,28 @@ hotspot (N6) lives in the same service.
   - `order`: given ids in priority order, set `autoconnect-priority` so the
     first wins (for example 100, 90, 80, ...), in one request.
   Tested against recorded `nmcli` output, as the existing join is.
-- [ ] **N5.3 Daemon routes behind the control token**, in
+  Partial 2026-11-07: implemented in `src/provisioning/network.py`
+  (`NetworkManagerCli.saved_networks`/`wifi_state`/`add_network`/
+  `connect_network`/`forget_network`/`set_order`, `WifiOpError`). `forget` and
+  `connect` decide by what NM says the profile *is* (type + mode), never by
+  name (404 unknown, `refused` for wired/AP/loopback); `add` refuses an SSID
+  another profile holds ("forget it first") and replaces our own under the
+  stable uuid; `join:false` writes + loads without activating (no journal),
+  and a not-in-range network is written non-hidden, security from the
+  passphrase; `order` needs exactly the saved set, steps 10 down to 1 so 25
+  networks stay distinct and positive, and puts old priorities back on a
+  failure; every WiFi operation, and a BLE join, share one lock.
+  `tests/test_provisioning_wifi.py` (61 tests) green. **Remainder: the nmcli
+  fixtures are hand-written from nmcli's documented terse format, not captured
+  from a live Pi (none on this machine).** Confirm once on the Pi: `nmcli -t
+  -f connection.autoconnect-priority,connection.autoconnect,802-11-wireless.mode,
+  802-11-wireless.ssid,802-11-wireless.hidden,802-11-wireless-security.key-mgmt
+  connection show uuid <u>` prints `property:value` lines, and `nmcli -t -f
+  SSID,SIGNAL,SECURITY device wifi list ifname wlan0 --rescan yes` waits for
+  the scan. Also: a WPA3-only network saved while out of range is written as
+  WPA-PSK (nothing says otherwise); `scanned_at` is the last rescan *this
+  service* made (`null` = NM's cache of unknown age).
+- [x] **N5.3 Daemon routes behind the control token**, in
   `src/dashboard/routes/control/network.py`:
   - `GET /control/network/wifi`: saved networks plus the last scan.
   - `POST /control/network/wifi/scan`: rescan, then the same payload.
@@ -214,7 +265,24 @@ hotspot (N6) lives in the same service.
   kind of empty it is:** the service not running (a laptop dev install, or
   `canary-provision` down) is a 503 naming the socket, never an empty list.
   Documented in `docs/headless-api.md`.
-- [ ] **N5.4 "Saved WiFi networks" on the Network page.** It lists the saved
+  Done 2026-11-07: routes in `src/dashboard/routes/control/network.py`
+  (sync `def`, so a 30 s join holds a worker thread), the client in
+  `src/provisioning/client.py` (timeouts: 10 s, 30 s rescan, 60 s join/connect;
+  503 `WiFi control service not reachable at <path>: <reason> (is
+  canary-provision running?)`, 504 on timeout, 502 on an odd reply),
+  `network_socket_path` threaded through `create_app` -> `ControlContext`, route
+  table snapshot regenerated (6 additions). Each change, done or refused,
+  publishes `network.wifi_changed` (so it is in the control ledger) with
+  `{op, ssid|id|ids, ok, ...}`; the add body is validated by hand because
+  FastAPI's 422 echoes the failing input, which for a missing field is the
+  whole body, passphrase included. `order` with ids that are not the saved set
+  is 409 per the contract (the service calls it `invalid`; an add's `invalid`
+  is 422). `tests/test_control_network_wifi.py` (51 tests: token on all six,
+  503 absent/stale socket, 504, 502, status per failure kind, the passphrase
+  absent from every response/ledger entry including 422s and a service that
+  echoes it, and one end-to-end test through the real socket server and real
+  operations). Not run: against a live daemon + Pi.
+- [x] **N5.4 "Saved WiFi networks" on the Network page.** It lists the saved
   networks in priority order with in-range and connected markers, and
   up/down to reorder. **Add network** picks from the scan or takes a typed
   name (a hidden network, or one not here), with a passphrase field, then
@@ -223,7 +291,21 @@ hotspot (N6) lives in the same service.
   the Pi through warns first: the page will drop, and the Pi will be at its
   new address. Works at phone width. vitest covers each control, and e2e
   covers the add flow at 412 px.
-- [ ] **N5.5 Docs.** The Network page in `docs/pi-setup.md`, plus
+  Done 2026-11-07 against the N5.3 HTTP contract, mocked (the backend landed
+  separately): `WifiNetworksCard.tsx` on System -> Network, `getWifi`/`scanWifi`/
+  `addWifi`/`connectWifi`/`orderWifi`/`forgetWifi` in `api/http.ts`. A 503/504
+  shows the daemon's detail as the section's state; a failed join shows "The Pi
+  could not join X: <detail>. Nothing was saved."; the passphrase field is
+  cleared on every submit. The drop warning fires only when the page's host is
+  in `addresses[wifi_interface]`. vitest `WifiNetworksCard.test.tsx` (16 tests:
+  order + markers, reorder sends the full order, forget confirms, join-now,
+  409 detail + field cleared, 422, save-for-later `join:false`, hidden typed
+  name, rescan, warning on WiFi / not over the cable / on forget, 503, locked);
+  e2e `phone.spec.ts` "Saved WiFi networks at 412px". `pnpm typecheck`, `format`,
+  `lint`, `test` (1372 passed), `pnpm exec playwright test` (46 passed) green.
+  Not run: against the real daemon (N5.1-N5.3 backend not exercised here).
+
+- [x] **N5.5 Docs.** *Done 2026-11-07:* `docs/pi-setup.md` "WiFi networks", `docs/ble-provisioning.md` (Settings pairing, the authorize prompt, more networks). Original scope: The Network page in `docs/pi-setup.md`, plus
   `docs/ble-provisioning.md`, which says a second network can now be added
   from the dashboard, without a provisioning window.
 

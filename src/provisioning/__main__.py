@@ -15,6 +15,14 @@
 - ``CANARY_DASHBOARD_PORT`` -- port in the URL handed back (default 8000)
 - ``CANARY_PROVISION_WINDOW_FILE`` -- the window file (default ``/run/canary/provision_window``)
 - ``CANARY_PROVISION_JOIN_TIMEOUT`` -- seconds to wait for a join (default 45)
+- ``CANARY_NETWORK_SOCKET`` -- the network-control socket the dashboard uses
+  (default ``/run/canary/network.sock``); ``CANARY_NETWORK_SOCKET_GROUP`` --
+  the group allowed to use it (default ``canary``);
+  ``CANARY_NETWORK_JOIN_TIMEOUT`` -- seconds a join asked for over it may wait
+  (default 30)
+
+The service serves the BLE server and that socket side by side: a Pi with no
+Bluetooth adapter still answers the socket (:mod:`src.provisioning.service`).
 """
 
 from __future__ import annotations
@@ -23,6 +31,7 @@ import argparse
 import asyncio
 import importlib.metadata
 import json
+import logging
 import os
 import socket
 import sys
@@ -38,8 +47,12 @@ from src.provisioning.gate import (
     read_window_remaining,
     write_window,
 )
+from src.provisioning.netsock import DEFAULT_JOIN_TIMEOUT_S as DEFAULT_NETWORK_JOIN_TIMEOUT_S
 from src.provisioning.network import NetworkManagerCli
+from src.provisioning.service import cancel_on_signals, run_service
 from src.provisioning.status import build_status
+
+log = logging.getLogger(__name__)
 
 DEFAULT_DASHBOARD_PORT = 8000
 _MODEL_PATH = Path("/proc/device-tree/model")
@@ -74,13 +87,14 @@ def device_info() -> DeviceInfo:
 
 
 def _run() -> int:
-    from src.provisioning.bluez import serve  # needs dbus-fast and a system bus
-
     network = _network()
     network.recover()  # logs each join it undoes
     timeout = float(_env("CANARY_PROVISION_JOIN_TIMEOUT") or DEFAULT_JOIN_TIMEOUT_S)
-    asyncio.run(
-        serve(
+
+    async def ble() -> None:
+        from src.provisioning.bluez import serve  # needs dbus-fast and a system bus
+
+        await serve(
             lambda sink: ImprovController(
                 network,
                 sink,
@@ -91,7 +105,23 @@ def _run() -> int:
             ),
             adapter_name=_env("CANARY_PROVISION_ADAPTER"),
         )
-    )
+
+    async def main() -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        cancel_on_signals(task)
+        await run_service(
+            network,
+            ble,
+            join_timeout_s=float(
+                _env("CANARY_NETWORK_JOIN_TIMEOUT") or DEFAULT_NETWORK_JOIN_TIMEOUT_S
+            ),
+        )
+
+    try:
+        asyncio.run(main())
+    except asyncio.CancelledError:  # SIGTERM from systemd
+        log.info("provisioning: stopping")
     return 0
 
 

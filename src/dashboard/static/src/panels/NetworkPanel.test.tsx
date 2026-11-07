@@ -1,11 +1,20 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { StatusResponse } from "../types";
 import type { NetworkResponse, NetworkSummary } from "../types/network";
 import { mockHttp } from "../test/harness";
 
-const mocks = mockHttp(["getNetwork", "setProvisioningWindow"]);
+const mocks = mockHttp([
+  "getNetwork",
+  "setProvisioningWindow",
+  "getWifi",
+  "scanWifi",
+  "addWifi",
+  "connectWifi",
+  "orderWifi",
+  "forgetWifi",
+]);
 
 const { NetworkPanel } = await import("./NetworkPanel");
 
@@ -30,6 +39,12 @@ function response(windowRemaining = 0, overrides: Partial<NetworkSummary> = {}):
     provisioning: { window_remaining_s: windowRemaining, max_minutes: 30 },
   };
 }
+
+beforeEach(() => {
+  mocks.getWifi.mockResolvedValue({
+    wifi: { networks: [], scan: [], scanned_at: null, interface: "wlan0" },
+  });
+});
 
 afterEach(() => {
   vi.useRealTimers();
@@ -92,7 +107,9 @@ describe("NetworkPanel", () => {
     render(<NetworkPanel token="" status={status} />);
     expect(screen.getByText("Starlink")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "http://192.168.1.23:8000/" })).toBeInTheDocument();
-    expect(screen.getByText(/needs the control token/)).toBeInTheDocument();
+    expect(screen.getByText(/needs the control token to open the window/)).toBeInTheDocument();
+    expect(screen.getByText(/needs the control token to manage WiFi networks/)).toBeInTheDocument();
+    expect(mocks.getWifi).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: /Let a phone change WiFi/ })).toBeNull();
     expect(mocks.getNetwork).not.toHaveBeenCalled();
   });

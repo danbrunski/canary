@@ -100,6 +100,9 @@ class ControlContext:
     #: Cached ``nmcli``/``ip`` reads for ``GET /control/network`` (P2.3);
     #: ``None`` (tests, bare apps) reports the route as not wired.
     network_reader: NetworkStatusReader | None = None
+    #: The root service's WiFi socket (``src/provisioning/netsock.py``) behind
+    #: ``/control/network/wifi``; ``None`` is its default, which tests override.
+    network_socket_path: Path | None = None
     #: The software-update request/status files shared with the root
     #: ``canary-update`` units (``src/control/updater.py``).
     update_paths: UpdatePaths = DEFAULT_UPDATE_PATHS

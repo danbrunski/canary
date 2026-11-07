@@ -20,6 +20,7 @@ import type { NetworkResponse, NetworkSummary } from "../types/network";
 import { toneClass } from "../util/format";
 import { formatDuration } from "../util/time";
 import { TokenRequired } from "../components/TokenRequired";
+import { WifiNetworksCard } from "./WifiNetworksCard";
 
 interface NetworkPanelProps {
   token: string;
@@ -199,6 +200,8 @@ export function NetworkPanel({ token, status }: NetworkPanelProps) {
           {token ? (error ?? "loading network…") : "No network reading yet."}
         </p>
       )}
+
+      <WifiNetworksCard token={token} network={network} />
 
       <section className="mt-4 border-t border-border pt-3">
         <h3 className={cn(definitionTermClass, "m-0 mb-2")}>Change WiFi from a phone</h3>

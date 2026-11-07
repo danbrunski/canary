@@ -28,6 +28,22 @@ the daemon, from `python -m src.provisioning run`. The code is
 There is no token to paste, no keyboard or monitor, and nothing secret sent
 over Bluetooth.
 
+**Not from Bluetooth settings.** The phone's *Pair new device* list may show
+`canary-XXXX`, but pairing there asks for a PIN and then fails: the setup
+service needs no pairing, and the Pi has no pairing agent to answer one. Use
+Chrome as above (found on the first real-phone run, 2026-11-07).
+
+**"Press the authorize button on the device."** CANary has no button. The
+provisioner says this when the gate below is closed, which happens whenever
+the Pi already holds *any* WiFi client profile, including one Raspberry Pi
+Imager wrote at flash time (`preconfigured`). Open a window (below), or turn
+the key ACC → ON → ACC, then connect again.
+
+**More networks, once the Pi is on one.** The dashboard's System → Network
+page lists every saved network and adds more (join now, or save for later,
+for a phone hotspot or a network somewhere else), reorders them, and forgets
+them, with no window needed (`docs/pi-setup.md`, "WiFi networks").
+
 That link is an IP address on purpose. Android does not reliably resolve
 `.local` names (N1.5), so do not rely on `canary.local` from a phone. Bookmark
 the address, or read it again later from the status characteristic (below).

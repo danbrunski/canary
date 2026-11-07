@@ -723,6 +723,54 @@
       "auth": "control",
       "body": false,
       "method": "GET",
+      "path": "/control/network/wifi",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/network/wifi",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "PUT",
+      "path": "/control/network/wifi/order",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/network/wifi/scan",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "DELETE",
+      "path": "/control/network/wifi/{network_id}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/network/wifi/{network_id}/connect",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
       "path": "/control/obd_discovery",
       "query": [],
       "status_code": null
