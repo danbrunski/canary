@@ -59,10 +59,13 @@ REGISTRY_SCHEMA_VERSION = 1
 #: A fact and its evidence form one *unit*: an edit to the fact needs new
 #: evidence (:func:`update_profile`), and the overlay stores and reverts the
 #: unit whole (:func:`_parameter_overrides`), so evidence never describes a
-#: number from the other side of the merge (operator, 2026-10-10).
+#: number from the other side of the merge (operator, 2026-10-10). Tire size
+#: is deliberately not in a unit: tires get swapped, and a new size must save
+#: without rewriting the gearing's evidence (operator, 2026-11-07). The drive's
+#: own GPS measurement (:mod:`src.analysis.rolling_circumference`) checks it.
 PARAMETER_EVIDENCE: dict[str, tuple[str, ...]] = {
     "mass_evidence": ("mass_kg",),
-    "driveline_evidence": ("final_drive", "gearbox_ratios", "tire_loaded_circumference_m"),
+    "driveline_evidence": ("final_drive", "gearbox_ratios"),
 }
 
 #: How the dashboard shows each :class:`~src.config.VehicleParameters` field:
@@ -540,8 +543,8 @@ def _require_evidence(before: VehicleParameters, after: VehicleParameters) -> No
 
     A constraint, not advice: the dyno and the derived channels quote these
     numbers, and a figure nobody can trace is how the WOT noise floor was once
-    quoted against idle. Clearing every driveline fact needs no evidence; the
-    model's own validator stops requiring it then.
+    quoted against idle. Clearing the gearing needs no evidence; the model's
+    own validator stops requiring it then.
     """
     for evidence, facts in PARAMETER_EVIDENCE.items():
         moved = [name for name in facts if getattr(before, name) != getattr(after, name)]

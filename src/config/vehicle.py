@@ -58,9 +58,12 @@ class VehicleParameters(_Strict):
     #: first). All of them or none: a gear estimate against a partial table
     #: would name the wrong gear whenever the driver is in a missing one.
     gearbox_ratios: tuple[float, ...] = ()
-    #: Loaded rolling circumference of the driven tires, metres.
+    #: Loaded rolling circumference of the driven tires, metres. Needs no
+    #: evidence: a tire swap must save on its own (operator, 2026-11-07), and
+    #: each drive measures it from GPS anyway.
     tire_loaded_circumference_m: float | None = Field(default=None, gt=0.0)
-    #: Where the driveline numbers come from. Required once any is set.
+    #: Where the gearing (``final_drive``, ``gearbox_ratios``) comes from.
+    #: Required once either is set.
     driveline_evidence: str | None = None
 
     @model_validator(mode="before")
@@ -99,10 +102,10 @@ class VehicleParameters(_Strict):
 
     @model_validator(mode="after")
     def _driveline_has_evidence(self) -> VehicleParameters:
-        driveline = (self.final_drive, self.gearbox_ratios, self.tire_loaded_circumference_m)
-        if any(driveline) and not self.driveline_evidence:
+        if (self.final_drive or self.gearbox_ratios) and not self.driveline_evidence:
             raise ValueError(
-                "driveline facts need driveline_evidence saying how they were measured"
+                "final_drive and gearbox_ratios need driveline_evidence saying how they "
+                "were arrived at"
             )
         if any(ratio <= 0 for ratio in self.gearbox_ratios):
             raise ValueError("gearbox_ratios must be positive")

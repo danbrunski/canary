@@ -317,6 +317,14 @@ def test_the_retired_gear_ratios_field_is_refused_by_name() -> None:
 def test_driveline_facts_need_their_evidence() -> None:
     with pytest.raises(ValueError, match="driveline_evidence"):
         VehicleParameters(final_drive=4.08)
+    with pytest.raises(ValueError, match="driveline_evidence"):
+        VehicleParameters(gearbox_ratios=(3.0, 1.0))
+
+
+def test_tire_size_needs_no_evidence() -> None:
+    """A tire swap saves on its own (operator, 2026-11-07)."""
+    params = VehicleParameters(tire_loaded_circumference_m=2.6, tire_diameter_m=0.834)
+    assert params.driveline_evidence is None
 
 
 def test_gear_estimate_clusters_to_nearest_ratio() -> None:

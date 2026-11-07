@@ -1085,15 +1085,17 @@ whole `VehicleParameters`. Refusals name the field:
   (position 9) is wrong. A non-North-American VIN with a mismatching check digit
   is accepted with a `warnings` entry.
 - 422 **evidence required**: changing `mass_kg` needs a new `mass_evidence`;
-  changing `final_drive`, `gearbox_ratios` or `tire_loaded_circumference_m`
-  needs a new `driveline_evidence` (the same text again is not new evidence).
+  changing `final_drive` or `gearbox_ratios` needs a new `driveline_evidence`
+  (the same text again is not new evidence). Tire size
+  (`tire_diameter_m`, `tire_loaded_circumference_m`) needs none: a tire swap
+  saves on its own.
 - 409 a VIN another profile already holds, or a VIN edit that moves the
   **active** profile off the VIN the startup probe read off the connected
   vehicle (the next start would find no profile for that vehicle and register a
   new, empty one).
 
 The overlay stores parameters field by field. A fact and its evidence form one
-unit (`mass_kg` + `mass_evidence`; the three driveline facts +
+unit (`mass_kg` + `mass_evidence`; `final_drive` + `gearbox_ratios` +
 `driveline_evidence`), stored, merged and reverted whole, so a later laptop edit
 to any *other* parameter still reaches this machine, and evidence never pairs
 with a number from the other side of the merge.

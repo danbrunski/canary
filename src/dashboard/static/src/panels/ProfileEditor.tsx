@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 
 import { HttpError, readVin, updateProfile } from "../api/http";
 import type {
@@ -10,6 +10,7 @@ import type {
   VinReadResult,
 } from "../types";
 import { buttonClass, cn, inputClass, placeholderClass } from "../styles";
+import { COMMON_TIRE_SIZES, parseTireSize } from "../util/tireSize";
 import { checkVin } from "../util/vin";
 
 /** The examples the daemon's evidence refusal quotes (src/vehicle/profiles.py). */
@@ -84,7 +85,9 @@ interface ProfileEditorProps {
 
 /** Edit one profile's identity and vehicle parameters. A changed vehicle
  *  fact asks for new evidence before it can be saved, the same rule the
- *  daemon enforces; the VIN can be read off the connected vehicle or typed. */
+ *  daemon enforces (tire size is not one: a tire swap saves on its own); the
+ *  VIN can be read off the connected vehicle or typed. A tire size picked or
+ *  typed as on the sidewall fills in the tire diameter. */
 export function ProfileEditor({
   token,
   profile,
@@ -101,6 +104,8 @@ export function ProfileEditor({
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(fields.map((f) => [f.name, parameterText(profile.parameters[f.name])])),
   );
+  const [tireSize, setTireSize] = useState("");
+  const tire = parseTireSize(tireSize);
   const [vinRead, setVinRead] = useState<VinReadResult | null>(null);
   const [reading, setReading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -215,6 +220,41 @@ export function ProfileEditor({
 
   const evidenceFor = (name: string) => evidenceOwed[name];
 
+  const onTireSize = (text: string) => {
+    setTireSize(text);
+    const parsed = parseTireSize(text);
+    if (parsed.kind === "ok") {
+      setValues((v) => ({ ...v, tire_diameter_m: String(parsed.diameterM) }));
+    }
+  };
+
+  const tireSizePicker = (
+    <label key="tire-size" className="flex flex-col gap-1">
+      Tire size (fills in the diameter)
+      <input
+        className={cn(inputClass, "font-num")}
+        aria-label="Tire size"
+        list={`tire-sizes-${profile.slug}`}
+        value={tireSize}
+        placeholder="e.g. 285/75R16 or 33x12.50R15"
+        onChange={(e) => onTireSize(e.target.value)}
+      />
+      <datalist id={`tire-sizes-${profile.slug}`}>
+        {COMMON_TIRE_SIZES.map((size) => (
+          <option key={size} value={size} />
+        ))}
+      </datalist>
+      {tire.kind === "ok" && (
+        <span className="text-fg-dim" data-testid="tire-size-result">
+          {tire.size}: {tire.diameterM.toFixed(3)} m diameter, {tire.circumferenceM.toFixed(3)} m
+          circumference, new and unloaded. The loaded circumference is a little smaller; each drive
+          measures it from GPS.
+        </span>
+      )}
+      {tire.kind === "invalid" && <span className="text-warn">{tire.message}</span>}
+    </label>
+  );
+
   return (
     <div className="mt-2 space-y-3 text-[0.82rem]" data-testid={`profile-editor-${profile.slug}`}>
       <div className="grid grid-cols-3 gap-2 max-[600px]:grid-cols-1">
@@ -307,7 +347,7 @@ export function ProfileEditor({
             "aria-label": field.label,
             value: values[field.name] ?? "",
           };
-          return (
+          const control = (
             <label
               key={field.name}
               className={cn("flex flex-col gap-1", field.kind === "evidence" && "col-span-full")}
@@ -346,6 +386,14 @@ export function ProfileEditor({
                 </span>
               )}
             </label>
+          );
+          return field.name === "tire_diameter_m" ? (
+            <Fragment key={field.name}>
+              {tireSizePicker}
+              {control}
+            </Fragment>
+          ) : (
+            control
           );
         })}
       </div>

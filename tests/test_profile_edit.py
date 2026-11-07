@@ -239,7 +239,6 @@ def test_reusing_the_old_evidence_text_is_not_new_evidence(tmp_path: Path, reuse
     [
         {"final_drive": 4.56},
         {"gearbox_ratios": [4.0, 2.5, 1.7, 1.3, 1.0, 0.8]},
-        {"tire_loaded_circumference_m": 2.6},
     ],
 )
 def test_changing_a_driveline_fact_needs_driveline_evidence(
@@ -256,6 +255,26 @@ def test_changing_a_driveline_fact_needs_driveline_evidence(
         {"parameters": {**change, "driveline_evidence": "measured 2026-10-10"}},
     )
     assert any(name.startswith("parameters.") for name in edit.changed)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"tire_loaded_circumference_m": 2.6},
+        {"tire_diameter_m": 0.834},
+        {"tire_diameter_m": 0.834, "tire_loaded_circumference_m": 2.6},
+    ],
+)
+def test_a_tire_size_change_saves_on_its_own(tmp_path: Path, change: dict[str, Any]) -> None:
+    """A tire swap needs no evidence and no other edit (operator, 2026-11-07)."""
+    registry = _registry(tmp_path)
+    _write_tracked(registry, _xterra())
+    edit = update_profile(registry, "xterra", {"parameters": change})
+    assert set(edit.changed) == {f"parameters.{name}" for name in change}
+    merged = load_registry(registry)[0].parameters
+    assert merged.driveline_evidence == "published ratios; GPS cruise"
+    for name, value in change.items():
+        assert getattr(merged, name) == value
 
 
 def test_unrelated_parameters_need_no_evidence(tmp_path: Path) -> None:
@@ -300,6 +319,8 @@ def test_every_vehicle_parameter_has_a_display_entry() -> None:
     schema = {row["name"]: row for row in parameter_schema()}
     assert schema["mass_kg"]["unit"] == "kg"
     assert schema["mass_kg"]["evidence_field"] == "mass_evidence"
+    assert schema["driveline_evidence"]["evidence_for"] == ["final_drive", "gearbox_ratios"]
+    assert schema["tire_loaded_circumference_m"]["evidence_field"] is None
     assert schema["fuel_type"]["choices"] == ["gasoline", "diesel", "e85"]
 
 

@@ -218,6 +218,74 @@ describe("ProfilesPanel parameters", () => {
     );
   });
 
+  it("saves a tire size picked from the sidewall code without touching the evidence", async () => {
+    const tireFields: VehicleParameterField[] = [
+      {
+        name: "tire_diameter_m",
+        label: "Tire diameter",
+        unit: "m",
+        kind: "number",
+        evidence_field: null,
+        evidence_for: [],
+      },
+      {
+        name: "final_drive",
+        label: "Final drive",
+        unit: "",
+        kind: "number",
+        evidence_field: "driveline_evidence",
+        evidence_for: [],
+      },
+      {
+        name: "tire_loaded_circumference_m",
+        label: "Loaded tire circumference",
+        unit: "m",
+        kind: "number",
+        evidence_field: null,
+        evidence_for: [],
+      },
+      {
+        name: "driveline_evidence",
+        label: "Driveline evidence",
+        unit: "",
+        kind: "evidence",
+        evidence_field: null,
+        evidence_for: ["final_drive", "gearbox_ratios"],
+      },
+    ];
+    const [profile] = EDITABLE.profiles;
+    mocks.getProfiles.mockResolvedValue({
+      ...EDITABLE,
+      profiles: [
+        {
+          ...profile,
+          parameters: {
+            tire_diameter_m: 0.804,
+            final_drive: 4.08,
+            tire_loaded_circumference_m: 2.559,
+            driveline_evidence: "axle tag",
+          },
+        },
+      ],
+      parameter_fields: tireFields,
+    });
+    mocks.updateProfile.mockResolvedValue(EDIT_RESULT);
+    render(createElement(ProfilesPanel, { token: "secret" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Tire size"), { target: { value: "285/75R16" } });
+    expect(screen.getByLabelText("Tire diameter")).toHaveValue("0.834");
+    expect(screen.getByTestId("tire-size-result")).toHaveTextContent("0.834 m diameter");
+    fireEvent.change(screen.getByLabelText("Loaded tire circumference"), {
+      target: { value: "2.571" },
+    });
+    expect(screen.queryByTestId("profile-editor-blockers")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(mocks.updateProfile).toHaveBeenCalledOnce());
+    expect(mocks.updateProfile).toHaveBeenCalledWith("secret", "xterra", {
+      parameters: { tire_diameter_m: 0.834, tire_loaded_circumference_m: 2.571 },
+    });
+  });
+
   it("shows the daemon's refusal in full", async () => {
     mocks.getProfiles.mockResolvedValue(EDITABLE);
     const refusal = Object.assign(new HttpErrorStub("HTTP 409"), {
