@@ -242,6 +242,84 @@ if [[ -n "${canary_hostname}" && "${canary_hostname}" != "${current_hostname}" ]
   current_hostname="${canary_hostname}"
 fi
 
+# ---------------------------------------------------------------------------
+# Wired link: 192.168.137.2 on eth0, the address every CANary answers on a cable
+# ---------------------------------------------------------------------------
+# The docs, sync-train.sh and companion discovery all reach a Pi on a direct
+# cable at 192.168.137.2, but nothing set it: the dev Pi and canary-8974 had it
+# by hand, and a Pi installed by this script alone sat on Raspberry Pi OS's DHCP
+# default and could not be found on the cable (2026-11-06, another user's Pi).
+# Static, so it needs no DHCP server on the laptop; never-default, so a cable
+# never steals the Wi-Fi's route; IPv6 link-local, so the Pi is still findable
+# with `ping ff02::1%<if>` if the laptop side is misconfigured. The profile
+# outranks Pi OS's and netplan's own eth0 profiles (autoconnect-priority).
+#
+# It is rewritten only while it still carries the marker below. `nmcli
+# connection modify canary-wired ...` rewrites the keyfile without comments, so
+# an edit made that way is the owner's and is kept. CANARY_WIRED_ADDRESS=<cidr>
+# picks another address, `none` leaves eth0 alone.
+WIRED_MARKER="# Managed by scripts/install_pi.sh; edit with nmcli to keep your changes."
+WIRED_ADDRESS="${CANARY_WIRED_ADDRESS:-192.168.137.2/24}"
+WIRED_DIR="${ROOT}/etc/NetworkManager/system-connections"
+WIRED_PROFILE="${WIRED_DIR}/canary-wired.nmconnection"
+WIRED_NOTICE=""
+WIRED_SUMMARY="not configured by this installer (eth0 left as it was)"
+if [[ "${WIRED_ADDRESS}" != "none" && -d "${WIRED_DIR}" ]]; then
+  WIRED_SUMMARY="${WIRED_ADDRESS%/*} (the laptop takes another address on ${WIRED_ADDRESS}, e.g. 192.168.137.1)"
+  if [[ ! "${WIRED_ADDRESS}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$ ]]; then
+    echo "REFUSING CANARY_WIRED_ADDRESS '${WIRED_ADDRESS}': an IPv4 address with a prefix, e.g. 192.168.137.2/24, or 'none'." >&2
+    exit 1
+  fi
+  if [[ ! -e "${WIRED_PROFILE}" ]] || grep -qxF "${WIRED_MARKER}" "${WIRED_PROFILE}"; then
+    staged="$(mktemp)"
+    cat >"${staged}" <<EOF
+${WIRED_MARKER}
+[connection]
+id=canary-wired
+uuid=6c1f2a4e-9b3d-4c57-8e21-0a7f5d3b9c64
+type=ethernet
+interface-name=eth0
+autoconnect=true
+autoconnect-priority=100
+
+[ethernet]
+
+[ipv4]
+method=manual
+address1=${WIRED_ADDRESS}
+never-default=true
+
+[ipv6]
+method=link-local
+
+[proxy]
+EOF
+    if [[ -f "${WIRED_PROFILE}" ]] && cmp -s "${staged}" "${WIRED_PROFILE}"; then
+      rm -f "${staged}"
+      echo "unchanged: eth0 wired profile (${WIRED_ADDRESS})"
+    else
+      # NetworkManager ignores a keyfile that is not root-owned and 0600.
+      install -m 0600 "${staged}" "${WIRED_PROFILE}"
+      rm -f "${staged}"
+      chown root:root "${WIRED_PROFILE}"
+      echo "  wrote ${WIRED_PROFILE} (eth0 ${WIRED_ADDRESS})"
+      if [[ -z "${ROOT}" ]] && command -v nmcli >/dev/null 2>&1; then
+        nmcli connection reload || true
+        # Not activated here: the installer may be running over SSH on eth0's
+        # current address, and switching it would cut the session mid-install.
+        # With no cable, NetworkManager picks this profile when one is plugged.
+        active="$(nmcli -g GENERAL.CONNECTION device show eth0 2>/dev/null || true)"
+        if [[ -n "${active}" && "${active}" != "canary-wired" ]]; then
+          WIRED_NOTICE="eth0 is still on '${active}'; it moves to ${WIRED_ADDRESS%/*} at the next boot, or now with: sudo nmcli connection up canary-wired"
+        fi
+      fi
+    fi
+  else
+    echo "unchanged: ${WIRED_PROFILE} was edited with nmcli; keeping it"
+    WIRED_SUMMARY="as set in the canary-wired profile (edited with nmcli)"
+  fi
+fi
+
 # Stable operator command. It discovers the active checkout through
 # /etc/canary/canary.env, so callers do not need to cd into the repository.
 install -m 0755 "${CANARY_HOME}/scripts/update_canary.sh" "${ROOT}/usr/local/sbin/canary-update"
@@ -929,6 +1007,7 @@ CANary Pi install complete.
 
 This Pi answers as ${current_hostname:-<unknown>}.local
   Dashboard: http://${current_hostname:-<pi-hostname>}.local:8000/
+  On a direct Ethernet cable: ${WIRED_SUMMARY}
 
 Next:
   1. Edit ${CANARY_CONFIG}
@@ -942,6 +1021,10 @@ Next:
      refclock should appear. See docs/time-sync.md
   9. Future updates: sudo canary-update
 EOF
+if [[ -n "${WIRED_NOTICE}" ]]; then
+  echo
+  echo "WIRED ADDRESS PENDING: ${WIRED_NOTICE}"
+fi
 if [[ "${CGROUP_REBOOT_NEEDED}" -eq 1 ]]; then
   echo
   echo "REBOOT REQUIRED: the memory cgroup controller is not active, so"

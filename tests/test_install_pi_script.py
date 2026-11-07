@@ -1223,3 +1223,74 @@ def test_a_failed_dashboard_build_is_reported_but_the_install_finishes(
     assert "systemctl enable canary.service" in installer.calls("systemctl enable")
     assert "DASHBOARD NOT BUILT" in result.stdout
     assert "RESTART NEEDED" not in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Wired link (2026-11-06): every CANary answers 192.168.137.2 on its cable
+# ---------------------------------------------------------------------------
+
+
+def _wired_profile(installer: Installer) -> Path:
+    connections = installer.root / "etc" / "NetworkManager" / "system-connections"
+    return connections / "canary-wired.nmconnection"
+
+
+def _with_networkmanager(installer: Installer) -> Path:
+    profile = _wired_profile(installer)
+    profile.parent.mkdir(parents=True, exist_ok=True)
+    return profile
+
+
+def test_a_fresh_install_puts_eth0_on_the_documented_address(installer: Installer) -> None:
+    """Another user's Pi, installed by the script alone, could not be found on
+    the cable: eth0 sat on Pi OS's DHCP default, while every doc and tool
+    reaches a CANary at 192.168.137.2."""
+    profile = _with_networkmanager(installer)
+    result = installer.run()
+
+    text = profile.read_text()
+    assert oct(profile.stat().st_mode & 0o777) == "0o600", "NetworkManager ignores a looser keyfile"
+    assert "interface-name=eth0" in text
+    assert "address1=192.168.137.2/24" in text
+    assert "never-default=true" in text, "the cable must never take the Wi-Fi's default route"
+    assert "method=link-local" in text
+    assert re.search(r"^autoconnect-priority=\d+$", text, re.M)
+    assert "chown root:root " + str(profile) in installer.calls("chown")
+    assert "On a direct Ethernet cable: 192.168.137.2" in result.stdout
+
+    again = installer.run()
+    assert "unchanged: eth0 wired profile" in again.stdout
+
+
+def test_a_profile_edited_with_nmcli_is_kept(installer: Installer) -> None:
+    profile = _with_networkmanager(installer)
+    installer.run()
+    # nmcli rewrites the keyfile without comments, dropping the marker.
+    edited = "\n".join(
+        line for line in profile.read_text().splitlines() if not line.startswith("#")
+    ).replace("192.168.137.2/24", "10.0.0.5/24")
+    profile.write_text(edited)
+
+    result = installer.run()
+    assert profile.read_text() == edited
+    assert "edited with nmcli; keeping it" in result.stdout
+
+
+def test_the_wired_address_can_be_chosen_or_left_alone(installer: Installer) -> None:
+    profile = _with_networkmanager(installer)
+    installer.run(CANARY_WIRED_ADDRESS="10.9.8.2/24")
+    assert "address1=10.9.8.2/24" in profile.read_text()
+
+    profile.unlink()
+    result = installer.run(CANARY_WIRED_ADDRESS="none")
+    assert not profile.exists()
+    assert "not configured by this installer" in result.stdout
+
+    refused = installer.run(check=False, CANARY_WIRED_ADDRESS="192.168.137.2")
+    assert refused.returncode == 1 and "REFUSING CANARY_WIRED_ADDRESS" in refused.stderr
+
+
+def test_without_networkmanager_eth0_is_left_alone(installer: Installer) -> None:
+    result = installer.run()
+    assert not _wired_profile(installer).exists()
+    assert "not configured by this installer" in result.stdout

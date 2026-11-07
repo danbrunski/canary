@@ -111,6 +111,21 @@ second `canary-2.local`. A name you chose yourself is kept, a re-run
 explicitly. To find the name without a screen: `ip link show eth0` on the Pi,
 or your router's client list.
 
+**Wired address.** The installer gives eth0 the fixed address
+`192.168.137.2/24` (NetworkManager profile `canary-wired`), the address the
+docs, `sync-train.sh` and companion discovery use for a Pi on a direct cable.
+Give the laptop's Ethernet adapter `192.168.137.1/24`, or turn on Windows
+Internet Connection Sharing, which assigns it. The profile has no default
+route, so a cable never takes over from Wi-Fi, and it keeps an IPv6
+link-local address, so `ping ff02::1%<laptop-interface>` finds the Pi even
+when the laptop side is wrong. Until 2026-11-06 nothing set this address: a
+Pi installed by the script alone stayed on DHCP and could not be found on the
+cable. A Pi whose eth0 was already in use moves at the next boot (the
+installer says so), because switching it mid-install would cut an SSH
+session on that cable. `CANARY_WIRED_ADDRESS=<cidr>` picks another address
+and `none` leaves eth0 alone. Edit the profile with `nmcli connection modify
+canary-wired ...` and the installer keeps your change.
+
 The installer copies `canary.pi.example.yaml` to `/etc/canary/canary.yaml` if
 the config does not already exist. Edit that file before first start:
 
