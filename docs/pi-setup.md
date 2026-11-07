@@ -46,10 +46,11 @@ sudo apt update
 sudo apt install -y git python3 python3-venv python3-pip can-utils iproute2
 ```
 
-`install_pi.sh` installs what the dashboard build needs (`canary-update`
-rebuilds it and refuses to update without it): `nodejs` from apt without
-npm (362 packages on trixie), and pnpm as its standalone binary at the
-version `package.json` pins, in `/usr/local/bin/pnpm`. By hand, the older way:
+`install_pi.sh` installs what the dashboard build needs and then builds it
+(section 5); `canary-update` rebuilds it and refuses to update without it. It
+installs `nodejs` from apt without npm (362 packages on trixie), and pnpm as
+its standalone binary at the version `package.json` pins, in
+`/usr/local/bin/pnpm`. By hand, the older way:
 
 ```bash
 sudo apt install -y nodejs npm
@@ -160,18 +161,29 @@ Stop with `Ctrl-C`. More details are in `docs/can-setup.md`.
 
 ## 5. Build The Dashboard
 
-The API works without a frontend build. To serve the browser dashboard from
-the Pi:
+`install_pi.sh` builds the browser dashboard (`pnpm install --frozen-lockfile
+&& pnpm build` in `src/dashboard/static`, as the `canary` user) when
+`dist/index.html` is missing or older than a source file there. That is the
+same rule `canary-update` uses (`scripts/lib/dashboard_build.sh`), so a re-run
+with a current bundle prints `unchanged: dashboard dist/ is current, not
+rebuilt`. Until 2026-11-06 only `canary-update` built it, so a Pi set up by
+the installer alone served no dashboard.
+
+The API works without a frontend build, so a failed build does not stop the
+install. The installer finishes and ends with `DASHBOARD NOT BUILT`. Fix the
+error and run the installer again, or `sudo canary-update --full`.
+`CANARY_DASHBOARD_BUILD=0` skips the build. By hand:
 
 ```bash
 cd /opt/canary/src/dashboard/static
-corepack prepare pnpm@10.29.3 --activate
-pnpm install --frozen-lockfile
-pnpm build
+sudo -u canary pnpm install --frozen-lockfile
+sudo -u canary pnpm build
 ```
 
-The FastAPI backend auto-mounts `src/dashboard/static/dist/` on `/` when it
-exists.
+The FastAPI backend mounts `src/dashboard/static/dist/` on `/` only if it
+exists when the daemon starts. If `canary` was already running when the
+installer built a missing bundle, the installer ends with `RESTART NEEDED`.
+Restart with `sudo scripts/restart_canary.sh` to serve it.
 
 ## 6. Start And Inspect
 

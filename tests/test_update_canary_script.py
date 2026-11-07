@@ -29,6 +29,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 UPDATE_SCRIPT = REPO_ROOT / "scripts" / "update_canary.sh"
 RESTART_SCRIPT = REPO_ROOT / "scripts" / "restart_canary.sh"
+DASHBOARD_LIB = REPO_ROOT / "scripts" / "lib" / "dashboard_build.sh"
 
 # Exit codes documented in update_canary.sh usage() and docs/pi-setup.md.
 EXIT_CAPTURE = 3
@@ -216,6 +217,8 @@ def harness(tmp_path: Path) -> Harness:
     (upstream / "scripts").mkdir()
     shutil.copy(UPDATE_SCRIPT, upstream / "scripts" / "update_canary.sh")
     shutil.copy(RESTART_SCRIPT, upstream / "scripts" / "restart_canary.sh")
+    (upstream / "scripts" / "lib").mkdir()
+    shutil.copy(DASHBOARD_LIB, upstream / "scripts" / "lib" / "dashboard_build.sh")
     _write_exec(upstream / "scripts" / "install_pi.sh", _INSTALL_PI_SHIM)
     (upstream / "src" / "dashboard" / "static").mkdir(parents=True)
     (upstream / "src" / "dashboard" / "static" / "index.html").write_text("<html/>\n")
@@ -512,6 +515,31 @@ def test_reexec_marker_prevents_a_second_reexec(harness: Harness) -> None:
     assert not harness.calls("runuser -u tester -- git"), "no fetch under the marker"
     assert "install_pi.sh: ran (scripts/update_canary.sh changed)" in _summary(result.stdout)
     assert harness.canary_restarts() == 1
+
+
+def test_a_changed_dashboard_helper_also_reexecs(harness: Harness) -> None:
+    """The updater sourced scripts/lib/dashboard_build.sh before the pull, so
+    the functions it holds are the old ones until it hands over."""
+    after = harness.commit_upstream(
+        "helper", **{"scripts/lib/dashboard_build.sh": DASHBOARD_LIB.read_text() + "# changed\n"}
+    )
+
+    result = harness.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "scripts/lib/dashboard_build.sh changed" in result.stdout
+    assert f"re-executed from {after}" in result.stdout
+
+
+def test_a_missing_dashboard_helper_is_a_setup_error(harness: Harness) -> None:
+    (harness.checkout / "scripts" / "lib" / "dashboard_build.sh").unlink()
+
+    result = harness.run()
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "dashboard build helper is missing" in result.stderr
+    assert not harness.calls("runuser"), "nothing fetched"
+    assert harness.canary_restarts() == 0
 
 
 # ---------------------------------------------------------------------------

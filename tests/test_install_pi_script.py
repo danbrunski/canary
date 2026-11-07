@@ -157,7 +157,8 @@ def installer(tmp_path: Path) -> Installer:
     shutil.copy(REPO_ROOT / "scripts" / "update_canary.sh", checkout / "scripts")
     shutil.copy(REPO_ROOT / "scripts" / "data_drive.sh", checkout / "scripts")
     (checkout / "scripts" / "lib").mkdir()
-    shutil.copy(REPO_ROOT / "scripts" / "lib" / "canary_hostname.sh", checkout / "scripts" / "lib")
+    for lib in ("canary_hostname.sh", "dashboard_build.sh"):
+        shutil.copy(REPO_ROOT / "scripts" / "lib" / lib, checkout / "scripts" / "lib")
     (checkout / "scripts" / "install_deps.py").write_text(_INSTALL_DEPS_STUB)
     shutil.copy(EXAMPLE_CONFIG, checkout / "canary.pi.example.yaml")
     (checkout / "systemd").mkdir()
@@ -213,6 +214,9 @@ def installer(tmp_path: Path) -> Installer:
         "CANARY_DATA_DRIVE_ADOPT": "0",
         # Node/pnpm: off here, exercised with a fake download below.
         "CANARY_DASHBOARD_TOOLS": "0",
+        # The bundle build: off here, exercised against a scratch dashboard
+        # below (src/ is this repo's, and its dist/ is not the test's to write).
+        "CANARY_DASHBOARD_BUILD": "0",
         # The laptop's own interfaces must not name the scratch Pi.
         "CANARY_NET_DIR": str(_fake_net_dir(tmp_path, eth0="88:a2:9e:1d:89:74")),
         # Nor its HAT, if it has one: no EEPROM unless a test writes one.
@@ -1098,3 +1102,124 @@ def test_a_pnpm_reporting_the_wrong_version_is_refused(installer: Installer) -> 
 
     assert not (installer.root / "usr" / "local" / "bin" / "pnpm").exists()
     assert f"does not report {_pinned_pnpm()}" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Dashboard bundle
+# ---------------------------------------------------------------------------
+
+# pnpm: `pnpm build` writes dist/index.html in its working directory, unless
+# SHIM_PNPM_NO_DIST=1 (a build that "succeeds" and leaves nothing to serve).
+_PNPM_SHIM = (
+    "#!/usr/bin/env bash\n"
+    + _LOG_PRELUDE
+    + """
+if [[ "$1" == "build" && "${SHIM_PNPM_NO_DIST:-0}" != "1" ]]; then
+  mkdir -p dist
+  echo built >dist/index.html
+fi
+exit "${SHIM_PNPM_EXIT:-0}"
+"""
+)
+
+
+def _scratch_dashboard(installer: Installer) -> Path:
+    """Give the checkout a dashboard of its own, so the build writes no dist/
+    into this repo, and a pnpm shim on PATH. Returns the dashboard directory."""
+    src = installer.checkout / "src"
+    src.unlink()
+    src.mkdir()
+    for child in (REPO_ROOT / "src").iterdir():
+        if child.name != "dashboard":
+            (src / child.name).symlink_to(child)
+    static = src / "dashboard" / "static"
+    static.mkdir(parents=True)
+    shutil.copy(REPO_ROOT / "src" / "dashboard" / "static" / "package.json", static)
+    (static / "index.html").write_text("<html/>\n")
+    _write_exec(Path(installer.env["PATH"].split(":", 1)[0]) / "pnpm", _PNPM_SHIM)
+    return static
+
+
+def test_a_fresh_checkout_gets_its_dashboard_built(installer: Installer) -> None:
+    """install_pi.sh left dist/ to canary-update, so a Pi it set up served no
+    dashboard until the operator ran canary-update (2026-11-06)."""
+    static = _scratch_dashboard(installer)
+
+    result = installer.run(CANARY_DASHBOARD_BUILD="1")
+
+    assert "Building the dashboard (dist/ missing)" in result.stdout
+    assert (static / "dist" / "index.html").read_text() == "built\n"
+    assert installer.calls("pnpm") == ["pnpm install --frozen-lockfile", "pnpm build"]
+    # As the user that owns the checkout, the way canary-update builds.
+    (build,) = [c for c in installer.calls("runuser") if "pnpm build" in c]
+    assert build.startswith("runuser -u canary -- bash -c")
+    assert "DASHBOARD NOT BUILT" not in result.stdout
+    # The shimmed systemctl says canary is running, and the daemon mounts dist/
+    # only if it existed at startup.
+    assert "RESTART NEEDED: canary started before the dashboard existed" in result.stdout
+
+
+def test_no_restart_hint_when_canary_is_not_running(installer: Installer) -> None:
+    _scratch_dashboard(installer)
+    _write_exec(
+        Path(installer.env["PATH"].split(":", 1)[0]) / "systemctl",
+        "#!/usr/bin/env bash\n" + _LOG_PRELUDE + '[[ "$1" == is-active ]] && exit 3\nexit 0\n',
+    )
+
+    result = installer.run(CANARY_DASHBOARD_BUILD="1")
+
+    assert "Building the dashboard (dist/ missing)" in result.stdout
+    assert "RESTART NEEDED" not in result.stdout
+
+
+def test_a_current_dashboard_is_not_rebuilt(installer: Installer) -> None:
+    """canary-update builds before it runs install_pi.sh; the installer must
+    not build the same bundle a second time."""
+    _scratch_dashboard(installer)
+    installer.run(CANARY_DASHBOARD_BUILD="1")
+
+    again = installer.run(CANARY_DASHBOARD_BUILD="1")
+
+    assert "unchanged: dashboard dist/ is current, not rebuilt" in again.stdout
+    assert not installer.calls("pnpm")
+    assert "RESTART NEEDED" not in again.stdout
+
+
+def test_a_source_newer_than_the_bundle_rebuilds_it(installer: Installer) -> None:
+    static = _scratch_dashboard(installer)
+    installer.run(CANARY_DASHBOARD_BUILD="1")
+    later = (static / "dist" / "index.html").stat().st_mtime + 10
+    os.utime(static / "index.html", (later, later))
+
+    again = installer.run(CANARY_DASHBOARD_BUILD="1")
+
+    assert (
+        "Building the dashboard (dist/ older than src/dashboard/static/index.html)" in again.stdout
+    )
+    assert installer.calls("pnpm build")
+    # dist/ existed when canary started, so it serves the new bundle as is.
+    assert "RESTART NEEDED" not in again.stdout
+
+
+@pytest.mark.parametrize(
+    ("failure", "stderr"),
+    [
+        ({"SHIM_PNPM_EXIT": "1"}, "the dashboard build failed"),
+        ({"SHIM_PNPM_NO_DIST": "1"}, "wrote no src/dashboard/static/dist/index.html"),
+    ],
+    ids=["pnpm-fails", "no-dist"],
+)
+def test_a_failed_dashboard_build_is_reported_but_the_install_finishes(
+    installer: Installer, failure: dict[str, str], stderr: str
+) -> None:
+    """The daemon, API and MCP server work without the bundle."""
+    _scratch_dashboard(installer)
+    installer.env.update(failure)
+
+    result = installer.run(CANARY_DASHBOARD_BUILD="1")
+
+    assert stderr in result.stderr
+    assert "CANary Pi install complete." in result.stdout
+    assert "systemctl enable canary.service" in installer.calls("systemctl enable")
+    assert "DASHBOARD NOT BUILT" in result.stdout
+    assert "RESTART NEEDED" not in result.stdout

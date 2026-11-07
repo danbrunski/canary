@@ -805,6 +805,40 @@ if [[ "${CANARY_DASHBOARD_TOOLS:-1}" == "1" ]]; then
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# Dashboard bundle
+# ---------------------------------------------------------------------------
+# A fresh clone has no dist/, and this script used to leave building it to
+# canary-update, so a Pi set up by install_pi.sh served no dashboard until a
+# `canary-update` built it (2026-11-06). It is built here when missing or older
+# than its sources, by the rule canary-update uses (scripts/lib/
+# dashboard_build.sh). canary-update builds before it runs this script, so an
+# update does not build twice. A failed build does not stop the install, since
+# the daemon, API and MCP server work without it; the end of the run repeats
+# the failure. CANARY_DASHBOARD_BUILD=0 skips the build.
+DASHBOARD_BUILD="skipped"
+DASHBOARD_WAS_MISSING=0
+if [[ "${CANARY_DASHBOARD_BUILD:-1}" == "1" ]]; then
+  # shellcheck source=lib/dashboard_build.sh
+  source "${CANARY_HOME}/scripts/lib/dashboard_build.sh"
+  dashboard_stale="$(dashboard_stale_reason "${CANARY_HOME}")"
+  if [[ -z "${dashboard_stale}" ]]; then
+    DASHBOARD_BUILD="current"
+    echo "unchanged: dashboard dist/ is current, not rebuilt"
+  else
+    if [[ "${dashboard_stale}" == "dist/ missing" ]]; then
+      DASHBOARD_WAS_MISSING=1
+    fi
+    echo "Building the dashboard (${dashboard_stale})"
+    if dashboard_build "${CANARY_HOME}" "${CANARY_USER}"; then
+      DASHBOARD_BUILD="built"
+    else
+      DASHBOARD_BUILD="failed"
+      echo "WARNING: the dashboard build failed; see above" >&2
+    fi
+  fi
+fi
+
 cd "${CANARY_HOME}"
 runuser -u "${CANARY_USER}" -- "${CANARY_PYTHON}" scripts/install_deps.py \
   --venv "${CANARY_HOME}/.venv" \
@@ -920,4 +954,16 @@ fi
 if [[ "${I2C_REBOOT_NEEDED}" -eq 1 ]]; then
   echo
   echo "REBOOT REQUIRED: dtparam=i2c_arm=on was added; /dev/i2c-1 appears only after a boot."
+fi
+if [[ "${DASHBOARD_BUILD}" == "failed" ]]; then
+  echo
+  echo "DASHBOARD NOT BUILT: the pnpm install/build above failed, so port 8000 serves"
+  echo "the API but no browser dashboard. Fix the error and run this installer again"
+  echo "(or: sudo canary-update --full)."
+elif [[ "${DASHBOARD_BUILD}" == "built" && "${DASHBOARD_WAS_MISSING}" -eq 1 ]] \
+    && systemctl is-active --quiet canary.service; then
+  # The daemon mounts dist/ only if it exists when it starts.
+  echo
+  echo "RESTART NEEDED: canary started before the dashboard existed and will not serve"
+  echo "it until it restarts: sudo ${CANARY_HOME}/scripts/restart_canary.sh"
 fi

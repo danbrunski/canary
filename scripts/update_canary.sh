@@ -98,8 +98,6 @@ fi
 CANARY_HOME="${CANARY_HOME:-/opt/canary}"
 STATUS_URL="${CANARY_STATUS_URL:-http://localhost:8000/status}"
 CANARY_USER="${CANARY_USER:-canary}"
-DASHBOARD_DIR="${CANARY_HOME}/src/dashboard/static"
-DASHBOARD_BUILT="${DASHBOARD_DIR}/dist/index.html"
 VENV_PYTHON="${CANARY_HOME}/.venv/bin/python"
 # `systemctl show` echoes MemoryMax even when the kernel has the memory
 # controller disabled; only the cgroup file proves the limit is live.
@@ -118,6 +116,16 @@ if [[ ! -x "${CANARY_HOME}/scripts/install_pi.sh" ]]; then
   echo "CANary installer is missing: ${CANARY_HOME}/scripts/install_pi.sh" >&2
   exit "${EXIT_SETUP}"
 fi
+# When the dashboard needs building, and the build: shared with install_pi.sh.
+# Read from the checkout, so a change to it re-executes like a change to this
+# file does (below).
+DASHBOARD_LIB="${CANARY_HOME}/scripts/lib/dashboard_build.sh"
+if [[ ! -r "${DASHBOARD_LIB}" ]]; then
+  echo "CANary dashboard build helper is missing: ${DASHBOARD_LIB}" >&2
+  exit "${EXIT_SETUP}"
+fi
+# shellcheck source=lib/dashboard_build.sh
+source "${DASHBOARD_LIB}"
 
 # The `=== <step> ===` lines and the summary block below are also the progress
 # feed of an update started from the dashboard: src/control/update_runner.py
@@ -279,11 +287,15 @@ else
   # copy it opened, so the rest of an update would run the OLD updater
   # (2026-09-22: the first run after 119527d printed the old health failure
   # while the daemon was healthy). Hand over to the new copy now, once, with
-  # the fetch already done.
-  if [[ "${before}" != "${after}" ]] \
-      && git -C "${CANARY_HOME}" diff --name-only "${before}" "${after}" \
-        | grep -qx 'scripts/update_canary.sh'; then
-    echo "scripts/update_canary.sh changed in ${before} -> ${after}; re-executing the new copy"
+  # the fetch already done. The dashboard helper it sourced counts as part of
+  # it: the functions in memory are the old ones.
+  self_changed=""
+  if [[ "${before}" != "${after}" ]]; then
+    self_changed="$(git -C "${CANARY_HOME}" diff --name-only "${before}" "${after}" \
+      | grep -xE 'scripts/update_canary\.sh|scripts/lib/dashboard_build\.sh' | head -n 1 || true)"
+  fi
+  if [[ -n "${self_changed}" ]]; then
+    echo "${self_changed} changed in ${before} -> ${after}; re-executing the new copy"
     export CANARY_UPDATE_REEXEC="${after}"
     export CANARY_UPDATE_REEXEC_BEFORE="${before}"
     export CANARY_UPDATE_STARTED_AT="${STARTED_AT}"
@@ -310,16 +322,13 @@ PIP_INPUTS='^(pyproject\.toml|requirements[^/]*\.txt|uv\.lock|poetry\.lock|pdm\.
 
 decide_dashboard() {
   local changed="$1"
-  local newer
+  local stale
   if [[ "${FULL}" -eq 1 ]]; then
     echo "ran (--full)"
   elif grep -q '^src/dashboard/static/' <<<"${changed}"; then
     echo "ran (src/dashboard/static changed)"
-  elif [[ ! -f "${DASHBOARD_BUILT}" ]]; then
-    echo "ran (dist/ missing)"
-  elif newer="$(find "${DASHBOARD_DIR}" \( -name node_modules -o -name dist \) -prune \
-      -o -type f -newer "${DASHBOARD_BUILT}" -print -quit)" && [[ -n "${newer}" ]]; then
-    echo "ran (dist/ older than ${newer#"${CANARY_HOME}"/})"
+  elif stale="$(dashboard_stale_reason "${CANARY_HOME}")" && [[ -n "${stale}" ]]; then
+    echo "ran (${stale})"
   else
     echo "skipped (no dashboard source change; dist/ is current)"
   fi
@@ -352,13 +361,7 @@ decide_pip() {
 }
 
 run_dashboard_build() {
-  if ! command -v pnpm >/dev/null 2>&1; then
-    echo "pnpm is required to build the dashboard." >&2
-    echo "Install Node.js + Corepack, then run: corepack enable" >&2
-    return 1
-  fi
-  runuser -u "${CANARY_USER}" -- bash -c \
-    'cd "$1" && pnpm install --frozen-lockfile && pnpm build' bash "${DASHBOARD_DIR}"
+  dashboard_build "${CANARY_HOME}" "${CANARY_USER}"
 }
 
 run_pip_install() {
