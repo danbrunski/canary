@@ -59,16 +59,16 @@ sudo corepack enable
 
 ## 2. Clone
 
-Use `/opt/canary` for the service install:
+Clone anywhere and run the installer from that clone; it writes the actual
+clone path into `/etc/canary/canary.env`. The Pis in use so far have it in the
+`canary` user's home:
 
 ```bash
-sudo mkdir -p /opt
-sudo git clone <repo-url> /opt/canary
-cd /opt/canary
+git clone <repo-url> ~/canary
+cd ~/canary
 ```
 
-If you clone somewhere else, run the installer from that clone; it writes the
-actual clone path into `/etc/canary/canary.env`.
+`/opt/canary` (`sudo git clone <repo-url> /opt/canary`) works the same way.
 
 ## 3. Install CANary
 

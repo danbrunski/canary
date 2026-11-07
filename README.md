@@ -180,16 +180,42 @@ step (OS packages, dev venv with CPU Torch, `canary.yaml`, built dashboard):
 ./scripts/setup_pi_dev.sh        # --help for options
 ```
 
-For the in-vehicle headless **service**, use the Pi-specific config and systemd
-install path instead:
+For the in-vehicle headless **service**, the flow from a blank SD card is:
 
-```bash
-sudo git clone <repo-url> /opt/canary
-cd /opt/canary
-sudo scripts/install_pi.sh
-sudo nano /etc/canary/canary.yaml
-sudo systemctl start canary
-```
+1. **Flash Raspberry Pi OS (64-bit)** with Raspberry Pi Imager. In its
+   settings, make the user `canary`, turn on SSH, and add your Wi-Fi if the
+   Pi should join it.
+2. **Get a shell on the Pi**: over Wi-Fi (`ssh canary@<imager-hostname>.local`),
+   or with a monitor and keyboard. Before step 3 the Ethernet port is on
+   DHCP, so a direct cable only works if the laptop hands out addresses.
+3. **Clone and install** (any location works; the installer records where):
+
+   ```bash
+   sudo apt install -y git
+   git clone <repo-url> ~/canary && cd ~/canary
+   sudo scripts/install_pi.sh
+   sudo reboot
+   ```
+
+   The installer sets up the venv, systemd units, `/etc/canary`, the data
+   directory and the dashboard. It also renames the Pi `canary-XXXX` (the last
+   four hex digits of its Ethernet MAC) and gives the Ethernet port the fixed
+   address **192.168.137.2**, both printed at the end. The reboot applies the
+   address and any kernel or overlay changes.
+4. **Configure**: `sudo nano /etc/canary/canary.yaml` (vehicle, CAN interface,
+   GPS), then `sudo systemctl start canary canary-mcp`.
+5. **Open the dashboard** at `http://canary-XXXX.local:8000/`, or
+   `http://192.168.137.2:8000/` over a direct cable. For the cable, give the
+   laptop's Ethernet adapter `192.168.137.1/24` (Windows Internet Connection
+   Sharing does this). A VPN client on the laptop can block local traffic:
+   Surfshark's did, so allow LAN access in it or turn it off.
+6. **Unlock the controls.** Most panels stay locked until the browser holds
+   the control token. On the Pi, run `canary-token`, then paste what it prints
+   into the **control token** pill in the dashboard's top bar. Or press **Pair
+   this device** in the dashboard and approve it by turning the key
+   ACC → ON → ACC, or on the bench with `canary-token pair`.
+
+[`docs/pi-setup.md`](docs/pi-setup.md) covers each step in detail.
 
 After the first install, update and redeploy the complete Pi application with:
 
@@ -217,8 +243,8 @@ clients. See [`docs/pi-setup.md`](docs/pi-setup.md),
 From a laptop, `scripts/canaryctl.py` drives the authenticated control API:
 
 ```bash
-export CANARY_HOST=http://192.168.0.230:8000
-export CANARY_CONTROL_TOKEN='<token from /etc/canary/control.token>'
+export CANARY_HOST=http://192.168.137.2:8000
+export CANARY_CONTROL_TOKEN="$(ssh canary@192.168.137.2 canary-token)"
 scripts/canaryctl.py preflight
 scripts/canaryctl.py capture start --purpose "next drive" --protocol drive
 scripts/canaryctl.py tag highway_cruise
