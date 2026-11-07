@@ -156,6 +156,7 @@ def installer(tmp_path: Path) -> Installer:
     shutil.copy(INSTALL_SCRIPT, checkout / "scripts" / "install_pi.sh")
     shutil.copy(REPO_ROOT / "scripts" / "update_canary.sh", checkout / "scripts")
     shutil.copy(REPO_ROOT / "scripts" / "data_drive.sh", checkout / "scripts")
+    shutil.copy(REPO_ROOT / "scripts" / "canary_token.sh", checkout / "scripts")
     (checkout / "scripts" / "lib").mkdir()
     for lib in ("canary_hostname.sh", "dashboard_build.sh"):
         shutil.copy(REPO_ROOT / "scripts" / "lib" / lib, checkout / "scripts" / "lib")
@@ -1294,3 +1295,18 @@ def test_without_networkmanager_eth0_is_left_alone(installer: Installer) -> None
     result = installer.run()
     assert not _wired_profile(installer).exists()
     assert "not configured by this installer" in result.stdout
+
+
+def test_the_installer_puts_canary_token_on_path_and_never_prints_the_token(
+    installer: Installer,
+) -> None:
+    """A new owner could not tell how to unlock the dashboard (2026-11-06), and
+    the closing message printed the token itself into the console scrollback."""
+    result = installer.run()
+
+    command = installer.root / "usr" / "local" / "bin" / "canary-token"
+    assert command.is_file()
+    assert oct(command.stat().st_mode & 0o777) == "0o755"
+    token = (installer.root / "etc" / "canary" / "control.token").read_text().strip()
+    assert token and token not in result.stdout
+    assert "canary-token" in result.stdout

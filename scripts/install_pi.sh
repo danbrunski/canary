@@ -323,6 +323,10 @@ fi
 # Stable operator command. It discovers the active checkout through
 # /etc/canary/canary.env, so callers do not need to cd into the repository.
 install -m 0755 "${CANARY_HOME}/scripts/update_canary.sh" "${ROOT}/usr/local/sbin/canary-update"
+# For whoever is SSH'd in: print the control token, or approve a browser
+# waiting to pair (scripts/canary_token.sh). In bin, not sbin: the canary user
+# runs it, no sudo needed.
+install -D -m 0755 "${CANARY_HOME}/scripts/canary_token.sh" "${ROOT}/usr/local/bin/canary-token"
 
 # Let the canary user restart the services without a password, so model/code
 # deploys (and the MCP control plane) can roll the daemon without an interactive
@@ -1014,7 +1018,9 @@ Next:
   2. Bring up can0 for your chosen OBD/CAN mode; see docs/can-setup.md
   3. Start with: sudo systemctl start canary canary-mcp
   4. Watch logs: sudo journalctl -u canary -f  (or -u canary-mcp -f)
-  5. Export the laptop token: export CANARY_CONTROL_TOKEN="$(cat "${CANARY_CONTROL_TOKEN_FILE}")"
+  5. Unlock the dashboard: run 'canary-token' on the Pi and paste what it prints
+     into the "control token" pill in the dashboard's top bar, or press "Pair
+     this device" there and run 'canary-token pair'
   6. Open: http://<pi-hostname-or-ip>:8000/status
   7. MCP server: http://<pi-hostname-or-ip>:8001/mcp (see docs/mcp-server.md)
   8. GPS/time: verify with 'cgps' (or gpsmon) and 'chronyc sources' — the GPS

@@ -215,11 +215,32 @@ curl http://canary.local:8000/status
 curl 'http://canary.local:8000/telemetry/latest?n=20'
 ```
 
-For control commands from a laptop, copy the token once:
+### The control token
+
+Most of the dashboard, and every control command, is locked until the browser
+or shell holds the Pi's control token. On the Pi, over SSH:
+
+```bash
+canary-token          # prints the token
+canary-token pair     # approves a browser waiting on "Pair this device"
+```
+
+In the dashboard, click the **control token** pill in the top bar (on a phone:
+the menu, under "Control token") and paste what `canary-token` printed. The
+browser remembers it. Pairing avoids the copy: press **Pair this device** in
+the dashboard, then either turn the key ACC → ON → ACC in the truck, or, on the
+bench, run `canary-token pair`. A paired browser gets a token of its own, which
+`canaryctl devices --remove ID` revokes without affecting anything else.
+
+The token lives in `/etc/canary/control.token` (root:canary, 0640), so the
+`canary` user reads it without sudo. The installer no longer prints it: it
+used to, which put it in every install log and console scrollback.
+
+For control commands from a laptop, copy it once:
 
 ```bash
 export CANARY_HOST=http://canary.local:8000
-export CANARY_CONTROL_TOKEN='<contents of /etc/canary/control.token on the Pi>'
+export CANARY_CONTROL_TOKEN="$(ssh canary@canary.local canary-token)"
 ```
 
 Then:
