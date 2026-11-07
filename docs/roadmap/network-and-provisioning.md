@@ -252,6 +252,13 @@ hotspot (N6) lives in the same service.
   the scan. Also: a WPA3-only network saved while out of range is written as
   WPA-PSK (nothing says otherwise); `scanned_at` is the last rescan *this
   service* made (`null` = NM's cache of unknown age).
+  **Read side confirmed on a real Pi 2026-11-07** (canary-8974 at fab3bb85,
+  `GET /control/network/wifi`): both saved profiles listed with SSID,
+  `wpa-psk`, autoconnect and `managed_by: other` (the Imager's and a BLE
+  join's), the active one `active: true`, `in_range: true`, signal 100, and
+  the scan listing three SSIDs with `saved` right. The property parsing and
+  the scan are therefore right; add/connect/forget/order on a Pi are still
+  owed.
 - [x] **N5.3 Daemon routes behind the control token**, in
   `src/dashboard/routes/control/network.py`:
   - `GET /control/network/wifi`: saved networks plus the last scan.

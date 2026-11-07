@@ -1253,7 +1253,13 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
       - There are 33 post reads: 2026-10-08T172943 21, 2026-10-08T182550 9,
         2026-10-10T153117 2, 2026-10-10T165941 1, and
         `_capture-fuel-pulsation-2026-10-08T210012` 0.
-      - All 33 are `not_co_observed`. The nearest rpm/MAF read is 0.417 s
+        **Corrected 2026-11-07:** the laptop then held only the first minutes
+        of the two 10-10 drives. On the complete copies (re-pulled 2026-10-27)
+        they give 28 and 6, so 64 post reads in all: 63 `not_co_observed` and
+        1 `transient`, the only read within 0.3 s of rpm/MAF. The verdicts are
+        unchanged (0 pairs). The private tests now count reads per drive, so a
+        partial copy fails by name.
+      - All 33 were `not_co_observed`. The nearest rpm/MAF read is 0.417 s
         away at best (medians 0.43–1.4 s), against 0.3 s. The live profile
         polls Mode 22 and Mode 01 apart.
       - Only 2 of the 33 have a fill interval within 0.3 s, and every post

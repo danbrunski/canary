@@ -806,6 +806,15 @@ FIVE = [
     "2026-10-10T165941",
 ]
 NULL_DRIVES = ("_capture-tuning-2026-09-22T235224", "_capture-tuning-2026-09-22T170459")
+#: BFS reads per post-flash drive, on the complete copies (re-pulled 2026-10-27);
+#: the pulsation capture polls no BFS.
+POST_READS = {
+    "2026-10-08T172943": 21,
+    "2026-10-08T182550": 9,
+    "2026-10-10T153117": 28,
+    "2026-10-10T165941": 6,
+}
+POST_STATES = {"not_co_observed": 63, "transient": 1}
 
 
 # -- the second prediction of record: its own frozen block (E09.12 follow-up) ------------
@@ -1131,10 +1140,14 @@ def test_the_real_verdict_is_insufficient_evidence_for_both_outputs(
     )
     bfs = report["effect_tests"]["base_fuel_schedule"]
     assert bfs["quantity"] == "raw"
-    # 33 BFS reads on the post-flash drives, all on the live profile's
-    # once-a-minute DID poll, none within 0.3 s of an rpm or MAF read.
-    assert bfs["post_reads"] == 33
-    assert bfs["post_states"] == {"not_co_observed": 33}
+    # 64 BFS reads on the post-flash drives, all on the live profile's
+    # once-a-minute DID poll. 63 have no rpm or MAF read within 0.3 s; the one
+    # that does is transient. Counted per drive so that a partial copy names
+    # itself: until 2026-10-27 this laptop held the first minutes of the two
+    # 10-10 drives only (2 and 1 reads), and the counts here were 33.
+    assert bfs["post_reads"] == 64
+    assert reads["base_fuel_schedule"].groupby("session").size().to_dict() == POST_READS
+    assert bfs["post_states"] == POST_STATES
     assert bfs["post_sessions"] == [
         "2026-10-08T172943",
         "2026-10-08T182550",
@@ -1262,7 +1275,7 @@ def test_the_amended_real_verdict_is_still_insufficient_evidence() -> None:
     )
     bfs = report["effect_tests"]["base_fuel_schedule"]
     assert bfs["quantity"] == "air_normalised"
-    assert bfs["post_states"] == {"not_co_observed": 33}
+    assert bfs["post_states"] == POST_STATES
     assert bfs["noise_floor_pct"] == pytest.approx(2.4379, abs=1e-3)
     assert bfs["exclusions"]["pre_at_ceiling"] == 0
     assert int(points["draws_at_ceiling:base_fuel_schedule"].sum()) == 0
@@ -1359,7 +1372,7 @@ def test_the_v3_real_verdict_is_still_insufficient_evidence() -> None:
         ("target_phi", "insufficient_evidence", 0, 54),
     )
     bfs = report["effect_tests"]["base_fuel_schedule"]
-    assert bfs["post_states"] == {"not_co_observed": 33}
+    assert bfs["post_states"] == POST_STATES
     assert bfs["reason"] == "0 pairs < 20"
     assert report["effect_tests"]["target_phi"]["empty"].startswith("never_captured")
 
@@ -1469,7 +1482,7 @@ def test_the_wot_post_flash_verdict_is_insufficient_evidence_for_both_outputs() 
     )
     bfs = report["effect_tests"]["base_fuel_schedule"]
     assert bfs["quantity"] == "air_normalised"
-    assert bfs["post_states"] == {"not_co_observed": 33}
+    assert bfs["post_states"] == POST_STATES
     assert bfs["empty"].startswith("filtered")
     assert bfs["noise_floor_pct"] == pytest.approx(3.1863, abs=1e-3)
     phi = report["effect_tests"]["target_phi"]
