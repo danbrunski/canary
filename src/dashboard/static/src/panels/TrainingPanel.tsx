@@ -32,6 +32,7 @@ import {
 import type { TrainingRun } from "../types";
 import { formatNumber, formatPercent } from "../util/format";
 import { numberArray } from "../util/json";
+import { TOKEN_FIRST } from "../lib/tokenMessages";
 
 interface TrainingPanelProps {
   token: string;
@@ -75,11 +76,11 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
     const base = target === "local" ? local.baseUrl : undefined;
     const jobToken = target === "local" ? local.token : token;
     if (target === "local" && local.sameOrigin && !token) {
-      setNotice({ kind: "error", text: "Enter the control token first." });
+      setNotice({ kind: "error", text: TOKEN_FIRST });
       return;
     }
     if (target === "pi" && !token) {
-      setNotice({ kind: "error", text: "Enter the Pi control token first." });
+      setNotice({ kind: "error", text: TOKEN_FIRST });
       return;
     }
     const params: Record<string, unknown> = {};
@@ -200,10 +201,8 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
       <Notice notice={notice} className="mb-3" />
       <ResourceGate
         enabled={historyEnabled}
-        enabledMessage={
-          target === "local"
-            ? "Enter the control token to read this server's training history."
-            : "Enter the Pi control token to read Pi training history."
+        tokenPurpose={
+          target === "local" ? "read this server's training history" : "read Pi training history"
         }
         loading={loading}
         loadingMessage="loading runs…"

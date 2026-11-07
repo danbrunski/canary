@@ -1,5 +1,5 @@
 import { createElement } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { HttpErrorStub, mockHttp } from "../test/harness";
@@ -13,10 +13,20 @@ function open() {
 }
 
 describe("TokenGate (Task 5.1)", () => {
-  it("reads 'required' with no token before the popover is opened (no probe)", () => {
+  it("names itself 'control token' with no token before the popover is opened (no probe)", () => {
     render(createElement(TokenGate, { token: "", onTokenChange: vi.fn() }));
-    expect(screen.getByRole("button", { name: "control token" })).toHaveTextContent("required");
+    expect(screen.getByRole("button", { name: "control token" })).toHaveTextContent(
+      "control token",
+    );
     expect(mocks.getPreflight).not.toHaveBeenCalled();
+  });
+
+  it("tells a locked user where the token comes from (canary-token on the Pi)", async () => {
+    mocks.getPreflight.mockResolvedValue({ ok: true, checked_at: "now", checks: [] });
+    render(createElement(TokenGate, { token: "", onTokenChange: vi.fn() }));
+    open();
+    expect(screen.getByText("canary-token").tagName).toBe("CODE");
+    await act(async () => {});
   });
 
   it("reads 'not needed' once opened against a loopback server with no token", async () => {
@@ -33,7 +43,7 @@ describe("TokenGate (Task 5.1)", () => {
     render(createElement(TokenGate, { token: "stale-token", onTokenChange: vi.fn() }));
     open();
     expect(await screen.findByRole("button", { name: "control token" })).toHaveTextContent(
-      "rejected",
+      "token rejected",
     );
   });
 

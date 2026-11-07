@@ -157,7 +157,9 @@ describe("LogBrowser", () => {
   it("asks for the token and requests nothing without one", async () => {
     answer(LOGS);
     render(<LogBrowser token="" selectedId={null} onSelect={() => {}} />);
-    expect(screen.getByText("Enter the control token to browse logs.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Locked — needs the control token to browse logs."),
+    ).toBeInTheDocument();
     await new Promise((r) => setTimeout(r, 20));
     expect(control).not.toHaveBeenCalled();
   });

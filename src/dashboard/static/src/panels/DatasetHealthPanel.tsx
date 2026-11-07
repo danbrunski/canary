@@ -28,7 +28,7 @@ export function DatasetHealthPanel({ token }: DatasetHealthPanelProps) {
     >
       <ResourceGate
         enabled={Boolean(token)}
-        enabledMessage="Enter the control token (Control panel) to read dataset health."
+        tokenPurpose="read dataset health"
         loading={loading}
         loadingMessage="analyzing corpus…"
         error={error}

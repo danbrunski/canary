@@ -56,7 +56,7 @@ const ONE_PID: CustomPidsResponse = {
 describe("CustomPidsPanel", () => {
   it("prompts for a token without one", () => {
     render(createElement(CustomPidsPanel, { token: "" }));
-    expect(screen.getByText(/Enter the control token/)).toBeInTheDocument();
+    expect(screen.getByText(/needs the control token/)).toBeInTheDocument();
     expect(mocks.getCustomPids).not.toHaveBeenCalled();
   });
 

@@ -46,7 +46,7 @@ function statTrend(overrides: Partial<StatTrend> = {}): StatTrend {
 describe("TrendsPanel", () => {
   it("prompts for a token without one", () => {
     render(createElement(TrendsPanel, { token: "" }));
-    expect(screen.getByText(/Enter the control token/)).toBeInTheDocument();
+    expect(screen.getByText(/needs the control token/)).toBeInTheDocument();
     expect(mocks.getTrends).not.toHaveBeenCalled();
   });
 

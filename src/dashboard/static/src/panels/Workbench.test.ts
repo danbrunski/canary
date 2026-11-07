@@ -167,7 +167,9 @@ describe("Workbench navigation", () => {
     window.localStorage.clear();
     renderAt("tuning-logs");
     expect(screen.getByRole("heading", { name: "Captures" })).toBeInTheDocument();
-    expect(screen.getByText("Enter the control token to browse logs.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Locked — needs the control token to browse logs."),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/W04/)).not.toBeInTheDocument();
   });
 

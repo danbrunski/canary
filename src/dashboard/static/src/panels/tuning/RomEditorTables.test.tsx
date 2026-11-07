@@ -205,7 +205,9 @@ describe("ROM Editor: every table, shaded", () => {
   it("needs a token: Open ROM is disabled and nothing is fetched", () => {
     route(TABLES_ALL_2D);
     render(<RomEditorPage token="" status={null} />);
-    expect(screen.getByText("Enter the control token to use the ROM Editor.")).toBeVisible();
+    expect(
+      screen.getByText("Locked — needs the control token to use the ROM Editor."),
+    ).toBeVisible();
     expect(screen.getByRole("button", { name: "Open ROM…" })).toBeDisabled();
     expect(control).not.toHaveBeenCalled();
   });

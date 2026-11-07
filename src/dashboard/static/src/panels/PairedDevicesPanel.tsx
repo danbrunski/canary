@@ -231,7 +231,7 @@ export function PairedDevicesPanel({ token }: PairedDevicesPanelProps) {
     <Panel title="Paired devices" count={data ? data.devices.length : undefined}>
       <ResourceGate
         enabled={Boolean(token)}
-        enabledMessage="Pair this device, or enter the control token, to manage paired devices."
+        tokenPurpose="manage paired devices"
         loading={loading}
         loadingMessage="loading paired devices…"
         error={error}

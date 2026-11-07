@@ -73,7 +73,9 @@ describe("PairedDevicesPanel", () => {
   it("asks for a token without one", () => {
     const fetchMock = fakePi();
     render(<PairedDevicesPanel token="" />);
-    expect(screen.getByText(/Pair this device, or enter the control token/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/needs the control token to manage paired devices/),
+    ).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

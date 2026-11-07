@@ -84,7 +84,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
     >
       <ResourceGate
         enabled={Boolean(token)}
-        enabledMessage="Enter the control token (Control panel) to view / edit tuning."
+        tokenPurpose="view and edit tuning"
         loading={loading}
         loadingMessage="loading tuning config…"
         error={error}

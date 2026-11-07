@@ -110,7 +110,7 @@ describe("EcuApplicationModelPanel", () => {
   it("asks for the token before fetching", () => {
     render(<EcuApplicationModelPanel token="" />);
     expect(api.getApplicationModel).not.toHaveBeenCalled();
-    expect(screen.getByText(/Enter the control token/)).toBeTruthy();
+    expect(screen.getByText(/needs the control token/)).toBeTruthy();
   });
 
   it("reports qualified outputs, blockers, regions and uncovered logic", async () => {

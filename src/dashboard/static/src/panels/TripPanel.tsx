@@ -17,6 +17,7 @@ import type { SessionDigestResponse, StatusResponse, TripSummaryFields } from ".
 import { formatPercent, KM_PER_MILE } from "../util/format";
 import { numberOrNull, scalarText } from "../util/json";
 import { formatDuration } from "../util/time";
+import { TokenRequired } from "../components/TokenRequired";
 
 interface TripPanelProps {
   channels: Map<string, ChannelSnapshot>;
@@ -167,9 +168,7 @@ export function TripPanel({ channels, status, token }: TripPanelProps) {
             Last drive digest
           </h3>
           {!token ? (
-            <p className={placeholderClass}>
-              Enter the control token (Control panel) to view the last-drive digest.
-            </p>
+            <TokenRequired purpose="view the last-drive digest" />
           ) : digest.loading ? (
             <p className={placeholderClass}>loading digest…</p>
           ) : digest.error || !digest.data ? (

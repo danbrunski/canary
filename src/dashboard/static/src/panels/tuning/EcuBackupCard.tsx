@@ -17,6 +17,7 @@ import type { StatusResponse } from "../../types";
 import type { RomBackupState, RomLibraryEntry } from "../../types/romLibrary";
 import { formatClockDuration } from "../../util/time";
 import { ChecksumChip, PreconditionChip, RevisionChip, UnverifiedChip } from "./romLibraryParts";
+import { TokenRequired } from "../../components/TokenRequired";
 
 /** Poll fast enough for a live block counter while a read runs; slowly
  *  otherwise, so a backup started elsewhere still shows up. */
@@ -126,7 +127,7 @@ export function EcuBackupCard({
           Reads the ECU&apos;s whole flash over the diagnostic bus and stores the plain image in the
           library as an ECU read. Nothing is written to the ECU.
         </p>
-        {!token && <p>Enter the control token to back up the ECU.</p>}
+        {!token && <TokenRequired purpose="back up the ECU" />}
         {token && polled.error && !job && <Notice notice={{ kind: "error", text: polled.error }} />}
         <Notice notice={notice} />
         {job && (

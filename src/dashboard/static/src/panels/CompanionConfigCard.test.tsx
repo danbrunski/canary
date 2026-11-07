@@ -220,6 +220,6 @@ describe("CompanionConfigCard", () => {
     mocks.getCompanionStatus.mockResolvedValue(status());
     render(<CompanionConfigCard companion={COMPANION} token="" />);
     expect(await screen.findByRole("button", { name: "Find Pi" })).toBeDisabled();
-    expect(screen.getByText(/Enter the control token/)).toBeInTheDocument();
+    expect(screen.getByText(/needs the control token/)).toBeInTheDocument();
   });
 });

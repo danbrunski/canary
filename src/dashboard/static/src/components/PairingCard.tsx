@@ -28,6 +28,17 @@ function KeySteps({ status }: { status: PairingRequestStatus | null }) {
   );
 }
 
+/** For a Pi on the bench there is no key to turn: the person at the Pi
+ *  approves the waiting request over SSH instead. */
+function BenchHint() {
+  return (
+    <p className="m-0 mt-3 text-[0.8rem] text-fg-faint">
+      No truck connected (bench)? After pressing “Pair this device”, approve it on the Pi over SSH
+      with <code>canary-token pair</code>.
+    </p>
+  );
+}
+
 /** Pair this device by turning the key ACC -> ON -> ACC. Shown while the
  *  device has no control token. */
 export function PairingCard({ onPaired }: PairingCardProps) {
@@ -44,6 +55,7 @@ export function PairingCard({ onPaired }: PairingCardProps) {
           <button type="button" className={cn(buttonClass, "mt-3")} onClick={() => void start()}>
             Pair this device
           </button>
+          <BenchHint />
         </>
       )}
       {view.phase === "waiting" && (
@@ -60,6 +72,7 @@ export function PairingCard({ onPaired }: PairingCardProps) {
           <button type="button" className={cn(buttonClass, "mt-3")} onClick={cancel}>
             Cancel
           </button>
+          <BenchHint />
         </>
       )}
       {view.phase === "failed" && (

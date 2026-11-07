@@ -1,6 +1,7 @@
 import { useCallback, useState, type ReactNode } from "react";
 
 import { Sheet } from "../components/Sheet";
+import { TokenEntryProvider, useTokenEntry } from "../components/TokenEntry";
 import { TokenGate } from "../components/TokenGate";
 import type { ConnectivityMode } from "../hooks/useConnectivityMode";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
@@ -144,71 +145,75 @@ export function DashboardShell({
   );
 
   return (
-    <div className={shellClass}>
-      {phone ? (
-        <header className={headerClass}>
-          {brand}
-          <PhoneHeaderMenu
-            summary={
-              <ConnectionSummary
-                connectivity={connectivity}
-                states={[telemetryState, anomalyState]}
-              />
-            }
-          >
-            <MenuSection title="Connection">
-              <div className="flex flex-wrap items-center gap-2">
-                {connectivityBadge}
-                {streams}
-              </div>
-            </MenuSection>
-            <MenuSection title="Vehicle">
-              <div className="flex flex-wrap items-center gap-2">
-                <VehicleStateBadge vehicleState={status?.vehicle_state} />
-                <OperatingModeIndicator events={events} liveMode={liveMode} />
-              </div>
-            </MenuSection>
-            <MenuSection title="Control token">
-              {/* Right-aligned: the token popover opens leftwards from the
+    <TokenEntryProvider>
+      <div className={shellClass}>
+        {phone ? (
+          <header className={headerClass}>
+            {brand}
+            <PhoneHeaderMenu
+              summary={
+                <ConnectionSummary
+                  connectivity={connectivity}
+                  states={[telemetryState, anomalyState]}
+                />
+              }
+            >
+              <MenuSection title="Connection">
+                <div className="flex flex-wrap items-center gap-2">
+                  {connectivityBadge}
+                  {streams}
+                </div>
+              </MenuSection>
+              <MenuSection title="Vehicle">
+                <div className="flex flex-wrap items-center gap-2">
+                  <VehicleStateBadge vehicleState={status?.vehicle_state} />
+                  <OperatingModeIndicator events={events} liveMode={liveMode} />
+                </div>
+              </MenuSection>
+              <MenuSection title="Control token">
+                {/* Right-aligned: the token popover opens leftwards from the
                   pill's right edge, so it stays on screen. */}
-              <div className="flex justify-end">
-                <TokenGate token={token} onTokenChange={onTokenChange} />
-              </div>
-            </MenuSection>
-            <MenuSection title="Display">{themeToggle}</MenuSection>
-          </PhoneHeaderMenu>
-        </header>
-      ) : (
-        <header className={headerClass}>
-          {brand}
-          <OperatingModeIndicator events={events} liveMode={liveMode} />
-          <VehicleStateBadge vehicleState={status?.vehicle_state} />
-          <TokenGate token={token} onTokenChange={onTokenChange} />
-          <div className="ml-auto flex gap-2 text-[0.78rem] text-fg-dim">
-            {connectivityBadge}
-            {streams}
-          </div>
-          {themeToggle}
-          <button
-            type="button"
-            className={cn(
-              buttonClass,
-              "rounded-full px-4 text-[0.78rem] font-semibold uppercase tracking-[0.04em]",
-              !driving && "border-accent bg-accent/15 text-accent",
-            )}
-            onClick={onToggleMode}
-            aria-label={driving ? "switch to the parked workbench" : "switch to the driving screen"}
-          >
-            {driving ? "→ workbench" : "→ drive"}
-          </button>
-        </header>
-      )}
-      <ReplayBanner replay={status?.replay} />
-      <CaptureProfileBanner state={status?.capture_profile} />
-      <StatusStrip status={status} channels={channels} events={events} />
-      <main className={mainClass}>{children}</main>
-      {phone && bottomNav}
-    </div>
+                <div className="flex justify-end">
+                  <TokenGate token={token} onTokenChange={onTokenChange} />
+                </div>
+              </MenuSection>
+              <MenuSection title="Display">{themeToggle}</MenuSection>
+            </PhoneHeaderMenu>
+          </header>
+        ) : (
+          <header className={headerClass}>
+            {brand}
+            <OperatingModeIndicator events={events} liveMode={liveMode} />
+            <VehicleStateBadge vehicleState={status?.vehicle_state} />
+            <TokenGate token={token} onTokenChange={onTokenChange} />
+            <div className="ml-auto flex gap-2 text-[0.78rem] text-fg-dim">
+              {connectivityBadge}
+              {streams}
+            </div>
+            {themeToggle}
+            <button
+              type="button"
+              className={cn(
+                buttonClass,
+                "rounded-full px-4 text-[0.78rem] font-semibold uppercase tracking-[0.04em]",
+                !driving && "border-accent bg-accent/15 text-accent",
+              )}
+              onClick={onToggleMode}
+              aria-label={
+                driving ? "switch to the parked workbench" : "switch to the driving screen"
+              }
+            >
+              {driving ? "→ workbench" : "→ drive"}
+            </button>
+          </header>
+        )}
+        <ReplayBanner replay={status?.replay} />
+        <CaptureProfileBanner state={status?.capture_profile} />
+        <StatusStrip status={status} channels={channels} events={events} />
+        <main className={mainClass}>{children}</main>
+        {phone && bottomNav}
+      </div>
+    </TokenEntryProvider>
   );
 }
 
@@ -263,6 +268,14 @@ function ConnectionSummary({
 function PhoneHeaderMenu({ summary, children }: { summary: ReactNode; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
+  // The token gate lives inside this menu on a phone, so a panel's Unlock
+  // button has to open the menu before the gate can open its field.
+  const { pending } = useTokenEntry();
+  const [seenPending, setSeenPending] = useState(false);
+  if (pending !== seenPending) {
+    setSeenPending(pending);
+    if (pending) setOpen(true);
+  }
   return (
     <div className="ml-auto flex min-w-0 items-center gap-2">
       {summary}

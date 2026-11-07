@@ -196,7 +196,7 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
     >
       <ResourceGate
         enabled={Boolean(token)}
-        enabledMessage="Enter the control token (Control panel) to view and edit vehicle profiles."
+        tokenPurpose="view and edit vehicle profiles"
         loading={loading}
         loadingMessage="loading profiles…"
         error={error}

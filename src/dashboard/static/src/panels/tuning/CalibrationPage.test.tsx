@@ -99,7 +99,7 @@ describe("CalibrationPage", () => {
     route();
     render(<CalibrationPage token="" status={STATUS} />);
     expect(
-      screen.getByText("Enter the control token to inspect calibration evidence."),
+      screen.getByText("Locked — needs the control token to inspect calibration evidence."),
     ).toBeInTheDocument();
     expect(control).not.toHaveBeenCalled();
   });

@@ -78,6 +78,7 @@ import { SimCancelled, SimFailureAlert, SimForm, SimRunning } from "./romEditor/
 import { SimResults } from "./romEditor/SimResults";
 import { TableTree } from "./romEditor/TableTree";
 import { RevisionChip } from "./romLibraryParts";
+import { TokenRequired } from "../../components/TokenRequired";
 
 /** The chosen image's sha lives in `?rom=<sha>`. The hash is the router's
  *  (`#wb/<page>`), which rewrites it, so the sha rides in the query. */
@@ -269,7 +270,7 @@ export function RomEditorPage({
               file adds it to the ROM library, kept by its hash. Nothing here writes the ECU.
             </p>
           )}
-          {!token && <p role="status">Enter the control token to use the ROM Editor.</p>}
+          {!token && <TokenRequired purpose="use the ROM Editor" />}
           {library.error && <Notice notice={{ kind: "error", text: library.error }} />}
           <OpenRom
             label={nothingLoaded ? "Open ROM…" : "Open another ROM…"}

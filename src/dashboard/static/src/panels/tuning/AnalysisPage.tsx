@@ -9,6 +9,7 @@ import { DynoView } from "./DynoView";
 import { SessionChooser } from "./SessionChooser";
 import { TimingView } from "./TimingView";
 import { TrimView } from "./TrimView";
+import { TokenRequired } from "../../components/TokenRequired";
 
 // The views this page was split into (R19), still importable from here.
 export { DeliveryChart } from "./DeliveryChart";
@@ -40,7 +41,7 @@ export function AnalysisPage({
   const runningRevision = status?.registry_revision ?? null;
   return (
     <div className="flex flex-col gap-4">
-      {!token && <p className="m-0 text-sm">Enter the control token to run analyses.</p>}
+      {!token && <TokenRequired purpose="run analyses" />}
       <SessionChooser
         token={token}
         choice={choice}

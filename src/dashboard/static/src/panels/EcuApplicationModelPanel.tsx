@@ -200,7 +200,7 @@ export function EcuApplicationModelPanel({ token }: { token: string }) {
     <Panel title="ECU application model">
       <ResourceGate
         enabled={enabled}
-        enabledMessage="Enter the control token (Control panel) to view the ECU application model."
+        tokenPurpose="view the ECU application model"
         loading={report.loading}
         error={report.error}
         data={report.data}

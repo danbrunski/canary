@@ -20,7 +20,7 @@ const COMPANION = {
 describe("DatasetHealthPanel", () => {
   it("prompts for a token when none is set (no fetch)", () => {
     render(createElement(DatasetHealthPanel, { token: "" }));
-    expect(screen.getByText(/Enter the control token/)).toBeInTheDocument();
+    expect(screen.getByText(/needs the control token/)).toBeInTheDocument();
     expect(mocks.getDatasetHealth).not.toHaveBeenCalled();
   });
 

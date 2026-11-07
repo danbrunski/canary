@@ -180,7 +180,9 @@ describe("LogsPage composition (R19)", () => {
   it("without a token asks for nothing and mounts no viewer", async () => {
     route(frame());
     render(<LogsPage token="" context={selected} />);
-    expect(screen.getByText("Enter the control token to browse logs.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Locked — needs the control token to browse logs."),
+    ).toBeInTheDocument();
     await new Promise((r) => setTimeout(r, 20));
     expect(control).not.toHaveBeenCalled();
     expect(screen.queryByRole("table", { name: "Log table" })).not.toBeInTheDocument();

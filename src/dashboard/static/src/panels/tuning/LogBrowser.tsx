@@ -7,6 +7,7 @@ import { cn } from "../../styles";
 import type { LogSummary } from "../../types/workbench";
 import { formatClockDuration } from "../../util/time";
 import { RefusalNotice } from "./WorkbenchNotices";
+import { TokenRequired } from "../../components/TokenRequired";
 
 /** The capture browser: one listing per "include ordinary sessions" choice,
  *  and the row clicked becomes the group's selected log. */
@@ -37,7 +38,7 @@ export function LogBrowser({
         </label>
       }
     >
-      {!token && <p className="m-0 text-sm">Enter the control token to browse logs.</p>}
+      {!token && <TokenRequired purpose="browse logs" />}
       <RefusalNotice refusal={refusal} />
       {data && data.logs.length === 0 && (
         <p className="m-0 text-sm text-fg-dim">

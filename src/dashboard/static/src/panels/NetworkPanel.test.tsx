@@ -92,7 +92,7 @@ describe("NetworkPanel", () => {
     render(<NetworkPanel token="" status={status} />);
     expect(screen.getByText("Starlink")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "http://192.168.1.23:8000/" })).toBeInTheDocument();
-    expect(screen.getByText(/Enter the control token/)).toBeInTheDocument();
+    expect(screen.getByText(/needs the control token/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Let a phone change WiFi/ })).toBeNull();
     expect(mocks.getNetwork).not.toHaveBeenCalled();
   });

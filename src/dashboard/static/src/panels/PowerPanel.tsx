@@ -91,7 +91,7 @@ export function PowerPanel({ token }: PowerPanelProps) {
     <Panel title="Power / UPS">
       <ResourceGate
         enabled={Boolean(token)}
-        enabledMessage="Enter the control token (Control panel) to view UPS status."
+        tokenPurpose="view UPS status"
         loading={loading}
         loadingMessage="loading power status…"
         error={error}

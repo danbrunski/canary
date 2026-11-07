@@ -19,6 +19,7 @@ import type { StatusResponse } from "../types";
 import type { NetworkResponse, NetworkSummary } from "../types/network";
 import { toneClass } from "../util/format";
 import { formatDuration } from "../util/time";
+import { TokenRequired } from "../components/TokenRequired";
 
 interface NetworkPanelProps {
   token: string;
@@ -232,7 +233,7 @@ export function NetworkPanel({ token, status }: NetworkPanelProps) {
             </div>
           </>
         ) : (
-          <p className={placeholderClass}>Enter the control token to open the window.</p>
+          <TokenRequired purpose="open the window" />
         )}
         <p className={cn(placeholderClass, "mt-2 text-[0.78rem]")}>
           While it is open, a phone in Bluetooth range can give the Pi a new WiFi network (Android

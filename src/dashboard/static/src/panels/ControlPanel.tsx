@@ -30,8 +30,8 @@ import { ControlEventsCard, PreflightCard } from "./ControlPanelSections";
 import { JobsCard } from "./JobsCard";
 import { ModelUploadCard } from "./ModelUploadCard";
 import { SequenceDetectorCard } from "./SequenceDetectorCard";
-
-const TOKEN_GATE = "Enter the control token first.";
+import { TOKEN_FIRST } from "../lib/tokenMessages";
+import { TokenRequired } from "../components/TokenRequired";
 
 interface ControlPanelProps {
   token: string;
@@ -98,7 +98,7 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
   const run = useCallback(
     (label: string, action: () => Promise<void>) =>
       runAction(label, action, {
-        precheck: () => (token ? null : TOKEN_GATE),
+        precheck: () => (token ? null : TOKEN_FIRST),
         then: refreshControl,
       }),
     [runAction, token, refreshControl],
@@ -147,11 +147,6 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
             {version.git_sha ? ` / ${version.git_sha}` : ""}
           </div>
         )}
-        {!token && (
-          <span className="text-[0.78rem] text-fg-dim">
-            Control token: use the lock icon in the header.
-          </span>
-        )}
       </div>
 
       <div
@@ -163,9 +158,11 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
         <span
           className={cn("inline-block h-2 w-2 rounded-full", token ? "bg-ok" : "bg-fg-faint")}
         />
-        {token
-          ? "Control unlocked — mutating actions enabled."
-          : "Read-only — enter the control token to enable captures, jobs, sessions and uploads."}
+        {token ? (
+          "Control unlocked — mutating actions enabled."
+        ) : (
+          <TokenRequired purpose="enable captures, jobs, sessions and uploads" />
+        )}
       </div>
 
       <CompanionConfigCard companion={companion} token={token} />

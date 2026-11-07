@@ -29,7 +29,7 @@ const TUNING: TuningResponse = {
 describe("TuningPanel", () => {
   it("prompts for a token without one", () => {
     render(createElement(TuningPanel, { token: "" }));
-    expect(screen.getByText(/Enter the control token/)).toBeInTheDocument();
+    expect(screen.getByText(/needs the control token/)).toBeInTheDocument();
     expect(mocks.getTuning).not.toHaveBeenCalled();
   });
 

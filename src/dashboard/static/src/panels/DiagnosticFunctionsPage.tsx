@@ -10,6 +10,7 @@ import type {
   DiagnosticFunction,
   ReadCodesResult,
 } from "../types/diagnostics";
+import { TokenRequired } from "../components/TokenRequired";
 
 interface DiagnosticFunctionsPageProps {
   token: string;
@@ -34,9 +35,7 @@ export function DiagnosticFunctionsPage({ token }: DiagnosticFunctionsPageProps)
   if (!token) {
     return (
       <Panel title="Diagnostic functions">
-        <p className={placeholderClass}>
-          Enter the control token (Control panel) to run diagnostic functions.
-        </p>
+        <TokenRequired purpose="run diagnostic functions" />
       </Panel>
     );
   }

@@ -8,6 +8,7 @@ import { usePolling } from "../hooks/usePolling";
 import { PI_SOURCE_LABEL, piDisplayName } from "../lib/piLink";
 import { badgeClass, buttonClass, inputClass, type NoticeState } from "../styles";
 import type { CompanionStatusResponse, DiscoveredPi } from "../types";
+import { TokenRequired } from "../components/TokenRequired";
 
 interface CompanionConfigCardProps {
   companion: CompanionSettings;
@@ -149,11 +150,7 @@ export function CompanionConfigCard({ companion, token }: CompanionConfigCardPro
                     : "No search yet"}
               </span>
             </div>
-            {needsToken && (
-              <p className="m-0 text-[0.75rem] text-fg-dim">
-                Enter the control token (lock icon in the header) to find or link a Pi.
-              </p>
-            )}
+            {needsToken && <TokenRequired purpose="find or link a Pi" className="text-[0.75rem]" />}
             {status.discovery.error && (
               <p className="m-0 text-[0.8rem]">Search failed: {status.discovery.error}</p>
             )}

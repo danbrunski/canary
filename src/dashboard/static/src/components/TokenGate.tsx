@@ -1,9 +1,11 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { getPreflight } from "../api/http";
 import { useControlResource } from "../hooks/useControlResource";
 import { cn } from "../styles";
+import { useTokenEntry } from "./TokenEntry";
 import { TokenField } from "./TokenField";
+import { TokenHint } from "./TokenHint";
 
 interface TokenGateProps {
   token: string;
@@ -19,10 +21,24 @@ const DOT_CLASS: Record<TokenGateState, string> = {
   unlocked: "bg-ok shadow-[0_0_0_3px_rgba(95,227,179,0.18)]",
 };
 
-const HELP: Record<TokenGateState, string> = {
+/** What the closed pill says. A locked pill names itself ("control token")
+ *  rather than only a state word, so a first-time user can find where the
+ *  token goes. */
+const LABEL: Record<TokenGateState, string> = {
+  "not needed": "not needed",
+  required: "🔒 control token",
+  rejected: "🔒 token rejected",
+  unlocked: "unlocked",
+};
+
+const HELP: Record<TokenGateState, ReactNode> = {
   "not needed":
     "This server allows control from loopback (dev/sim) — no token needed here. You'd only paste one pointed at the Pi.",
-  required: "Paste the control token this server was started with (Pi: /etc/canary/control.token).",
+  required: (
+    <>
+      Paste the control token here. <TokenHint />
+    </>
+  ),
   rejected:
     "The server rejected this token (401/403) — wrong or stale value. Re-enter it or Clear and try again.",
   unlocked:
@@ -39,6 +55,23 @@ const HELP: Record<TokenGateState, string> = {
  *  until the operator asks for more. */
 export function TokenGate({ token, onTokenChange }: TokenGateProps) {
   const [open, setOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { pending, consume } = useTokenEntry();
+  // A panel's Unlock button (anything calling `requestTokenEntry`) opens the
+  // popover. Adjusted during render rather than in an effect so the field
+  // is mounted by the time the effect below focuses it.
+  const [seenPending, setSeenPending] = useState(false);
+  if (pending !== seenPending) {
+    setSeenPending(pending);
+    if (pending) setOpen(true);
+  }
+  useEffect(() => {
+    if (!pending) return;
+    // Deferred a microtask: inside the phone menu, the Sheet's own
+    // focus-the-dialog effect runs after this one and would take it back.
+    queueMicrotask(() => inputRef.current?.focus());
+    consume();
+  }, [pending, consume]);
   const fetcher = useCallback((signal: AbortSignal) => getPreflight(token, signal), [token]);
   const probe = useControlResource(fetcher, { enabled: open, intervalMs: 10000 });
   const authRejected = probe.status === 401 || probe.status === 403;
@@ -69,12 +102,17 @@ export function TokenGate({ token, onTokenChange }: TokenGateProps) {
             DOT_CLASS[state],
           )}
         />
-        {state}
+        {LABEL[state]}
       </button>
       {open && (
         <div className="absolute right-0 top-full z-10 mt-1 w-72 rounded-[8px] border border-border-soft bg-elev p-3 text-[0.78rem] shadow-lg">
           <p className="m-0 mb-2 text-fg-dim">{HELP[state]}</p>
-          <TokenField value={token} onChange={onTokenChange} className="w-full" />
+          <TokenField
+            value={token}
+            onChange={onTokenChange}
+            className="w-full"
+            inputRef={inputRef}
+          />
         </div>
       )}
     </div>

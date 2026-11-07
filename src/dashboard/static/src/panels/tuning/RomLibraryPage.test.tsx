@@ -137,7 +137,9 @@ describe("ROM Library page — direct load and empty state (W08.6)", () => {
   it("without a token asks for one and fetches nothing", () => {
     route();
     render(<RomLibraryPage token="" status={null} />);
-    expect(screen.getByText("Enter the control token to use the ROM library.")).toBeVisible();
+    expect(
+      screen.getByText("Locked — needs the control token to use the ROM library."),
+    ).toBeVisible();
     expect(screen.getByLabelText("ROM image file")).toBeDisabled();
     expect(control).not.toHaveBeenCalled();
   });

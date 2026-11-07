@@ -32,6 +32,7 @@ import {
   placeholderClass,
 } from "../styles";
 import type { UpdateAction, UpdateCheck, UpdateSnapshot } from "../types/update";
+import { TokenRequired } from "../components/TokenRequired";
 
 interface UpdateCardProps {
   token: string;
@@ -161,7 +162,7 @@ export function UpdateCard({ token }: UpdateCardProps) {
   if (!token) {
     return (
       <Panel title="Software update">
-        <p className={placeholderClass}>Enter the control token (Control panel) to update.</p>
+        <TokenRequired purpose="update" />
       </Panel>
     );
   }

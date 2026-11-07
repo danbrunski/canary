@@ -53,7 +53,7 @@ export function RomCompare({ token, entries }: { token: string; entries: RomLibr
   }
 
   const blocker = !token
-    ? "Enter the control token to compare images."
+    ? "Locked — needs the control token to compare images."
     : entries.length < 2
       ? "Compare needs two images in the library."
       : !a || !b || a === b

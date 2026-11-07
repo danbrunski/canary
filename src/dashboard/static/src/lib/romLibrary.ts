@@ -440,7 +440,7 @@ export function backupStartBlocker(
   status: StatusResponse | null,
   job: Pick<RomBackupState, "state" | "preconditions" | "can_start" | "blocked_by"> | null,
 ): string | null {
-  if (!token) return "Enter the control token to back up the ECU.";
+  if (!token) return "Locked — needs the control token to back up the ECU.";
   if (job?.state === "running") return "A backup is already running.";
   if (!status) return "Waiting for /status to confirm the preconditions.";
   const chip = backupPreconditions(status, job?.preconditions ?? null).find(

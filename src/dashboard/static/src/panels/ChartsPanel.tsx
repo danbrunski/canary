@@ -13,6 +13,7 @@ import type { SessionChartResponse } from "../types";
 import { seriesColor, useThemeVersion } from "../lib/chartTheme";
 import { downloadBlob } from "../util/browser";
 import { formatReading } from "../util/format";
+import { TOKEN_FIRST } from "../lib/tokenMessages";
 
 interface ChartsPanelProps {
   channels: Map<string, ChannelSnapshot>;
@@ -109,7 +110,7 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
     run(
       "load session",
       async () => {
-        if (!token) throw new Error("Enter the control token first.");
+        if (!token) throw new Error(TOKEN_FIRST);
         if (!sessionId.trim()) throw new Error("Enter a session id.");
         const keys = sessionChannels
           .split(",")
@@ -130,7 +131,7 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
 
   const exportTrack = (format: "gpx" | "kml") =>
     run(`export ${format}`, async () => {
-      if (!token) throw new Error("Enter the control token first.");
+      if (!token) throw new Error(TOKEN_FIRST);
       if (!sessionId.trim()) throw new Error("Enter a session id.");
       const blob =
         format === "gpx"

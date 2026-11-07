@@ -73,6 +73,15 @@ describe("PairingCard", () => {
     expect(new Headers(pollInit.headers).get("X-Pairing-Secret")).toBe("s1");
   });
 
+  it("tells a bench user to approve over SSH, before and while pairing", async () => {
+    vi.stubGlobal("fetch", fakePi([waiting("turn_on")]));
+    render(<PairingCard onPaired={vi.fn()} />);
+    expect(screen.getByText("canary-token pair").tagName).toBe("CODE");
+    fireEvent.click(screen.getByRole("button", { name: "Pair this device" }));
+    await flush();
+    expect(screen.getByText("canary-token pair").tagName).toBe("CODE");
+  });
+
   it("shows a conflict and offers a retry", async () => {
     vi.stubGlobal(
       "fetch",

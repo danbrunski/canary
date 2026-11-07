@@ -41,7 +41,7 @@ interface BrainPageProps {
   token: string;
 }
 
-const TOKEN_MESSAGE = "Enter the control token (Control panel) to view the second brain.";
+const TOKEN_PURPOSE = "view the second brain";
 
 /** Every distinct evidence view on a card, by id. */
 export function cardEvidence(card: InvestigationCardResponse["card"]): Map<string, EvidenceView> {
@@ -405,7 +405,7 @@ export function BrainPage({ token }: BrainPageProps) {
       <Panel title="Second brain">
         <ResourceGate
           enabled={enabled}
-          enabledMessage={TOKEN_MESSAGE}
+          tokenPurpose={TOKEN_PURPOSE}
           loading={status.loading}
           error={status.error}
           data={status.data}
@@ -416,7 +416,7 @@ export function BrainPage({ token }: BrainPageProps) {
       <Panel title="Next measurement (live)">
         <ResourceGate
           enabled={enabled}
-          enabledMessage={TOKEN_MESSAGE}
+          tokenPurpose={TOKEN_PURPOSE}
           loading={status.loading}
           error={status.error}
           data={status.data}
@@ -462,7 +462,7 @@ export function BrainPage({ token }: BrainPageProps) {
         )}
         <ResourceGate
           enabled={enabled}
-          enabledMessage={TOKEN_MESSAGE}
+          tokenPurpose={TOKEN_PURPOSE}
           loading={jobs.loading}
           error={jobs.error}
           data={jobs.data}
@@ -520,7 +520,7 @@ export function BrainPage({ token }: BrainPageProps) {
         </form>
         <ResourceGate
           enabled={enabled}
-          enabledMessage={TOKEN_MESSAGE}
+          tokenPurpose={TOKEN_PURPOSE}
           loading={memory.loading}
           error={memory.error}
           data={memory.data}

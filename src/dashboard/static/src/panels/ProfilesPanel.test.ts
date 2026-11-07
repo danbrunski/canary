@@ -49,7 +49,7 @@ const PROFILES: VehicleProfilesResponse = {
 describe("ProfilesPanel", () => {
   it("prompts for a token without one", () => {
     render(createElement(ProfilesPanel, { token: "" }));
-    expect(screen.getByText(/Enter the control token/)).toBeInTheDocument();
+    expect(screen.getByText(/needs the control token/)).toBeInTheDocument();
     expect(mocks.getProfiles).not.toHaveBeenCalled();
   });
 

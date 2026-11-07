@@ -8,8 +8,7 @@ import { describeError } from "../hooks/useControlResource";
 import type { SessionSummary } from "../types";
 import { ReplayCard } from "./ReplayCard";
 import { SessionsCard } from "./SessionsCard";
-
-const TOKEN_GATE = "Enter the control token first.";
+import { TOKEN_FIRST } from "../lib/tokenMessages";
 
 interface SessionsPanelProps {
   token: string;
@@ -80,7 +79,7 @@ export function SessionsPanel({ token, companion }: SessionsPanelProps) {
   const run = useCallback(
     (label: string, action: () => Promise<void>) =>
       runAction(label, action, {
-        precheck: () => (token ? null : TOKEN_GATE),
+        precheck: () => (token ? null : TOKEN_FIRST),
         then: refreshSessions,
       }),
     [runAction, token, refreshSessions],

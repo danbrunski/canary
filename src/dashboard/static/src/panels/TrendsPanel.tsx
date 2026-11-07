@@ -8,6 +8,7 @@ import { cn, placeholderClass } from "../styles";
 import type { StatTrend } from "../types";
 import { formatNumber, toneClass } from "../util/format";
 import { formatTimestamp } from "../util/time";
+import { TokenRequired } from "../components/TokenRequired";
 
 interface TrendsPanelProps {
   token: string;
@@ -28,9 +29,7 @@ export function TrendsPanel({ token }: TrendsPanelProps) {
   if (!token) {
     return (
       <Panel title="Drift Trends">
-        <p className={placeholderClass}>
-          Enter the control token (Control panel) to view fingerprint trends.
-        </p>
+        <TokenRequired purpose="view fingerprint trends" />
       </Panel>
     );
   }

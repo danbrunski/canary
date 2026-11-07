@@ -1,3 +1,5 @@
+import type { Ref } from "react";
+
 import { buttonClass, cn, inputClass } from "../styles";
 
 interface TokenFieldProps {
@@ -7,16 +9,25 @@ interface TokenFieldProps {
   className?: string;
   /** Show a "Clear" button once a value is entered. Default true. */
   showClear?: boolean;
+  /** Lets a caller focus the input (e.g. when entry is requested). */
+  inputRef?: Ref<HTMLInputElement>;
 }
 
 /** The control-token password input + its "Clear" button, hand-rendered
  *  divergently in ControlPanel and TestSessionPanel (Task 3.3). Each panel
  *  keeps its own surrounding chrome (label, status badge, help text) —
  *  only the input/clear pair itself is shared. */
-export function TokenField({ value, onChange, className, showClear = true }: TokenFieldProps) {
+export function TokenField({
+  value,
+  onChange,
+  className,
+  showClear = true,
+  inputRef,
+}: TokenFieldProps) {
   return (
     <div className="flex gap-2">
       <input
+        ref={inputRef}
         className={cn(inputClass, className)}
         type="password"
         autoComplete="off"

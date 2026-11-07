@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { cn, placeholderClass } from "../styles";
+import { TokenRequired } from "./TokenRequired";
 
 interface ResourceGateProps<T> {
   /** False shows `enabledMessage` instead of fetching/rendering — the
@@ -8,6 +9,10 @@ interface ResourceGateProps<T> {
    *  to true for panels with nothing to gate on (e.g. unauthenticated
    *  reads). */
   enabled?: boolean;
+  /** What the control token unlocks, as a verb phrase ("view tire
+   *  wear"). Renders the shared `TokenRequired` placeholder. */
+  tokenPurpose?: string;
+  /** Overrides the placeholder entirely; prefer `tokenPurpose`. */
   enabledMessage?: ReactNode;
   loading: boolean;
   loadingMessage?: ReactNode;
@@ -22,14 +27,21 @@ interface ResourceGateProps<T> {
  *  used, so existing role/text-based tests keep passing. */
 export function ResourceGate<T>({
   enabled = true,
-  enabledMessage = "Enter the control token (Control panel) to continue.",
+  tokenPurpose = "continue",
+  enabledMessage,
   loading,
   loadingMessage = "loading…",
   error,
   data,
   children,
 }: ResourceGateProps<T>) {
-  if (!enabled) return <p className={placeholderClass}>{enabledMessage}</p>;
+  if (!enabled) {
+    return enabledMessage === undefined ? (
+      <TokenRequired purpose={tokenPurpose} />
+    ) : (
+      <p className={placeholderClass}>{enabledMessage}</p>
+    );
+  }
   if (loading) return <p className={placeholderClass}>{loadingMessage}</p>;
   if (error || !data) {
     return <p className={cn(placeholderClass, "text-bad")}>{error ?? "no data"}</p>;

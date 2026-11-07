@@ -14,6 +14,7 @@ import { useControlResource } from "../../hooks/useControlResource";
 import { buttonClass, inputClass } from "../../styles";
 import type { StatusResponse } from "../../types";
 import type { MemoryChannel, MemoryState, VerifyMemoryResponse } from "../../types/workbench";
+import { TokenRequired } from "../../components/TokenRequired";
 
 const stateClass: Record<MemoryState, string> = {
   verified: "text-ok",
@@ -108,7 +109,7 @@ export function CalibrationPage({
   return (
     <section className="space-y-4">
       <Panel title="Running calibration" count={calibration?.running_revision ?? "unknown"}>
-        {!token && <p>Enter the control token to inspect calibration evidence.</p>}
+        {!token && <TokenRequired purpose="inspect calibration evidence" />}
         {mismatch && (
           <Notice
             notice={{

@@ -6,9 +6,10 @@
 // fields — see SessionsCard.tsx etc.
 
 import { Panel } from "../components/Panel";
-import { cn, placeholderClass } from "../styles";
+import { cn } from "../styles";
 import type { ConnectionState, ControlEvent, PreflightResponse } from "../types";
 import { formatTimeOfDay } from "../util/time";
+import { TokenRequired } from "../components/TokenRequired";
 
 function checkClass(ok: boolean, severity: string): string {
   if (ok) return "text-ok";
@@ -33,7 +34,7 @@ export function PreflightCard({
       }
     >
       {!hasToken ? (
-        <p className={placeholderClass}>Enter the token to unlock controls.</p>
+        <TokenRequired purpose="run the pre-flight checks" />
       ) : (
         <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
           {(preflight?.checks ?? []).map((check) => (

@@ -175,7 +175,7 @@ describe("BrainPage", () => {
   it("asks for the token before fetching", () => {
     render(<BrainPage token="" />);
     expect(api.getBrainStatus).not.toHaveBeenCalled();
-    expect(screen.getAllByText(/Enter the control token/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/needs the control token/).length).toBeGreaterThan(0);
   });
 
   it("explains a discrepancy: card parts, missing inputs, next measurement and the trace", async () => {

@@ -18,6 +18,7 @@ import type {
   VehicleLedgerEvent,
   VehicleLedgerTires,
 } from "../types";
+import { TokenRequired } from "../components/TokenRequired";
 
 const KINDS: VehicleEventKind[] = ["maintenance", "mod", "repair", "observation", "dtc"];
 
@@ -144,9 +145,7 @@ export function VehicleLedgerPage({ token }: VehicleLedgerPageProps) {
   if (!token) {
     return (
       <Panel title="Vehicle ledger">
-        <p className={placeholderClass}>
-          Enter the control token (Control panel) to view the vehicle ledger.
-        </p>
+        <TokenRequired purpose="view the vehicle ledger" />
       </Panel>
     );
   }

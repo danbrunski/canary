@@ -209,7 +209,7 @@ describe("TripPanel", () => {
     );
     expect(mocks.getSessionDigest).not.toHaveBeenCalled();
     expect(
-      screen.getByText("Enter the control token (Control panel) to view the last-drive digest."),
+      screen.getByText("Locked — needs the control token to view the last-drive digest."),
     ).toBeInTheDocument();
   });
 });

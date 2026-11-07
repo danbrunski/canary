@@ -14,6 +14,7 @@ import {
   selectClass,
 } from "../styles";
 import type { CustomPid } from "../types";
+import { TokenRequired } from "../components/TokenRequired";
 
 interface CustomPidsPanelProps {
   token: string;
@@ -63,9 +64,7 @@ export function CustomPidsPanel({ token }: CustomPidsPanelProps) {
   if (!token) {
     return (
       <Panel title="Custom PIDs">
-        <p className={placeholderClass}>
-          Enter the control token (Control panel) to manage custom PIDs.
-        </p>
+        <TokenRequired purpose="manage custom PIDs" />
       </Panel>
     );
   }

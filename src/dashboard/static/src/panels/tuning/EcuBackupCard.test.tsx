@@ -450,7 +450,7 @@ describe("ECU backup card (W08.8)", () => {
     route(backupState());
     renderCard({ token: "" });
     expect(
-      screen.getAllByText("Enter the control token to back up the ECU.").length,
+      screen.getAllByText("Locked — needs the control token to back up the ECU.").length,
     ).toBeGreaterThan(0);
     expect(control).not.toHaveBeenCalled();
   });

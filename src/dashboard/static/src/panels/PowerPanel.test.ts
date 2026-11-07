@@ -31,7 +31,7 @@ function snapshot(overrides: Partial<PowerSnapshot> = {}): PowerStatusResponse {
 describe("PowerPanel", () => {
   it("prompts for a token without one", () => {
     render(createElement(PowerPanel, { token: "" }));
-    expect(screen.getByText(/Enter the control token/)).toBeInTheDocument();
+    expect(screen.getByText(/needs the control token/)).toBeInTheDocument();
     expect(mocks.getPowerStatus).not.toHaveBeenCalled();
   });
 

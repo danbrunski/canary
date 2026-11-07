@@ -13,6 +13,7 @@ import {
   placeholderClass,
 } from "../styles";
 import type { TireAction, TireStatus } from "../types";
+import { TokenRequired } from "../components/TokenRequired";
 
 interface TreadWearCardProps {
   token: string;
@@ -52,9 +53,7 @@ export function TreadWearCard({ token }: TreadWearCardProps) {
   if (!token) {
     return (
       <Panel title="Tread wear">
-        <p className={placeholderClass}>
-          Enter the control token (Control panel) to view tire wear.
-        </p>
+        <TokenRequired purpose="view tire wear" />
       </Panel>
     );
   }

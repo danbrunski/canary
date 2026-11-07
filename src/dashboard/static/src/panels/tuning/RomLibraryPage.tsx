@@ -48,6 +48,7 @@ import {
   UnverifiedChip,
   checksumWords,
 } from "./romLibraryParts";
+import { TokenRequired } from "../../components/TokenRequired";
 
 /** Engine Tuning ▸ ROM Library (W08.6, W08.8): stored ROM images, the memory
  *  map of the selected one, its tables, compare, and the ECU backup.
@@ -167,7 +168,7 @@ export function RomLibraryPage({
             vehicle&apos;s map definition recognises but cannot decode, such as UpRev&apos;s
             encrypted backup .bin, is refused by name. Nothing here writes the ECU.
           </p>
-          {!token && <p role="status">Enter the control token to use the ROM library.</p>}
+          {!token && <TokenRequired purpose="use the ROM library" />}
           {library.error && <Notice notice={{ kind: "error", text: library.error }} />}
           <div
             role="group"

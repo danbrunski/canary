@@ -6,6 +6,7 @@ import { Panel } from "../components/Panel";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { buttonClass, cn, inputClass, placeholderClass } from "../styles";
 import type { JobRecord } from "../types";
+import { TOKEN_FIRST } from "../lib/tokenMessages";
 
 const FORMATS = ["csv", "jsonl", "parquet", "feature_matrix"] as const;
 
@@ -42,7 +43,7 @@ export function ExportPanel({ token }: { token: string }) {
     run(
       "export",
       async () => {
-        if (!token) throw new Error("Enter the control token first.");
+        if (!token) throw new Error(TOKEN_FIRST);
         const ids = splitCsv(sessionIds);
         if (ids.length === 0) throw new Error("Enter at least one session id.");
         const params: Record<string, unknown> = {

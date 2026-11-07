@@ -480,7 +480,9 @@ describe("AnalysisPage composition (R19)", () => {
   it("asks for the token, and keeps every Run disabled without one", async () => {
     route({});
     render(<AnalysisPage token="" status={RUNNING} context={context()} />);
-    expect(screen.getByText("Enter the control token to run analyses.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Locked — needs the control token to run analyses."),
+    ).toBeInTheDocument();
     pickRunning();
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
     view("Trim surface");
