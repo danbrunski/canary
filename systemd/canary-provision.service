@@ -17,6 +17,14 @@ Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 # The window file the daemon writes (POST /control/network/provisioning/window).
 Environment=CANARY_PROVISION_WINDOW_FILE=/run/canary/provision_window
+# The service exists for a Pi nobody can reach yet, so it must not depend on
+# someone running `rfkill unblock` first. systemd-rfkill restores a saved soft
+# block on every boot. BlueZ then refuses Powered=true, and the service fails
+# and restarts every 5 s until someone with a shell unblocks the radio. This
+# runs on each restart too, so it also undoes a block that
+# systemd-rfkill restores after a late hci0 appears. "-": a missing rfkill
+# binary leaves the old behaviour, and the journal names the block.
+ExecStartPre=-/usr/sbin/rfkill unblock bluetooth
 ExecStart=/bin/bash -c 'cd "$CANARY_HOME" && exec "$CANARY_HOME/.venv/bin/python" -m src.provisioning run'
 Restart=on-failure
 RestartSec=5
