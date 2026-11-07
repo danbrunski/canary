@@ -27,6 +27,16 @@ it, so the AP's only remaining job is the case where no LAN exists at all.
 
 ## The decided architecture (operator-approved 2026-09-11 — do not re-open)
 
+> **Amended by the operator, 2026-11-07:** the built-in radio *may* serve a
+> hotspot, but only as a **setup and fallback** hotspot (N6): when no saved
+> network is reachable. It never runs alongside the client. The full-time
+> AP's problems came from switching between AP and client while someone
+> depended on both; a hotspot that exists only when there is no client
+> network has nothing to switch away from. Why: a user away from every saved
+> network, with only a phone, otherwise has no way to reach the Pi at all
+> (BLE needs Android Chrome; iPhones have no Web Bluetooth). The rest of this
+> section stands.
+
 Each transport gets one job, matched to its bandwidth:
 
 - **WiFi is always a client.** It joins a known network for internet and for
@@ -153,6 +163,101 @@ Rejected, with reasons, so they are not re-proposed:
   that does. Every Bluetooth path in this design has the same hole; say so
   once, in `docs/`, rather than letting each reader rediscover it.
 
+### Saved WiFi networks in the dashboard (N5, operator 2026-11-07)
+
+The Network page shows what the Pi joined and nothing else, so a second
+network, a phone hotspot saved ahead of time, or a typo'd one could only be
+handled with `nmcli` over SSH. NetworkManager already keeps any number of
+saved networks and auto-joins the best one in range; this exposes that.
+
+**Privilege (decided):** the root `canary-provision` service is the one owner
+of WiFi state. It already writes keyfiles without putting a passphrase on an
+argv, and joins with a journalled rollback (`src/provisioning/network.py`).
+The unprivileged daemon asks it over a local socket, the same "daemon asks,
+root acts" shape P3.1 chose for updates over a polkit rule. The fallback
+hotspot (N6) lives in the same service.
+
+- [ ] **N5.1 Network-control socket in `canary-provision`.** A Unix stream
+  socket, `/run/canary/network.sock`, root:canary 0660, one JSON request and
+  one JSON reply per line, with `SO_PEERCRED` refusing a peer outside the
+  canary group. Operations: `list`, `scan`, `add`, `connect`, `forget`,
+  `order`. The socket is served whether or not BLE is advertising.
+  Passphrases arrive only in `add` and are never logged, echoed, or
+  returned.
+- [ ] **N5.2 Saved-network operations in `src/provisioning/network.py`.**
+  - `list`: every WiFi *client* profile NetworkManager holds, including ones
+    CANary did not write (the Imager's `preconfigured`), but never `mode=ap`.
+    Fields: id (connection UUID), SSID, priority, autoconnect, hidden,
+    security, whether it is active, in range now (with signal), and
+    `managed_by` (`canary` for `canary-wifi-*`, else `other`). Never a secret.
+  - `add` with `join: true`: today's verified join, undone on failure.
+  - `add` with `join: false` ("save for later"): write and load the profile
+    without activating it. This is how a phone hotspot or a network
+    somewhere else gets saved. It is validated the same way, so a
+    passphrase of the wrong length is refused before it is written.
+  - `connect`: activate a saved profile now.
+  - `forget`: delete the profile. Refuse an id that is not a WiFi client
+    profile, so this can never delete `canary-wired` or an AP profile.
+  - `order`: given ids in priority order, set `autoconnect-priority` so the
+    first wins (for example 100, 90, 80, ...), in one request.
+  Tested against recorded `nmcli` output, as the existing join is.
+- [ ] **N5.3 Daemon routes behind the control token**, in
+  `src/dashboard/routes/control/network.py`:
+  - `GET /control/network/wifi`: saved networks plus the last scan.
+  - `POST /control/network/wifi/scan`: rescan, then the same payload.
+  - `POST /control/network/wifi`: body `{ssid, password?, hidden?, join}`.
+  - `POST /control/network/wifi/{id}/connect`
+  - `PUT /control/network/wifi/order`: body `{ids: [...]}`.
+  - `DELETE /control/network/wifi/{id}`
+  Each mutation publishes `network.wifi_changed` on `/ws/control` and lands
+  in the control ledger without the passphrase. **An empty result says which
+  kind of empty it is:** the service not running (a laptop dev install, or
+  `canary-provision` down) is a 503 naming the socket, never an empty list.
+  Documented in `docs/headless-api.md`.
+- [ ] **N5.4 "Saved WiFi networks" on the Network page.** It lists the saved
+  networks in priority order with in-range and connected markers, and
+  up/down to reorder. **Add network** picks from the scan or takes a typed
+  name (a hidden network, or one not here), with a passphrase field, then
+  **Join now** or **Save for later**. **Forget** asks first, and **Connect**
+  switches now. Joining or forgetting the network this browser is reaching
+  the Pi through warns first: the page will drop, and the Pi will be at its
+  new address. Works at phone width. vitest covers each control, and e2e
+  covers the add flow at 412 px.
+- [ ] **N5.5 Docs.** The Network page in `docs/pi-setup.md`, plus
+  `docs/ble-provisioning.md`, which says a second network can now be added
+  from the dashboard, without a provisioning window.
+
+### Setup and fallback hotspot (N6, operator 2026-11-07)
+
+For a user with only a phone: at first setup, and anywhere no saved network
+reaches. The phone's WiFi list shows `CANary-XXXX setup`; joining it opens a
+captive portal, which is the N5 Network page served on the hotspot.
+
+- [ ] **N6.1 Adopt or follow an established implementation.** Evaluate
+  comitup (Debian, built for a Pi) and balena wifi-connect before writing
+  a supervisor. Record the choice and why here.
+- [ ] **N6.2 When it runs.** Up when no saved network has been reachable for
+  about 2 minutes (and on a first boot with none saved). Scan first and
+  cache the list, because the radio cannot scan while it beacons. While it
+  is up *and no client is connected to it*, drop it every few minutes for a
+  short scan, and rejoin a saved network that is back in range. Never drop
+  it under a connected client.
+- [ ] **N6.3 Captive portal.** The hotspot hands out DNS that answers every
+  name with the Pi, so iOS and Android open their sign-in sheet on their own,
+  and that sheet is the Network page. Pin `canary.setup` (or similar) as a
+  name too, since mDNS is unreliable on phones (N1.5).
+- [ ] **N6.4 Who may change WiFi through it.** Open while no network is saved,
+  the N1.2 rule. Otherwise changing WiFi from the portal needs the key
+  cycle ACC -> ON -> ACC, physical presence in the truck, as pairing does,
+  or a control token. A bench Pi with no truck uses the cable or SSH.
+- [ ] **N6.5 "Add your phone's hotspot" as the portal's last step**, with
+  N5's "save for later". With the phone's hotspot saved, the Pi works
+  anywhere the phone does, with no hotspot needed at all.
+- [ ] **N6.6 Off switch.** A dashboard toggle turns the fallback hotspot and
+  BLE advertising off, for a user who wants nothing listening once set up.
+  The UI says the cost plainly: a Pi with both off and no saved network in
+  range can only be reached by cable.
+
 ### Installer ownership
 
 - [ ] **N2.1 `scripts/install_pi.sh` configures networking.** It currently
@@ -164,7 +269,9 @@ Rejected, with reasons, so they are not re-proposed:
   *Hostname done (2026-10-11):* a first install names the Pi `canary-XXXX`
   from its wired MAC, so two CANaries on one LAN no longer race for
   `canary.local` (docs/pi-setup.md). A fallback AP's SSID should carry the
-  same suffix. The rest of this item is open.
+  same suffix. *Wired link done (2026-11-06):* the installer writes the
+  `canary-wired` profile, `192.168.137.2/24` with `never-default`
+  (docs/pi-setup.md "Wired address"). The rest of this item is open.
   **WiFi passphrases must not land in a repo-tracked config file.** Keep
   the network list under `/etc/canary/` beside the control token, or let
   NetworkManager hold the secrets in its own store and have the installer
@@ -213,7 +320,8 @@ Rejected, with reasons, so they are not re-proposed:
 ## Non-goals
 
 - Serving the dashboard over Bluetooth.
-- Any AP on the built-in radio while it is also the client.
+- Any AP on the built-in radio while it is also the client. (The setup/fallback hotspot, N6,
+  runs only when the client has no network.)
 - A DHCP reservation scheme; mDNS plus the optional AP's fixed address
   cover addressing, and the Starlink router cannot make reservations
   anyway.
