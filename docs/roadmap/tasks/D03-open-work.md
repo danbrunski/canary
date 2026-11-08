@@ -2576,6 +2576,62 @@ live here now, so the documents could be archived
         the line and the vent valve work.
       - **Test:** one highway key cycle with ≥ 30 min of purging cruise, on
         `ltft-gate` (prediction G4 in the 10-27 next-drive plan).
+    - **2026-11-08 `ltft-gate` capture (desk,
+      `_capture-ltft-gate-2026-11-08T180840`;
+      `data/analyses/2026-11-08-ltft-learning.md`):** learning runs again,
+      and the "0.00" is one unlearned cell.
+      - **Maps.** At the first read, 18:08:41Z, each bank already held 20
+        learned cells (B1 756 visits, B2 821), all below 4,400 rpm and below
+        BFS 36,864. The learning happened on drives the Pi did not record,
+        after 10-27 17:52Z. During the capture the learner updated 3 cells
+        per bank, 40 updates in all (18:15:21–18:16:39Z, creeping at
+        3–4 km/h with 28B9.6 set). Every count change came with a map change
+        of the same cell, which the operating point indexed (62/62).
+      - **Known answer.** PID LTFT A = floor((cell + w62AC − 0x6400)/200),
+        indexed by BFS (0x1208) against cal 0xD290 and rpm/50 against 0xD372.
+        - 36/36 on steady reads with a settled cell and a BFS read ≤ 0.5 s
+          away; 129/136 at any separation. The 7 misses are transients with
+          0.6–0.9 s BFS skew.
+        - Rounding fails (B1 19/70).
+        - w62AC − 0x6400 lies in 0..+0.6 %, so it is neutral.
+      - **Why idle read 0.00.** Warm idle stays in r0c1 (BFS 5,376–10,240
+        with ±1,024 hysteresis), which has never been learned. Its idle path
+        was closed on every pre-key-off idle read: by w38AA ≥ 40 for B1
+        (purge flowing, 10240) and by the 30-update cap for B2 (1436 = 31).
+      - **0x1518 cannot be observed by any 0x23 read.**
+        - Its tick term 2881.1 is set and cleared inside one learner call.
+          It read set on 0 of 629 reads, and 1518 on 0 of 671.
+        - That includes 7 reads with 179C = 138A = 151A = 3.
+        - The visit counts are the evidence of learning. 151A does read
+          (11 reads).
+      - **28B9.6 has a second route.** It read set at w5224>>15 = 754–769
+        (73 reads). `FUN_0006a52c` recomputes it every call as `≥ 0x302`
+        OR `(w5224>>15 − w1584) > w14A0` (table 0xDE4A on w3930). w1584,
+        w14A0 and w3930 are not in `ltft-gate`.
+      - **Predictions, as written:**
+        - G1 unresolved: no input is false on ≥ 95 % with its path's others
+          true on ≥ 50 %. The learner ran anyway.
+        - G2 fail: 640/960 count reads are non-zero.
+        - G3 fail: 74.2 % closed, n 163. "1518 stays clear" is the tick's
+          blindness.
+        - G4 fail: w5224 grew on 4 intervals with DID 0x1110 at 0, and
+          28B9.6 was set below 770. No count moved with 28B9.6 clear, and the
+          accumulator restarted at 0 after key-off.
+      - **Fuelling.** The learned correction is cell-shaped, not uniform. At
+        1,800–3,400 rpm it runs −4.6..−6.3 % at ≈ 10–25 g/s and −0.3..−3.4 %
+        at ≈ 40–70 g/s, and reaches +1.5..+2.6 % on B2 at ≈ 69–89 g/s.
+        - The 11–12 converged cells (≥ 30 visits) per bank have a mean of
+          −3.3 % (B1) and −2.8 % (B2), with an SD of 2.0–2.5 %. The banks
+          correlate (r 0.73).
+        - The level sits inside N02.7's −3.9..+1.6 % between-drive span. The
+          shape does not fit N02.7's "uniform within a drive".
+        - The near-idle cells r1c0 (+3.2/+2.3 %) were learned with purge
+          flowing.
+      - **This is still not the owed data relation.** Learned trim now
+        moves, so the 0x1123–0x1126 vs PID 0x06–0x09 alternation capture
+        can be run.
+      - **Re-run:** `~/canary-data/analysis-scripts/2026-11-08-ltft/ltft_learning.py
+        <session_dir>`, on `…T182054` once it is pulled.
   - [x] **0x1110 is commanded EVAP purge, not intake VVT duty.** The
     CAN Mode 22 handler (`FUN_000d16b8`) sends DID high byte 0x11 to table
     0x24988. Entry 16 there is 0xFFFF272E (read back from the ROM image), and
