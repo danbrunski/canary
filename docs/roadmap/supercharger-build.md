@@ -225,14 +225,47 @@ uses the `tuning` profile, so the baseline and the new engine share a schema.
   flow, about half the measured WOT lean, so the answer leans **delivery**. A
   3rd-gear pull is still owed to read it at WOT airflow
   ([analysis](../../data/analyses/2026-10-04-fuel-pressure-first-drive.md)).
-- [ ] **NA3 — Closed-loop trim map.** Warm, rpm × MAF, both banks, across idle,
+- [x] **NA3 — Closed-loop trim map.** Warm, rpm × MAF, both banks, across idle,
   cruise at several speeds, and light load. **Wait for LTFT to relearn first**:
   it read exactly 0.00 % after the 2026-09-20 flash, so today's map is STFT
   alone.
-- [ ] **NA4 — Idle baseline.** Warm idle MAF, throttle position, STFT, idle rpm
+  *2026-11-08 (relaxed per operator: no dedicated speed steps; town and
+  highway driving stand in for "several speeds").* LTFT has relearned: 20–21
+  learned cells per bank, and learning was seen live
+  ([analysis](../../data/analyses/2026-11-08-ltft-learning.md)). The maps use
+  total trim (1+STFT)(1+LTFT)−1, warm closed loop, with trims paired to
+  RPM/MAF within 0.25 s. They cover leg 1 (`_capture-ltft-gate-2026-11-08T182054`,
+  town ≤ 40 km/h, n 4,512) and leg 2 (`…T191721`, town plus highway to
+  ~75 km/h, n 5,103), on ZS44A-20261004 with the new pump.
+  - **Idle (< 900 rpm, < 4 g/s):** B1 +6..+9 %, B2 +2..+6 %.
+  - **Cruise cells (900–3,400 rpm × 4–60 g/s, n ≥ 20):** B1 −1.1..+5.1 %,
+    B2 −2.3..+1.6 %.
+  - **Split by purge (DID 0x1110):** with purge off, idle and 0–15 g/s run
+    lean (+5..+9 % B1, +3..+6 % B2), shrinking roughly as 1/MAF. With purge on,
+    light cruise sits near 0. B1 − B2 ≈ +3 % on every band, new since 10-27.
+  - **Caveat for the baseline:** that low-load lean looks like a leak (see
+    [proposals](../../data/analyses/2026-11-08-tuning-proposals.md)). If one is
+    found and fixed, re-run this map after the repair; the new map supersedes
+    this one. Scripts: `~/canary-data/analysis-scripts/2026-11-08-drive/`
+    `trim_map.py` and `decompose.py`.
+- [~] **NA4 — Idle baseline.** Warm idle MAF, throttle position, STFT, idle rpm
   stability; with electrical loads stepped (headlights, blower, A/C) — the
   stock-injector dead-time reference (`injector-deadtime-idle`, archived, has
   the protocol). The throttle body and injectors both change idle.
+  *2026-11-08, idle half done; load steps owed.* Warm idle filter: 500–1,000
+  rpm, TPS < 9 %, MAF < 7 g/s, ECT ≥ 85 °C.
+  - **Leg 1 (`…T182054`, n 1,520):** rpm 762 (p5 712, p95 962, SD 79), MAF
+    3.43 g/s, TPS 3.14 %, STFT +7.0 / +4.7 %, LTFT −0.8 / −1.6 %, timing 17°,
+    Vb 13.04 V, IAT 43 °C, ECT 91 °C.
+  - **Leg 2 (`…T191721`, n 1,549):** rpm 762 (p5 718, p95 962, SD 77), MAF
+    3.41 g/s, TPS 3.14 %, STFT +8.6 / +5.5 %, LTFT 0.0 / 0.0, timing 17°,
+    13.04 V, IAT 45 °C, ECT 92 °C.
+  - Warm idle runs above the FSM's 625 ± 50 rpm, which is a sea-level, stock
+    figure. The idle LTFT cell has never learned, so STFT carries all of it.
+  - **Load steps were not driven.** Natural Vb spread at idle was too small to
+    resolve dead time (within-stop SD 0.135 V; slope +1.1 %/V B1, CI
+    −2.3..+3.9). Still owed: headlights, blower on high and rear defrost, 30 s
+    on / 30 s off ×3.
 - [ ] **NA5 — Whole-vehicle performance.** 40→80 mph (or 2,500 rpm → limiter) in
   a fixed gear on flat road, GPS speed, both directions to cancel grade and
   wind. A before/after acceleration number is the result the build is for, and

@@ -460,3 +460,36 @@ cd /home/dan/code/canary
 
 The script asserts the ROM axis and gain bytes, and it re-decodes every
 window anchor from its payload. A mismatch would print.
+
+## 9. Leg 2, `_capture-ltft-gate-2026-11-08T191721` (19:17:21–20:14:40Z)
+
+Same scripts, run on the laptop after the pull (outputs in
+`~/canary-data/analysis-scripts/2026-11-08-drive/out-leg2/`). The window
+decode re-decoded 87,983 anchor values from their payloads with 0 mismatches.
+
+- **No learning.** There were 0 cell changes (count and map) between the
+  first read (19:17:21.99Z) and the last (20:10:23.45Z). At the last read B1
+  holds 21 visited cells (776 visits, visit-weighted −3.08 %) and B2 holds 21
+  (841, −2.90 %). That is one more cell per bank than at 18:08, learned
+  between the two captures.
+- **28B9.6 was clear on every gate read** (3,073 / 3,122 reads with 179C clear
+  on B1 / B2). It was the only false input on off-idle reads. Every other
+  observable input was true (G1/G3 as written: fail, for the same reason as
+  in the first leg's restart cycle).
+- **The accumulator resets at every engine restart, stalls included.** w5224>>15 rose
+  from 32 at 19:17Z to 157 at 19:56:21Z. It read 0 at 19:57:22Z, after the
+  19:56:37Z stall and restart. It then climbed to 52.5 by 20:10Z. The key had
+  stayed on through the stall, so the reset follows an engine start, not
+  key-on alone.
+- **Fill rate depends on purge.** It ran 0.0–0.4 units/min with purge
+  commanded 0 (idle, and long stretches of light cruise), 3–9 units/min at
+  purge 5–18 %, and 26 units/min in the one 52 % minute (19:29Z). Leg 2
+  averaged ≈ 3 units/min against ≈ 18 units/min in the first key cycle, which
+  crossed 770 about 43 min in. At leg 2's rate the gate needs over 4 h of
+  driving without a restart.
+- **G4 (as written):** no read reached 770 and none had 28B9.6 set. No count
+  changed. Unresolved for the fill-from-0 question. This key cycle never got
+  far enough.
+- **What it means for learning:** idle-heavy town driving, stalls and short
+  hops never open the gate. One long purging cruise per start is what opens
+  it (the 10-27 verdict). The idle cell r0c1 still has no visits.
