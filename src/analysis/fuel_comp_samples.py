@@ -16,7 +16,10 @@ One row per *candidate*, two routes:
   is near zero by construction.
 
 Every candidate is paired on acquisition time with rpm and the throttle input
-(:func:`src.signals.pairing.match_ordered`, the route's declared separation),
+(:func:`src.signals.pairing.match_ordered`, the route's declared separation;
+the throttle read is chosen per sample: PID 0x11 where one pairs, else DID
+0x120F minus the session's closed-position estimate, the route named on the
+sample),
 gets the context it is gated on as of its instant (coolant, baro, fuel status,
 each within a declared age), and the Fuel Comp load byte reconstructed as an
 interval (:mod:`src.analysis.fuel_comp_inputs`) on the revision in force *at
@@ -112,7 +115,10 @@ from src.vehicle.tune_revisions import TuneRevisionRegistry
 #: Bumped whenever a state, gate, pairing or column changes meaning.
 #: 3: open loop placed as an interval over the B06 delay bracket (no
 #: steadiness gate); rpm word and row intervals; MAF and BFS carried.
-SAMPLES_VERSION = 3
+#: 4: the throttle route is chosen per sample, not per session (N02.8): PID
+#: 0x11 where a read pairs within the route's separation, else DID 0x120F;
+#: ``throttle_route`` / ``throttle_validated`` name the read actually used.
+SAMPLES_VERSION = 4
 
 ROUTES = ("closed_loop", "open_loop")
 STATES = ("eligible", "gated", "unpaired", "input_missing")
@@ -422,15 +428,56 @@ def _seconds_since(cut_times: np.ndarray, at: np.ndarray) -> np.ndarray:
 # -- the throttle input -----------------------------------------------------------
 
 
+PID_ROUTE = "pid_0x11"
+DID_ROUTE = "did_0x120F"
+
+
 @dataclass(frozen=True)
-class _Throttle:
-    route: str | None
+class _ThrottleRoute:
+    """One throttle input's reads: ``counts`` per read is the w2CC8 interval,
+    or ``None`` when it cannot be formed."""
+
+    name: str
     series: _Series
-    #: Per read: the w2CC8 interval, or ``None`` when it cannot be formed.
     counts: list[Interval | None]
     validated: bool
+
+    def mids(self) -> _Series:
+        return _Series(
+            self.series.times,
+            np.array([np.nan if c is None else float(c.mid) for c in self.counts], dtype=float),
+            self.series.basis,
+        )
+
+
+@dataclass(frozen=True)
+class _Throttle:
+    """The session's throttle inputs, in preference order: PID 0x11 (exact
+    counts, validated) first, then DID 0x120F minus the closed-position
+    estimate. Each sample takes the first route with a read paired within its
+    separation (:func:`_pick_throttle`), so a session that logged PID 0x11 for
+    part of a drive still places the rest on the DID (N02.8: choosing once per
+    session lost 170 eligible reads of ``_capture-tuning-2026-09-23T164007``)."""
+
+    routes: tuple[_ThrottleRoute, ...]
     closed_position: ClosedPositionEstimate | None
     missing_reason: str | None
+    #: DID 0x120F was captured beside PID 0x11 but cannot supply counts (no
+    #: closed-position estimate): reads without a co-observed PID stay unpaired.
+    did_unusable: str | None = None
+
+    @property
+    def route(self) -> str | None:
+        """The session's routes, ``+``-joined; ``None`` when neither was captured."""
+        return "+".join(r.name for r in self.routes) or None
+
+    @property
+    def uses_did(self) -> bool:
+        return any(r.name == DID_ROUTE for r in self.routes)
+
+    def label(self, policy: PairingPolicy) -> str:
+        """The routes as an ``unpaired`` reason, each naming a clock that cannot pair."""
+        return " or ".join(r.series.label(r.name, policy) for r in self.routes) or "throttle"
 
 
 def _throttle_input(
@@ -440,6 +487,7 @@ def _throttle_input(
     coolant: _Series,
 ) -> _Throttle:
     inputs = declaration.inputs
+    routes: list[_ThrottleRoute] = []
     pid = _series(long.get(inputs.throttle_pid.channel))
     if pid.captured:
         counts: list[Interval | None] = []
@@ -448,15 +496,14 @@ def _throttle_input(
                 counts.append(throttle_counts_pid(value, declaration))
             except FuelCompInputError:
                 counts.append(None)
-        return _Throttle("pid_0x11", pid, counts, True, None, None)
+        routes.append(_ThrottleRoute(PID_ROUTE, pid, counts, True))
     did_frame = long.get(inputs.throttle_did.channel)
     did = _series(did_frame)
     if not did.captured:
+        if routes:
+            return _Throttle(tuple(routes), None, None)
         return _Throttle(
-            None,
-            _EMPTY,
-            [],
-            False,
+            (),
             None,
             f"throttle ({inputs.throttle_pid.channel} or {inputs.throttle_did.channel})",
         )
@@ -465,25 +512,76 @@ def _throttle_input(
     estimate = estimate_closed_position(
         did.times, raw, rpm.times, rpm.values, coolant.times, coolant.values, declaration
     )
+    did_series = _Series(did.times, raw.astype(float), did.basis)
     if estimate.interval is None:
+        if routes:
+            return _Throttle(
+                tuple(routes),
+                estimate,
+                None,
+                did_unusable=f"{DID_ROUTE} closed_position: {estimate.reason}",
+            )
         return _Throttle(
-            "did_0x120F",
-            _Series(did.times, raw.astype(float), did.basis),
-            [None] * len(raw),
-            False,
+            (_ThrottleRoute(DID_ROUTE, did_series, [None] * len(raw), False),),
             estimate,
             "closed_position",
         )
     closed = estimate.interval
     counts = [throttle_counts_did(int(r), closed, inputs.throttle_did.counts_max) for r in raw]
-    return _Throttle(
-        "did_0x120F",
-        _Series(did.times, raw.astype(float), did.basis),
-        counts,
-        inputs.throttle_did.validated,
-        estimate,
-        None,
-    )
+    routes.append(_ThrottleRoute(DID_ROUTE, did_series, counts, inputs.throttle_did.validated))
+    return _Throttle(tuple(routes), estimate, None)
+
+
+@dataclass(frozen=True)
+class _ThrottlePick:
+    """Per sample: the throttle route and read used (``index`` into that
+    route's reads, ``-1`` for none), its count interval (open loop: the delay
+    bracket's hull on that route), and how far it got: 0 no read paired, 1
+    paired without a count interval, 2 (open loop) no bounding hull over the
+    delay bracket, 3 usable."""
+
+    route: np.ndarray
+    validated: np.ndarray
+    index: np.ndarray
+    times: np.ndarray
+    counts: list[Interval | None]
+    level: np.ndarray
+
+
+def _pick_throttle(
+    throttle: _Throttle,
+    times: np.ndarray,
+    policy: PairingPolicy,
+    bracket: _Bracket | None,
+) -> _ThrottlePick:
+    """The first route, in preference order, that gets furthest for each
+    sample (a later route wins only by getting strictly further). A sample no
+    route reaches carries the preferred route's name, the route it would have
+    been read on."""
+    n = len(times)
+    first = throttle.routes[0] if throttle.routes else None
+    route = np.full(n, None if first is None else first.name, dtype=object)
+    validated = np.full(n, False if first is None else first.validated, dtype=object)
+    index = np.full(n, -1, dtype=np.intp)
+    paired_at = np.full(n, np.nan)
+    counts: list[Interval | None] = [None] * n
+    level = np.zeros(n, dtype=int)
+    for candidate in throttle.routes:
+        idx = _pair(times, candidate.series, policy)
+        has = np.array([i >= 0 and candidate.counts[i] is not None for i in idx], dtype=bool)
+        hull_ok = np.ones(n, dtype=bool) if bracket is None else bracket.throttle_ok[candidate.name]
+        reach = np.where(idx < 0, 0, np.where(~has, 1, np.where(~hull_ok, 2, 3)))
+        for i in np.flatnonzero(reach > level):
+            route[i] = candidate.name
+            validated[i] = candidate.validated
+            index[i] = idx[i]
+            paired_at[i] = candidate.series.times[idx[i]]
+            if reach[i] == 3 and bracket is not None:
+                counts[i] = bracket.counts[candidate.name][i]
+            elif has[i]:
+                counts[i] = candidate.counts[idx[i]]
+            level[i] = reach[i]
+    return _ThrottlePick(route, validated, index, paired_at, counts, level)
 
 
 # -- the reconstruction per candidate ---------------------------------------------
@@ -862,8 +960,9 @@ class _Bracket:
 
     rpm_ok: np.ndarray
     words: list[Interval | None]
-    throttle_ok: np.ndarray
-    counts: list[Interval | None]
+    #: Per throttle route: whether its reads bound the span, and their hull.
+    throttle_ok: dict[str, np.ndarray]
+    counts: dict[str, list[Interval | None]]
     #: A zero rpm read inside the span: the engine was not turning for part
     #: of it, and the chain's divide guard (``w116A = 0`` at word 0) breaks
     #: the byte's monotonicity in rpm, so no interval can be formed.
@@ -932,16 +1031,21 @@ def _delay_bracket(
             except FuelCompInputError:
                 continue
             rpm_ok[i] = True
-    counts: list[Interval | None] = [None] * n
-    throttle_ok = np.zeros(n, dtype=bool)
-    series = throttle.series
-    if series.captured and series.clock_refusal(policy) is None:
-        lows = np.array([np.nan if c is None else c.lo for c in throttle.counts], dtype=float)
-        highs = np.array([np.nan if c is None else c.hi for c in throttle.counts], dtype=float)
-        ok, low, high = _hull(series.times, lows, highs, start, end, gap)
-        for i in np.flatnonzero(ok):
-            counts[i] = Interval(int(low[i]), int(high[i]))
-        throttle_ok = ok
+    counts: dict[str, list[Interval | None]] = {}
+    throttle_ok: dict[str, np.ndarray] = {}
+    for route in throttle.routes:
+        hulls: list[Interval | None] = [None] * n
+        route_ok = np.zeros(n, dtype=bool)
+        series = route.series
+        if series.captured and series.clock_refusal(policy) is None:
+            lows = np.array([np.nan if c is None else c.lo for c in route.counts], dtype=float)
+            highs = np.array([np.nan if c is None else c.hi for c in route.counts], dtype=float)
+            ok, low, high = _hull(series.times, lows, highs, start, end, gap)
+            for i in np.flatnonzero(ok):
+                hulls[i] = Interval(int(low[i]), int(high[i]))
+            route_ok = ok
+        counts[route.name] = hulls
+        throttle_ok[route.name] = route_ok
     return _Bracket(rpm_ok, words, throttle_ok, counts, rpm_zero)
 
 
@@ -961,13 +1065,13 @@ def _route_frame(
         ctx.calibration(revision)
     throttle = ctx.throttle
     rpm_index = _pair(times, ctx.rpm, policy)
-    throttle_index = _pair(times, throttle.series, policy)
     purge_index = _pair(times, ctx.purge, policy)
     bracket = None
     if route == "open_loop":
         source = open_loop.commanded or rules.open_loop.commanded_preference[0]
         shift = declared_delays_s(ctx.delivery, source)["enrichment"]
         bracket = _delay_bracket(ctx, times, shift, policy)
+    pick = _pick_throttle(throttle, times, policy, bracket)
     coolant_now = _value_at_or_before(ctx.coolant, times, gates.coolant.max_age_s)
     baro_now = _value_at_or_before(ctx.baro, times, gates.baro.max_age_s)
     route_rules = rules.closed_loop if route == "closed_loop" else rules.open_loop
@@ -980,8 +1084,8 @@ def _route_frame(
         route=np.full(n, route, dtype=object),
         timestamp=stamps.to_numpy(),
         revision=revisions,
-        throttle_route=np.full(n, throttle.route, dtype=object),
-        throttle_validated=np.full(n, throttle.validated, dtype=object),
+        throttle_route=pick.route,
+        throttle_validated=pick.validated,
         coolant_c=coolant_now,
         baro_kpa=baro_now,
         fuel_status_prior=fs_prior,
@@ -995,7 +1099,7 @@ def _route_frame(
     states = _States(n)
     for missing in ctx.session_missing():
         states.assign(np.ones(n, dtype=bool), "input_missing", missing)
-    if throttle.route == "did_0x120F" and throttle.missing_reason == "closed_position":
+    if throttle.missing_reason == "closed_position":
         detail = throttle.closed_position.reason if throttle.closed_position else ""
         states.assign(np.ones(n, dtype=bool), "input_missing", f"closed_position: {detail}")
     states.assign(
@@ -1017,7 +1121,7 @@ def _route_frame(
         states.assign(np.ones(n, dtype=bool), "unpaired", anchor.label(anchor_spec, policy))
 
     paired = _error_columns(ctx, route, times, columns, states, open_loop, policy)
-    paired += [_paired_times(ctx.rpm, rpm_index), _paired_times(throttle.series, throttle_index)]
+    paired += [_paired_times(ctx.rpm, rpm_index), pick.times]
     stacked = np.vstack(paired)
     separation = np.where(np.isfinite(stacked), np.abs(stacked - times), -np.inf).max(axis=0)
     columns["max_separation_s"] = np.where(np.isfinite(separation), separation, np.nan)
@@ -1026,32 +1130,26 @@ def _route_frame(
     window_end = np.fmax(times, np.where(np.isfinite(stacked), stacked, -np.inf).max(axis=0))
 
     states.assign(rpm_index < 0, "unpaired", ctx.rpm.label(inputs.rpm.channel, policy))
-    states.assign(
-        throttle_index < 0,
-        "unpaired",
-        throttle.series.label(throttle.route or "throttle", policy),
-    )
-    counts_ok = np.array(
-        [i >= 0 and throttle.counts[i] is not None for i in throttle_index], dtype=bool
-    )
-    states.assign(~counts_ok, "unpaired", f"{throttle.route}: no count interval")
+    states.assign(pick.level == 0, "unpaired", throttle.label(policy))
+    for name in {str(r) for r in pick.route[pick.level == 1]}:
+        states.assign(
+            (pick.level == 1) & (pick.route == name), "unpaired", f"{name}: no count interval"
+        )
     states.assign(~np.isfinite(coolant_now), "unpaired", f"{ctx.coolant_spec} (stale)")
     states.assign(~np.isfinite(baro_now), "unpaired", f"{gates.baro.channel} (stale)")
     states.assign(
         ~np.isfinite(fs_prior) | ~np.isfinite(fs_next), "unpaired", f"{FUEL_STATUS_SPEC} (stale)"
     )
-    _assign_gates(ctx, route, times, window_end, states, coolant_now, baro_now, fs_prior, fs_next)
+    _assign_gates(
+        ctx, route, times, window_end, states, coolant_now, baro_now, fs_prior, fs_next, pick
+    )
     if bracket is not None:
         rpm_label = ctx.rpm.label(inputs.rpm.channel, policy)
         states.assign(bracket.rpm_zero, "gated", "engine_stopped_in_delay_bracket")
         states.assign(~bracket.rpm_ok, "unpaired", f"{rpm_label} (delay bracket)")
-        states.assign(
-            ~bracket.throttle_ok,
-            "unpaired",
-            f"{throttle.series.label(throttle.route or 'throttle', policy)} (delay bracket)",
-        )
+        states.assign(pick.level < 3, "unpaired", f"{throttle.label(policy)} (delay bracket)")
     states.finish()
-    _fill_reconstruction(ctx, columns, revisions, rpm_index, throttle_index, purge_index, bracket)
+    _fill_reconstruction(ctx, columns, revisions, rpm_index, pick.counts, purge_index, bracket)
     columns["state"] = states.state
     columns["reason"] = states.reason
     return pd.DataFrame({name: columns[name] for name in COLUMNS})
@@ -1067,11 +1165,15 @@ def _assign_gates(
     baro_now: np.ndarray,
     fs_prior: np.ndarray,
     fs_next: np.ndarray,
+    pick: _ThrottlePick,
 ) -> None:
     """The declared gates, in order. Closed loop only: steadiness is judged
     over ``[t - dwell_s, window_end]``, the dwell before the sample and
-    forward to its latest paired read. Open loop has no steadiness gate; its
-    rpm and throttle are intervals over the delay bracket (:func:`_delay_bracket`)."""
+    forward to its latest paired read, throttle on the reads of the route the
+    sample was placed with (the two routes' counts are not interchangeable
+    reads of one series: the DID's carry the closed-position estimate). Open
+    loop has no steadiness gate; its rpm and throttle are intervals over the
+    delay bracket (:func:`_delay_bracket`)."""
     rules = ctx.declaration.samples
     gates = rules.gates
     if route == "closed_loop":
@@ -1106,12 +1208,15 @@ def _assign_gates(
     rpm_n, rpm_span = _window_span(ctx.rpm, start, window_end)
     states.assign(rpm_n < steady.min_samples, "gated", "rpm_steadiness_unobserved")
     states.assign(~(rpm_span <= steady.rpm_max_span), "gated", "rpm_transient")
-    mids = np.array(
-        [np.nan if c is None else float(c.mid) for c in ctx.throttle.counts], dtype=float
-    )
-    throttle_n, throttle_span = _window_span(
-        _Series(ctx.throttle.series.times, mids), start, window_end
-    )
+    throttle_n = np.zeros(len(times), dtype=int)
+    throttle_span = np.full(len(times), np.nan)
+    for throttle_route in ctx.throttle.routes:
+        mine = pick.route == throttle_route.name
+        if not mine.any():
+            continue
+        route_n, route_span = _window_span(throttle_route.mids(), start[mine], window_end[mine])
+        throttle_n[mine] = route_n
+        throttle_span[mine] = route_span
     states.assign(throttle_n < steady.min_samples, "gated", "throttle_steadiness_unobserved")
     states.assign(
         ~(throttle_span <= steady.throttle_max_span_counts), "gated", "throttle_transient"
@@ -1123,13 +1228,14 @@ def _fill_reconstruction(
     columns: dict[str, Any],
     revisions: np.ndarray,
     rpm_index: np.ndarray,
-    throttle_index: np.ndarray,
+    throttle_counts: list[Interval | None],
     purge_index: np.ndarray,
     bracket: _Bracket | None = None,
 ) -> None:
     """Inputs and the load byte interval wherever rpm, throttle and an image
-    exist. Open loop (``bracket``): rpm words and throttle counts are the
-    delay bracket's intervals where it could be bounded."""
+    exist. ``throttle_counts`` is each sample's chosen read's interval
+    (:func:`_pick_throttle`; open loop: the delay bracket's hull where it could
+    be bounded). Open loop (``bracket``): rpm words are the bracket's hull."""
     declaration = ctx.declaration
     idle_air = declaration.inputs.idle_air
     shift = declaration.inputs.purge.gain_shift
@@ -1156,11 +1262,7 @@ def _fill_reconstruction(
             words = hull
         columns["rpm_word_lo"][i] = words.lo
         columns["rpm_word_hi"][i] = words.hi
-        if throttle_index[i] < 0:
-            continue
-        counts = ctx.throttle.counts[throttle_index[i]]
-        if bracket is not None and bracket.throttle_ok[i]:
-            counts = bracket.counts[i]
+        counts = throttle_counts[i]
         if counts is None:
             continue
         columns["throttle_counts_lo"][i] = counts.lo
@@ -1271,11 +1373,16 @@ def session_samples(
         resolve=resolve,
     )
     notes: list[str] = []
-    if ctx.throttle.route == "did_0x120F" and not ctx.throttle.validated:
+    if ctx.throttle.uses_did and not inputs.throttle_did.validated:
         notes.append(
-            "throttle from DID 0x120F minus an estimated closed position: not validated "
-            "at acquisition time against PID 0x11; closing capture: "
-            + (inputs.throttle_did.closing_capture or "none named")
+            "throttle from DID 0x120F minus an estimated closed position (samples with "
+            "throttle_route did_0x120F): not validated at acquisition time against PID "
+            "0x11; closing capture: " + (inputs.throttle_did.closing_capture or "none named")
+        )
+    if ctx.throttle.did_unusable:
+        notes.append(
+            f"{ctx.throttle.did_unusable}: samples without a co-observed PID 0x11 read "
+            "stay unpaired"
         )
     open_loop = _open_loop_rows(ctx, afr_calibration, afr_stoich)
     anchors = {

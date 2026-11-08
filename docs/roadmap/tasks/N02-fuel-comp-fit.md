@@ -500,13 +500,35 @@ the model of how Fuel Comp acts is wrong and N02.5's factors must not be used.
   (n 115), stated in the report. Load-byte known answer in the report: idle 1.000
   (n 38), off idle 1.026 (n 22), passed.
 
-- [ ] **N02.7 — Run on the corpus; re-run after the 20261004 drive.**
+- [~] **N02.7 — Run on the corpus; re-run after the 20261004 drive.**
   Orchestrator. Record the result in `data/analyses/` with session names, n per
   cell and the validation verdict. Re-run once the first 20261004 drive lands:
   - if the restore prediction passes, the proposal can inform an edit;
   - if it fails, record why and do not propose.
+  **Run 2026-11-08 (desk; record `data/analyses/2026-11-08-n02-7-fuel-comp-corpus.md`,
+  outputs `~/canary-data/analysis-scripts/2026-11-08-n02/`).** SAMPLES_VERSION 4.
+  Corpus (112 sessions ≥ 08-03, 13 drives, 564 samples, DID excluded): 10
+  proposed / 50 / 196, held-out RMS current 2.848 % vs cells 3.275 %, **no
+  improvement**. 20261004 drives split at the fuel-pump change (between 10-10
+  and 10-26; pump gain measured +4.7 % flow at idle falling to +1.3 % at
+  100–120 g/s): pre-pump fit 17 usable samples / 3 drives, 0 proposed;
+  post-pump fit 178 usable (169 from one drive) / 3 drives, **0 proposed, 22
+  insufficient**, a global factor worsens held-out RMS (4.48 % vs 2.90 %).
+  **Restore prediction: not passed, unresolved.** Matched rpm × byte bins,
+  drive-bootstrap CI. Low band (< 64): pre-pump +5.2 [−2.9, +11.1] vs +1.3
+  predicted, post-pump purge-off pump-corrected −2.4 [−3.2, +4.6]; unresolved
+  (same-revision drive medians span −7.4..+7.8 %). 64–144: pump-corrected
+  post-pump FAIL +8.4 [+1.5, +9.5] vs ≈ 0 predicted, 2 drives, purge never
+  commanded off there. The deciding band (≥ 144, 4,000–5,600 rpm) has 3
+  post-flash samples from one pull and 0 pre-pump: unresolved even under the
+  operator-relaxed n (≥ 5/side). Relaxed band ≥ 144 at any rpm: raw −5.0
+  [−8.4, −3.2] vs −1.9 (FAIL, richer than predicted), pump-corrected −3.2
+  [−6.2, −1.05] (PASS). Per this item's rule no factor is proposed. **Remains:**
+  WOT pulls at 4,000–5,600 rpm on two drives with `sensor:FUEL_PRESSURE`
+  logged through the pull, and part-throttle closed loop with purge commanded
+  0 on two drives; then re-run the record's `scripts/restore_eval.py`.
 
-- [ ] **N02.8 — Choose the throttle route per read, not per session.**
+- [x] **N02.8 — Choose the throttle route per read, not per session.**
   Found 2026-10-15 by E08.2's verifier. `fuel_comp_samples._throttle_input`
   returns the PID 0x11 route for a whole session as soon as one PID 0x11 read
   exists, and reaches the DID 0x120F route only when PID 0x11 was never
@@ -520,6 +542,31 @@ the model of how Fuel Comp acts is wrong and N02.5's factors must not be used.
   **Accept:** the 09-23T164007 drive yields DID-route samples where PID 0x11
   is absent. Sample counts on the other N02 sessions are reported before and
   after, so any change is visible.
+  **Done 2026-11-08.** `fuel_comp_samples._throttle_input` now returns every
+  captured route in preference order (`_ThrottleRoute`: PID 0x11, then DID
+  0x120F when its closed position was estimated); `_pick_throttle` chooses per
+  sample the first route that gets furthest (paired within the route's
+  separation, has a count interval, and in open loop bounds the delay
+  bracket), and `throttle_route` / `throttle_validated` name the read actually
+  used. Throttle steadiness is judged on the chosen route's own reads (the two
+  routes' counts are not one series). A DID with no closed-position estimate
+  beside PID 0x11 leaves those samples unpaired on PID 0x11, as before, with a
+  session note naming why. Session-level `throttle_route` is `+`-joined
+  (`pid_0x11+did_0x120F`). `SAMPLES_VERSION` 3 → 4. Corpus before/after (112
+  sessions ≥ 2026-08-03, same declaration, outputs in
+  `~/canary-data/analysis-scripts/2026-11-08-n02/samples-{before,after}`):
+  83,471 candidates both; eligible closed loop 6,075 → 6,194, open loop 57 →
+  64; the only session whose eligible count moved is
+  `_capture-tuning-2026-09-23T164007`: 0 → 119 closed loop and 0 → 7 open loop,
+  all `did_0x120F` (before: 1,444 rows `unpaired:pid_0x11`). Every other row's
+  state and reason is identical; 530 non-eligible rows on five 20261004
+  tuning captures now name `did_0x120F` and carry a byte where only the DID
+  paired. Tests: `tests/test_fuel_comp_samples.py`
+  `test_the_throttle_route_is_chosen_per_sample_not_per_session`,
+  `test_a_did_with_no_closed_position_beside_pid_leaves_its_reads_unpaired_and_says_so`;
+  `tests/test_sim_design.py::test_pid_0x11_is_used_where_co_observed_and_the_did_elsewhere`
+  now pins the per-read behaviour (second half placed on `did:0x120F`, 95 PID /
+  65 DID points on the slice).
 
 ## Not now, and why
 

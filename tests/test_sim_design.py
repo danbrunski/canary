@@ -852,18 +852,29 @@ def test_without_pid_0x11_throttle_comes_from_did_0x120f_through_n02s_closed_pos
 def test_pid_0x11_is_used_where_co_observed_and_the_did_elsewhere(tmp_path: Path) -> None:
     """PID 0x11 reads stop halfway; DID 0x120F runs throughout. The first half
     places on the PID. In the second half the DID supplies the throttle (no
-    read is ``throttle_unpaired``), but N02 reconstructs the fill byte on the
-    PID route whenever the session captured PID 0x11 at all, so those reads
-    have no byte and are unplaced under N02's own (first) reason: on this
-    slice ``input_missing:obd:FUEL_STATUS``."""
+    read is ``throttle_unpaired``) and N02 reconstructs the fill byte on the
+    DID route too: it picks the throttle read per sample, not per session
+    (N02.8; before it, every second-half read was unplaced under
+    ``fill_byte:input_missing:obd:FUEL_STATUS`` because the session had
+    captured PID 0x11 at all)."""
     session = _augmented(tmp_path, pid="first_half", did="all")
     design = _drive([session])
-    assert {p.throttle_pct_source for p in design.points} == {"pid:0x11"}
+    sources = {p.throttle_pct_source for p in design.points}
+    assert sources == {"pid:0x11", "did:0x120F"}
+    did_t = [
+        p.t for p in design.points if p.throttle_pct_source == "did:0x120F" and p.t is not None
+    ]
+    pid_t = [p.t for p in design.points if p.throttle_pct_source == "pid:0x11" and p.t is not None]
+    assert min(did_t) > max(pid_t)
     assert "throttle_unpaired" not in design.placement
-    assert design.placement.get("fill_byte:input_missing:obd:FUEL_STATUS", 0) > 0
+    # Only a read or two at the hand-over stays unplaced on N02's own reason.
+    assert design.placement.get("fill_byte:input_missing:obd:FUEL_STATUS", 0) < len(did_t) / 10
     pid_only = _drive([_augmented(tmp_path / "p", pid="first_half")])
     assert pid_only.placement.get("throttle_unpaired", 0) > 0
-    assert summary(design)["points_by_throttle_source"] == {"pid:0x11": len(design.points)}
+    assert summary(design)["points_by_throttle_source"] == {
+        "pid:0x11": len(pid_t),
+        "did:0x120F": len(did_t),
+    }
 
 
 def test_a_did_with_no_closed_position_estimate_is_named_apart_from_no_throttle(

@@ -520,6 +520,64 @@ def test_eligible_samples_are_split_by_throttle_route(
     assert did.as_dict()["eligible"]["synthetic"]["closed_loop"]["by_throttle_route"] == route
 
 
+def test_the_throttle_route_is_chosen_per_sample_not_per_session(
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
+    """N02.8: PID 0x11 stops at 80 s, DID 0x120F runs throughout (warm idle
+    first, for the closed-position estimate). Samples keep PID 0x11 while it
+    is co-observed and take the DID after; each names the route it used.
+    Choosing once per session left every read after 80 s unpaired on PID
+    0x11 (``_capture-tuning-2026-09-23T164007`` lost 170 eligible reads)."""
+    result = _run(
+        _session(
+            THROTTLE_POS=lambda s: 51 * 100 / 255 if s < 80 else None,
+            DID_120F=lambda s: 125 if s < 40 else 300,
+            RPM=lambda s: 750.0 if s < 40 else 2000.0,
+        ),
+        declaration,
+        delivery,
+        afr,
+    )
+    _accounted(result)
+    rows = _closed(result)
+    t = (rows["timestamp"] - pd.Timestamp(T0)).dt.total_seconds()
+    eligible = rows["state"] == ELIGIBLE
+    assert set(rows.loc[eligible & (t > 43) & (t < 78), "throttle_route"]) == {"pid_0x11"}
+    late = eligible & (t > 83)
+    assert late.sum() > 30
+    assert set(rows.loc[late, "throttle_route"]) == {"did_0x120F"}
+    assert set(rows.loc[late, "throttle_validated"]) == {False}
+    assert set(rows.loc[eligible & (t < 78), "throttle_validated"]) == {True}
+    assert not rows.loc[t > 83, "reason"].astype(str).str.contains("pid_0x11").any()
+    split = eligible_summary(result.frame)["synthetic"]["closed_loop"]["by_throttle_route"]
+    assert split["pid_0x11"]["eligible"] > 0 and split["did_0x120F"]["eligible"] > 0
+    assert split["did_0x120F"]["validated"] is False
+    assert result.throttle_route == "pid_0x11+did_0x120F"
+    assert result.closed_position is not None
+    assert any("did_0x120F" in note for note in result.notes)
+
+
+def test_a_did_with_no_closed_position_beside_pid_leaves_its_reads_unpaired_and_says_so(
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
+    """No warm idle, so the DID has no closed position: where PID 0x11 stops,
+    samples are unpaired on PID 0x11, as before N02.8, and a note names why
+    the DID could not take over."""
+    result = _run(
+        _session(THROTTLE_POS=lambda s: 51 * 100 / 255 if s < 60 else None, DID_120F=300),
+        declaration,
+        delivery,
+        afr,
+    )
+    _accounted(result)
+    rows = _closed(result)
+    t = (rows["timestamp"] - pd.Timestamp(T0)).dt.total_seconds()
+    assert set(rows.loc[t > 63, "reason"]) == {"pid_0x11"}
+    assert set(rows.loc[t > 63, "throttle_route"]) == {"pid_0x11"}
+    assert result.throttle_route == "pid_0x11"
+    assert any("closed_position" in note and "unpaired" in note for note in result.notes)
+
+
 def _enrichment(**overrides: Any) -> pd.DataFrame:
     """Steady open-loop enrichment at 4 Hz: PID 0x44 phi 1.15 (lambda 0.8696),
     bank 1 reading 2 % lean of it and bank 2 1 % lean."""
