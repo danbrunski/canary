@@ -11,7 +11,7 @@ drivers.
 register write and the read as one combined transaction (a repeated start,
 no stop between them). That is what these chips' datasheets specify, and it
 is what ``smbus2`` does internally; a few lines of ``ctypes`` avoid adding it
-as a runtime dependency (H01.3, ``docs/roadmap/tasks/H01-source-policy.md``).
+as a runtime dependency (H01.3, ``docs/roadmap/tasks/archive/H01-source-policy.md``).
 Reads are not limited to SMBus's 32-byte blocks, so a FIFO can be drained in
 one transaction.
 """

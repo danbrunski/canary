@@ -30,7 +30,7 @@ DECODED_SOURCE: Final = "decoded"
 GPS_SOURCE: Final = "gps"
 #: 3-axis IMU readings (imu:ACCEL_X/Y/Z, imu:GYRO_X/Y/Z, and — post
 #: ``src.preprocessing.imu_frame`` gravity/heading resolution —
-#: imu:ACCEL_LON/LAT). Phase 2a (docs/roadmap/imu-gps-integration.md): a
+#: imu:ACCEL_LON/LAT). Phase 2a (docs/roadmap/archive/imu-gps-integration.md): a
 #: first-class source like GPS/OBD, no hardware required to exist in the
 #: Literal — ``ImuConfig.source: disabled`` is the default until Phase 2b.
 IMU_SOURCE: Final = "imu"

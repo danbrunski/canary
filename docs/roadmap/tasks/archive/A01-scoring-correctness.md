@@ -1,8 +1,11 @@
 # A01 — scoring correctness at serve time
 
+> **Archived 2026-11-08.** Six of seven items landed. A01.6's remainder, the Pi
+> measurement of a hot-swap, continues as **D03.44** in `../D03-open-work.md`.
+
 **Depends on:** nothing. These are defects in how the live daemon scores
 ticks, independent of what the models learned and of the deferred retrain.
-Follow [A00](A00-anomaly-detectors-README.md).
+Follow [A00](../A00-anomaly-detectors-README.md).
 
 The sequence detector is stateful: it scores a 30-tick window. Three paths
 let that window mix rows that do not belong together, and one path hands a
@@ -176,7 +179,7 @@ on the current code.
   - The thresholds of the 2026-09-20 artifact still count those 12 columns.
     Only a retrain with a matching list removes that (D03.25), and it is not
     a code item.
-- [~] **A01.6 — A model hot-swap is not a scoring timeout.** Loading a new
+- [~] **A01.6 — A model hot-swap is not a scoring timeout.** → **carried to D03.44** (2026-11-08). Loading a new
   artifact in the child takes about 2–7 s against a 3 s reply timeout, which
   is the likely origin of A01.1's lag.
   - Have the child acknowledge readiness after a swap, and have the parent

@@ -54,7 +54,7 @@ window) and entirely in the guard model.
 ## What the retrained detectors are for (A06, 2026-09-23)
 
 The operator decided the learned detectors' roles on 2026-09-23
-([A06](tasks/A06-detector-roles.md)), on A02.11's held-out table
+([A06](tasks/archive/A06-detector-roles.md)), on A02.11's held-out table
 (`data/analyses/2026-09-23-a02-detector-baseline.md`; false alarms per
 engine-hour against a budget of 1):
 

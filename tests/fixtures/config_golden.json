@@ -1786,7 +1786,7 @@
      "stopped_speed_max_kph": 3.0
     }
    },
-   "doc": "Thresholds for the motion-aware auto-tagger (Phase 2a.5/2a.6,\ndocs/roadmap/imu-gps-integration.md). One taxonomy, one config block:\nboth the offline pass (``scripts/autotag.py``) and the live daemon hook\nevaluate the exact same thresholds, so tuning them (as real drives\naccumulate) never needs a redeploy \u2014 same philosophy as the behavior\nmodels' deviation bands.\n\n``live_enabled`` is a **hard pre-made decision** (Round-2\nOVERNIGHT-QUEUE): ships ``False`` until Phase 2b hardware validation,\nindependent of whether the offline pass is useful today (it is, for the\nGPS-only ``stopped``/``highway_cruise`` tags against existing sessions).",
+   "doc": "Thresholds for the motion-aware auto-tagger (Phase 2a.5/2a.6,\ndocs/roadmap/archive/imu-gps-integration.md). One taxonomy, one config block:\nboth the offline pass (``scripts/autotag.py``) and the live daemon hook\nevaluate the exact same thresholds, so tuning them (as real drives\naccumulate) never needs a redeploy \u2014 same philosophy as the behavior\nmodels' deviation bands.\n\n``live_enabled`` is a **hard pre-made decision** (Round-2\nOVERNIGHT-QUEUE): ships ``False`` until Phase 2b hardware validation,\nindependent of whether the offline pass is useful today (it is, for the\nGPS-only ``stopped``/``highway_cruise`` tags against existing sessions).",
    "fields": [
     {
      "alias": null,
@@ -4835,7 +4835,7 @@
      "source": "disabled"
     }
    },
-   "doc": "3-axis IMU (accel + gyro) for motion-aware auto-tagging.\n\nPhase 2a/2b (``docs/roadmap/imu-gps-integration.md``). Optional and\ndefaulted-disabled, same \"configs without it keep loading and behave\nexactly as before\" contract as ``GpsConfig``. Unlike ``GpsConfig`` there\nis no separate ``enabled`` bool: the doc's config sketch folds \"no\nhardware\" into the same ``source`` Literal that names which chip is\nwired, since which-chip and whether-any-chip are the same decision here.\n``.enabled`` is provided as a property so call sites can gate the same\nway as ``gps.enabled`` without a Literal-vs-bool special case.",
+   "doc": "3-axis IMU (accel + gyro) for motion-aware auto-tagging.\n\nPhase 2a/2b (``docs/roadmap/archive/imu-gps-integration.md``). Optional and\ndefaulted-disabled, same \"configs without it keep loading and behave\nexactly as before\" contract as ``GpsConfig``. Unlike ``GpsConfig`` there\nis no separate ``enabled`` bool: the doc's config sketch folds \"no\nhardware\" into the same ``source`` Literal that names which chip is\nwired, since which-chip and whether-any-chip are the same decision here.\n``.enabled`` is provided as a property so call sites can gate the same\nway as ``gps.enabled`` without a Literal-vs-bool special case.",
    "fields": [
     {
      "alias": null,
@@ -22245,9 +22245,9 @@
  "schemas": {
   "per_class": {
    "AlertsConfig": "40d2a25efded30311c3a2781c21f2d566f7c0c729af3e365be5c783a60281588",
-   "AutoTagConfig": "460c49dceabbc6ab6771a5fc110af831a3171f714a26c474a67569f6e2de4e5d",
+   "AutoTagConfig": "854532402701043c94e3fbcbeabfcb4c55bf4dbe98e490628def8a6eddbf6879",
    "CanBusConfig": "bd87c3879adcff6ddc4a06b2ed1ae7f1a20625abca1fa40bf2b60e631c36053f",
-   "CanaryConfig": "f3376510abae58ce24298a37cf41738c6bbbf8d47c0ac03b875cb95723c9556d",
+   "CanaryConfig": "c5c54259f9a55370a7608bc8694981d210dad537e60396ef26578bc02a007457",
    "CollectionConfig": "98e6c84db424d868397ad5603fb9ae205cdc9d715bb6eca63d8fb498a1d38f80",
    "CommitteesConfig": "9eb7046514943dd0444615e211830127965478958085f3db5e1691964eab8cbc",
    "CompanionConfig": "8002ff2c0312e9cc9801f7b06f1928332bfec8e3df86d0e4cebded3ea1f5f9f9",
@@ -22256,10 +22256,10 @@
    "DetectorRolesConfig": "80deb54664d9d9d899849465171c0cac85d06427c5c9839a53118cec8885ea75",
    "FusionConfig": "64ff6779ffadcdd5a69151de887585f0b81a3b618c5f33d405c487724e6848ec",
    "GpsConfig": "f6fb1ecdfeda60fd1f9e36aa57d14068fa3ae74bc973b69fcad0815d2f19e0d7",
-   "HardwareConfig": "028f19a3053c3e0d1bcafe726cb058604269c9dc8b2dc91a6120e2f4e48511f9",
+   "HardwareConfig": "1222901222a40cd9fef47026c5eba59bcfacb50b0639f3a53eb2dea8b9551620",
    "HatAdcConfig": "82b9b12e1a43f473bc0db97dde65ed369c7a633300fd964f735b811bc0e66f4d",
    "IdleShutdownConfig": "c964ea9dc2e1a947bd3ff309bbcd097093db05dbbb075f5967414d1efd2b8b75",
-   "ImuConfig": "5b8e7a94d366572ec86f336ec1e58fa178d437b0d7a3be7faa6e2e1f57527068",
+   "ImuConfig": "63608cdc6cb108a5fec8255ce066c85c8eb29925e26bfa4433cbabf70d76a096",
    "IsolationForestConfig": "a0674698e4784a4b9a9f08205bf511701f875da582a7e1c129892c16404be62a",
    "KlineConfig": "d0ed19891944fbb7578f60b062e3d5a723c1b190518fcfa0ac07b31a2d02b4dc",
    "LLMAssistConfig": "1a94ebd77f540053c65afc6cc8fa6c41c10e0ae0e4d3ca4ec2387489a4b8dc15",
@@ -22335,7 +22335,7 @@
     },
     "AutoTagConfig": {
      "additionalProperties": false,
-     "description": "Thresholds for the motion-aware auto-tagger (Phase 2a.5/2a.6,\ndocs/roadmap/imu-gps-integration.md). One taxonomy, one config block:\nboth the offline pass (``scripts/autotag.py``) and the live daemon hook\nevaluate the exact same thresholds, so tuning them (as real drives\naccumulate) never needs a redeploy \u2014 same philosophy as the behavior\nmodels' deviation bands.\n\n``live_enabled`` is a **hard pre-made decision** (Round-2\nOVERNIGHT-QUEUE): ships ``False`` until Phase 2b hardware validation,\nindependent of whether the offline pass is useful today (it is, for the\nGPS-only ``stopped``/``highway_cruise`` tags against existing sessions).",
+     "description": "Thresholds for the motion-aware auto-tagger (Phase 2a.5/2a.6,\ndocs/roadmap/archive/imu-gps-integration.md). One taxonomy, one config block:\nboth the offline pass (``scripts/autotag.py``) and the live daemon hook\nevaluate the exact same thresholds, so tuning them (as real drives\naccumulate) never needs a redeploy \u2014 same philosophy as the behavior\nmodels' deviation bands.\n\n``live_enabled`` is a **hard pre-made decision** (Round-2\nOVERNIGHT-QUEUE): ships ``False`` until Phase 2b hardware validation,\nindependent of whether the offline pass is useful today (it is, for the\nGPS-only ``stopped``/``highway_cruise`` tags against existing sessions).",
      "properties": {
       "cornering_g": {
        "default": 0.3,
@@ -23411,7 +23411,7 @@
     },
     "ImuConfig": {
      "additionalProperties": false,
-     "description": "3-axis IMU (accel + gyro) for motion-aware auto-tagging.\n\nPhase 2a/2b (``docs/roadmap/imu-gps-integration.md``). Optional and\ndefaulted-disabled, same \"configs without it keep loading and behave\nexactly as before\" contract as ``GpsConfig``. Unlike ``GpsConfig`` there\nis no separate ``enabled`` bool: the doc's config sketch folds \"no\nhardware\" into the same ``source`` Literal that names which chip is\nwired, since which-chip and whether-any-chip are the same decision here.\n``.enabled`` is provided as a property so call sites can gate the same\nway as ``gps.enabled`` without a Literal-vs-bool special case.",
+     "description": "3-axis IMU (accel + gyro) for motion-aware auto-tagging.\n\nPhase 2a/2b (``docs/roadmap/archive/imu-gps-integration.md``). Optional and\ndefaulted-disabled, same \"configs without it keep loading and behave\nexactly as before\" contract as ``GpsConfig``. Unlike ``GpsConfig`` there\nis no separate ``enabled`` bool: the doc's config sketch folds \"no\nhardware\" into the same ``source`` Literal that names which chip is\nwired, since which-chip and whether-any-chip are the same decision here.\n``.enabled`` is provided as a property so call sites can gate the same\nway as ``gps.enabled`` without a Literal-vs-bool special case.",
      "properties": {
       "accel_range_g": {
        "default": 8,
@@ -25054,7 +25054,7 @@
     },
     "AutoTagConfig": {
      "additionalProperties": false,
-     "description": "Thresholds for the motion-aware auto-tagger (Phase 2a.5/2a.6,\ndocs/roadmap/imu-gps-integration.md). One taxonomy, one config block:\nboth the offline pass (``scripts/autotag.py``) and the live daemon hook\nevaluate the exact same thresholds, so tuning them (as real drives\naccumulate) never needs a redeploy \u2014 same philosophy as the behavior\nmodels' deviation bands.\n\n``live_enabled`` is a **hard pre-made decision** (Round-2\nOVERNIGHT-QUEUE): ships ``False`` until Phase 2b hardware validation,\nindependent of whether the offline pass is useful today (it is, for the\nGPS-only ``stopped``/``highway_cruise`` tags against existing sessions).",
+     "description": "Thresholds for the motion-aware auto-tagger (Phase 2a.5/2a.6,\ndocs/roadmap/archive/imu-gps-integration.md). One taxonomy, one config block:\nboth the offline pass (``scripts/autotag.py``) and the live daemon hook\nevaluate the exact same thresholds, so tuning them (as real drives\naccumulate) never needs a redeploy \u2014 same philosophy as the behavior\nmodels' deviation bands.\n\n``live_enabled`` is a **hard pre-made decision** (Round-2\nOVERNIGHT-QUEUE): ships ``False`` until Phase 2b hardware validation,\nindependent of whether the offline pass is useful today (it is, for the\nGPS-only ``stopped``/``highway_cruise`` tags against existing sessions).",
      "properties": {
       "cornering_g": {
        "default": 0.3,
@@ -26130,7 +26130,7 @@
     },
     "ImuConfig": {
      "additionalProperties": false,
-     "description": "3-axis IMU (accel + gyro) for motion-aware auto-tagging.\n\nPhase 2a/2b (``docs/roadmap/imu-gps-integration.md``). Optional and\ndefaulted-disabled, same \"configs without it keep loading and behave\nexactly as before\" contract as ``GpsConfig``. Unlike ``GpsConfig`` there\nis no separate ``enabled`` bool: the doc's config sketch folds \"no\nhardware\" into the same ``source`` Literal that names which chip is\nwired, since which-chip and whether-any-chip are the same decision here.\n``.enabled`` is provided as a property so call sites can gate the same\nway as ``gps.enabled`` without a Literal-vs-bool special case.",
+     "description": "3-axis IMU (accel + gyro) for motion-aware auto-tagging.\n\nPhase 2a/2b (``docs/roadmap/archive/imu-gps-integration.md``). Optional and\ndefaulted-disabled, same \"configs without it keep loading and behave\nexactly as before\" contract as ``GpsConfig``. Unlike ``GpsConfig`` there\nis no separate ``enabled`` bool: the doc's config sketch folds \"no\nhardware\" into the same ``source`` Literal that names which chip is\nwired, since which-chip and whether-any-chip are the same decision here.\n``.enabled`` is provided as a property so call sites can gate the same\nway as ``gps.enabled`` without a Literal-vs-bool special case.",
      "properties": {
       "accel_range_g": {
        "default": 8,

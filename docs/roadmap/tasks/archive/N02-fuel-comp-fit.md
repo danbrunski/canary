@@ -1,5 +1,9 @@
 # N02 — Fuel Comp corrections from logged fuelling error
 
+> **Archived 2026-11-08.** Eight of nine items landed. N02.7's remainder, the
+> corpus re-run once the deciding band has data, continues as **D03.45** in
+> `../D03-open-work.md`.
+
 Written 2026-10-04, after the Fuel Comp load input was decoded
 (`docs/ecu-firmware-analysis.md`, "Fuel Comp load input `0xFFFF118A`, and how
 BFS is formed").
@@ -500,7 +504,7 @@ the model of how Fuel Comp acts is wrong and N02.5's factors must not be used.
   (n 115), stated in the report. Load-byte known answer in the report: idle 1.000
   (n 38), off idle 1.026 (n 22), passed.
 
-- [~] **N02.7 — Run on the corpus; re-run after the 20261004 drive.**
+- [~] **N02.7 — Run on the corpus; re-run after the 20261004 drive.** → **carried to D03.45** (2026-11-08).
   Orchestrator. Record the result in `data/analyses/` with session names, n per
   cell and the validation verdict. Re-run once the first 20261004 drive lands:
   - if the restore prediction passes, the proposal can inform an edit;

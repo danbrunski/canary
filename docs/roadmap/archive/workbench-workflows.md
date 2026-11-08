@@ -1,5 +1,9 @@
 # Roadmap — workbench navigation by what the operator is doing
 
+> **Archived 2026-11-08.** Every task landed (W2's index box, which lagged its
+> checklist, was ticked on the W02 evidence); the checklists it indexes are in
+> `tasks/archive/`. Nothing carried.
+
 Status: **planned** (2026-09-21). Straight to `main`, no feature branches.
 Supersedes the grouping in `archive/dashboard-ux.md`, whose ten tasks all landed
 (2026-07) — this regroups the pages that work produced.
@@ -174,38 +178,43 @@ acts on separate pages.
 ## Tasks
 
 Each task below has a detailed implementation checklist under
-[`tasks/`](tasks/archive/W00-workbench-README.md) — files, symbols, tests, empty states
+[`tasks/`](../tasks/archive/W00-workbench-README.md) — files, symbols, tests, empty states
 and acceptance. The checkboxes *there* are task-level truth; the list here is
 the index.
 
 
-- [x] **[W1](tasks/archive/W01-navigation-regroup.md) — Regroup the navigation.** Five groups as tabled above; rename
+- [x] **[W1](../tasks/archive/W01-navigation-regroup.md) — Regroup the navigation.** Five groups as tabled above; rename
   `models-tuning` → Alert Thresholds; move `live-rom-maps` into Engine Tuning.
   Keep the old route ids resolving (redirect) so bookmarks and docs survive.
-- [~] **[W2](tasks/archive/W02-tuning-context-bar.md) — Context bar.** Running calibration from `0x21 10` beside the
+- [x] **[W2](../tasks/archive/W02-tuning-context-bar.md) — Context bar.** Running calibration from `0x21 10` beside the
   registry's newest revision; selected log and loaded ROM held in group state;
   readiness chips (UPS SOC, storage, memory channels, achieved rates).
-- [x] **[W3](tasks/archive/W03-logging-page.md) — Logging page.** Profile picker, start/stop, keepalive, per-channel
+  *Ticked 2026-11-08: the index box lagged its checklist.* Every W02 box is `[x]`
+  with evidence: `39a3d2f1` built the context bar, the calibration id in
+  `/status` and the readiness chips; the one hardware step, the KOEO probe
+  (W02.1), was measured 2026-09-22 (`5691cbc5`); the checklist was archived in
+  `6e8d2308`.
+- [x] **[W3](../tasks/archive/W03-logging-page.md) — Logging page.** Profile picker, start/stop, keepalive, per-channel
   achieved rate / timeouts / NRC, tap-to-tag.
-- [x] **[W4](tasks/archive/W03-logging-page.md) — Announce an ended capture.** Detect "a capture was active and now
+- [x] **[W4](../tasks/archive/W03-logging-page.md) — Announce an ended capture.** Detect "a capture was active and now
   is not, and the operator did not stop it" (daemon restart included) and say
   so on Logging and in the status strip. Needs a small backend fact: the last
   capture's end reason.
-- [x] **[W5](tasks/archive/W04-logs-and-analysis.md) — Logs page.** Capture browser; table and visual presentations of
+- [x] **[W5](../tasks/archive/W04-logs-and-analysis.md) — Logs page.** Capture browser; table and visual presentations of
   one log; regime filter; tune-revision boundary marker.
-- [x] **[W6](tasks/archive/W04-logs-and-analysis.md) — Analysis page.** Delivery error, trim surface, timing per cell,
+- [x] **[W6](../tasks/archive/W04-logs-and-analysis.md) — Analysis page.** Delivery error, trim surface, timing per cell,
   pull comparison — each with sample counts, gate report, and a named reason
   when unavailable. Backed by the existing `src/analysis` functions, which
   already take a session directory.
-- [x] **[W7](tasks/archive/W05-rom-maps-trace-coverage.md) — ROM Maps: trace from the ECM's own coordinates.** Use the map-trace
+- [x] **[W7](../tasks/archive/W05-rom-maps-trace-coverage.md) — ROM Maps: trace from the ECM's own coordinates.** Use the map-trace
   memory channels; keep the inferred lookup as a displayed cross-check; name
   the fix when the channels are not being polled.
-- [x] **[W8](tasks/archive/W05-rom-maps-trace-coverage.md) — ROM Maps: coverage overlay.** Cells visited and samples per cell,
+- [x] **[W8](../tasks/archive/W05-rom-maps-trace-coverage.md) — ROM Maps: coverage overlay.** Cells visited and samples per cell,
   for the live capture or the selected log.
-- [x] **[W9](tasks/archive/W06-calibration-page.md) — Calibration page.** Flash history, running revision, per-channel
+- [x] **[W9](../tasks/archive/W06-calibration-page.md) — Calibration page.** Flash history, running revision, per-channel
   known-answer verify state, and the re-verify action.
 - [x] **W10 — Reserve ROM Editor and Flash** as planned entries.
-- [x] **[W11](tasks/archive/W07-flash-interlocks.md) — Flash interlocks before any flash capability.** The two AGENTS.md
+- [x] **[W11](../tasks/archive/W07-flash-interlocks.md) — Flash interlocks before any flash capability.** The two AGENTS.md
   conditions as code, server-side: a per-operation confirmation that names the
   image hash, and a `vehicle_state == ignition_only` check at the moment of
   the write. Plus supply-voltage and UPS-SOC floors. These land, with tests,

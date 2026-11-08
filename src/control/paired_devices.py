@@ -1,4 +1,4 @@
-"""Paired devices: a control token per phone or laptop (docs/roadmap/phone-ui.md P2.4).
+"""Paired devices: a control token per phone or laptop (docs/roadmap/archive/phone-ui.md P2.4).
 
 The shared control token (``/etc/canary/control.token``) stays the key for
 SSH, the MCP server and scripts. A person's devices get their own tokens

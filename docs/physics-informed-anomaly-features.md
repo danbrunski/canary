@@ -224,7 +224,7 @@ blanket*:
     the warmup curve, which is a 2nd-derivative signature (the failure mode
     `coolant_warmup` in `behavior_models.yaml` already calls out).
   - **RPM jerk** — misfire / stumble.
-  - **IMU jerk** — d(accel)/dt, already planned in `roadmap/imu-gps-integration.md`.
+  - **IMU jerk** — d(accel)/dt, already planned in `roadmap/archive/imu-gps-integration.md`.
 
 Model-split, same as correlations: rate and curvature matter most for the
 **IF**, which is memoryless and per-row — without them it sees no dynamics at

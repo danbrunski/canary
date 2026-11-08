@@ -14,6 +14,9 @@ phase of one of these point here.
 | [`multi-pid-polling.md`](multi-pid-polling.md) | batched Mode 01 polling, Phases 1–2; verification leftovers continue as D03.24 | 2026-07-26 |
 | [`ml-correctness-hardening.md`](ml-correctness-hardening.md) | 39 ML-correctness tasks; the retrain continues as D03.25 | 2026-07-19 |
 | [`eval-longitudinal-and-dtc.md`](eval-longitudinal-and-dtc.md) | evaluation benchmarks, longitudinal trends, DTC handling — 42 tasks; ledger backfill continues as D03.26 | 2026-07-20 |
+| [`imu-gps-integration.md`](imu-gps-integration.md) | motion-aware auto-tagging and grade de-confounding: IMU and GPS plumbing, the auto-tagger, Phases 1–2a; Phase 2b's hardware work moved to the H series — nothing carried | 2026-11-08 |
+| [`workbench-workflows.md`](workbench-workflows.md) | workbench navigation by what the operator is doing: five groups, the Engine Tuning context bar, Logging, Logs, Analysis, ROM Maps, Calibration and the flash interlocks (W1–W11) — nothing carried | 2026-11-08 |
+| [`phone-ui.md`](phone-ui.md) | the phone as the primary UI: BLE WiFi setup, PWA install, phone navigation, key-cycle pairing, update from the UI; the on-device checks, P1.2 among them, continue as D03.42 | 2026-11-08 |
 
 ## What did not move, and why
 
@@ -35,3 +38,8 @@ from archived roadmaps*, names the document it came from, and is marked in
 the archived document at the point it left. Unticked boxes that are standing
 acceptance criteria for every phase — not tasks — were left as they are and
 say so in the document's banner.
+
+The third batch (2026-11-08) applied the same rule to ten task checklists, which
+went to [`../tasks/archive/`](../tasks/archive/), and to the three documents above.
+Their 21 carried items are D03.42–D03.62 in `../tasks/D03-open-work.md` under
+*Carried from archived roadmaps — 2026-11-08*; `phone-ui.md` carries one of them.

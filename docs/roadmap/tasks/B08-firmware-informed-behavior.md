@@ -23,7 +23,7 @@ Evidence sources:
 - [Fuel Comp writer and remaining unknowns](../../ecu-firmware-analysis.md#fuel-comp-load-input-0xffff118a-and-how-bfs-is-formed).
 - [Corrected table axes](../../ecu-firmware-analysis.md#map-slot-tables-confirmed-from-the-code-that-reads-the-ram-copy)
   and [editor grid verification](../../ecu-firmware-analysis.md#uprevs-fuel-comp-display-checked-against-memory).
-- [Existing timing/airflow limitations](B04-timing-and-airflow.md): timing
+- [Existing timing/airflow limitations](archive/B04-timing-and-airflow.md): timing
   remains exploratory; MAF-derived air mass and VE share measurement blind
   spots. The new coordinate is a candidate to evaluate against those gaps.
 - [Pre-flash Fuel Comp prediction](../../../data/analyses/2026-10-04-fuel-comp-restore-prediction.md)

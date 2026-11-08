@@ -433,7 +433,7 @@ footprint-level rule), not by moving copper.
 **Range check:** the vehicle operates at ~80 kPa (800 hPa, ~2072 m), comfortably
 inside the 300–1250 hPa range.
 
-**Noise vs the roadmap's BMP390.** `docs/roadmap/imu-gps-integration.md`
+**Noise vs the roadmap's BMP390.** `docs/roadmap/archive/imu-gps-integration.md`
 specifies a BMP390 for the `derived:GRADE` channel. Grade is a *derivative* of
 altitude, so what matters is short-term RMS noise and noise density, not the ±9
 Pa relative-accuracy figure quoted above (BMP390: ±3 Pa). Confirm the BMP384's

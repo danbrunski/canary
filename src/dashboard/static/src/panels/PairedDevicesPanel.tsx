@@ -209,7 +209,7 @@ function DeviceRow({
 }
 
 /** System → Paired devices: who holds a token of their own, and who is
- *  waiting for one (docs/roadmap/phone-ui.md P2.4). */
+ *  waiting for one (docs/roadmap/archive/phone-ui.md P2.4). */
 export function PairedDevicesPanel({ token }: PairedDevicesPanelProps) {
   const fetcher = useCallback((signal: AbortSignal) => fetchSnapshot(token, signal), [token]);
   const { data, error, loading, refresh } = useControlResource(fetcher, {

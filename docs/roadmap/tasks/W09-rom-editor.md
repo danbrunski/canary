@@ -7,7 +7,7 @@ we can experiment with the engine physics simulator."
 The answer on 2026-10-15 was no. The ROM Library page shows every table of an
 image read-only (`RomTablesView`), and the **ROM Editor** nav entry is a
 `planned` placeholder (`Workbench.tsx`, `tuning-rom-editor`; reserved by W10 in
-`docs/roadmap/workbench-workflows.md`). The simulator exists only as a library:
+`docs/roadmap/archive/workbench-workflows.md`). The simulator exists only as a library:
 E08.1 edit specs, E08.2 point designs, E08.3 paired Monte Carlo. The CLI and the
 report are still open (E08.5, E08.6).
 

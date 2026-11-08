@@ -13,7 +13,7 @@ import { overflowReport } from "./fixtures/overflow";
 import { mockWorkbench } from "./fixtures/workbenchRoutes";
 
 /**
- * P2.6 — the phone layout's regression net (docs/roadmap/phone-ui.md). Runs
+ * P2.6 — the phone layout's regression net (docs/roadmap/archive/phone-ui.md). Runs
  * in the `phone` project only: a Pixel 7 in portrait, 412x915, touch on.
  *
  * "No horizontal page scroll" is checked two ways. The document must not be

@@ -171,7 +171,7 @@ install -m 0644 "${CANARY_HOME}/systemd/70-canable-can0.rules" \
 # (uses lgpio), not the venv.
 install -m 0644 "${CANARY_HOME}/systemd/ups-shutdown.service" \
   "$(dirname "${CANARY_SERVICE}")/ups-shutdown.service"
-# Phone setup and updates (docs/roadmap/phone-ui.md). canary-provision: WiFi
+# Phone setup and updates (docs/roadmap/archive/phone-ui.md). canary-provision: WiFi
 # setup over Bluetooth (Improv), root, standalone from the daemon like the UPS
 # watchdog (docs/ble-provisioning.md). canary-update.path/.service: the root
 # side of "update from the dashboard", started by the request file the

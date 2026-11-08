@@ -1,4 +1,4 @@
-// Display rules for paired devices (docs/roadmap/phone-ui.md P2.4).
+// Display rules for paired devices (docs/roadmap/archive/phone-ui.md P2.4).
 
 import type { PairedDevice } from "../api/pairedDevices";
 import type { ControlEvent } from "../types";

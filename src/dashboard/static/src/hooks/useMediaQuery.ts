@@ -1,6 +1,6 @@
 import { useCallback, useSyncExternalStore } from "react";
 
-/** The phone layout's edge (docs/roadmap/phone-ui.md P2.2). It names the
+/** The phone layout's edge (docs/roadmap/archive/phone-ui.md P2.2). It names the
  *  same width as every `max-[600px]:` utility: Tailwind's `max-[600px]`
  *  compiles to `width < 600px`, which this query matches to the sub-pixel. */
 export const PHONE_MEDIA_QUERY = "(max-width: 599.98px)";

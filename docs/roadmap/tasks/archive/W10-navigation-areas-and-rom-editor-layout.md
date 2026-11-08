@@ -1,5 +1,7 @@
 # W10 — Workbench areas, and a ROM Editor laid out like an editor
 
+> **Archived 2026-11-08.** Every box ticked (W10.1–W10.24). Nothing carried.
+
 Requested 2026-10-27 by the operator: "On the ROM Editor, there are buttons for
 all the different maps we can view/edit. Typically a UI would present these
 like tabs or some file dropdown menu. … There's also a lot of stuff crammed

@@ -5,7 +5,7 @@ resampled/segmented frame) and the daemon's live hook (Phase 2a.6 — ships
 config-gated off, see ``AutoTagConfig.live_enabled``) write the exact same
 tag records the manual ``scripts/tag.py`` writes
 (``src.collection.tags.write_tag``), from the exact same threshold table
-(``docs/roadmap/imu-gps-integration.md`` "The auto-tagger"):
+(``docs/roadmap/archive/imu-gps-integration.md`` "The auto-tagger"):
 
 | Label             | Trigger                                                    | Sensors  |
 |-------------------|-------------------------------------------------------------|----------|

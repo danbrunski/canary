@@ -14,7 +14,7 @@ const cardClass =
   "pointer-events-auto w-full max-w-md rounded-card border border-accent/55 bg-elev p-3 shadow-panel";
 
 /** "Android phone wants to pair — Approve / Ignore", on every page of a
- *  device that already holds a token (docs/roadmap/phone-ui.md P2.4).
+ *  device that already holds a token (docs/roadmap/archive/phone-ui.md P2.4).
  *
  *  The daemon's waiting list is the truth: each `pairing.*` control event only
  *  says "re-read it", so a request approved by a key cycle, by another phone,

@@ -34,7 +34,7 @@ class OperatingModeSpec(_Strict):
     recent_speed_max: float | None = None
     #: Longitudinal/lateral accel gates (g) on the decimated
     #: ``imu:ACCEL_LON_MAX``/``imu:ACCEL_LAT_MAX`` channels (Phase 2a.3/2a.7,
-    #: docs/roadmap/imu-gps-integration.md) — lets ``launch``/``hard_brake``/
+    #: docs/roadmap/archive/imu-gps-integration.md) — lets ``launch``/``hard_brake``/
     #: ``cornering`` modes gate on a transient IMU peak the same way other
     #: modes gate on RPM/speed/throttle. Inert (never required, never
     #: matched) until a real session actually has these columns — no IMU

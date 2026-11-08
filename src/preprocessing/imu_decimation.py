@@ -1,6 +1,6 @@
 """Pre-resample decimation for high-rate IMU channels (Phase 2a.3).
 
-See ``docs/roadmap/imu-gps-integration.md`` ("Decimation into the wide
+See ``docs/roadmap/archive/imu-gps-integration.md`` ("Decimation into the wide
 frame"): a 100 Hz IMU must not flow raw into the feature pipeline the way
 1-5 Hz OBD does — every distinct sample becomes its own row in ``to_wide``'s
 per-timestamp pivot, dwarfing the OBD rows and bloating the pivot the

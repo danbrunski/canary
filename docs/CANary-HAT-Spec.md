@@ -553,7 +553,7 @@ blockers close with it:
   anything the Pi can poll itself.
 
 The IMU, barometer, and GNSS consolidate hardware the roadmap already committed
-to (`docs/roadmap/imu-gps-integration.md` Phase 2b, `docs/sensor-committees.md`)
+to (`docs/roadmap/archive/imu-gps-integration.md` Phase 2b, `docs/sensor-committees.md`)
 and unblock `derived:GRADE` plus four of the six declared-but-dormant sensor
 committees. They take part in detection only through those committees: no
 external-sensor channel trains or scores the anomaly detectors or behavior

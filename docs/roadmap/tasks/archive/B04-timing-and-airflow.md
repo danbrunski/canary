@@ -1,10 +1,14 @@
 # B04 — timing resolution and airflow consolidation
 
+> **Archived 2026-11-08.** The other items landed. B04.2, B04.6 and B04.8 wait on
+> drives below 76 kPa and continue as **D03.57**, **D03.58** and **D03.59** in
+> `../D03-open-work.md`.
+
 **Depends on:** B01/B02; B03 governs artifact status and publication.
 Addresses the behavior-model part of D03.20. Follow
-[B00](B00-behavior-models-README.md).
+[B00](../B00-behavior-models-README.md).
 
-**2026-10-04 follow-on:** [B08.3/B08.4](B08-firmware-informed-behavior.md)
+**2026-10-04 follow-on:** [B08.3/B08.4](../B08-firmware-informed-behavior.md)
 evaluate the newly decoded throttle-fill path and actual timing lookup
 coordinates/selection state against the baselines below. B08 owns those new
 candidate comparisons; the existing measurements and model statuses remain
@@ -31,8 +35,8 @@ historical evidence, not proof that the new candidates work.
   evaluator (`per_context`): by calibration (k106 5.77° vs post-flash
   ZS44A-20260920 6.94°), IAT, coolant, load (15.3° below 20 % load vs 1.8° at
   20–30 %), baro (+6.99° bias on the single 50–70 kPa drive) and
-  steady/transient (4.24° vs 7.51°). Evidence: [report §1](../../../data/analyses/2026-09-22-b04-b05-measurements.md).
-- [~] **B04.2 — Build a load-aware context candidate.** Retain RPM and load
+  steady/transient (4.24° vs 7.51°). Evidence: [report §1](../../../../data/analyses/2026-09-22-b04-b05-measurements.md).
+- [~] **B04.2 — Build a load-aware context candidate.** → **carried to D03.57** (2026-11-08). Retain RPM and load
   as essential explanatory inputs; assess IAT/coolant and relevant air-density
   context on independent drives. Prefer the smallest interpretable conditional
   model justified by coverage. If additional axes cannot be supported, keep
@@ -40,7 +44,7 @@ historical evidence, not proof that the new candidates work.
   an RPM/IAT-only fit or broadening bands until it passes.
   *Assessed 2026-09-23 on the current calibration; stays exploratory.* The
   RPM/load surface was refit on ZS44A-20260920 (candidate v3) and judged on 2
-  untouched drive groups. Strata ([report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §4):
+  untouched drive groups. Strata ([report](../../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §4):
   - IAT: [20,30) °C MAE 6.08°, [30,40) 2.89°, [40,50) 0.20°. High IAT is
     idle/low airflow (stagnation), so IAT stands in for operating point, not
     context.
@@ -82,7 +86,7 @@ historical evidence, not proof that the new candidates work.
   end-to-end. **Along the way:** the evaluator's row clock read microsecond
   frames as `int64/1e9`, compressing every interval 1000x — events, dedupe
   and synthetic windows were all wrong before today (`EVALUATOR_VERSION` 2).
-  Evidence: [report §0, §2](../../../data/analyses/2026-09-22-b04-b05-measurements.md).
+  Evidence: [report §0, §2](../../../../data/analyses/2026-09-22-b04-b05-measurements.md).
 - [x] **B04.4 — Publish only demonstrated improvement.** Use B02's untouched
   test drives, same eligible points and physical-unit errors to compare against
   the existing surface and simple baseline. Publish via B03 if qualified;
@@ -98,7 +102,7 @@ historical evidence, not proof that the new candidates work.
     transient controls 0.30/0.38 > 0
 
   `behavior_policy.yaml` keeps it exploratory. RPM/IAT regains nothing
-  (held-out coverage 24.7 %, failed, not published). Evidence: [report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md)
+  (held-out coverage 24.7 %, failed, not published). Evidence: [report](../../../../data/analyses/2026-09-23-behavior-refit-validation-report.md)
   §2–§4, `2026-09-23-behavior-refit-comparison.json`.
 
 ## Air charge and VE
@@ -127,8 +131,8 @@ historical evidence, not proof that the new candidates work.
   longer claim to identify leaks/restriction/MAF drift, and both VE recipes
   state they share air mass's MAF/RPM measurement. Tests:
   `tests/test_anomaly_signals.py` (four new cases). Evidence:
-  [report §3](../../../data/analyses/2026-09-22-b04-b05-measurements.md).
-- [~] **B04.6 — Validate normalization across conditions.** Keep the air-charge
+  [report §3](../../../../data/analyses/2026-09-22-b04-b05-measurements.md).
+- [~] **B04.6 — Validate normalization across conditions.** → **carried to D03.58** (2026-11-08). Keep the air-charge
   recipe, quantify its missing grid coverage, and compare density-aware
   alternatives on multiple independent low/high-pressure and temperature
   sessions. Record units and calibration dependence of raw DID counts. Missing
@@ -144,7 +148,7 @@ historical evidence, not proof that the new candidates work.
 
   **Remaining:** independent drives below 76 kPa (none on ZS44A-20260920).
   Until then, density normalization is not validated across pressure
-  ([report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §4).
+  ([report](../../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §4).
 - [x] **B04.7 — Run the airflow ablation on identical observations.** Compare
   air-mass, VE and their combination using the intersection of eligible rows;
   separately report each model's exclusive coverage. Include no-fault controls
@@ -164,9 +168,9 @@ historical evidence, not proof that the new candidates work.
 
   Blind spots: air mass cannot see baro/IAT errors by construction; VE's
   ~7.9 % warning width is wider than the 3.4–3.9 % such errors produce;
-  neither separates MAF bias from unmetered air. Evidence: [report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §4,
+  neither separates MAF bias from unmetered air. Evidence: [report](../../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §4,
   `2026-09-23-behavior-refit-comparison.json` `b04_7_air_mass_ve_ablation`.
-- [~] **B04.8 — Make the conditional retirement decision.** Demote the
+- [~] **B04.8 — Make the conditional retirement decision.** → **carried to D03.59** (2026-11-08). Demote the
   air-mass alert only if validated VE/context coverage preserves useful unique
   sensitivity under the predeclared B02 criteria. Otherwise retain it with
   corrected context or diagnostic-only status and name the unresolved evidence.
@@ -188,7 +192,7 @@ historical evidence, not proof that the new candidates work.
   **Unresolved:** the decision must be re-run with a < 76 kPa drive on the
   current calibration.
 
-  [Report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §4.
+  [Report](../../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §4.
 
 - [x] **B04.9 — Pair timing with its axes per read, or bound the skew.**
   The evaluator that produced B04.1–B04.4 reads a frame resampled onto a 1 Hz

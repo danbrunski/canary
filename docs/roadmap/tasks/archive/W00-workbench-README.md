@@ -1,6 +1,6 @@
 # W — workbench navigation and Engine Tuning pages
 
-Implementation checklists for [`../workbench-workflows.md`](../../workbench-workflows.md),
+Implementation checklists for [`../workbench-workflows.md`](../../archive/workbench-workflows.md),
 which holds the reasoning. Read that first; these files only say what to build,
 in what order, and how to know it is done.
 

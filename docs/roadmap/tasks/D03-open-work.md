@@ -1671,6 +1671,298 @@ live here now, so the documents could be archived
   report, `train_anomaly_model.evaluate`, the synthetic dropout ceiling, the
   live source and the manifest's `max_gap_seconds`.
 
+## Carried from archived roadmaps — 2026-11-08
+
+Thirteen more roadmap and task documents were one small remainder from
+finished, and the operator asked for as many as possible in the archive
+(2026-11-08). Those remainders live here now (`../archive/README.md`,
+`archive/`), each naming where its history is; `imu-gps-integration.md` and
+W10 carry nothing because every box was ticked, and `workbench-workflows.md`
+carries nothing because its one stale partial (W2) was ticked on the evidence
+that closed its task checklist.
+
+- [ ] **D03.42 Phone UI: the on-device checks.** *From `../archive/phone-ui.md`
+  P1.2 and its "Remaining" list.* Everything is built and tested on the laptop
+  (Playwright phone project included); what is left needs a Pi, the truck or a
+  real phone, in one session there (operator, 2026-10-13). **P1.2 bench
+  acceptance** (nothing to build): on a freshly installed Pi with no WiFi
+  profile, provision from Android Chrome and confirm the returned dashboard link
+  opens, a second provisioning is refused until a window is opened, and nRF
+  Connect reads the status characteristic. The same session owes the P2.4 key
+  cycle on the truck (lag after ACC; ACC never reads as ON on the Xterra), a
+  real update from the phone (P3.1; the `safe.directory` fix was confirmed only
+  on git 2.39.5 in a container), P5.2 on Android (progress across screen sleep;
+  the download landing in Downloads), and a pass on a real phone and mobile
+  Safari with icon masking. **Accept:** each recorded here with date and device.
+- [~] **D03.43 External sensors never train: the retrain half of the source
+  gate.** *From `archive/H01-source-policy.md` H01.1.* The gate is built and
+  tested offline: `TRAINABLE_SOURCES` in `src/telemetry.py`,
+  `src/trainability.py`, a refusal in every feature chooser and in behavior
+  recipes and artifact load, `tests/test_trainability.py` (26). The corpus
+  diff is 348 → 344 columns, exactly the `gps:speed` family. Serve is left
+  alone on purpose: the deployed IF (2026-09-20) and LSTM (r2, 2026-09-24)
+  manifests still carry `gps:speed` and its `__mean`/`__std`/`__roc`, and
+  excluding them at serve time would blind them (the D02.5 failure). The IF
+  load audit lists them as `policy_violations`. **Owed:** "the next retrained
+  manifests carry no external-sensor feature", which needs a retrain that is
+  *deployed*; D03.25 and A06 own the retrain. The undeployed 2026-10-08
+  no-memory LSTM candidate (D03.52) already drops the four `gps:speed`
+  columns. **Accept:** after that deploy, neither manifest's feature list names
+  a `gps:`, `imu:` or `sensor:` column.
+- [~] **D03.44 A model hot-swap on the Pi: measure the swap time.** *From
+  `archive/A01-scoring-correctness.md` A01.6.* Code done 2026-09-22
+  (`src/daemon/inference_worker.py`): the child answers `WorkerReady` after a
+  `WorkerSwap`, and until then the parent scores the Isolation Forest
+  in-process and drops the sequence job, so a swap is "sequence not ready",
+  not a 3 s reply timeout. Seven tests in `tests/test_scoring_continuity.py`,
+  all failing against `606e4ab`. **Owed (Pi):** hot-swap one artifact and read
+  `last_swap_seconds` and `last_load_seconds` under
+  `/status.detectors.inference.worker_swaps` (`startup_seconds` is there from
+  the first boot); the load was estimated at 2–7 s against the old 3 s
+  timeout. No measurement is recorded in the docs (checked 2026-11-08).
+- [~] **D03.45 Fuel Comp fit: re-run on the corpus once the deciding band has
+  data.** *From `archive/N02-fuel-comp-fit.md` N02.7.* Run 2026-11-08 at the
+  desk (record `data/analyses/2026-11-08-n02-7-fuel-comp-corpus.md`): 112
+  sessions from 08-03, 13 drives, 564 samples. Held-out RMS 2.848 % current
+  against 3.275 % for the cells, **no improvement**. The 20261004 drives split
+  at the fuel-pump change: pre-pump fit 0 proposed, post-pump fit 0 proposed
+  and 22 insufficient. **The restore prediction is not passed and unresolved:**
+  the deciding band (≥ 144, 4,000–5,600 rpm) has 3 post-flash samples from one
+  pull and none pre-pump. Per the item's rule no factor is proposed. **Owed
+  (truck):** WOT pulls at 4,000–5,600 rpm on two drives with
+  `sensor:FUEL_PRESSURE` logged through the pull, and part-throttle closed
+  loop with purge commanded 0 on two drives; then re-run the record's
+  `restore_eval.py`. **Accept:** the restore prediction passes (the proposal
+  may inform an edit) or fails with the reason recorded (no proposal).
+- [~] **D03.46 Cold start: the Pi trace of what recording still imports.**
+  *From `archive/S01-cold-start.md` S01.3.* Desk half done 2026-09-22:
+  `src.dashboard.api`, `src.daemon.inference`, `src.models.isolation_forest`,
+  `src.control.trip_end`, python-OBD with pint, and httpx moved off the
+  recording path (the laptop loads 921 modules there, 1,064 before), pinned by
+  `tests/test_cold_start_imports.py::test_recording_path_does_not_import` (18
+  cases). Not moved: `sequence_training`/`sequence_dataset` through
+  `components` (~14 ms, A02's files), and pandas/numpy, which 17 recording
+  modules import at the top (a refactor of collection and storage code, not a
+  lazy import). `build_components` and the `FrameDecoder.from_path` bindings
+  read still run before the collector tasks and are not broken down. **Owed:**
+  the Pi cold trace by S01's method (drop caches, restart, `py-spy dump` every
+  ~1.5 s until `/status` answers). **Accept:** no non-collection import before
+  `first_record_stored`.
+- [~] **D03.47 Move the root filesystem off the SD card.** *From
+  `archive/S01-cold-start.md` S01.7.* **Decided yes (operator, 2026-10-04), in
+  two steps.** Now: a USB 3 drive whose NVMe later moves to the base with its
+  data intact, so the SD card is cloned once; set `usb_max_current_enable=1`
+  first (the X1202 feeds the Pi through pogo pins, so the Pi assumes 3 A and
+  caps USB at 600 mA). Later: an NVMe base under the Pi in the slot the retired
+  X1202 frees, with the power side on the supercapacitor board
+  (`CANary-PWR-Spec.md`, `CANary-HAT-Revisions.md` §13.3.0). **Landed, a
+  different step:** `/data` on a USB NVMe (`61e725ea`, 2026-10-10; all of
+  `/data` read cold in 47 s against ~225 s from the SD card), optional per Pi.
+  **Owed:** the *root* move as its own task list (clone, EEPROM boot order,
+  confirm `memory.max` and the cmdline edit survive), and after each step a
+  cold re-measure by S01.1's method. No document records that the root has
+  moved. The numbers it is meant to cut: imports 28.6 s cold against 3.8 s
+  warm, the IF artifact 34 s against 3.3 s.
+- [~] **D03.48 Sequence detector: the `engine_response` ablation.** *From
+  `archive/A03-sequence-inputs-and-training.md` A03.2.* Design done 2026-09-23
+  as a feature-spec option (`src/models/sequence_feature_set.py`,
+  `train_sequence.py --feature-set engine_response`): inputs condition the
+  encoder, targets are the only loss, threshold and score; the deployed 361
+  columns resolve to 43 context and 39 target columns, 279 dropped with reasons;
+  `all_channels` stays the default (`tests/test_sequence_feature_set.py`). **The
+  A02-protocol ablation could not run (2026-10-03):** on r2's split
+  `engine_response` was refused by the trainer's coverage guard (82.4 % of
+  windows against 90.0 % required) because its 39 targets are polled far more
+  sparsely than the 43 context columns. A finding, not a fault to bypass; the
+  floor is not lowered. **Owed:** the targets polled densely enough on
+  `default` (D03.34), or a floor for an `engine_response` artifact as an
+  operator decision (A06's); then both sets trained and graded by
+  `evaluate_detectors.py` on the same drives, per drive, against A02.11.
+- [~] **D03.49 Sequence detector: one source per quantity, ablated.** *From
+  `archive/A03-sequence-inputs-and-training.md` A03.3.* Implemented inside
+  `engine_response` 2026-09-23: a broadcast channel is dropped for the PID it
+  mirrors only when the ground-truth suite confirms the pair
+  (`test_every_dropped_mirror_is_confirmed_by_the_ground_truth_suite`); the
+  four coolant channels become `obd:COOLANT_TEMP`; targets keep no
+  `__mean`/`__std`/`__roc`, inputs keep `__roc` only, so
+  `BAROMETRIC_PRESSURE__std` is gone; unconfirmed same-quantity pairs
+  (`did:ECM_RPM` and `obd:RPM`) are listed in `same_quantity_unconfirmed`.
+  **Owed:** the ablation D03.48 owes, before any `__std`/`__roc` target comes
+  back or the set is deployed.
+- [~] **D03.50 Sequence detector: a "top feature" that means something.**
+  *From `archive/A03-sequence-inputs-and-training.md` A03.7.* The short-term
+  half is done 2026-09-23: events carry `detail.channel_ranking =
+  "largest_deviation_from_training_envelope"` and a note that it is not a
+  cause, with a `ranking_scope` stamp (`all_channels` or
+  `engine_response_targets`), and the anomaly row and evidence card say so
+  (`lib/evidence.channelRankingCaption`). Tests: `test_event_from_lstm_result`,
+  `test_context_inputs_are_never_scored_or_ranked`,
+  `ModelEvidenceHealth.test.ts`. **Owed:** attribution over engine-response
+  targets only, grouped by channel family, with driving conditions labelled as
+  context. The engine already keeps `engine_response` context columns out of
+  the ranking; the rest waits on D03.48, D03.49 and A06's decision.
+  **Accept:** judged on A02's protocol against the current artifact, same
+  held-out drives and rows, per drive.
+- [~] **D03.51 Isolation Forest: the next retrain, once idle and highway have
+  three drives.** *From `archive/A06-detector-roles.md` A06.3.* Operator
+  decision 2026-09-23: (a) a full naturally aspirated retrain. Done: retrained
+  and evaluated on the laptop
+  ([report](../../../data/analyses/2026-09-23-a06-3-retrain-evaluation.md));
+  the LSTM r2 (`lstm_autoencoder_2026-09-24T035125.284392Z`) went to the Pi
+  2026-09-24 beside the unchanged `isolation_forest_2026-09-20T054703`, the
+  operator having chosen to deploy the LSTM only. The IF replay diff is done
+  (D03.25, 2026-10-03): on D6 the candidate scores 422 of 782 ticks and none on
+  highway, against the deployed IF's 748; events identical, neither IF crosses
+  its threshold. **Owed:** the next IF retrain once idle and highway clear
+  `min_training_drives_per_mode` (3; each rested on 2 drives), and the cost of
+  600 trees per tick, measured only for an IF that is deployed. Tracked with
+  D03.25.
+- [~] **D03.52 LSTM retrain without memory features: the operator's choice and
+  the deploy.** *From `archive/A06-detector-roles.md` A06.3, nested item
+  (operator-approved 2026-10-08; B08.4's owed retrain).* Trained and evaluated
+  2026-10-08, not deployed: `models/_candidates/2026-10-08-na-r2-nomem/`
+  (gitignored; set aside by the A02.3 gate, D6 holding 0.40 engine-h against 1
+  needed). **The feature-set acceptance failed:** it asked for r2 minus four
+  memory features, but 254 → 184 columns (also 28 unpolled Mode 01 columns, 4
+  `gps:speed`, 38 `sparse_for_grid`; 4 `derived:AFR_CENSORED_B2` added) and the
+  r3 parked-row filter left 600/158 windows. On D6 it sits with r3, not clearly
+  apart from r2 (per-channel 47.9 FA/eh [28.8, 74.7] against 20.2 [8.7, 39.7];
+  global 0 episodes; one drive); every number is in the candidate's
+  `evaluation/`. **Owed:** the operator's choice of feature set and an
+  `--accept-unbudgeted-thresholds` reason. If deployed: refresh
+  `tests/fixtures/deployed_manifests`, drop the stale
+  `manifest_unproducible_allowlist.yaml` entry, and rework
+  `test_default_profile_b08_context.py::test_the_deployed_lstm_carries_the_spark_window_so_the_guard_can_fail`.
+- [~] **D03.53 Sequence tick budget: the Pi measurement and the operator's
+  cadence.** *From `archive/A06-detector-roles.md` A06.6.* Desk half done
+  2026-10-05, the cadence route (int8/ONNX not taken; ONNX Runtime is not
+  installed): `models.sequence_forward_every_n_ticks` (default 1; n ≤ 3 under the
+  shipped 3-in-8 s persistence gate) with `ForwardCadence` in
+  `src/models/inference.py`, carried through A02.3 budget levels, harness
+  grading, A06.5 verdicts and benchmark comparability;
+  `tests/test_sequence_cadence.py`, 41 passed. On a held-out real drive
+  (`2026-10-04T194342`, r2 LSTM) 0 of 637 scored results differ at n = 3. Laptop
+  `observe` median 12.18 ms → 2.42 ms, though `reconcile_feature_frame_to_spec`
+  (every tick) is most of the stage there. **Owed (Pi):** `stages.sequence` and
+  missed ticks on the truck at n = 1 against n = 2 or 3 on the same drive
+  conditions; the operator's choice of n; any artifact later carrying an A02.3
+  level must have it chosen at that n. P02's int8/ONNX option is still open.
+- [~] **D03.54 Plausibility range check: the benchmark drives through the
+  committee-coverage classifier.** *From `archive/A05-plausibility-checks.md`
+  A05.2.* Done: the range check runs on every arrived sample before the quality
+  gate and reproduces one known answer (pre-`d947afe` PID 0x0E 0xFF stored as
+  63.5 degBTDC: 14 confirmed on the 10 pre-fix calibration drives, none later).
+  The benchmark's known answer did not reproduce on `2026-08-07T164617` and
+  `2026-09-18T173749` (spikes 45/50, scales 20/40; every miss RPM or
+  THROTTLE_POS at idle, inside the envelope), so on 2026-10-13 the operator
+  restated it (A05.8): the committees own those faults, and plausibility owns
+  those that leave the range or slew envelope (25/25 on the committed 08-03
+  slice). **Owed:** run `scripts/evaluate_committee_coverage.py` on those two
+  drives (`~/canary-data`) to confirm each of the 5 spike and 20 scale misses
+  is owner `committee` and plausibility-owned ones confirm at 100 %; by-hand
+  analysis only so far. Can share the run with D03.55 (ii).
+- [~] **D03.55 Plausibility on A02's harness: what the 2026-10-13 decision left
+  open.** *From `archive/A05-plausibility-checks.md` A05.8.* Measured (evidence
+  `data/analyses/2026-09-23-a05-plausibility-evaluation.json`): clean 0 confirmed
+  on 38 drives and 17 captures (rules revised on them) and on 12 unseen sessions
+  (2026-09-26); spike 97.5 %, scale 75 %, drift 72 %, stuck 12 %, dropout 9 %;
+  realistic faults 0, as designed; `plausibility` is a baseline in A02's harness.
+  Operator decision 2026-10-13: the committees own RPM/THROTTLE faults at idle and
+  stuck-at-cruise; priority PIDs retry after 10 s; the unnamed-channel gaps are
+  accepted, not a remainder. **Owed:** (i) a committee that reads RPM and
+  THROTTLE_POS ([H04.6](H04-committees.md)), since nothing catches the faults
+  the decision gave the committees; (ii) `evaluate_committee_coverage.py` on the
+  38 evaluation drives (per-owner recall where idle and cruise occur); (iii)
+  `plausibility.yaml` `tiers.fast.interval_seconds` stays 33 s until set from
+  `default`-profile drives recorded with the 10 s back-off (the 2026-11-08
+  `ltft-gate` gaps, 3.6 s RPM and 2.6 s THROTTLE_POS, were a ~2 Hz tuning-family
+  capture). Thin margin: a pending range read at engine stop on
+  `2026-09-23T164007` (`obd:mem:ECM_ENGINE_PERIOD`) stayed unconfirmed only by
+  the 1.0 s `confirm.range.min_separation_seconds`.
+- [~] **D03.56 Plausibility live: the Pi cost against the missed-tick budget.**
+  *From `archive/A05-plausibility-checks.md` A05.9.* Built and off by default:
+  `plausibility.enabled` wires the evaluator into the live tick
+  (`src/daemon/plausibility_live.py`), the per-tick cost is
+  `/status.detectors.inference.stages.plausibility`, and a confirmed record
+  reaches `AnomalyEventEmitter.emit_plausibility` (log, broadcast, ntfy push,
+  never in replay; `tests/test_plausibility_live_alerts.py`). Laptop: 1.84 µs
+  per sample; replaying `2026-09-18T173749` added 4.2 ms of loop time per 1 s
+  tick (stage median 2.5 ms, p95 3.3 ms). **Owed (Pi):** measure the per-tick
+  cost on the Pi against the missed-tick budget before enabling it on a drive.
+  **Accept:** `stages.plausibility` inside that budget.
+- [~] **D03.57 Timing behavior model: coverage for a load-aware context.**
+  *From `archive/B04-timing-and-airflow.md` B04.2.* Assessed 2026-09-23 on
+  ZS44A-20260920; stays exploratory. The RPM/load surface (candidate v3), judged
+  on 2 untouched drive groups
+  ([report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md)
+  §4): MAE 8.88° below 60 °C coolant (2 cold starts) against 4.21° at 90–100 °C,
+  10.9° below 20 % load (overrun) against 1.18° at 20–30 %, IAT strata 6.08° /
+  2.89° / 0.20° (high IAT is idle, so it stands in for operating point), baro
+  only 76–90 kPa. Neither IAT nor coolant explains the dominant error. **Owed
+  (data):** drives below 76 kPa on the calibration in force (air density), more
+  cold starts (coolant), and a way to model low-load overrun; B08.3/B08.4 own
+  the newer timing-lookup candidates. **Accept:** exploratory with the missing
+  coverage named, never an RPM/IAT-only fit or broadened bands.
+- [~] **D03.58 Air-charge normalization across pressure.** *From
+  `archive/B04-timing-and-airflow.md` B04.6.* Measured 2026-09-23: the
+  air-charge recipe (raw DID counts, scale unpinned, calibration-dependent)
+  populated 41 of 49 cells and missed its target, held-out MAE 1771 counts
+  against 1500; air mass (MAE 0.125 g/cycle) and ambient VE (3.17 %) both fail
+  B02, relative resolution 0.45 against 0.40; the test rows span baro 79–82 kPa
+  and IAT 20–58 °C. The pressure comparison is data-blocked. **Owed (data):**
+  independent drives below 76 kPa on the calibration in force, to compare
+  density-aware alternatives. Until then density normalization is not validated
+  across pressure, and missing pressure or IAT is an unavailable input, not
+  evidence of stability.
+- [~] **D03.59 Re-run the air-mass retirement decision with a low-pressure
+  drive.** *From `archive/B04-timing-and-airflow.md` B04.8.* Decided
+  2026-09-23: air mass is not retired. VE adds 0 unique detections (B04.7) and
+  fails B02, and air mass also fails (MAE 0.125 > 0.08 g, synthetic detection
+  0.25), so it stays diagnostic-only (B03.9 refresh). Fusion grouping is fixed:
+  `FusionScorer.behavior_source` derives the group from the graded channel
+  (`src/models/fusion.py::behavior_fusion_group`), so air mass and every VE
+  channel vote as one `behavior:airflow` voice
+  (`tests/test_fusion.py::test_one_measurement_is_one_voice_across_its_derived_channels`).
+  The behavior-side evidence is linked into D03.20. **Owed (data):** the
+  decision re-run with a < 76 kPa drive on the calibration in force, the same
+  data D03.58 waits on.
+- [~] **D03.60 Behavior models: the deployed inventory.** *From
+  `archive/B03-behavior-lifecycle-and-refit.md` B03.1.* Local side done
+  2026-09-21: `tools/inventory_behavior_artifacts.py` over
+  `src/analysis/behavior_inventory.py` records the artifact (hash, per-model
+  identity), policy, criteria, tune registry, overrides, every IF and sequence
+  manifest with the `deviation:*` columns it consumes (none do), and a deployed
+  comparison that reads `unknown` without a saved `/models/behavior` snapshot
+  (consumers in `data/analyses/2026-09-21-behavior-artifact-inventory.md`).
+  B03.9 hash-checked the artifact on the Pi on 2026-09-24. **Owed (Pi):** read
+  `/status.vehicle_state`, save the deployed `/models/behavior` snapshot, and
+  run the tool with `--deployed-snapshot`; do it with D03.62.
+- [~] **D03.61 Behavior models: candidates for the data-limited recipes.**
+  *From `archive/B03-behavior-lifecycle-and-refit.md` B03.6.* Candidates made
+  2026-09-23 (`scripts/refit_behavior_models.py` over 53 manifest paths into
+  `data/nissan-xterra-2008/_candidates/2026-09-23/`): 10 recipes fitted with
+  B02 evidence on untouched drives, every verdict `failed` (reasons in
+  `data/analyses/2026-09-23-behavior-refit-validation-report.md` §2). Found and
+  fixed: exposure counted 11 h of a parked truck (`EVALUATOR_VERSION` 3). The set
+  went out as a diagnostic-only refresh (B03.9). **Owed (data-limited; criteria
+  unchanged, missing data is a partial task):** warmup recipes (2 cold starts
+  then, `min_sessions` 3), cam (commanded cam never polled), TPS (244 rows
+  against 300), manifold VE (no MAP), LTFT balance (LTFT constantly 0.0 then;
+  learning has resumed, `70c1999e`, so re-check). **Accept:** each refits and
+  gets a B02 verdict on untouched held-out drives; a failed candidate never
+  overwrites the baseline.
+- [~] **D03.62 Behavior models: confirm the unscored-row fix on the Pi.** *From
+  `archive/B03-behavior-lifecycle-and-refit.md` B03.9.* Operator decision
+  2026-09-23: promote the candidate set as a **diagnostic-only refresh**, though
+  the qualified set is empty. Deployed 2026-09-24 16:03Z (build `2971d79`,
+  `scripts/restart_canary.sh`, no capture): hash `816c150b…e565` matched; 12
+  models, all `diagnostic_only` with reasons, seen live ~16:07Z. Desk part
+  landed 2026-09-25: `BehaviorObservation` nulls `severity` on an unscored tick
+  and `not_scored` names the kind (`off_map`, `actual_stale`, …), in dashboard
+  and MCP (`tests/test_behavior_live.py`, `BehaviorModelsPanel.test.ts`).
+  Rollback: `data/nissan-xterra-2008/_prior/2026-09-24T024700/` (laptop) or git
+  `2971d79^`. **Owed (Pi):** pull the build carrying the 09-25 change and confirm
+  a live off-map row reads `severity: null` with its `not_scored` kind.
 ## Opened 2026-09-23 on the drive
 
 - [x] **D03.28 `GET /anomalies` parses the whole anomaly history in the collecting

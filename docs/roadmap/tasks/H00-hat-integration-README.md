@@ -14,7 +14,7 @@ PENDING-HARDWARE used bare `H0`–`H9`; these are `H01.1` onward.)
 
 | File | Scope |
 |---|---|
-| [`H01-source-policy.md`](H01-source-policy.md) | Which sources may train or score detectors; source allowlist sweeps; runtime dependencies; stale docs |
+| [`H01-source-policy.md`](archive/H01-source-policy.md) | Which sources may train or score detectors; source allowlist sweeps; runtime dependencies; stale docs |
 | [`H02-imu.md`](H02-imu.md) | LSM6DSOX config and collector, record load, frame resolution, known-answer validation |
 | [`H03-hat-platform.md`](H03-hat-platform.md) | 12 V sense, PPS → chrony, GNSS rate, uart0 default, barometer (deferred) |
 | [`H04-committees.md`](H04-committees.md) | Sensor cross-checks that flag: OBD ↔ GPS speed, OBD ↔ HAT baro, longitudinal accel |

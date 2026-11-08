@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Strip one Pi's identity from an installed CANary so its SD card can be
-# imaged and handed to someone else (docs/roadmap/phone-ui.md P2.4).
+# imaged and handed to someone else (docs/roadmap/archive/phone-ui.md P2.4).
 #
 #   sudo scripts/prepare_image.sh        # then power off and image the card
 #

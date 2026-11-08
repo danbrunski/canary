@@ -1,10 +1,14 @@
 # A03 — sequence detector inputs and training
 
+> **Archived 2026-11-08.** A03.1, A03.4–A03.6 and A03.8 landed. A03.2, A03.3 and A03.7
+> wait on one ablation and continue as **D03.48**, **D03.49** and **D03.50** in
+> `../D03-open-work.md`.
+
 **Depends on:** A02 for evaluation. Items that change the trained model take
 effect only at the next retrain, which the operator deferred on 2026-09-22
 (D03.25). A06 decides whether that retrain happens for the naturally
 aspirated engine at all. Code and tests can land before then. Follow
-[A00](A00-anomaly-detectors-README.md).
+[A00](../A00-anomaly-detectors-README.md).
 
 The 2026-09-20 artifact reconstructs 361 columns: 98 channel families × raw,
 `__mean`, `__std`, `__roc`, with duplicate sources for the same quantity.
@@ -99,7 +103,7 @@ what the code says it means.
       344 ms on 2026-09-24. *Was:* serving validation on an engine-running,
       non-passive drive. It is the same drive as A06.2 and A01.7.
 - [~] **A03.2 — Condition on driving conditions; reconstruct engine
-  responses.** Split the columns into:
+  responses.** → **carried to D03.48** (2026-11-08). Split the columns into:
   - *inputs*: operator commands and environment, such as rpm, throttle or
     pedal, speed or gear, baro, IAT, coolant, AC load and supply voltage;
   - *targets*: what the engine does in response, such as air mass, trims,
@@ -174,7 +178,7 @@ what the code says it means.
     for an `engine_response` artifact becomes a decision. That is A06's and
     the operator's call; the floor is not lowered here. A03.7 stays blocked
     on this.
-- [~] **A03.3 — De-duplicate sources and justify every derived column.**
+- [~] **A03.3 — De-duplicate sources and justify every derived column.** → **carried to D03.49** (2026-11-08).
   - Four coolant channels contribute 19.2 % of the global-score numerator
     from 7.1 % of the observed cells.
   - `BAROMETRIC_PRESSURE__std` is a step detector: its scaler σ is 0.21 and
@@ -299,7 +303,7 @@ what the code says it means.
     restart sibling empties an explicit two-session list; no artifact is
     written) and the A03.6 addition to
     `test_bakeoff_holdouts_take_their_whole_drive`.
-- [~] **A03.7 — Make "top feature" mean something or stop showing it.**
+- [~] **A03.7 — Make "top feature" mean something or stop showing it.** → **carried to D03.50** (2026-11-08).
   Attribution today is each channel's MAE divided by that channel's own
   0.999 quantile, over every column including driving conditions and rolling
   statistics. On the altitude trip it named `BAROMETRIC_PRESSURE` on every

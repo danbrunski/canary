@@ -1,5 +1,9 @@
 # Roadmap: the phone as the primary UI
 
+> **Archived 2026-11-08.** Every item is built and tested on the laptop. The one
+> open box, P1.2 (bench acceptance), and the four other on-device checks in
+> [Remaining](#remaining) continue as **D03.42** in `../tasks/D03-open-work.md`.
+
 Status: **desk work complete (2026-10-12); hardware checks open.** Every item
 is built and tested on the laptop, including a Playwright phone project.
 What remains needs a Pi, the truck or a real phone, plus installer wiring
@@ -46,7 +50,7 @@ pasted token. Each row below is now built, as each item records.
   `install_pi.sh` installs and enables `canary-provision.service`
   (`8f46a20`, `test_phone_setup_update_and_first_boot_units_are_installed`).
   Its on-device run is P1.2.
-- [ ] **P1.2 Bench acceptance.** A test, with nothing to build, deferred to
+- [ ] **P1.2 Bench acceptance.** → **carried to D03.42** (2026-11-08). A test, with nothing to build, deferred to
   the truck and phone session (operator, 2026-10-13). On a freshly installed
   Pi with no WiFi profile, provision from Android and confirm three things:
   - the dashboard link the provisioner returns opens;

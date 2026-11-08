@@ -171,7 +171,7 @@ class ProfilesConfig(_Strict):
 
 class AutoTagConfig(_Strict):
     """Thresholds for the motion-aware auto-tagger (Phase 2a.5/2a.6,
-    docs/roadmap/imu-gps-integration.md). One taxonomy, one config block:
+    docs/roadmap/archive/imu-gps-integration.md). One taxonomy, one config block:
     both the offline pass (``scripts/autotag.py``) and the live daemon hook
     evaluate the exact same thresholds, so tuning them (as real drives
     accumulate) never needs a redeploy — same philosophy as the behavior

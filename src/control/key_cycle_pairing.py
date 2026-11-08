@@ -1,6 +1,6 @@
 """Pairing by key cycle: ACC -> ON -> ACC proves someone is in the car.
 
-docs/roadmap/phone-ui.md P2.4 (operator decision 2026-10-12). A device asks to
+docs/roadmap/archive/phone-ui.md P2.4 (operator decision 2026-10-12). A device asks to
 pair (``POST /pair/request``) and the dashboard tells the person to turn the
 key from ACC to ON and back to ACC. Nobody outside the car can do that, and
 nothing secret crosses Bluetooth or the network for it.

@@ -44,7 +44,7 @@ hardware:
     device: /dev/ttyUSB0
     baudrate: 9600
   # Optional 3-axis IMU (accel + gyro). Phase 2a software slice only — no
-  # collector reads this yet (Phase 2b, docs/roadmap/imu-gps-integration.md).
+  # collector reads this yet (Phase 2b, docs/roadmap/archive/imu-gps-integration.md).
   # `disabled` (default) is a hard requirement: the daemon runs normally
   # without it, same as gps.enabled=false above.
   imu:
@@ -233,7 +233,7 @@ preprocessing:
       speed_max: 80
     highway:
       speed_min: 80
-    # Phase 2a.7 (docs/roadmap/imu-gps-integration.md) — IMU-gated modes.
+    # Phase 2a.7 (docs/roadmap/archive/imu-gps-integration.md) — IMU-gated modes.
     # INERT today: imu:ACCEL_LON_MAX/ACCEL_LAT_MAX (Phase 2a.3 decimation
     # output) don't exist in any real session — no IMU hardware yet (Phase
     # 2b) — so the segmenter finds these candidate columns entirely absent

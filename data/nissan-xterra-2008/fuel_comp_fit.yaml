@@ -5,7 +5,7 @@
 # hash-checked by src/analysis/fuel_comp_rom.py; the per-sample assembly is
 # src/analysis/fuel_comp_samples.py. Sources: docs/ecu-firmware-analysis.md
 # ("Fuel Comp load input 0xFFFF118A, and how BFS is formed"),
-# docs/roadmap/tasks/N02-fuel-comp-fit.md.
+# docs/roadmap/tasks/archive/N02-fuel-comp-fit.md.
 #
 # Every number here is a declared constraint with its evidence. None is chosen
 # from the size of a fuelling residual. `status: proposed` marks a value set

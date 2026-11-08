@@ -288,7 +288,7 @@ export function navItemClass(active: boolean): string {
 }
 
 // ---------------------------------------------------------------------------
-// Phone layout (docs/roadmap/phone-ui.md P2.2). Below 600px the sidebar and
+// Phone layout (docs/roadmap/archive/phone-ui.md P2.2). Below 600px the sidebar and
 // the header's widget row give way to a bottom bar of five entries, a "More"
 // sheet holding the rest of NAV, and one header menu.
 // ---------------------------------------------------------------------------

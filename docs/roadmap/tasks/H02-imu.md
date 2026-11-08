@@ -1,7 +1,7 @@
 # H02 — the IMU (LSM6DSOX on the HAT)
 
 Part of [H00](H00-hat-integration-README.md). Supersedes Phase 2b items 2b.1,
-2b.2 and 2b.4 of `docs/roadmap/imu-gps-integration.md`, which planned a
+2b.2 and 2b.4 of `docs/roadmap/archive/imu-gps-integration.md`, which planned a
 BNO055. What is already built there stays: the `imu` source, `ImuConfig`,
 `imu_decimation.py`, `imu_frame.py`, the auto-tagger and the committee
 declarations (Phase 2a, all ticked).

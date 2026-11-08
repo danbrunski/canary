@@ -149,7 +149,7 @@ export function itemForGroup(
 }
 
 // ---------------------------------------------------------------------------
-// Phone navigation (docs/roadmap/phone-ui.md P2.2, operator decision
+// Phone navigation (docs/roadmap/archive/phone-ui.md P2.2, operator decision
 // 2026-10-12: the five proposed entries). Below 600px a bottom bar holds the
 // five things done from a phone; everything else in NAV sits in the grouped
 // "More" sheet, derived from NAV, so a page registered above appears there

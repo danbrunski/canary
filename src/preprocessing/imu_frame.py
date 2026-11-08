@@ -2,7 +2,7 @@
 
 Turns raw body-frame ``imu:ACCEL_X/Y/Z`` into frame-resolved
 ``imu:ACCEL_LON``/``imu:ACCEL_LAT`` (vehicle-longitudinal / vehicle-lateral,
-in g), per ``docs/roadmap/imu-gps-integration.md`` ("Gravity / frame
+in g), per ``docs/roadmap/archive/imu-gps-integration.md`` ("Gravity / frame
 resolution"). Three steps, run in this order:
 
 1. **Gravity estimate** (:func:`estimate_gravity`) — a low-pass of the

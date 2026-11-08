@@ -1,8 +1,11 @@
 # A05 — deterministic plausibility checks
 
+> **Archived 2026-11-08.** The checks are built and evaluated. A05.2, A05.8 and
+> A05.9 continue as **D03.54**, **D03.55** and **D03.56** in `../D03-open-work.md`.
+
 **Depends on:** A03.1's "sample arrived" flag for the stuck and freshness
 checks; A02.4 to evaluate. No retrain. Follow
-[A00](A00-anomaly-detectors-README.md).
+[A00](../A00-anomaly-detectors-README.md).
 
 Gross sensor faults are the cheapest thing to catch, and the current
 detectors miss them. In the 2026-09-20 fault-injection benchmark the
@@ -58,7 +61,7 @@ code.
     `test_a_channel_with_no_stated_limit_reports_unchecked_not_ok`,
     `test_profile_mode_names_must_exist_in_the_segmenter`,
     `test_the_xterra_profile_resolves_against_its_catalogs_and_modes`.
-- [~] **A05.2 — Range check.** Flag a value outside its physical limits, per
+- [~] **A05.2 — Range check.** → **carried to D03.54** (2026-11-08). Flag a value outside its physical limits, per
   sample, naming the channel, value and limit.
   - Check against the raw sample, before resampling or forward-fill.
   - The first run should reproduce the known answer: every injected spike and
@@ -170,7 +173,7 @@ code.
 - [x] **A05.7 — Emit evidence, not just alerts.** Every detection writes a
   record naming the channel, check, value, limit, operating mode and sample
   times. This is the shape the second brain's evidence store will use
-  ([ECU second brain](../ecu-second-brain.md), capability 2). Dashboard text
+  ([ECU second brain](../../ecu-second-brain.md), capability 2). Dashboard text
   is rendered from the record.
   - Evidence: `src/plausibility/evaluator.py` `EvidenceRecord` (schema
     `plausibility-evidence/1`: state, channel, check, value, limit, limit kind and
@@ -180,7 +183,7 @@ code.
     `<anomalies_dir>/plausibility-evidence.jsonl`, replays
     `<anomalies_dir>/_replay/<id>.plausibility-evidence.jsonl`. Test:
     `test_evidence_round_trips_and_text_is_rendered_from_the_record`.
-- [~] **A05.8 — Evaluate on A02's harness.** Required results:
+- [~] **A05.8 — Evaluate on A02's harness.** → **carried to D03.55** (2026-11-08). Required results:
   - 100 % of the plumbing faults (spike, scale, stuck, dropout, drift at
     today's magnitudes);
   - zero confirmed alerts on clean held-out drives;
@@ -292,7 +295,7 @@ code.
       spike/scale/drift on RPM/THROTTLE_POS, or stuck on RPM/SPEED; `unassigned`
       otherwise, reported and never folded into either denominator.
       Evidence:
-      [`2026-10-13-a05-committee-coverage-slice.json`](../../../data/analyses/2026-10-13-a05-committee-coverage-slice.json).
+      [`2026-10-13-a05-committee-coverage-slice.json`](../../../../data/analyses/2026-10-13-a05-committee-coverage-slice.json).
       This is the committed 08-03 ground-truth slice: 420 s of driving, 5 channels
       x 5 kinds x 5 runs, `--assume-gps-fix` because the slice was cut without
       sats/HDOP. The 38 evaluation drives are not on the machine this ran on.
@@ -328,7 +331,7 @@ code.
         `::test_on_the_real_slice_no_committee_reads_rpm_and_speed_is_caught_in_part`
         (pins the counts above).
       **Remaining:** (i) a committee that reads RPM and THROTTLE_POS, now
-      [H04.6](H04-committees.md) (opened by operator decision 2026-10-13). None
+      [H04.6](../H04-committees.md) (opened by operator decision 2026-10-13). None
       exists yet, so the faults the decision gives the committees are caught by
       nothing today.
       The resampled frame already carries broadcast copies
@@ -350,14 +353,14 @@ code.
     every other detector. The A02.11 table reads plausibility 0 FA/eh (0 %
     withheld) on 13 in-era held-out drives, and 0 recall on the five
     realistic (sub-range) faults, as designed
-    ([baseline](../../../data/analyses/2026-09-23-a02-detector-baseline.md)).
+    ([baseline](../../../../data/analyses/2026-09-23-a02-detector-baseline.md)).
     Those drives predate this rule set, so they are not unseen by it and (3)
     stands.
     (3) **Zero confirmed on unseen drives** — re-run
     `scripts/evaluate_plausibility.py --clean` on drives recorded after this rule
     set was frozen.
     **Met 2026-09-26: 0 confirmed on 12 unseen sessions, 1 pending**
-    ([evidence](../../../data/analyses/2026-09-26-a05-plausibility-unseen.json)).
+    ([evidence](../../../../data/analyses/2026-09-26-a05-plausibility-unseen.json)).
     - **Rules unchanged since the freeze:** `git diff 06a3188 HEAD` over
       `src/plausibility`, `plausibility.yaml` and the catalogs' `plausible_*`
       bounds shows only the confirmed-only `alert_sink`, the catalog
@@ -395,7 +398,7 @@ code.
       stays `[~]` for that item's named remainders: a committee that reads
       RPM/THROTTLE_POS, the per-owner run on the 38 evaluation drives, and the
       re-measured fast tier from drives recorded with the 10 s back-off.
-- [~] **A05.9 — Run it live and measure the cost.** Wire the evaluator into
+- [~] **A05.9 — Run it live and measure the cost.** → **carried to D03.56** (2026-11-08). Wire the evaluator into
   the live tick (or the collector's decode path for raw-sample checks).
   Measure per-tick cost on the Pi against the missed-tick budget before
   enabling it on a drive (Pi item).

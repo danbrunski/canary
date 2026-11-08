@@ -1,4 +1,4 @@
-// Pairing this device by key cycle (docs/roadmap/phone-ui.md P2.4).
+// Pairing this device by key cycle (docs/roadmap/archive/phone-ui.md P2.4).
 //
 // A device without a control token asks to pair, then the person in the car
 // turns the key ACC -> ON -> ACC. The Pi sees the ECM wake and sleep and

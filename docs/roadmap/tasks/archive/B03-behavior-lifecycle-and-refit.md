@@ -1,12 +1,15 @@
 # B03 — model demotion, baseline refit and rollout
 
+> **Archived 2026-11-08.** The other items landed. B03.1, B03.6 and B03.9
+> continue as **D03.60**, **D03.61** and **D03.62** in `../D03-open-work.md`.
+
 **Depends on:** B01/B02 for validated publication. Inventory and preparing
 demotions can start now. Each later B04–B07 release reuses the rollout steps.
-Follow [B00](B00-behavior-models-README.md).
+Follow [B00](../B00-behavior-models-README.md).
 
 ## Artifact lifecycle and consumers
 
-- [~] **B03.1 — Inventory the served and dependent artifacts.** Record local
+- [~] **B03.1 — Inventory the served and dependent artifacts.** → **carried to D03.60** (2026-11-08). Record local
   and, when reachable, deployed behavior-model versions, config/profile,
   calibration identity, overrides and validation evidence. Read vehicle state
   first; no access means deployed identity remains unknown. Enumerate IF/LSTM
@@ -19,7 +22,7 @@ Follow [B00](B00-behavior-models-README.md).
   the `deviation:*` columns it consumes (none do) and a deployed comparison
   that is `unknown` without a saved `/models/behavior` snapshot. The Pi was not
   contacted, so vehicle state was not read. UI/API/MCP consumers enumerated in
-  the [inventory](../../../data/analyses/2026-09-21-behavior-artifact-inventory.md).
+  the [inventory](../../../../data/analyses/2026-09-21-behavior-artifact-inventory.md).
   **Remaining:** read `/status.vehicle_state`, save the deployed
   `/models/behavior` and run `--deployed-snapshot` (with B03.9).
 - [x] **B03.2 — Separate display, learned features and direct alerts.** Make
@@ -53,7 +56,7 @@ Follow [B00](B00-behavior-models-README.md).
   qualifies it. Preserve historical fits/reports and raw channels. Prevent a
   partial refit or old artifact reload from silently restoring trusted status;
   test that demoted models do not contribute fusion votes.
-  *Done 2026-09-21:* [`data/nissan-xterra-2008/behavior_policy.yaml`](../../../data/nissan-xterra-2008/behavior_policy.yaml):
+  *Done 2026-09-21:* [`data/nissan-xterra-2008/behavior_policy.yaml`](../../../../data/nissan-xterra-2008/behavior_policy.yaml):
   `timing_advance_vs_rpm_iat` demoted and `timing_advance_vs_rpm_load`
   exploratory by model name (a future refit stays covered until the entry is
   removed), the current `cat_warmup` quarantined by `artifact_fingerprint`
@@ -76,7 +79,7 @@ Follow [B00](B00-behavior-models-README.md).
   with D02.5/D03.25. Do not reproduce the binding-retraction blindness incident
   by silently feeding missing or changed behavior features to old artifacts.
   *Swept 2026-09-21:* no tracked IF/sequence manifest consumes any
-  `deviation:*` column ([inventory](../../../data/analyses/2026-09-21-behavior-artifact-inventory.md)),
+  `deviation:*` column ([inventory](../../../../data/analyses/2026-09-21-behavior-artifact-inventory.md)),
   so the demotions strand nothing; demotion withdraws selection only, never
   production. `spec_producibility.behavior_feature_conflicts` (reported by
   `tools/check_manifest_producibility.py` as `WARN` beside the unproducible
@@ -112,7 +115,7 @@ Follow [B00](B00-behavior-models-README.md).
   Name missing corpus facts rather than selecting across calibration boundaries
   by convenience. Inspect legacy fits with absent tune provenance explicitly.
   *Done 2026-09-23 (operator corpus decision 2026-09-23: current calibration
-  only).* [Manifest](../../../data/analyses/2026-09-23-behavior-corpus-manifest.yaml): `resolve_session_revision() == ZS44A-20260920`
+  only).* [Manifest](../../../../data/analyses/2026-09-23-behavior-corpus-manifest.yaml): `resolve_session_revision() == ZS44A-20260920`
   selects **53 directories** (40 sessions + 13 captures, 482 MB) under
   `~/canary-data/sessions/nissan-xterra-2008`. Each one is pinned by content
   hash with its start time, row range, revision source, capture profile and
@@ -129,8 +132,8 @@ Follow [B00](B00-behavior-models-README.md).
   allowlist recorded beside it. Legacy fits: 7 of 8 published models carry
   no `tune_revision` and trained on ZS04C-stock/ZS44A-osiris-initial
   sessions, and `air_charge` is ZS44A-k106. None is on the current
-  calibration ([report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §0).
-- [~] **B03.6 — Produce isolated candidates.** Refit qualified retained
+  calibration ([report](../../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §0).
+- [~] **B03.6 — Produce isolated candidates.** → **carried to D03.61** (2026-11-08). Refit qualified retained
   recipes on the laptop, preserving grid/version provenance. Run B02 validation
   with untouched held-out drives and archive per-model pass/refusal reasons.
   An unsuccessful candidate cannot overwrite the qualified baseline or restore
@@ -142,7 +145,7 @@ Follow [B00](B00-behavior-models-README.md).
   grids carry (`grid_version` 1). The refit did not touch the published
   artifact; it was replaced afterwards by the operator-approved promotion
   (B03.9). 10 recipes fitted with B02 evidence on untouched drives; every verdict is
-  `failed`, and per-model reasons are archived in the [report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §2 and
+  `failed`, and per-model reasons are archived in the [report](../../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §2 and
   `behavior_models.yaml.report.json`. All 10 candidates' persisted held-out
   numbers reproduce exactly through the independent evaluator frame path.
   The carried-over `cat_warmup` stays quarantined and `timing_advance_vs_rpm_iat`
@@ -165,7 +168,7 @@ Follow [B00](B00-behavior-models-README.md).
   *Offline equivalent done 2026-09-23.* The evaluator (`evaluate()`: serving
   contract, then the daemon's `PersistenceGate` + dedupe) ran the published
   artifact on each candidate's own test drives, on identical eligible rows.
-  [Report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §3 and [JSON](../../../data/analyses/2026-09-23-behavior-refit-comparison.json) `baseline_vs_candidate_same_test_drives`:
+  [Report](../../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §3 and [JSON](../../../../data/analyses/2026-09-23-behavior-refit-comparison.json) `baseline_vs_candidate_same_test_drives`:
   - coverage and off-map: timing 6976→7261, air mass 6516→7238
   - residuals: fuel-trim MAE 5.39→4.09 %, timing warning width 23.1→13.2°
   - persisted events: fuel trim 44→6, VE 17→0; warm idle 6→6 (bias
@@ -182,9 +185,9 @@ Follow [B00](B00-behavior-models-README.md).
   `scripts/replay.py` had no behavior-event path.
 
   *Runtime replay done 2026-10-05; no truck or Pi needed.*
-  [Report](../../../data/analyses/2026-10-05-b03-7-behavior-replay-comparison.md)
-  and [JSON](../../../data/analyses/2026-10-05-b03-7-behavior-replay-comparison.json).
-  [`tools/replay_behavior_compare.py`](../../../tools/replay_behavior_compare.py)
+  [Report](../../../../data/analyses/2026-10-05-b03-7-behavior-replay-comparison.md)
+  and [JSON](../../../../data/analyses/2026-10-05-b03-7-behavior-replay-comparison.json).
+  [`tools/replay_behavior_compare.py`](../../../../tools/replay_behavior_compare.py)
   runs one `tools/replay_event_diff.drive_session` pass per side. It is not a
   second replay engine: the stored rows go through the daemon's own
   `LiveInferencePipeline` on the session clock, so `BehaviorDetector` grades,
@@ -285,7 +288,7 @@ Follow [B00](B00-behavior-models-README.md).
   `::test_live_abstain_reasons`, `tests/test_dashboard_api.py` (empty state),
   `src/dashboard/static/src/panels/BehaviorModelsPanel.test.ts` "status (B03.8)"
   (empty, eligible, demoted, failed, off-map, ineligible).
-- [~] **B03.9 — Deploy and verify the selected qualified set.** Use the
+- [~] **B03.9 — Deploy and verify the selected qualified set.** → **carried to D03.62** (2026-11-08). Use the
   existing artifact publication/transfer workflow and verify hashes on the Pi.
   Use the guarded restart script if a restart is necessary. Observe the
   requested versions and ordinary eligible observations; confirm demoted models

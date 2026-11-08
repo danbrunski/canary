@@ -1,7 +1,19 @@
 # Implementation task index
 
+**Status 2026-11-08: thirteen checklists archived.** Ten task checklists (W10,
+H01, A01, N02, S01, A03, A06, A05, B04 and B03) moved to [`archive/`](archive/),
+and three roadmap documents (`imu-gps-integration.md`, `workbench-workflows.md`
+and `phone-ui.md`) to [`../archive/`](../archive/), with their links. W10 and
+`imu-gps-integration.md` had every box ticked, and `workbench-workflows.md` had
+one stale index box (W2), ticked on its finished W02 checklist. The rest each had
+a small remainder (a Pi or truck step, an operator choice, or data that does
+not exist yet); those 21 items continue as D03.42–D03.62, under *Carried from
+archived roadmaps — 2026-11-08* in [`D03-open-work.md`](D03-open-work.md), and
+each archived document marks its items "carried to D03.NN". The A00, B00 and H00
+indexes link to `archive/`.
+
 **Status 2026-10-27: W10, Workbench areas and the ROM Editor's layout.**
-[`W10-navigation-areas-and-rom-editor-layout.md`](W10-navigation-areas-and-rom-editor-layout.md)
+[`W10-navigation-areas-and-rom-editor-layout.md`](archive/W10-navigation-areas-and-rom-editor-layout.md)
 answers the operator's "the navigation sidebar is getting pretty busy". The
 five NAV groups become areas on a bar above the Workbench. The sidebar lists
 one area's pages and collapses to a rail. System sits behind a gear. Part A
@@ -143,7 +155,7 @@ P02.1–P02.6 are desk items; P02.7–P02.10 need the Pi.
 
 **Status 2026-09-24: B02 and W02 archived.** Every box in both is ticked;
 they moved to [`archive/`](archive/), and the links in B00, W00 and
-`../workbench-workflows.md` point there.
+`../archive/workbench-workflows.md` point there.
 
 **Status 2026-09-24: R01–R08, the second refactor review.**
 [`R00-refactor-README.md`](archive/R00-refactor-README.md) indexes eight checklists
@@ -207,7 +219,7 @@ decisions on what the two detectors are for. The existing overnight queue is
 unchanged.
 
 **Status 2026-09-22 — two new checklists: cold start and the Pi updater.**
-[`S01-cold-start.md`](S01-cold-start.md) picks up after `04b6cd0` and
+[`S01-cold-start.md`](archive/S01-cold-start.md) picks up after `04b6cd0` and
 `a870887` took the daemon's first record from 93 s to 69 s after the unit
 starts on a cold boot: startup timing in `/status`, torch and the other heavy
 imports off the path to recording, a shorter VIN probe against a sleeping ECU,
@@ -241,7 +253,7 @@ D03.22, and a fourth reason for it arrived this week.
 **Status 2026-09-21 — a second live set: the workbench checklists.**
 [`W00-workbench-README.md`](archive/W00-workbench-README.md) indexes seven files
 (W01–W07) covering the dashboard regroup and the Engine Tuning pages planned in
-[`../workbench-workflows.md`](../workbench-workflows.md). They are independent
+[`../workbench-workflows.md`](../archive/workbench-workflows.md). They are independent
 of D03, which remains the live checklist for collection and diagnostics. W07
 (flash interlocks) has no dependency on the rest and must land before anything
 that can program a module exists.

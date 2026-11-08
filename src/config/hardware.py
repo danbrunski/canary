@@ -85,7 +85,7 @@ class SensorCanConfig(_Strict):
 class ImuConfig(_Strict):
     """3-axis IMU (accel + gyro) for motion-aware auto-tagging.
 
-    Phase 2a/2b (``docs/roadmap/imu-gps-integration.md``). Optional and
+    Phase 2a/2b (``docs/roadmap/archive/imu-gps-integration.md``). Optional and
     defaulted-disabled, same "configs without it keep loading and behave
     exactly as before" contract as ``GpsConfig``. Unlike ``GpsConfig`` there
     is no separate ``enabled`` bool: the doc's config sketch folds "no

@@ -1,4 +1,4 @@
-"""Live auto-tagger hook (Phase 2a.6, docs/roadmap/imu-gps-integration.md).
+"""Live auto-tagger hook (Phase 2a.6, docs/roadmap/archive/imu-gps-integration.md).
 
 Evaluates the exact same tag taxonomy ``scripts/autotag.py`` runs offline
 (``src.analysis.autotag``'s threshold table) once per daemon tick, writing

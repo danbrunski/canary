@@ -1034,7 +1034,7 @@ def test_can0_comes_up_on_every_boot(installer: Installer) -> None:
 
 
 def test_phone_setup_update_and_first_boot_units_are_installed(installer: Installer) -> None:
-    """docs/roadmap/phone-ui.md: BLE WiFi setup (P1.1), update from the
+    """docs/roadmap/archive/phone-ui.md: BLE WiFi setup (P1.1), update from the
     dashboard (P3.1) and an imaged Pi's first boot (P3.3) each need their unit
     on the Pi, not only in the checkout."""
     installer.run()

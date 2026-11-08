@@ -10,8 +10,8 @@ use `[~]` when code is complete but named validation or deployment remains.
 |---|---|---|---|
 | [B01](archive/B01-behavior-serving-contracts.md) ✅ archived | Derivative ordering and shared eligibility | None | Final serving check in B03 |
 | [B02](archive/B02-behavior-validation.md) | Reproducible evaluation, grouped holdouts, publication gates | Evaluator can start now; parity after B01 | New data only where coverage is missing |
-| [B03](B03-behavior-lifecycle-and-refit.md) | Demotions, compatibility, baseline refit, rollout | B01/B02 for publication; inventory now | Deployment and controlled replay |
-| [B04](B04-timing-and-airflow.md) | Useful timing resolution and airflow consolidation | B01/B02; B03 artifact policy | Matched operating-condition evidence |
+| [B03](archive/B03-behavior-lifecycle-and-refit.md) | Demotions, compatibility, baseline refit, rollout | B01/B02 for publication; inventory now | Deployment and controlled replay |
+| [B04](archive/B04-timing-and-airflow.md) | Useful timing resolution and airflow consolidation | B01/B02; B03 artifact policy | Matched operating-condition evidence |
 | [B05](B05-trim-cam-and-tps.md) | Activate existing trim, bank-balance, cam and TPS recipes | B01/B02; B03 artifact policy | Missing captures and final live check |
 | [B06](B06-lambda-delivery-error.md) | Target-versus-measured lambda residual | B01/B02; B03 artifact policy | Steady enrichment/lag evidence if absent |
 | [B07](B07-warmup-and-idle.md) | Validate warmup and retain useful idle baseline | B01/B02; B03 artifact policy | Independent cold starts/accessory states |

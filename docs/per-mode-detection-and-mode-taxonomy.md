@@ -22,7 +22,7 @@ shipped; this stub records where the behavior now lives.
   sessions), not on the training window — in-sample calibration once
   masked the TCN entirely.
 
-**Role (operator decision 2026-09-23, [A06](roadmap/tasks/A06-detector-roles.md)).**
+**Role (operator decision 2026-09-23, [A06](roadmap/tasks/archive/A06-detector-roles.md)).**
 Per-mode calibration did not make either detector fit to alert. On A02.11's
 held-out drives (`data/analyses/2026-09-23-a02-detector-baseline.md`, false
 alarms per engine-hour against a budget of 1) the Isolation Forest read 1.18

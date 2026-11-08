@@ -1,5 +1,9 @@
 # S01 — cold start: record sooner after power-on
 
+> **Archived 2026-11-08.** The other items landed. S01.3's remainder (the Pi cold
+> trace) continues as **D03.46** and S01.7's (the root filesystem off the SD
+> card) as **D03.47**, both in `../D03-open-work.md`.
+
 Opened 2026-09-22, after two fixes and a `py-spy` trace of the daemon's cold
 start on the Pi. Same conventions as D03: task-level truth is the checkboxes
 here, `[x]` only with the measurement in hand and the artifact linked, `[~]`
@@ -179,7 +183,7 @@ system starting beside it.
   with the LSTM (89.5 s), after recording began.
 
 - [~] **S01.3 Nothing on the path to recording imports what recording doesn't
-  need.** After S01.2, repeat the cold trace and list every heavy import still
+  need.** → **carried to D03.46** (2026-11-08). After S01.2, repeat the cold trace and list every heavy import still
   on the main thread before the collector tasks run. Known candidates:
   `src/daemon/server.py` imports `src.dashboard.api.create_app` at module top,
   so the whole API module tree (FastAPI, every route's dependencies) loads
@@ -446,7 +450,7 @@ system starting beside it.
 
 ## Operator decision
 
-- [~] **S01.7 Move the root filesystem off the SD card?** **Decided yes,
+- [~] **S01.7 Move the root filesystem off the SD card?** → **carried to D03.47** (2026-11-08). **Decided yes,
   2026-10-04 (operator), in two steps.** *Now:* a USB 3 drive. Buying the final
   2230/2242 NVMe drive in a USB enclosure means it later moves to the base with
   its data intact, so the SD card is cloned only once. Set
@@ -454,7 +458,7 @@ system starting beside it.
   not USB-C PD, so the Pi assumes a 3 A supply and caps USB at 600 mA. *Later:*
   an NVMe base under the Pi, in the slot the retired X1202 frees. The power side
   moves to a supercapacitor power board between the Pi and the HAT
-  ([`CANary-PWR-Spec.md`](../../CANary-PWR-Spec.md),
+  ([`CANary-PWR-Spec.md`](../../../CANary-PWR-Spec.md),
   `CANary-HAT-Revisions.md` §13.3.0). Still owed after each step: re-measure
   with S01.1's method. The original question follows. Every remaining
   number above is dominated by cold random reads from the SD card: the same

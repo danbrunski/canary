@@ -1,5 +1,5 @@
 // Paired devices and approving a waiting pairing request
-// (`src/dashboard/routes/pairing.py`, docs/roadmap/phone-ui.md P2.4). All of
+// (`src/dashboard/routes/pairing.py`, docs/roadmap/archive/phone-ui.md P2.4). All of
 // these need a control token; a paired device's own token counts.
 
 import { controlJson, jsonBody, requireFields } from "./core";

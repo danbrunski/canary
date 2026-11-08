@@ -132,7 +132,7 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 > active anomaly on the dashboard, and cannot be the reason a fused event
 > fires: that needs an `alert`-role source among the agreeing voices. The
 > `agreement >= 2` gate is unchanged. Both learned detectors default to
-> `evidence` ([A06](roadmap/tasks/A06-detector-roles.md)), on A02.11's
+> `evidence` ([A06](roadmap/tasks/archive/A06-detector-roles.md)), on A02.11's
 > held-out table (`data/analyses/2026-09-23-a02-detector-baseline.md`: 14
 > drives in the artifacts' era, false alarms per engine-hour against a budget
 > of 1, 95 % drive-bootstrap intervals):

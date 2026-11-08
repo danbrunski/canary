@@ -1,12 +1,16 @@
 # IMU + GPS integration — motion-aware auto-tagging and grade de-confounding
 
+> **Archived 2026-11-08.** Every box is ticked: Phase 1 and Phase 2a are done,
+> and Phase 2b's remaining work moved to the H series (H02, H03, H04), as the
+> status note below says. Nothing carried.
+
 > **Status (2026-09-24, H01.4).** Phase 1 and Phase 2a are done. Phase 2b's
 > hardware is the **CANary-HAT rev 2.0** (checkout passed 2026-09-23): an
 > LSM6DSOX 6-axis IMU, a MAX-M10M GNSS with PPS and a BMP384 barometer (dead
 > on the first board). The remaining work is tracked in the H series, not
-> here: IMU in [`H02`](tasks/H02-imu.md), PPS / 10 Hz GNSS / barometer in
-> [`H03`](tasks/H03-hat-platform.md), sensor cross-checks in
-> [`H04`](tasks/H04-committees.md). Two things below are **historical** and no
+> here: IMU in [`H02`](../tasks/H02-imu.md), PPS / 10 Hz GNSS / barometer in
+> [`H03`](../tasks/H03-hat-platform.md), sensor cross-checks in
+> [`H04`](../tasks/H04-committees.md). Two things below are **historical** and no
 > longer the plan: the BNO055 recommendation (the HAT's IMU has no on-chip
 > fusion, so gravity/heading resolution stays ours, `imu_frame.py`), and the
 > BMP390 add-on (a BMP390 is only the footprint-compatible replacement for the

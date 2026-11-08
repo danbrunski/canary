@@ -2,7 +2,7 @@
 
 An image made from one Pi must not carry that Pi's identity: its control
 token would control every copy, its paired phone would control a customer's
-Pi, and its WiFi profile would close BLE setup (docs/roadmap/phone-ui.md
+Pi, and its WiFi profile would close BLE setup (docs/roadmap/archive/phone-ui.md
 P2.4). The first boot of each copy then makes the identity its own.
 """
 

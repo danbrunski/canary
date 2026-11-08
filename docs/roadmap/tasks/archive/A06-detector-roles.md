@@ -1,13 +1,18 @@
 # A06 — what the Isolation Forest and sequence detector are for
 
+> **Archived 2026-11-08.** The decisions are recorded and the other items landed.
+> A06.3's remainder (the next IF retrain) continues as **D03.51**, its nested
+> LSTM-without-memory retrain as **D03.52**, and A06.6 (the Pi measurement and
+> the operator's cadence) as **D03.53**, all in `../D03-open-work.md`.
+
 **Depends on:** the operator for every decision here. A02.11's baseline table
 supplies the evidence. Items marked *decision* stay `[~]` with the options
 named until the operator chooses; an implementer does not choose. Follow
-[A00](A00-anomaly-detectors-README.md).
+[A00](../A00-anomaly-detectors-README.md).
 
 The two detectors were built to say "something is unusual" across hundreds
 of features. The record so far, detailed in the
-[review](../../../data/analyses/2026-09-22-anomaly-detector-review.md):
+[review](../../../../data/analyses/2026-09-22-anomaly-detector-review.md):
 
 - **No confirmed fault catch.** No written record credits either detector
   with a real vehicle fault. The behavior validation report states "there is
@@ -48,7 +53,7 @@ training envelope". That is useful to know. It is not a diagnosis.
     it beating A02.5's baselines.
   - *Evidence now available (2026-09-23, awaiting the operator's choice):*
     A02.11's held-out table,
-    [`2026-09-23-a02-detector-baseline.md`](../../../data/analyses/2026-09-23-a02-detector-baseline.md).
+    [`2026-09-23-a02-detector-baseline.md`](../../../../data/analyses/2026-09-23-a02-detector-baseline.md).
     It is **provisional**: it is being re-run after a harness fix, so re-read
     it before deciding. First-run overall false alarms per engine-hour,
     against a budget of 1: Isolation Forest 1.45 [0.00, 4.29] with 78 % of
@@ -118,7 +123,7 @@ training envelope". That is useful to know. It is not a diagnosis.
     went from 7 to 114 scored windows out-of-process (15 to 87 in-process).
     `tests/test_live_sequence_ordering.py` fails on the old code.
     The Pi has run `6892c2c` since 2026-09-24 16:53:24Z
-    ([scan-tool note](../../../data/analyses/2026-09-24-scan-tool-bcm-ecm-session.md)),
+    ([scan-tool note](../../../../data/analyses/2026-09-24-scan-tool-bcm-ecm-session.md)),
     but CANary was passive in that session, so it says nothing about
     scoring. *Closed 2026-10-04 drive (Pi `a1da058`, daemon up 19:43:17Z, profile `default`; engine running 19:43–20:16Z, passive 19:48:23–~20:00Z by another caller, non-passive otherwise):* `sequence_envelope` counted **1,739 windows**
     (`envelope_recorded: true`, r2 LSTM): 367 inside, 904 outside, 468
@@ -142,7 +147,7 @@ training envelope". That is useful to know. It is not a diagnosis.
   - Whatever is chosen, A01.1–A01.4 are correctness fixes and land anyway.
   - *Evidence now available (2026-09-23, awaiting the operator's choice):*
     A02.11's held-out table,
-    [`2026-09-23-a02-detector-baseline.md`](../../../data/analyses/2026-09-23-a02-detector-baseline.md).
+    [`2026-09-23-a02-detector-baseline.md`](../../../../data/analyses/2026-09-23-a02-detector-baseline.md).
     It is **provisional**: it is being re-run after a harness fix, so re-read
     it before deciding. First-run overall false alarms per engine-hour,
     against a budget of 1: Isolation Forest 1.45 [0.00, 4.29] with 78 % of
@@ -150,11 +155,11 @@ training envelope". That is useful to know. It is not a diagnosis.
     global 3.38; fused 0.00. A05's deterministic plausibility checks are
     committed (`06a3188`, [A05](A05-plausibility-checks.md)). The role
     mechanism the decision would switch is in A06.5.
-- [~] **A06.3 — Decision: scope of the owed retrain (D03.25).** **Decided
+- [~] **A06.3 — Decision: scope of the owed retrain (D03.25).** → **carried to D03.51** (2026-11-08). **Decided
   by the operator, 2026-09-23: (a) a full naturally aspirated retrain now**,
   with the A02–A04 fixes and the A04.10 tree count (600). *Retrained and
   evaluated 2026-09-23; not deployed.*
-  [Report](../../../data/analyses/2026-09-23-a06-3-retrain-evaluation.md)
+  [Report](../../../../data/analyses/2026-09-23-a06-3-retrain-evaluation.md)
   (the `.json` beside it has every number).
   - **Corpus.** The operator's choice: sessions starting at or after the
     ZS44A-20260920 flash (2026-09-21T03:08:45Z, `era_resolver`), from
@@ -227,7 +232,7 @@ training envelope". That is useful to know. It is not a diagnosis.
     422 of 782 ticks and none on highway, against the deployed IF's 748.
     Events are identical, and neither IF crosses its threshold.
   - [~] **LSTM retrain without memory features (operator-approved
-    2026-10-08; B08.4's owed retrain).** *Trained and evaluated 2026-10-08;
+    2026-10-08; B08.4's owed retrain).** → **carried to D03.52** (2026-11-08). *Trained and evaluated 2026-10-08;
     not deployed; the feature-set acceptance failed (below).* Candidate
     `models/_candidates/2026-10-08-na-r2-nomem/` (gitignored), set aside by
     the A02.3 gate as `_refused-unbudgeted-20261008T210426Z-lstm_autoencoder/`
@@ -298,7 +303,7 @@ training envelope". That is useful to know. It is not a diagnosis.
     intervention and corpus boundary either way.
   - *Evidence now available (2026-09-23, awaiting the operator's choice):*
     A02.11's held-out table,
-    [`2026-09-23-a02-detector-baseline.md`](../../../data/analyses/2026-09-23-a02-detector-baseline.md).
+    [`2026-09-23-a02-detector-baseline.md`](../../../../data/analyses/2026-09-23-a02-detector-baseline.md).
     It is **provisional**: it is being re-run after a harness fix, so re-read
     it before deciding. First-run overall false alarms per engine-hour,
     against a budget of 1: Isolation Forest 1.45 [0.00, 4.29] with 78 % of
@@ -324,7 +329,7 @@ training envelope". That is useful to know. It is not a diagnosis.
     alarm names a component. (b) stays open as an A02-judged experiment.
   - *Evidence now available (2026-09-23, awaiting the operator's choice):*
     A02.11's held-out table,
-    [`2026-09-23-a02-detector-baseline.md`](../../../data/analyses/2026-09-23-a02-detector-baseline.md).
+    [`2026-09-23-a02-detector-baseline.md`](../../../../data/analyses/2026-09-23-a02-detector-baseline.md).
     It is **provisional**: it is being re-run after a harness fix, so re-read
     it before deciding. First-run overall false alarms per engine-hour,
     against a budget of 1: Isolation Forest 1.45 [0.00, 4.29] with 78 % of
@@ -503,7 +508,7 @@ training envelope". That is useful to know. It is not a diagnosis.
       - a refused artifact's verdict stays with it, with `accepted: false`;
       - the served directory gets no verdict.
 - [~] **A06.6 — Give back the tick budget if the sequence detector stops
-  alerting.** A novelty screen does not need 1 Hz. Measure it at a lower
+  alerting.** → **carried to D03.53** (2026-11-08). A novelty screen does not need 1 Hz. Measure it at a lower
   cadence, or post-drive, on the Pi, and return the time to the collector and
   the live second-brain loop (Pi item).
   - *Desk half done 2026-10-05: the cadence route.* int8/ONNX was not taken:
@@ -617,7 +622,7 @@ training envelope". That is useful to know. It is not a diagnosis.
     pass. The envelope check reads the buffer's condition columns, at 39 µs
     per window on the laptop. A lower-cadence screen could keep the check
     every tick and run the forward pass every n.
-  - *Option added 2026-09-26 ([P02](P02-raw-reads-evaluation-and-pi-costs.md)):*
+  - *Option added 2026-09-26 ([P02](../P02-raw-reads-evaluation-and-pi-costs.md)):*
     keep the forward pass on every tick but make it cheaper, using int8
     dynamic quantization or an ONNX Runtime export. The gain is unmeasured
     here. It is judged by replay score parity: scores within a stated
@@ -644,9 +649,9 @@ training envelope". That is useful to know. It is not a diagnosis.
     It also has the envelope badge (A06.2). `pnpm test` 357 passed,
     `pnpm typecheck` clean.
   Update, citing A02's numbers:
-  - [`CANary-overview.md`](../../CANary-overview.md);
-  - [`per-mode-detection-and-mode-taxonomy.md`](../../per-mode-detection-and-mode-taxonomy.md);
-  - [`online-training-strategy.md`](../online-training-strategy.md);
+  - [`CANary-overview.md`](../../../CANary-overview.md);
+  - [`per-mode-detection-and-mode-taxonomy.md`](../../../per-mode-detection-and-mode-taxonomy.md);
+  - [`online-training-strategy.md`](../../online-training-strategy.md);
   - the dashboard's anomaly panel copy.
 
 ## Acceptance

@@ -1,4 +1,4 @@
-"""Pairing a phone or laptop with the Pi (docs/roadmap/phone-ui.md P2.4).
+"""Pairing a phone or laptop with the Pi (docs/roadmap/archive/phone-ui.md P2.4).
 
 A device without a token asks to pair (``POST /pair/request``), then polls its
 request while the person in the car turns the key ACC -> ON -> ACC. The

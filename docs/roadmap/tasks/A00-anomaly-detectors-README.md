@@ -9,12 +9,12 @@ operator decision remains.
 
 | File | Scope | Dependencies | Vehicle/Pi work |
 |---|---|---|---|
-| [A01](A01-scoring-correctness.md) | Serve-time defects: worker replies applied to the wrong tick, stale fallback, windows that straddle gaps and replays, suppression altering encoder input | None | Hot-swap timing; dropped-tick measurement |
+| [A01](archive/A01-scoring-correctness.md) | Serve-time defects: worker replies applied to the wrong tick, stale fallback, windows that straddle gaps and replays, suppression altering encoder input | None | Hot-swap timing; dropped-tick measurement |
 | [A02](A02-calibration-and-evaluation.md) | Disjoint calibration/evaluation, coverage-checked thresholds, drive-grouped harness, baselines, realistic and real fault labels | Harness now; recalibration waits for the retrain | Induced reversible faults; Pi artifact hashes |
-| [A03](A03-sequence-inputs-and-training.md) | Mask meaning "sample arrived", conditioning on driving conditions, de-duplicated inputs, scaler/validation/CLI fixes, envelope record | A02 to judge; retrain to take effect | None |
+| [A03](archive/A03-sequence-inputs-and-training.md) | Mask meaning "sample arrived", conditioning on driving conditions, de-duplicated inputs, scaler/validation/CLI fixes, envelope record | A02 to judge; retrain to take effect | None |
 | [A04](A04-isolation-forest.md) | Single-quantity blindness, attribution, quarantine and completeness, per-mode provenance, feature policy at load, served `unknown` model, evaluation and hyperparameters | A02 to judge; A06.1 for its future | None |
-| [A05](A05-plausibility-checks.md) | Deterministic range, stuck, freshness and slew checks with confirmation and evidence records | A03.1 for arrived-sample flags; A02 to judge | Per-tick cost on the Pi |
-| [A06](A06-detector-roles.md) | Operator decisions: whether the IF alerts, what the sequence model is for, retrain scope before the supercharger, where the primary detector lives | Operator; A02.11 baseline | Tick budget if the role changes |
+| [A05](archive/A05-plausibility-checks.md) | Deterministic range, stuck, freshness and slew checks with confirmation and evidence records | A03.1 for arrived-sample flags; A02 to judge | Per-tick cost on the Pi |
+| [A06](archive/A06-detector-roles.md) | Operator decisions: whether the IF alerts, what the sequence model is for, retrain scope before the supercharger, where the primary detector lives | Operator; A02.11 baseline | Tick budget if the role changes |
 
 ## Implementation order and decisions
 

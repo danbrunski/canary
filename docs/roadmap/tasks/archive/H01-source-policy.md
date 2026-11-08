@@ -1,6 +1,10 @@
 # H01 — source policy and plumbing for the HAT's new sources
 
-Part of [H00](H00-hat-integration-README.md). Everything else in the H series
+> **Archived 2026-11-08.** H01.2–H01.4 landed. H01.1's remainder, a deployed
+> retrain whose manifests carry no external-sensor feature, continues as
+> **D03.43** in `../D03-open-work.md`.
+
+Part of [H00](../H00-hat-integration-README.md). Everything else in the H series
 adds records under `imu:`, `sensor:` and (H05) `kline:`. This file makes sure
 that is safe before it happens: which sources may feed a detector, which
 allowlists must learn the new namespaces, and which dependencies the daemon
@@ -32,7 +36,7 @@ piece of hardware.
 
 ## Desk
 
-- [~] **H01.1 A source-level trainability gate.** **Do:** in `src/telemetry.py`,
+- [~] **H01.1 A source-level trainability gate.** → **carried to D03.43** (2026-11-08). **Do:** in `src/telemetry.py`,
   a `TRAINABLE_SOURCES` frozenset beside `CAPTURED_SOURCES`
   (`obd`, `decoded`; `can` raw frames never become features anyway) with an
   import-time assert that it is a subset of `TelemetrySource`, and every
@@ -181,7 +185,7 @@ piece of hardware.
   HAT (claim, set, a second claimant refused with EBUSY). Nothing was added to
   `pyproject.toml`; pyserial was already a dependency.
 - [x] **H01.4 Reconcile the documents that predate the HAT.**
-  `docs/roadmap/imu-gps-integration.md` Phase 2b still plans a BNO055 over
+  `docs/roadmap/archive/imu-gps-integration.md` Phase 2b still plans a BNO055 over
   UART, a BMP390 and upper-case `gps:SPEED`/`LAT` names (the code uses
   lower-case); `OVERNIGHT-QUEUE.md` says "BNO055 is the assumed sensor";
   `docs/CANary-HAT-Spec.md` §9 says commanded AFR and timing are "not on the
