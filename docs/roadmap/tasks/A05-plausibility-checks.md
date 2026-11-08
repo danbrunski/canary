@@ -255,6 +255,31 @@ code.
       **Remaining (truck):** drives recorded with the 10 s back-off, then
       re-measure the priority PIDs' longest routine answering-time gap and set
       `tiers.fast.interval_seconds` from it.
+      **2026-11-08 measured on a tuning-family capture, not `default`; stays
+      `[~]`.** `ltft-gate` (a `tuning` child: RPM and THROTTLE_POS polled at
+      ~2 Hz, not `default`'s ~1 Hz) on the daemon with the 10 s back-off, three
+      captures 18:08-20:15Z (script
+      `~/canary-data/analysis-scripts/2026-11-08-drive/checklist/gaps2.py`).
+      Gaps between consecutive stored `obd:RPM` / `obd:THROTTLE_POS` rows:
+      - **Routine** (key-off excluded: 84.3 s 18:17:04, 289.0 s 19:04:22 and
+        98.5 s 19:11:14, where the CAN rate fell from ~1,200 to ~200 frames/s
+        for the key-off; capture boundaries excluded: first 10 s and last 60 s
+        of each capture): `RPM` n 12,788, median 0.480 s, p95 0.977, p99 1.308,
+        p99.9 2.107, **max 3.612 s** (19:01:09Z), 21 gaps ≥ 2 s, 1 ≥ 3 s, 0 ≥ 5 s;
+        `THROTTLE_POS` n 12,344, median 0.524 s, p95 1.014, p99 1.378, p99.9
+        2.128, **max 2.636 s** (18:56:58Z), 23 ≥ 2 s, 0 ≥ 3 s.
+      - The three stalls (19:56:37Z, ~20:06:58Z, ~20:08:58Z) left the RPM
+        cadence unbroken: the largest gap within ±30 s is 1.31, 1.96 and
+        1.77 s (Mode 01 kept answering; the stall is in the engine, not the
+        poll).
+      - The priority 10 s retry never fired as a back-off: no priority PID
+        went silent while others answered for ≥ 10 s.
+      Expected ≈ 10 s + routine interval ≈ 13 s (above) is consistent with a
+      3.6 s routine maximum, but **this is not the `default` profile's gap**
+      (its priority PIDs answer at ~1 s, 1.0-2.7 s routine intervals recorded
+      above), so `tiers.fast.interval_seconds` is left at 33 s: set it from a
+      `default` drive, not from this one. Nothing in `plausibility.yaml`
+      changed.
     - **(a) measured, not assumed:** `scripts/evaluate_committee_coverage.py` grades
       both detectors on A05.8's own injections (same seed, generator and kind order
       as `evaluate_plausibility.py`, so the same windows and magnitudes). Committees

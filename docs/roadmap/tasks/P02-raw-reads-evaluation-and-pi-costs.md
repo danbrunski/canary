@@ -1255,6 +1255,22 @@ recomputes the rolling frame over the whole buffered window every tick.
     on a quiet laptop (457/481 → 120/117 ms under load), with the aligned
     frame and report identical.
   - **Owed:** the before/after per-tick time on the Pi.
+  - **2026-11-08 Pi "after" recorded; stays `[~]` (no matched "before").**
+    Daemon c4458e5b (includes `compute_features_last_row`), `ltft-gate` capture
+    at ~78-84 req/s, full `/status` 20:05:08Z, `detectors.inference.stages`
+    over the last 300 ticks: **`feature` median 325.5 ms (p95 404.8, max
+    647.4)**, of which `feature_wait` (worker elapsed) median 272.8 ms,
+    `loop_occupancy` median 70.5 ms; whole `total` 349.2 ms (p95 427.0).
+    7,013 ticks, 4 missed (`overrun`). Earlier Pi totals recorded in D01.4
+    (D03-open-work.md), not dated against P02.9's landing: 439 ms median tick at idle (`default`),
+    320 ms under `tuning-did`. **These are not matched** (different profile and
+    request load, buffer width, model set), and the Pi's 325 ms does not
+    show the laptop's −37..−43 % (240/273 → 159/156 ms); with a wider
+    `ltft-gate` plan it neither confirms nor refutes it. Not ticked because the
+    only "before" on file is another load; a same-session replay of one
+    stored session through both builds on the Pi, or a `default` drive to set
+    beside the 439 ms, would settle it. Parity, replay and unit evidence
+    above stand.
 
 - [~] **P02.10 Store CAN frames on change; re-write an unchanged id once per
   stale timeout (operator decision).** On the 09-20 drive, 41 % of CAN frames

@@ -376,7 +376,7 @@ estimated signal; they cannot establish how UpRev calculates its display.
   may already be under 1 %.
   _From D01._
 
-- [ ] **D02.2 Measure the MCP2515 controller overflow, separately from the
+- [x] **D02.2 Measure the MCP2515 controller overflow, separately from the
   socket loss.** `rx_over_errors` rose by **121** across the 2026-09-10 drive
   and by 14 in a 65 s idle window while `rx_dropped` stayed flat. The MCP2515
   has two hardware RX buffers; an overflow there is the SPI driver not
@@ -417,6 +417,31 @@ estimated signal; they cannot establish how UpRev calculates its display.
   ordering as a lead. The matched-rate pair supports a pacing hypothesis;
   repeat it with comparable driving/load before assigning causality.
   _From D02._
+  - **2026-11-08 (MCP2518FD, HAT rev 2.0): closed `[x]`, relaxed (operator
+    authorization 2026-11-08: close with data close enough).** Controller
+    overflow, scope `controller`, from each capture's stop verdict
+    (`~/canary-data/2026-11-08-drive/capture_stop_{1..4}.json`,
+    `losses.controller.counters["can0.rx_over_errors"]`, status `verified`):
+    start 0, stop 0, **delta 0** in all four `ltft-gate` captures, 120.9 s
+    (17:34Z), 721.3 s, 3,352.5 s and 3,434.0 s, **7,629 s (127 min) in
+    total: 0 overflows per minute**. Every one of 1,494 compact `/status`
+    polls 17:32-20:21Z read `can0.rx_over_errors` 0, `rx_errors` 0 and
+    `since_start` 0 (`rx_dropped` read 2 before the 18:04Z power loss, 0 after, flat).
+    Workload: `ltft-gate` at `bus_budget_override` 90 req/s (60 s achieved
+    83.6 Hz at 18:09Z, 154 active requests), `receive.frames_seen` delta
+    1,511-1,596 frames/s over the engine-on legs, and rounds of ~19 memory reads
+    in 150-160 ms bursts (p50 147-163 ms, p95 214-267 ms; B08.4) -- i.e. the
+    bursty shape that gave 5.2/min on the MCP2515 on 09-17 -- plus Mode 01
+    batches of 6. Town and highway, 74 km/h at 20:05Z. The other loss scopes
+    (`recording`, `dashboard`, `derived`) read `lost` 0, `verified`, in captures
+    2-4 (kept separate from the controller figure).
+    **Relaxed:** the item names the MCP2515; the rig has been the MCP2518FD
+    since 2026-09-23, so the `spimaxfrequency` / second-controller levers
+    (1, 2 above) do not apply, and the MCP2515 per-minute table above is a
+    different controller. The bursty-vs-paced comparison at matched rate was
+    **not run**, because overflow was 0 in the heaviest bursty workload this
+    profile makes: nothing to rank. The ~650 req/s back-to-back case that gave
+    36/min on the MCP2515 was not repeated on the MCP2518FD.
 
 - [~] **H6 (C10.12) Compare candidate budgets incrementally under the same
   workload.** Stop increasing when a requested contract fails, identify the
@@ -975,7 +1000,7 @@ promote unverified bindings or to change a tune.
   Record `compare_channels` verdicts, acquisition separation, exact raw decode
   and operating conditions. Leave unsupported/flat/unpaired candidates open.
 
-- [~] **D03.13 Capture-quality concurrency fixed; UPS heartbeat remains.**
+- [x] **D03.13 Capture-quality concurrency fixed; UPS heartbeat remains.**
 
   - [x] **Capture-quality concurrency — desk fix landed.** The shared helper
     now single-flights equivalent requests and serializes distinct full-session
@@ -991,6 +1016,29 @@ promote unverified bindings or to change a tune.
     Establish the cause and verify successive fresh timestamps and reported
     power transitions around the drive's key-off. Do not let a planned power
     transition interrupt the final evidence copy.
+  - **2026-11-08: heartbeat verified live `[x]`, relaxed (operator
+    authorization 2026-11-08: close with data close enough).** Source:
+    [drive log](../../../data/analyses/2026-11-08-drive-log.md) and
+    `~/canary-data/2026-11-08-drive/{power_200508.json,power_keyoff.log}`
+    (`GET /control/power`).
+    - **A real input-loss transition, 17:32-17:37Z** (the OBD plug was out, so
+      the UPS lost its feed): every poll answered with `status_age_s` < 1 s and
+      `watchdog_stale: false`; `input_lost` went false → true and
+      `seconds_lost` counted 0 → 65 s while the keepalive was disarmed
+      (17:36:26Z); SoC 12.5 % → 7.8 % → 0 %, cell 3.73 V → 2.95 V.
+    - **20:05:08Z, engine running:** `watchdog_running` true, `watchdog_stale`
+      false, `status_age_s` 0.163, `input_lost` false, SoC 97.5 %, 4.21 V.
+    - **Across the 20:10:32Z key-off** (`power_keyoff.log`, polls 20:11:39,
+      :45, :52Z): `watchdog_stale` false in all three, `status_age_s` 0.027,
+      0.553, 0.935 s (successive fresh timestamps, each < 1 s), `input_lost`
+      false, `on_battery` false, SoC 98.6 %.
+    **Relaxed:** the key-off did not cut the Pi's supply (it was on a DC
+    adapter, not the vehicle's switched feed), so a *key-off-driven* power
+    transition was not observed; the real transition above stands in for it.
+    The cause of the 2026-09 `status_age_s ≈ 5.16e6` reading is **not
+    established** (no Pi journal or `/run/canary/ups_status` read today); it
+    did not recur in any poll recorded today (17:32-17:37Z, 20:05Z, 20:11Z). Each
+    poll is a point sample, not a continuous trace of the heartbeat.
 
 ## Additional CAN-only experiments — September 18
 
@@ -1178,7 +1226,7 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
 
 ## Opened 2026-09-18 on the drive
 
-- [~] **D03.18 One request timeout stalls the whole hybrid cycle ~2.4 s, and
+- [x] **D03.18 One request timeout stalls the whole hybrid cycle ~2.4 s, and
   benches the DID for 30–48 s.** `fuel-pw-research` recorded 12 all-channel,
   both-mode gaps of 2.28–2.62 s in 34 min (≈1.5 % of the capture). It fails
   `acquisition_gap` on every long research capture. Block A tied one to exactly
@@ -1300,6 +1348,40 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
       with resend, a resend rescue, mid-response loss, unbounded, silence and
       single frames not counted) and
       `test_obd_scheduler_receive_metrics.py`.
+  - **2026-11-08 live, closed `[x]`, relaxed (operator authorization
+    2026-11-08: close with data close enough).** `ltft-gate` captures, daemon
+    c4458e5b, full `/status` at 20:05:08Z
+    (`~/canary-data/2026-11-08-drive/status_full_200508.json`, scheduler life
+    from the 19:09Z start, ~56 min):
+    - **The exit retry fired live:** `did_profile` `fast_exits` 3,452,
+      `fast_exit_failures` 4, **`fast_exit_retries` 1**, `unknown_session_exits`
+      6, `session_failures` 54, `windows_opened` 3,448 = `windows_completed`
+      3,448, `last_exit_nrc` null (every failure was silence, no NRC).
+    - **No 5 s lapse in the stored rows.** Mode 01 `RPM` / `THROTTLE_POS` over
+      the three captures (13,168 RPM rows; 12,788 / 12,344 routine intervals,
+      scripts `checklist/gaps2.py`): excluding key-off (84, 98 and 289 s) and the
+      capture-boundary gaps, the longest gap is **3.61 s** (RPM) / 2.64 s
+      (THROTTLE_POS); 21 / 23 gaps ≥ 2 s, 1 / 0 ≥ 3 s, none ≥ 5 s. A silent
+      `10 81` exit that cost the old lapse would be a ≥ 5 s all-channel gap.
+    - **CF wait (`isotp.await_response`, N_Cr 0.15 s) live:**
+      `receive` 5,644,534 frames, `parse_errors` 0, `continuation_losses` 98,
+      `flow_control_resends` 100, `flow_control_rescues` 4. Last poll of each
+      engine-on scheduler life (18:08-18:18, 18:18-19:09, 19:09-20:19Z;
+      12.31 M frames): losses 10 / 57 / 118, resends 11 / 55 / 120, rescues
+      1 / 0 / 4, `parse_errors` 0 throughout. **So a lost CF is ~1 per 66 k
+      frames, and one flow-control resend rescued only ~3 % (5 of 186; 4 of 100 in
+      the 20:05 snapshot)**; the
+      other exchanges end at N_Cr (0.15 s, or 0.30 s with the resend) instead
+      of the old 1.0 s timeout.
+    **Relaxed:** the counters count the retry sent, not its outcome (a failed
+    retry would add a fifth failure, which the 4 / 1 split cannot separate from
+    the 3 silent-entry exits), so "one retry observed" is the criterion met,
+    not "one retry observed to recover"; the no-5 s-gap result is what stands
+    in for recovery. 2.0-3.6 s Mode 01 gaps still occur: 28 RPM gaps of 2-30 s, 24 of which
+    have only DID / memory rows inside (Mode 01 silent, Mode 22 kept its
+    cadence: the 09-26 CF-loss shape). They were not attributed one by one to
+    a CF loss versus a session entry, and the FF-only versus mid-response
+    split of the 98 losses is not in the counters.
 
 - [x] **D03.19 A key-off boot disabled multi-PID batching for the whole session.**
   Silent timeouts from a sleeping ECM counted as batch rejections (6→4→2→off in
@@ -1805,7 +1887,7 @@ live here now, so the documents could be archived
   long after boot. If it only follows a start, look at the memory scheduler's
   first minute (session 0xC0 re-entry, window verify) before calling it a
   fault.
-- [ ] **GNSS sees no satellites (since at least 2026-10-10).** The no-fix case
+- [x] **GNSS sees no satellites (since at least 2026-10-10).** The no-fix case
   above has come back, and this time it doesn't clear. Every GPS row in
   `2026-10-10T171856`, `_capture-tuning-2026-10-10T171518`,
   `_capture-tuning-2026-10-26T010515` and the 23-min outdoor drive
@@ -1833,6 +1915,31 @@ live here now, so the documents could be archived
     work, and the fault is where the antenna normally sits or its cable run.
     Not closed: find the mounting spot that sees sky (or the cable fault)
     and confirm a fix within minutes from a cold start there.
+  - **2026-11-08: closed `[x]`, relaxed (operator authorization 2026-11-08:
+    close with data close enough).** Cold start after a real power loss: the
+    Pi came back at 18:04Z (`/status` `startup.process_start` 18:04:25Z; the
+    HAT receiver has no backup cell, so it started cold). The first stored
+    GPS row of `_capture-ltft-gate-2026-11-08T180840` is 18:08:41Z, `fix_quality`
+    0 with 0 satellites. **First `fix_quality` ≥ 1 at 18:11:18.18Z: 6 min 40 s
+    after the 18:04:38Z power-on** (6 min 53 s after the daemon's process
+    start, 2 min 37 s into the capture). 3 satellites at the fix, 4 by
+    18:12Z, 5 at 18:18Z, 7 at 18:20Z. After the first fix every row had a fix:
+    39,801 of 39,801 rows in `…T182054` (18:20–19:17Z) and 41,492 of 41,492
+    in `…T191721` (19:17–20:15Z), 74 km/h included. Over those two captures
+    `num_satellites` median 11 (max 17), `hdop` median 1.13 (n 87,576). The
+    pre-power-loss capture `…T173437` (17:34Z, receiver already warm) had a fix
+    on 1,295 of 1,360 rows. Full `/status` 20:05:08Z: fix, 10 satellites,
+    HDOP 1.2. Script
+    `~/canary-data/analysis-scripts/2026-11-08-drive/checklist/gps2.py`.
+    **Relaxed:** the "normal antenna spot" was not recorded today (the drive
+    log does not say; assumed unchanged from the 10-27 dash position), and
+    "within minutes" read as ≤ 10 min (measured 6.7 min) with the truck
+    stationary at an unrecorded sky view. The mounting-spot / cable cause of
+    the 10-10..10-27 darkness is **not** established; only that today the
+    receiver saw sky for 2 h at the current setup. The 17:31Z and 18:08Z
+    "0 satellites" reads in the drive log are the pre-fix period. The bullet
+    below (H07.11 gear holds, committees, the unsatisfiable feature spec)
+    was not re-checked and stays owed under its own items.
   - Owed with it: the H07.11 gear holds and every GPS-referenced committee
     (`SPEED_SOURCE_DIVERGENCE` reads `reference_missing`). Note too that the
     daemon logs "model feature spec is unsatisfiable … this detector will
@@ -3103,7 +3210,7 @@ live here now, so the documents could be archived
     (260 passed). `CalibrationPage.test.tsx` passed 9; it names a relation
     "via" its owner. The tolerances and the pass rates on the truck remain
     the key-on read's job.
-  - [~] **Per-read cadence: desk work done 2026-10-08, truck rate owed.** The
+  - [x] **Per-read cadence: desk work done 2026-10-08, truck rate owed.** The
     fault reads want about 1 Hz, but every memory read rode one rate and a
     profile could not weight memory channels.
     - `CaptureProfile.memory_rate_weights` (channel → weight, missing = 1.0)
@@ -3192,6 +3299,41 @@ live here now, so the documents could be archived
     - **Owed (truck):** arm a profile weighting the knock-fault windows to
       about 1 Hz. Read the achieved rate from the session's own rows as
       consecutive pairs, not `achieved_hz_capture` count ÷ wall-clock.
+    - **2026-11-08 truck rate, closed `[x]`, relaxed (operator authorization
+      2026-11-08: close with data close enough).** The `ltft-gate` capture
+      (`profile_snapshot.memory_rate_weights`: 0.5 on the knock-retard and
+      LTFT gate windows, 0.25 on the purge / learn-state windows, 0.125 on the
+      knock-fault and LTFT map/count windows; `target_rate_hz` 4.0,
+      `did_cycle_seconds` 0.5) was armed for two captures. Rates are 1 / median
+      of consecutive *acquisition-time* pairs (`metadata_json.acquired_at`,
+      distinct per read; pairs ≥ 10 s dropped, so key-off gaps do not count),
+      per `mem:` channel, script `checklist/mem.py`:
+
+      | weight | channels | `…T182054` (56 min) | `…T191721` (58 min) | median p95 interval |
+      |---|---|---|---|---|
+      | 0.125 | 23 | 0.4999-0.5004 Hz | 0.4984-0.5004 Hz | 2.25-2.35 s |
+      | 0.25 | 17 | 0.9959-0.9984 Hz | 0.9953-0.9972 Hz | 1.31-1.34 s |
+      | 0.5 | 8 | 1.0065-1.0076 Hz | 1.027-1.034 Hz | 1.27 s |
+      | none (1.0) `fuel_target` | 4 | 1.0066-1.0096 Hz | 1.0275-1.0297 Hz | 1.25 s |
+
+      **Below the ceiling, rate is proportional to weight, and equals
+      `target_rate_hz` × weight exactly:** 0.125 → 0.50 Hz and 0.25 → 1.00 Hz
+      (ratio 1.99-2.00; 0.5 and 4.0 × weight predict 2.0 and 4.0 Hz).
+      **Weights 0.5 and 1.0 are capped at ~1.0 Hz**, not 2 / 4 Hz: the cadence
+      rule is `min(target × weight, 1 / window period)`
+      (`cadence._request_rate_hz`), and with the 36 extra windows the session
+      window period ran ~1 s (3,448 windows opened by 20:05Z, about one a
+      second) against the 0.5 s the DID cycle asks for. So at this profile a weight of 0.5
+      buys nothing over 1.0: the profile's own capacity note ("expect the 4 Hz
+      batch to slow") is the same fact. The knock-fault windows weighted for
+      ~1 Hz (0.5 here) achieved **1.007 Hz / 1.028 Hz** (median pairs, p95
+      interval 1.27 s); every read in this profile held members of one weight, so
+      the fastest-member rule for a mixed-weight read was not exercised.
+      **Relaxed:** the profile weights the knock windows at 0.5 (capped at
+      ~1 Hz by the window period), not a profile built to hit exactly
+      1 Hz; the ≈ 1 Hz target is met by the ceiling, so the *proportionality*
+      below the ceiling (0.125 vs 0.25: 2.00 ×) is the part that tests the
+      weight mechanism. A knock-focused profile at its own weights was not run.
   - [~] **0xFFFF2842 renamed `ECM_TIMING_TRIM_SELECT_FLAGS` →
     `ECM_KNOCK_TRIM_DIFF_FLAGS` (2026-10-05; operator: "fix
     ECM_TIMING_TRIM_SELECT_FLAGS to be correct"). Code done, store migration
@@ -3481,7 +3623,7 @@ live here now, so the documents could be archived
 
 ## Deferred by decision, not blocked
 
-- [~] **D01.4 Get the feature build off the event loop — implemented; Pi
+- [x] **D01.4 Get the feature build off the event loop — implemented; Pi
   measurement remains.** `source.tick()` ran in phase 1 on the loop and held
   it for **169 ms** median (was 332 ms before D01.8). The live source now
   separates a cheap, serialized `prepare_tick` from the pure pandas transform
@@ -3510,6 +3652,38 @@ live here now, so the documents could be archived
   a missed-deadline one.
   Design it before building it; this is still the larger half of the problem.
   Reopen it if a future drive puts the tick back over budget.
+  **2026-11-08 live on the Pi, closed `[x]`, relaxed (operator authorization
+  2026-11-08: close with data close enough).** Daemon c4458e5b with
+  `out_of_process_feature_build` on, `ltft-gate` capture (154 active requests,
+  ~78-84 req/s), full `/status` at 20:05:08Z
+  (`~/canary-data/2026-11-08-drive/status_full_200508.json`), `detectors.inference`
+  window of the last 300 ticks, 7,013 ticks since the 18:08Z start:
+  - **`loop_occupancy` median 70.5 ms, p95 83.5 ms (max 127.9)** = ~7 % of each
+    second, against the ~17 % (~170 ms) recorded above (`source.tick()`
+    169 ms median on the loop after D01.8).
+  - `feature_wait` (the worker's elapsed time, off the loop) median 272.8 ms,
+    p95 355.7; `feature` stage 325.5 ms median, p95 404.8, max 647; whole tick
+    `total` 349.2 ms median, p95 427.0, max 667.7, under the 1 s budget
+    (439 ms at idle and 320 ms under `tuning-did` recorded above). `lateness`
+    median 0.5 ms, p95 3.3.
+  - **Missed ticks: 4 of 7,013 (0.06 %), all `overrun`**; the poller shows all 4
+    had accrued by tick 4,308 and none in the next 3,000 (19:20-20:10Z,
+    50 min). On 2026-10-04 the cold-boot drive missed 23 of 2,271 (1 %).
+    `stale_results_discarded` 1, `compute_failures` 0, `worker_fallbacks` {}.
+  - Scoring (IF + sequence, 1 per ~21 s): `compute` 540 ms median (IF 182,
+    sequence 357), `compute_wait` 546; behavior 3.8 ms; lambda delivery
+    14.1 ms.
+  - **HTTP latency:** the laptop's compact `/status` polls over Wi-Fi
+    (`_ttfb`, 596 polls 19:17-20:15Z, engine running): median 47 ms, p95 96 ms,
+    max 368 ms. Request rate `achieved_hz_60s_total` median 78.2 Hz (p5-p95
+    73.7-83.8, n 556). System at 20:05Z: load 0.28 per CPU, 67 °C, memory
+    limits enforced (6 GiB), `mem_used_fraction` 0.156.
+  **Relaxed:** there is no same-window A/B against the in-process build (that
+  build cannot run on this daemon), so "matched live window" is the figures
+  recorded earlier on other loads (a heavier request mix than `tuning-did`);
+  the comparison is against the 17 % / 169 ms and 439 / 320 ms above, and the
+  7 % loop occupancy and 0.06 % missed ticks are what close it. The worker's
+  CPU cost (feature stage ~325 ms) is unchanged by design (see above).
   _From D01._
 
 ---

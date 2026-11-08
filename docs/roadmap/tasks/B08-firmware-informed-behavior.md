@@ -936,6 +936,41 @@ extra independent votes.
     - Items 1–3 above still close the item. Under (c), item 1's Mode 01 leg
       is not needed, and the comparison against the Mode 01 surface is
       given up until (c) is lifted.
+    - **2026-11-08 truck tuple spread and controller overflow measured;
+      item stays `[~]` (items 1-3 above still open).** `ltft-gate` captures
+      on the Pi (daemon c4458e5b, MCP2518FD), memory reads only, from
+      `metadata_json` `acquired_at`, grouped by (`generation`, `round_id`) so a
+      restart's reused round ids do not merge
+      (script `~/canary-data/analysis-scripts/2026-11-08-drive/checklist/spread2.py`).
+      Legs `…T182054` (4,628 rounds) / `…T191721` (5,038 rounds):
+      - **Whole memory burst of a round** (median 18 / 19 distinct reads, max
+        31, because this profile has 36 windows, not the 3-5 reads the 10-08
+        design sized): spread p50 146.5 / 162.9 ms, p95 214.1 / 267.1 ms, p99
+        270 / 302 ms, max 1,401 / 559 ms (rounds with >1 read, n 4,539 /
+        4,877). Consecutive reads inside a round: p50 6.2 / 6.3 ms, p95
+        19.5 / 25.5 ms, in line with the 6.15 ms median acquisition-to-acquisition gap
+        measured on the 09-21 `rom-trace` captures (above).
+      - **The coordinate tuple** (rpm word `mem:ECM_ENGINE_SPEED_RAM` against
+        `mem:ECM_HIGH_DET_FLAGS`, same round): |Δ| p50 16.9 / 9.6 ms, p95
+        55.4 / 59.3 ms, p99 106 / 111 ms, max 185 / 289 ms (n 2,939 / 3,291);
+        **1 of 6,230 pairs exceeds the lookup's 0.25 s skew limit** (289 ms,
+        in the second leg). Against `mem:ECM_KNOCK_RETARD`: p50 22.9 / 15.3 ms,
+        p95 64.5 / 75.9 ms; against `mem:ECM_TARGET_EQUIV_RATIO`: p50
+        10.2 / 9.4 ms, p95 41.9 / 63.5 ms. The prediction was ~10 ms for the
+        tuple with the truck's turnaround; measured p50 is 9.6-16.9 ms.
+      - **The memory-only target (c):** `mem:ECM_IGNITION_TIMING_RAM` against
+        the rpm word is **0.0 ms** at every quantile (n 2,850 / 3,308), the
+        same read.
+      - **`can0.rx_over_errors` on the MCP2518FD: 0** across all four
+        captures, 7,629 s, verified `controller` scope (D03 D02.2 has the
+        counters and workload).
+      Not done, so the item stays open: the independent-drive timing-resolution
+      and branch tests (items 1-3). Neither Mode 01 `TIMING_ADVANCE` nor the
+      identical-sample comparison was run, the two captures declare
+      `corpus_eligible: false` (B02 refuses to grade them, R03.12), and
+      `tools.timing_lookup_coverage` needs the ZS44A ROM image on the Windows
+      side that was not used here. `ECM_HIGH_DET_FLAGS` was read at ~1 Hz (the
+      latch both branches need), so the branch half has data for a later run.
 
 - [~] **B08.5 — Connect distinct residuals to investigation evidence.**
   Feed B08 context and qualified behavior results into E03 while keeping

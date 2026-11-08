@@ -238,7 +238,7 @@ other checklist leans on.
   started` within 6 s, and the receiver was at 115200 30 s after the start,
   with no `txbuf`.
 
-- [~] **H03.4 GNSS at 10 Hz.** **Do:** configure the MAX-M10M on every gpsd
+- [x] **H03.4 GNSS at 10 Hz.** **Do:** configure the MAX-M10M on every gpsd
   attach (it has no backup cell fitted, so settings in RAM do not survive a
   power cut): UBX `CFG-VALSET` for `CFG-RATE-MEAS` 100 ms and a UART1 baud that
   carries 10 Hz of the sentences gpsd needs (38400 or higher), sent by
@@ -297,6 +297,35 @@ other checklist leans on.
   ~10 Hz, no `txbuf alloc`, and the journal shows the ubxtool ACK (its exit
   status is not known to reflect a NAK). Recheck the NMEA lag with `ntpshmmon`:
   chrony's `offset 0.065` was measured at 1 Hz.
+  **2026-11-08: closed `[x]`, relaxed (operator authorization 2026-11-08:
+  close with data close enough).** The Pi had a real power loss and came back
+  at 18:04Z (HAT receiver without a backup cell, so its RAM settings were
+  gone). The daemon's stored `gps:` rows, 4 captures, intervals between
+  consecutive rows of one channel (script
+  `~/canary-data/analysis-scripts/2026-11-08-drive/checklist/gps3.py`):
+  - `…T180840` (first rows 18:08:41Z, 4 min after the power-up boot):
+    `latitude` median interval 0.0970 s, p95 0.118 s, n 6,283;
+    `fix_quality` 7,902 rows in 728 s = 10.85 rows/s.
+  - `…T182054` (56 min): `latitude` median 0.0968 s, p95 0.115 s, p99 0.132 s,
+    max 0.8 s, n 39,801, 11.77 rows/s; **`gps:speed` median 0.0969 s, p95
+    0.113 s, n 34,636, 10.64 rows/s**.
+  - `…T191721` (58 min): `latitude` median 0.0974 s, p95 0.110 s, n 41,492,
+    11.98 rows/s; `gps:speed` median 0.0975 s, p95 0.110 s, n 39,893.
+  - 99.4-99.9 % of all intervals are ≤ 0.15 s in every capture; none above
+    0.8 s once fixed (the 5.6 s `latitude` max in `…T173437` is a fix drop).
+  The receiver therefore ran at 10 Hz after the power cut, with no sign of the
+  9600-baud `txbuf` stall (which showed as growing delay, not as steady
+  0.1 s rows), so the drop-in's baud and rate commands took effect on the
+  boot. **Relaxed / not measured:** `gpspipe -w`, the ubxtool ACK in the
+  journal, the `txbuf alloc` text and the `ntpshmmon` lag need Pi logs, and
+  `/control/logs` was not available offline (the 20:05Z log pull saved an
+  empty file); the post-gpsd-stop/start leg was not run (the 10-04 stop/
+  start evidence above stands). **Unexplained, not chased:** the daemon logs
+  10.6-12.0 rows/s, not 10.0; about 8.6 % of consecutive `latitude` intervals
+  in `…T191721` are under 20 ms and 22.8 % of consecutive latitudes are
+  identical, so some rows repeat a fix. Whether the receiver runs above 10 Hz,
+  gpsd emits a TPV per sentence, or the collector double-reads was not
+  checked.
 - [x] **H03.5 uart0 on by default in the overlay** once H05 has a collector
   that uses it. The SysRq hazard needs a console on uart0, and on the Pi 5 the
   console is `ttyAMA10`; make `install_pi.sh` refuse a `console=` on

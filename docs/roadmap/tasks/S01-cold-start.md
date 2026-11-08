@@ -261,7 +261,7 @@ system starting beside it.
   response; calibration ID and CVN skipped (no responder on the bus)"; the
   probe cost profile_resolved − main_entered = **2.13 s** (was 6 s).
 
-- [~] **S01.5 Make a retention tick cheap, not just off the loop.** `a870887`
+- [x] **S01.5 Make a retention tick cheap, not just off the loop.** `a870887`
   moved the tick into a thread, but it still stats every session file and
   opens every parquet to read its last four bytes (`_is_truncated_parquet`),
   every hour: 62,091 files on the Pi today, growing with the corpus. Off the
@@ -355,10 +355,33 @@ system starting beside it.
   the first tick after a cold boot with the ledger in place (expect `footers_read`
   = the sessions closed since the last tick), and the steady-state tick during a
   drive above.
+  **2026-11-08 (Pi journal `retention tick` lines, from the drive log; closed
+  `[x]`, relaxed: operator authorization 2026-11-08, close with data close
+  enough).** `/data` is the NVMe now, and the Pi's corpus is 41-44 sessions
+  (5.8k files statted), so these ticks are not comparable in size to the
+  10-04 ones (142 sessions, 44,738 footers). Daemon at c4458e5b:
+  - **18:05:06Z, first tick after the cold boot** (power loss, Pi back at
+    18:04Z): **480.9 ms**, 41 sessions, 5,820 `files_stat`, **46
+    `footers_read`**. Cold boot, ledger present; the boot's own tick cost
+    0.48 s here against 49.8-70.5 s on the SD card.
+  - **18:08:13Z, first tick of the `canary-update` restart** (the daemon had
+    restarted at 18:08:08Z, still importing): **3,391.6 ms**, 42 sessions,
+    5,849 files, 27 footers read. The slowest tick of the day, inside the
+    restart, not a drive; why 27 footers were read after a restart with a
+    ledger (sessions closed since 18:05Z cannot be 27) was not checked.
+  - **19:08:14Z, steady state, one hour after the last start (18:08:08Z):
+    140.7 ms**, 44 sessions, 5,855 files, **4 footers read**. The daemon was mid-drive with the `ltft-gate`
+    capture recording (~85 reads/s, inference 1 Hz), but the truck was in the
+    19:04-19:09Z key-off stop (`parked` / `engine_off`), not moving.
+  **Relaxed:** no tick was read while the truck was moving. A tick near 20:08Z (engine
+  running, mid-leg 2) would fall after the 20:05Z log pull; no later pull exists. The steady-state kind was measured at 141 ms / 4 footers against
+  0.59-0.86 s / 0 footers parked on the SD card, with the collector at full
+  load; on this NVMe corpus the "stat every file, open every footer" tick is
+  cheap. The inference ticks around it are in D01.4.
 
 ## Needs the truck
 
-- [~] **S01.6 Key-on after the startup changes.** After the 16:32Z reboot on
+- [x] **S01.6 Key-on after the startup changes.** After the 16:32Z reboot on
   2026-09-22 `/status` read `no_data`, and the kernel's `can0` counter showed
   0 frames received since boot (70 transmitted, no errors). That is below
   anything the daemon does, and the most likely reading is that the bus had
@@ -378,6 +401,48 @@ system starting beside it.
   < 27 s and fell between a manual read and the 5 s poller's first sample.
   Still owed: that edge, plus the cold power-on figure (the Pi was already up
   for 20 min). Next drive: have the poller running before the key turns.
+  **2026-11-08 (Pi on c4458e5b; closed `[x]`, relaxed: operator authorization
+  2026-11-08, close with data close enough).** The laptop poller ran all drive (compact `/status` every ~5.4 s, 1,469 parsed polls
+  in `~/canary-data/2026-11-08-drive/status.jsonl`, blind 17:38-18:05Z while the
+  Pi was down and 19:09:22-19:16:04Z). States seen, `vehicle_state` with
+  12 V sense:
+  - **Key-off, three times, `ignition_only` observed:** 18:17:03.7Z
+    (rpm 0, OBD fresh 0.29 s, CAN fresh, 12.67 V) → `engine_off` 18:17:14.5Z →
+    `parked` 18:17:20Z; 19:04:19.5Z → 19:04:35.8Z → 19:04:41Z; 20:10:24.4Z
+    (12.55 V) → `engine_off` 20:10:40.5Z (OBD stale 13.3 s). `ignition_only`
+    lasted 11-16 s each.
+  - **Key-on / start, `engine_running` observed after each of three starts:**
+    18:18:23.5Z `engine_off` (CAN fresh 0.0 s, OBD stale 77.8 s) → 18:18:32.9Z
+    `engine_running` (rpm 1,000), **9.4 s**; 19:09:06.7Z `engine_off` (OBD
+    stale 284 s) → 19:09:17.3Z `engine_running` (rpm 762.5), 10.6 s; and
+    20:10:40Z `engine_off` → 20:15:22.2Z `engine_running` (rpm 1,237; no intermediate
+    state was sampled). The stored rows have both CAN and OBD in each
+    leg: `receive.frames_seen` 1,511-1,596 frames/s on the engine-on legs
+    (the kernel counter is not in the compact view), 592,453 `obd` + `derived`
+    rows and CAN/GPS/sensor rows across the three `ltft-gate` captures.
+  - **The `ignition_only` edge at key-on was again not sampled**: each key-on
+    went `parked`/`engine_off` → `engine_running` with no `ignition_only`
+    between, the ECM's first Mode 01 answer arriving with the engine already
+    running (rpm 762-1,237), within 9.4-10.6 s of the first `engine_off` sample. Whether the ECM
+    answered KOEO and the scheduler's backoff after the silent run
+    (`obd_freshness_seconds` 77.8 / 284 s) hid it, was not checked.
+  - **Cold power-on figure.** After the power loss the Pi's first daemon
+    (`startup.process_start` 18:04:25.3Z; reachable at 18:04:38Z) stored its
+    first record per source at **88.49 s (`can`, `sensor`), 88.49 s (`gps`)**
+    from process start (poll 18:05:53.9Z), `startup.complete` true by 18:06:04Z,
+    and **no `obd` record**: `bench`, the OBD plug out (12 V sense 0.01 V), so
+    the collector waited. The `canary-update` restart at 18:08:08.9Z (warm) stored
+    `can` / `sensor` 27.65 s, `gps` 27.70 s and **`obd` 28.90 s** after process
+    start (first rows 18:08:36.5-37.8Z; `http_bound` 6.9 s, IF loaded 7.2 s,
+    LSTM 9.3 s). Cold, 88.5 s on NVMe, is longer than the 69 s SD-card figure
+    in the table above (collectors running); the boot daemon was competing
+    with a full boot, and the number was not decomposed.
+  **Relaxed:** the power-on was not paired with an engine start (the engine
+  was already warm, key-on ~17:26Z, and the OBD plug was out), so "OBD rows
+  stored from a cold power-on" is the warm-restart 28.9 s, not a cold one; the
+  `ignition_only` key-on edge is unobserved, with the key-off edge standing in
+  for the classifier. The cold figure is from daemon process start, not from
+  the Pi's power switch.
 
 ## Operator decision
 
