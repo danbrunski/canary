@@ -109,6 +109,7 @@ from src.collection.vehicle_power import (
     ASLEEP_SECONDS,
     VEHICLE_POWER,
     VehiclePower,
+    classify_supply,
     is_tester_request,
 )
 from src.config import CanBusConfig, VehicleConfig
@@ -212,7 +213,16 @@ async def wait_off_the_bench(stop_event: asyncio.Event, power: VehiclePower) -> 
     )
     while power.connection() == "bench" and not stop_event.is_set():
         await wait_for_stop_or_timeout(stop_event, BENCH_RECHECK_SECONDS)
-    if not stop_event.is_set():
+    if stop_event.is_set():
+        return
+    sensed = power.latest()
+    if classify_supply(sensed) == "bench":
+        log.warning(
+            "a module is talking on the bus but the 12 V sense reads %.2f V: "
+            "OBD polling starts (check the HAT's 12 V input)",
+            sensed or 0.0,
+        )
+    else:
         log.info("vehicle power on the OBD port: OBD polling starts")
 
 

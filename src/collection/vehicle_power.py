@@ -93,6 +93,18 @@ class VehiclePower:
             return self._volts
 
     def connection(self, *, now: float | None = None) -> Connection:
+        """``vehicle`` while another module has been heard within
+        :data:`ASLEEP_SECONDS`, whatever the 12 V sense reads; otherwise what
+        the sense says.
+
+        A module talking is a vehicle on the port. On 2026-11-08 the sense
+        read 0.0 V (the HAT's 12 V input had gone) while the broadcast sniffer
+        heard a running engine, and the OBD collector sat in its bench wait
+        through the whole engine run: a capture with zero answers on every
+        channel. The sense alone decides only when the bus is silent."""
+        silent = self.bus_silent_for(now=now)
+        if silent is not None and silent < ASLEEP_SECONDS:
+            return "vehicle"
         return classify_supply(self.latest(now=now))
 
     def note_bus_frame(self, *, at: float | None = None) -> None:

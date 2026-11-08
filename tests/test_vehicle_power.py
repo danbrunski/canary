@@ -35,6 +35,39 @@ def test_a_stale_reading_says_nothing() -> None:
     assert power.latest(now=101.0) is None
 
 
+def test_a_module_talking_is_a_vehicle_whatever_the_sense_reads() -> None:
+    """2026-11-08: the 12 V sense read 0.0 V while the broadcast sniffer heard
+    a running engine; the port was classified ``bench`` and OBD never polled."""
+    from src.collection.vehicle_power import ASLEEP_SECONDS
+
+    power = VehiclePower()
+    power.note(0.0, at=100.0)
+    power.note_bus_frame(at=100.5)
+    assert power.connection(now=101.0) == "vehicle"
+    assert not power.asleep(now=101.0)  # a talking bus is not asleep
+    # Silent long enough: the sense decides again.
+    assert power.connection(now=100.5 + ASLEEP_SECONDS) == "bench"
+    # No 12 V sense at all: a talking bus is still a vehicle.
+    unsensed = VehiclePower()
+    unsensed.note_bus_frame(at=5.0)
+    assert unsensed.connection(now=5.1) == "vehicle"
+    assert unsensed.connection(now=5.0 + ASLEEP_SECONDS) == "unknown"
+
+
+async def test_obd_leaves_the_bench_wait_when_a_module_talks() -> None:
+    power = VehiclePower()
+    power.note(0.0)
+    stop = asyncio.Event()
+    waiting = asyncio.create_task(wait_off_the_bench(stop, power))
+    await asyncio.sleep(0.05)
+    assert not waiting.done()
+    power.note(0.0)  # the sense still reads nothing ...
+    power.note_bus_frame()  # ... but the engine is talking
+    import src.collection.can_obd_collector as collector
+
+    await asyncio.wait_for(waiting, timeout=collector.BENCH_RECHECK_SECONDS + 5)
+
+
 async def test_obd_waits_on_the_bench_and_starts_when_a_battery_appears(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
