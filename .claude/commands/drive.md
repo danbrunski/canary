@@ -228,6 +228,16 @@ its own criteria frozen before its data.
   2026-09-22 a warm-engine gate, a 4-minute wake cadence and a 10-minute cap
   left three pulls over 5,000 rpm on `default` at ~1 Hz and caught one 4,512
   rpm burst on `tuning`. Poll ~60 s until the capture is open.
+- **Let the daemon start and stop a whole-drive capture.** Use `POST
+  /control/capture/autostart` with `{"profile": "<name>", "coolant_min_c":
+  null}` rather than starting it yourself from a laptop poller. The daemon
+  starts the capture on the first `engine_running` tick. It stops 10 s after
+  the engine stops, which rides through a stall and ends before parking, and
+  then it re-arms for the next start. The rule is in memory, so re-arm after
+  every restart or deploy, and check it with `GET /control/capture/autostart`.
+  On 2026-11-08 a laptop poller auto-started only once, and leg 3 was left
+  recording when the link dropped 4 s after `parked`. The laptop goes where
+  the operator goes, so never rely on it for the stop.
 - On any other drive, isolated captures ≤ one third of driving time. Stop one
   as soon as its sample target is met, and before a stop that ends a block.
 - **Until the capture-start fix lands:** `POST /control/capture` returns a
