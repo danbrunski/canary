@@ -95,6 +95,37 @@ the new cells read 101.56–103.91 %, where 20261004 reads 103.13–108.59 %.
     0.5°.
 - The BFS ceiling (0xD8B3) is 255 at every rpm, so it does not clamp.
 
+## Which copy the ECM reads (added 18:30Z, before the flash; operator's question)
+
+Two switches are easy to confuse here: UpRev's Map 1–5 slots, and the
+Main / High Det pair.
+
+- **HI DET was latched for the whole capture.** `mem:ECM_HIGH_DET_FLAGS` read
+  0x40 on 3,283 of 3,283 reads. The cause is the knock-sensor fault flag
+  (`mem:ECM_KS_FAULT_FLAGS` 0x80 on every read), not knock: the accumulated
+  knock metric read 0 throughout.
+- **HI DET does not choose a Fuel Comp table.** Each map slot holds one Fuel
+  Comp table (+0x660). HI DET switches the timing trim (A at +0x020 to B at
+  +0x120) and scales the fuel target's enrichment by the curve at 0xD247,
+  which is 128 (×1.0) in all eight cells of this image.
+- **Map 1 is the slot in use, shown by today's data.** Fuel Targets differs
+  between slot 1 and slots 2–5 in ten cells. The last-column cell of the top
+  rpm row is 159 (φ 1.242) in slot 1 and 164 (φ 1.281) in slots 2–5. The ECM
+  commanded 1.242 at full pedal above 5,200 rpm. Fuel Comp is in the same
+  2 KiB block the ECM copies to RAM, so it comes from slot 1 too.
+  `mem:ECM_ACTIVE_MAP` was not in today's capture. It read 0 (slot 1) on
+  196 of 196 reads on 2026-10-04.
+- **The edit is in slot 1 only,** like every earlier tune. Slots 2–5 keep the
+  20261004 Fuel Comp cells.
+- **Timing while latched comes from trim B (High Det).** In slot 1 it equals
+  trim A from 4,000 rpm up. It is 1–4 counts lower at 2,000–3,600 rpm, BFS
+  columns 88–128. The k106 edits to trim A (rows 2,800–3,600 rpm, columns
+  104–128, +1 to +2 counts) are not read while the latch is set.
+- Loose end: `data/dids.yaml` (0x1134 evidence) says the rpm table 0xD247
+  *replaces* the Target AFR cell under HI DET. `docs/ecu-firmware-analysis.md`
+  says it *scales the excess over 128*. Today's data fits scaling: the table
+  is all 128, and commanded φ was 1.16–1.24 with the latch set.
+
 ## Predictions (frozen before the flash)
 
 Scored on the next warm drive with full-pedal pulls in 2nd or 3rd gear, same
