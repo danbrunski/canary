@@ -493,3 +493,46 @@ decode re-decoded 87,983 anchor values from their payloads with 0 mismatches.
 - **What it means for learning:** idle-heavy town driving, stalls and short
   hops never open the gate. One long purging cruise per start is what opens
   it (the 10-27 verdict). The idle cell r0c1 still has no visits.
+
+## 10. Leg 3, `_capture-ltft-gate-2026-11-08T201601` (20:16:01–22:04:24Z; pulled 2026-11-10)
+
+The capture was never stopped. The laptop link dropped 4 s after `parked`, and
+recording ran on until 22:04:24Z, when the Pi powered off about 5 min after
+the operator unplugged it. There is no `capture_quality.json`. Script and
+outputs: `ltft_learning.py`, `~/canary-data/analysis-scripts/2026-11-08-drive/out-leg3/`.
+
+- **No learning, as predicted.** 0 cell changes. 28B9.6 was clear on all
+  6,067 gate reads, and it was the first false input on every warm
+  closed-loop read with 179C clear (5,603 / 5,619 on B1 / B2). No read
+  reached 770.
+- **The accumulator reset at the 20:37:40Z stall-restart.** It held 80.8 from
+  20:29Z (purge 0) and read 0 from 20:40Z. Over the one start from 20:37:50
+  to 21:58:52Z it reached 728.
+- **Fill rate (G4's fill-from-0 question, now measured over one whole
+  start).** These are 60 s windows of consecutive reads, not a whole-leg
+  average:
+
+  | Regime | Purge cmd | Units/min |
+  |---|---|---|
+  | Steady cruise, 2,740–2,840 rpm, 41–47 g/s | 45–53 % | 22–25 |
+  | Cruise at 15–30 g/s | 8–35 % | 8–17 |
+  | Town, 1,500–2,400 rpm | 0–14 % | 0–16, typically 4–6 |
+  | Warm idle, 762 rpm | 3–12 % | 2–6 |
+  | Purge 0 | 0 | 0–1 |
+
+  At the cruise rate the gate needs about 32–35 min of steady purging cruise
+  in one start. The 22 min of cruise (21:28–21:50) took the accumulator from
+  212 to 634.
+- **G4 (as written) only partly holds.** 185 of 4,613 growth intervals
+  (4 %) grew with every DID 0x1110 read in the interval at 0. Those are
+  pairing edges (the purge DID is read about every 0.3 s), or purge flow that
+  outlives the command. The rule "grows only while 0x1110 > 0" is right
+  96 % of the time, not always.
+- **Idle with purge on was heavily vapour-loaded on this leg.** Warm idle had
+  purge commanded on 70 % of reads (2,096 / 2,985 on B1), against 5 % on legs
+  1–2. Purge flow w38AA read 2,000–3,100 during the 21:04–21:20Z idle. Total
+  trim there was −21.7 % (B1) and −17.7 % (B2), against +10.2 / +7.7 % with
+  purge off. With w38AA ≥ 40, the B1 idle learn path is closed (§7), so
+  this vapour does not reach the idle cell.
+- **Known answers pass:** RAM rpm/PID ratio 1.0000 (n 2,351), timing median
+  Δ 0° (81 % within 1°), target φ vs PID 0x44 1.0026 (n 1,362).

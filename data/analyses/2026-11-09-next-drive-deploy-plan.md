@@ -23,9 +23,14 @@ As a by-product, get one engine start long enough for the LTFT gate to open.
 
 ## Before the drive (desk and garage)
 
-1. **Pull leg 3 first.** `_capture-ltft-gate-2026-11-08T201601` is on the Pi's
-   NVMe, unpulled. It was still recording when the laptop lost the link at
-   21:59:27Z.
+1. ~~**Pull leg 3 first.**~~ **Done 2026-11-10.** Results are in the 11-08 drive
+   log, `2026-11-08-ltft-learning.md` §10 and `2026-11-08-tuning-proposals.md`
+   "Leg 3". On road data, the 1/MAF (leak) shape already beats the dead-time
+   shape (N1 below still tests it directly). The bank gap faded with load on
+   leg 3, so check the bank-1 exhaust ahead of its sensor before the swap.
+   The original instructions follow. `_capture-ltft-gate-2026-11-08T201601` is
+   on the Pi's NVMe, unpulled. It was still recording when the laptop lost the
+   link at 21:59:27Z.
    - Pull it with a tar stream, then check two things. A `capture_quality.json`
      means the capture was finalized. `digest.json` or `digest_skipped.json`
      (with its reason) says what the trip-end digest did.

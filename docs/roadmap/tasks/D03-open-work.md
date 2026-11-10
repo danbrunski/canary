@@ -1963,6 +1963,19 @@ that closed its task checklist.
   Rollback: `data/nissan-xterra-2008/_prior/2026-09-24T024700/` (laptop) or git
   `2971d79^`. **Owed (Pi):** pull the build carrying the 09-25 change and confirm
   a live off-map row reads `severity: null` with its `not_scored` kind.
+- [ ] **D03.63 A second trip inside one session gets no digest and no reason.**
+  *From the 2026-11-08 drive (leg 3, pulled 2026-11-10).*
+  `_capture-ltft-gate-2026-11-08T201601` covered two trips. The first trip
+  ended at 21:02:28Z after 300 s stationary, and its `digest.json` was written.
+  The second trip (21:02–21:59Z) left nothing behind. `run_trip_end_digest`
+  (`src/control/trip_end.py`) returns `None` when `read_digest(session_dir)`
+  already exists, and writes no `digest_skipped.json`. A one-hour leg of
+  driving is therefore indistinguishable from one that never ended. Whole-drive
+  captures under `capture/autostart` make long multi-trip sessions the norm.
+  **Accept:** every detected trip end produces either a digest for that trip
+  or a skip record naming the reason. Fix it in the shared function, keyed by
+  trip rather than by session directory. A test drives two trip ends through
+  one session and checks both are on disk.
 ## Opened 2026-09-23 on the drive
 
 - [x] **D03.28 `GET /anomalies` parses the whole anomaly history in the collecting

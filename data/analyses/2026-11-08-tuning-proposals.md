@@ -88,6 +88,55 @@ STFT/LTFT reads are paired to RPM/MAF within 0.25 s, and to purge (DID
   load columns 0–4, because the idle-air and purge-area inputs are uncertain.
   Any idle edit has to be a block.
 
+## Leg 3 (pulled 2026-11-10)
+
+`_capture-ltft-gate-2026-11-08T201601`, 20:16–22:04Z: town, then 22 min of
+steady cruise. Same filters as above (`decompose.py`, `trim_map.py`; outputs in
+`out-leg3/`). Leg 3 supports point 1 and weakens point 2.
+
+- **The idle lean grew again:** purge-off warm idle TT was +10.2 % on B1 and
+  +7.7 % on B2 (n 908 / 889). Rail pressure was 50.05 psi, and
+  pressure-normalising takes off 0.65 points (+9.6 / +7.1). The trend across
+  legs is +7.0 → +9.4 → +10.2 on B1.
+- **Fitting both shapes, the 1/MAF term carries all of it.** Leg 3's
+  purge-off reads span 2.8–72 g/s, and its two regressors are nearly
+  uncorrelated (corr(1/MAF, rpm/MAF) = 0.07), so a leak and a dead-time error
+  can be told apart here. With both terms in, the dead-time-shaped term
+  (rpm/MAF) improves the residual by under 0.1 point on each bank:
+  - B1: 6.50 vs 6.51, n 1,391.
+  - B2: 5.66 vs 5.70, n 1,365.
+  - Leg 2 gave the same result (6.49 vs 6.53 and 5.43 vs 5.52, corr 0.13).
+
+  The leak-only fit puts the unmetered air at 0.27 g/s on B1 and 0.25 on B2.
+  Leg 2's figures were 0.16 and 0.21. The leak is consistent between banks
+  and grew over the afternoon. Hot-soak expansion of a cracked boot or a PCV
+  path is one candidate, and a smoke test settles it. It also fits a MAF that
+  under-reads at low flow, which a smoke test does not separate. Clean or
+  swap the MAF only if no leak is found.
+- **The bank gap was not constant across load on leg 3.** At warm idle with
+  purge off it was +2.5. With purge on, off idle, the B1 − B2 band medians were:
+
+  | MAF band (g/s) | 0–8 | 8–15 | 15–25 | 25–40 | 40–60 | 60–90 |
+  |---|---|---|---|---|---|---|
+  | B1 − B2 | +1.5 | +0.2 | −0.9 | 0.0 | −0.7 | −1.6 |
+
+  The bins hold 160–1,070 reads each. Leg 2 had +1.5 to +3.6 in every band.
+  A gap that appears at low flow and fades with load is what a bank-1-only
+  leak looks like. Point 2's "scaling, so injector or sensor" holds for leg 2
+  only. **An exhaust leak ahead of the bank-1 A/F sensor now ranks with the
+  sensor itself.** It reads lean at low exhaust flow and fades as flow rises.
+  Check the bank-1 manifold and the sensor boss before swapping sensors. The
+  swap still decides sensor versus everything else.
+- **Rail pressure was lower again:** 49.1–49.8 psi by band, against 50.8 on
+  leg 2 and 52.5 on leg 1. At the next start, on 2026-11-10 and about 5 min
+  after a cold start, it read 53.2 psi. So the drop through 11-08 recovers
+  once the system cools. That fits
+  temperature (fuel, regulator or sensor), not wear.
+- **Idle with purge on was very rich on leg 3:** −21.7 / −17.7 % at 6 %
+  duty, with purge on for 70 % of idle reads. It is canister vapour, and it
+  does not change any proposal. It is why idle trims must always be split by
+  purge.
+
 ## If you want a flash to try anyway
 
 **F1. Fuel Comp +3 % (+4 counts) over rows 0–4 × columns 0–5.** This is
