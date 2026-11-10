@@ -2078,10 +2078,15 @@ that closed its task checklist.
       it exceeded what is on disk and could hide a real `persistence_loss`
       (`rows_on_disk < rows_written`); `docs/capture-quality.md` always defined
       it as the persisted count. Needs the operator's nod that the corrected
-      figure replaces the old one. (3) Pi: pull the build, re-score leg 3
-      (`GET /control/capture/quality/_capture-ltft-gate-2026-11-08T201601`),
-      and confirm a >= 50 min capture's normal stop leaves the unit up (cgroup
-      peak well under 6 GiB). Not run: it needs the Pi.
+      figure replaces the old one. (3) **Pi, 2026-11-10 18:21Z (commit `0df45715`, deployed by
+      bundle, restarted 18:18Z with the truck parked):** `GET
+      /control/capture/quality/_capture-ltft-gate-2026-11-08T201601` answered
+      in 17 s with verdict `fail` (`rate_shortfall`, `acquisition_gap`,
+      `unknown_loss_counters`) and `rows_on_disk` 9,213,483, as on the laptop.
+      The daemon's cgroup `MemoryPeak` was 1.48 GB against the 6 GiB limit,
+      `NRestarts` 0. This is the capture whose boot-time score reached 6.19 GB
+      and stopped the unit that morning. Still to see: a capture of 50 minutes
+      or more stopping normally on the new build (next drive).
 ## Opened 2026-09-23 on the drive
 
 - [x] **D03.28 `GET /anomalies` parses the whole anomaly history in the collecting

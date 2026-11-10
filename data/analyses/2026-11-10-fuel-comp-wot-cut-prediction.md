@@ -95,7 +95,7 @@ the new cells read 101.56–103.91 %, where 20261004 reads 103.13–108.59 %.
     0.5°.
 - The BFS ceiling (0xD8B3) is 255 at every rpm, so it does not clamp.
 
-## Which copy the ECM reads (added 18:30Z, before the flash; operator's question)
+## Which copy the ECM reads (added ~18:10Z, before the flash; operator's question)
 
 Two switches are easy to confuse here: UpRev's Map 1–5 slots, and the
 Main / High Det pair.
