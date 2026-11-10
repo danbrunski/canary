@@ -8,6 +8,19 @@ the operator's, in UpRev, with the engine off and an explicit per-flash
 decision. Scripts: `~/canary-data/analysis-scripts/2026-11-08-drive/`
 (`decompose.py`, `trim_map.py`).
 
+> **Corrected 2026-11-10.** Point 1 below called the idle lean leak-shaped and
+> ranked an air leak first. A cool-morning drive on 2026-11-10 does not support
+> a fixed leak: warm idle with purge off ran total trim 0.0 % (B1) and −1.6 %
+> (B2), n 640 / 671, with intake air at 19–28 °C and the rail at 53.1 psi. On
+> 11-08 the same filter gave +7 to +10 % and +4 to +8 %, growing through a hot
+> afternoon (intake air 41–65 °C, rail 50–52.5 psi). The lean follows heat. A
+> fixed leak would be there cold. What grows with heat at idle is not
+> identified: hot fuel in a returnless rail, the falling rail pressure (worth
+> about 2 points of it), or a leak that opens when hot. **F1 is withdrawn**: a
+> fixed +3 % would run a cool engine rich. The bank gap was +1.6 on 11-10. The
+> 2026-11-10 flash candidate and its predictions are in
+> `2026-11-10-fuel-comp-wot-cut-prediction.md`.
+
 ## Answer
 
 1. **Find the low-load lean before tuning it out.** With purge off, warm idle
