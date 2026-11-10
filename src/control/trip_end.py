@@ -63,7 +63,6 @@ import asyncio
 import dataclasses
 import functools
 import logging
-import resource
 from concurrent.futures import BrokenExecutor, Executor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -129,27 +128,6 @@ class TripEndDigestUnavailableError(RuntimeError):
         # Rebuilt from its constructor's arguments, so it survives a process
         # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
         return (type(self), (self.reason, str(self)), self.__dict__)
-
-
-def limit_address_space(nbytes: int) -> tuple[int, int]:
-    """Cap this process's address space at ``nbytes`` and return the limit.
-
-    Never *raises* the limit: an existing hard limit (a cgroup, a systemd
-    ``LimitAS=``) stays the ceiling. Returns what ``getrlimit`` reports
-    afterwards so a caller — or a test running this in a real child — can
-    assert the limit is actually in force rather than trusting the call.
-
-    ``RLIMIT_AS`` bounds *virtual* address space, which is deliberately
-    stricter than RSS: pandas/pyarrow map more than they resident, so this
-    refuses somewhat before the kernel would have killed anything. Refusing
-    early with a named reason is the trade being made.
-    """
-    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-    target = nbytes if hard == resource.RLIM_INFINITY else min(nbytes, hard)
-    if soft != resource.RLIM_INFINITY:
-        target = min(target, soft)
-    resource.setrlimit(resource.RLIMIT_AS, (target, hard))
-    return resource.getrlimit(resource.RLIMIT_AS)
 
 
 def compute_digest_under_limit(
@@ -289,6 +267,9 @@ async def _in_digest_child(
 
 _spawn_pool = child_pool.spawn_pool
 _discard_pool = child_pool.discard_pool
+#: Defined in :mod:`src.control.child_pool` (the capture-quality child caps itself
+#: the same way); named here for the callers and tests that patch it on this module.
+limit_address_space = child_pool.limit_address_space
 
 
 #: Sessions with a digest computation in flight on this loop. The GPS edge

@@ -74,6 +74,11 @@ def session_footer_span(session_dir: Path) -> SessionFooterSpan:
             # in some, annotated in others) — unused-ignore keeps this line green
             # under both, since CI and local envs can resolve different pyarrow.
             meta = pq.ParquetFile(chunk).metadata  # type: ignore[no-untyped-call, unused-ignore]
+        except MemoryError:
+            # Not a corrupt chunk: a process out of memory (or out of the
+            # address space it capped itself at) must say so, not report the
+            # session as holding no rows (D03.64).
+            raise
         except Exception:  # noqa: BLE001 - a corrupt/truncated chunk just doesn't count
             continue
         rows += meta.num_rows

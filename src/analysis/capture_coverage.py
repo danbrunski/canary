@@ -51,6 +51,7 @@ from src.storage.capture_manifest import (
     read_capture_manifest,
     read_capture_quality,
 )
+from src.storage.session_files import PARQUET_PATTERN, count_session_rows
 
 log = logging.getLogger(__name__)
 
@@ -239,18 +240,105 @@ def _requests_for(profile: Mapping[str, Any], frame: pd.DataFrame) -> list[dict[
     return rows
 
 
-def _row_count(frame: pd.DataFrame) -> int:
-    """**Every** persisted row, not the rows this module goes on to use.
+#: What the score reads of the session, and nothing else (D03.64). The tuple
+#: and cadence arithmetic below reads only ``obd`` rows, and of those only the
+#: round identity in ``metadata_json``: a 108-minute ``tuning`` capture is 80 %
+#: raw CAN frames, 7.7 % ADC samples and 6.7 % GPS, and reading all of them
+#: (with the CAN decoded on read) peaked at 9.6 GB, past the Pi's 6 GiB
+#: cgroup. The restriction is made once, here, at the parquet read, so no
+#: caller can forget it; the two figures that *are* whole-session counts are
+#: taken from the footers and a column scan instead (:func:`persisted_quality_inputs`).
+SCORED_SOURCE = OBD_SOURCE
+SCORED_COLUMNS = ("timestamp", "source", "channel", "metadata_json")
 
-    The tuple and cadence arithmetic below reads only ``source == "obd"``
-    rows, so filtering the read is a standing temptation. Two figures here
-    are counts over the whole session and would be silently wrong if it were
-    filtered: this one (``rows_on_disk``, compared against the writer's
-    ``rows_written`` for the ``persistence_loss`` clause — a short count
-    invents a loss) and the ``ended_at`` fallback, which takes the interval
-    end from the last row of *any* source.
+
+def read_scored_rows(session_dir: Path) -> pd.DataFrame:
+    """The ``obd`` rows of ``session_dir`` on the acquisition clock: the only
+    rows (and only the stored columns) the quality score reads.
+
+    ``decoded="as_recorded"``: nothing the score uses is a decoded row, so
+    nothing is decoded on read. Raises ``FileNotFoundError`` as the session
+    reader does when no chunk is readable.
     """
-    return int(len(frame))
+    return read_acquisition_frame(
+        session_dir,
+        decoded="as_recorded",
+        filters=[("source", "==", SCORED_SOURCE)],
+        columns=SCORED_COLUMNS,
+    )
+
+
+#: What :func:`last_row_seconds_outside_scored` reads of every chunk.
+_LAST_ROW_COLUMNS = ("timestamp", "source", "metadata_json")
+
+
+def last_row_seconds_outside_scored(session_dir: Path) -> float | None:
+    """The latest acquisition instant among the rows the score does **not**
+    read (every source but :data:`SCORED_SOURCE`), or ``None`` when there are
+    none.
+
+    The interval's end, when nobody recorded one, is the last row of *any*
+    source (a capture that ended on a CAN frame ended there), so the rows the
+    score leaves unread still have to be asked. Asked of each chunk's
+    ``timestamp``, ``source`` and ``metadata_json`` columns in Arrow, one chunk
+    at a time: a row whose metadata cannot carry an ``acquired_at`` is on the
+    stored clock and is never turned into a Python object, and the few that
+    can (K-line exchanges) go through the same acquisition clock
+    :func:`read_acquisition_frame` puts on every row.
+    """
+    import pyarrow.compute as pyarrow_compute
+    import pyarrow.parquet as pq
+
+    # The kernels (``not_equal``, ``match_substring``, ...) are generated when
+    # pyarrow.compute is imported, so the stubs do not declare them.
+    pc: Any = pyarrow_compute
+
+    latest_stored: pd.Timestamp | None = None
+    latest_stamped: float | None = None
+    for chunk in sorted(session_dir.glob(PARQUET_PATTERN)):
+        try:
+            if chunk.stat().st_size == 0:
+                continue
+            with pq.ParquetFile(chunk) as handle:  # type: ignore[no-untyped-call, unused-ignore]
+                names = handle.schema_arrow.names
+                wanted = [name for name in _LAST_ROW_COLUMNS if name in names]
+                table = handle.read(columns=wanted)
+        except (OSError, ValueError):
+            continue  # unreadable chunks are skipped by the session reader too
+        if "timestamp" not in table.column_names or "source" not in table.column_names:
+            continue
+        table = table.filter(pc.fill_null(pc.not_equal(table["source"], SCORED_SOURCE), True))
+        if table.num_rows == 0:
+            continue
+        plain, maybe = table, table.slice(0, 0)
+        if "metadata_json" in table.column_names:
+            metadata = table["metadata_json"]
+            # The proof in ``channels._parse_candidates``: no key substring and
+            # no backslash (a JSON escape) means no ``acquired_at`` is spelled.
+            stamped = pc.fill_null(
+                pc.or_(
+                    pc.match_substring(metadata, ACQUIRED_AT_COLUMN),
+                    pc.match_substring(metadata, "\\"),
+                ),
+                False,
+            )
+            plain, maybe = table.filter(pc.invert(stamped)), table.filter(stamped)
+        if plain.num_rows:
+            newest = pd.to_datetime(pc.max(plain["timestamp"]).as_py(), utc=True)
+            latest_stored = newest if latest_stored is None else max(latest_stored, newest)
+        if maybe.num_rows:
+            on_clock = read_acquisition_frame(maybe.to_pandas())
+            newest_seconds = float(_acquisition_seconds(on_clock).max())
+            latest_stamped = (
+                newest_seconds if latest_stamped is None else max(latest_stamped, newest_seconds)
+            )
+    seconds = [] if latest_stored is None else [_stored_seconds(latest_stored)]
+    return max([*seconds, *([] if latest_stamped is None else [latest_stamped])], default=None)
+
+
+def _stored_seconds(stamp: pd.Timestamp) -> float:
+    """One stored instant as the acquisition-clock seconds every row's is."""
+    return float(_acquisition_seconds(pd.DataFrame({"timestamp": pd.Series([stamp])})).iloc[0])
 
 
 def persisted_quality_inputs(
@@ -266,9 +354,26 @@ def persisted_quality_inputs(
     Returns ``requests``, ``lifetime_channels``, ``tuples``, ``rows_on_disk``
     and the ``ended_at`` actually used (the last row when none was given —
     then a missing tail is undetectable, and the caller says so).
+
+    Reads only the rows the score is made of (:func:`read_scored_rows`). Two
+    figures are counts over the **whole** session and would be silently wrong
+    if taken from that read, so they are not:
+
+    * ``rows_on_disk`` is the chunks' footer row count — every persisted row,
+      compared against the writer's ``rows_written`` for the
+      ``persistence_loss`` clause (a short count invents a loss). It used to
+      be ``len`` of a decode-on-read frame, which counted the *decoded* rows
+      synthesised from the CAN frames as if they were on disk (12.7 M against
+      9.2 M stored on ``_capture-ltft-gate-2026-11-08T201601``), so a real
+      shortfall could hide behind them.
+    * the ``ended_at`` fallback, the last row of *any* source
+      (:func:`last_row_seconds_outside_scored`), asked only when none was given.
     """
+    rows_on_disk = count_session_rows(session_dir)
     try:
-        frame = read_acquisition_frame(session_dir)
+        if rows_on_disk is None:
+            raise FileNotFoundError(f"no readable telemetry chunks in {session_dir}")
+        frame = read_scored_rows(session_dir)
     except FileNotFoundError:
         return {
             "requests": profile_requests(profile, did_channel_for=did_channel_for),
@@ -281,7 +386,11 @@ def persisted_quality_inputs(
     ended_source = "given"
     if ended_at is None:
         ended_source = "last_row"
-        ended_at = float(_acquisition_seconds(frame).max()) if len(frame) else started_at
+        instants = [last_row_seconds_outside_scored(session_dir)]
+        if len(frame):
+            instants.append(float(_acquisition_seconds(frame).max()))
+        known = [value for value in instants if value is not None]
+        ended_at = max(known) if known else started_at
     requests = _requests_for(profile, frame)
     channels = [str(row["channel"]) for row in requests]
     return {
@@ -297,7 +406,7 @@ def persisted_quality_inputs(
             ended_at=ended_at,
             generation_boundary=generation_boundary,
         ),
-        "rows_on_disk": _row_count(frame),
+        "rows_on_disk": rows_on_disk,
         "ended_at": ended_at,
         "ended_at_source": ended_source,
     }
@@ -468,5 +577,6 @@ __all__ = [
     "member_channels",
     "persisted_quality_inputs",
     "read_quality_with_scope",
+    "read_scored_rows",
     "recompute_capture_quality",
 ]

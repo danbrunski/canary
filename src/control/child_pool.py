@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import multiprocessing
+import resource
 import threading
 from concurrent.futures import Executor, ProcessPoolExecutor
 from dataclasses import dataclass, field
@@ -37,6 +38,27 @@ CHILD_EXIT_BOUND_SECONDS = TERMINATE_GRACE_SECONDS + 1.0
 
 def spawn_pool() -> ProcessPoolExecutor:
     return ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn"))
+
+
+def limit_address_space(nbytes: int) -> tuple[int, int]:
+    """Cap this process's address space at ``nbytes`` and return the limit.
+
+    Never *raises* the limit: an existing hard limit (a cgroup, a systemd
+    ``LimitAS=``) stays the ceiling. Returns what ``getrlimit`` reports
+    afterwards so a caller — or a test running this in a real child — can
+    assert the limit is actually in force rather than trusting the call.
+
+    ``RLIMIT_AS`` bounds *virtual* address space, which is deliberately
+    stricter than RSS: pandas/pyarrow map more than they resident, so this
+    refuses somewhat before the kernel would have killed anything. Refusing
+    early with a named reason is the trade being made.
+    """
+    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    target = nbytes if hard == resource.RLIM_INFINITY else min(nbytes, hard)
+    if soft != resource.RLIM_INFINITY:
+        target = min(target, soft)
+    resource.setrlimit(resource.RLIMIT_AS, (target, hard))
+    return resource.getrlimit(resource.RLIMIT_AS)
 
 
 def discard_pool(

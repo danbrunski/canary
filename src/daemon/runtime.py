@@ -15,7 +15,7 @@ from src.collection.kline.plan import KlineCatalog
 from src.collection.record_arming import RecordArmingGate
 from src.config import CanaryConfig
 from src.control.capture import CaptureController
-from src.control.capture_finalize import recompute_quality_off_loop
+from src.control.capture_finalize import finalize_interrupted_capture
 from src.control.profile_capture import (
     AUTOSTART_TICK_SECONDS,
     CaptureAutostart,
@@ -25,7 +25,7 @@ from src.control.replay_control import ReplayController
 from src.decode.bindings import load_bindings
 from src.paths import BINDINGS_YAML as DEFAULT_BINDINGS_PATH
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
-from src.storage.capture_manifest import recover_interrupted_capture, write_capture_quality
+from src.storage.capture_manifest import recover_interrupted_capture
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.storage.sessions import last_heard, latest_session
 from src.telemetry import TelemetryRecord
@@ -592,11 +592,9 @@ async def run_daemon(
     interrupted = recover_interrupted_capture(config.collection.storage_path)
     if interrupted is not None:
         interrupted_dir, _manifest = interrupted
-        try:
-            quality = await recompute_quality_off_loop(interrupted_dir)
-            write_capture_quality(interrupted_dir, quality.to_dict())
-        except Exception:  # noqa: BLE001 — recovery is best effort, stamp remains truthful
-            log.exception("failed to finalize interrupted capture %s", interrupted_dir)
+        # Never raises: a capture too large for its child's address-space cap
+        # (D03.64) is a logged refusal, not a daemon that does not start.
+        await finalize_interrupted_capture(interrupted_dir)
 
     # Lazy import — keeps daemon module importable without the collector deps
     # at module-load time. Task 4.7: this used to reach into `src.main`

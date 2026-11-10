@@ -769,7 +769,11 @@ def _on_acquisition_clock(
 
 
 def read_acquisition_frame(
-    session: Path | pd.DataFrame, *, decoded: DecodedRows = "on_read"
+    session: Path | pd.DataFrame,
+    *,
+    decoded: DecodedRows = "on_read",
+    filters: Any = None,
+    columns: Sequence[str] | None = None,
 ) -> pd.DataFrame:
     """The raw session on its acquisition clock, with ``timestamp_basis`` per row.
 
@@ -780,8 +784,22 @@ def read_acquisition_frame(
     rather than a JSON parse; :func:`round_skew` summarises them.
     ``decoded="as_recorded"`` is for an account of what is on disk (storage
     accounting), which the decode on read must not add to.
+
+    ``filters`` (pyarrow DNF) and ``columns`` (stored column names) narrow a
+    *session directory's* read at the parquet reader, as
+    :func:`src.preprocessing.session_reader.read_session` takes them: a caller
+    that scores one source reads only those rows and columns, never a whole
+    drive. The clock is row-local, so a narrowed read's rows are exactly the
+    whole read's rows for them. Neither means anything for a frame already in
+    memory, so a frame given with either is refused rather than ignored.
     """
-    frame, fields = _long_frame_with_metadata(session, acquired_time=True, decoded=decoded)
+    if isinstance(session, pd.DataFrame) and (filters is not None or columns is not None):
+        raise ValueError(
+            "filters and columns narrow a session directory's read; a frame is already read"
+        )
+    frame, fields = _long_frame_with_metadata(
+        session, acquired_time=True, decoded=decoded, filters=filters, columns=columns
+    )
     if fields is None:
         for column in (ACQUIRED_AT_COLUMN, GENERATION_COLUMN, ROUND_ID_COLUMN):
             frame[column] = pd.Series(pd.NA, index=frame.index, dtype="Float64")

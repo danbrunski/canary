@@ -1976,7 +1976,7 @@ that closed its task checklist.
   or a skip record naming the reason. Fix it in the shared function, keyed by
   trip rather than by session directory. A test drives two trip ends through
   one session and checks both are on disk.
-- [ ] **D03.64 Scoring a long capture OOM-kills the daemon.** *From the
+- [~] **D03.64 Scoring a long capture OOM-kills the daemon.** *From the
   2026-11-10 boot.*
   - **What happened.** At 16:59:58Z the daemon tried to finalize the
     interrupted leg 3 (`_capture-ltft-gate-2026-11-08T201601`: 108 min,
@@ -2009,6 +2009,79 @@ that closed its task checklist.
       (`trip_end.limit_address_space`). A refusal then writes a quality
       record naming the reason, instead of the kernel killing the service.
     - A regression test asserts the CAN rows are never loaded.
+  - **Done 2026-11-10 (laptop, offline; nothing deployed).** Measured with
+    `recompute_capture_quality` on copies of the two sessions, same machine
+    and code path before and after:
+    - leg 3 copy (167 MB, 9.21 M rows): **9,544 MB peak RSS / 41.4 s ->
+      841-905 MB / 9.9-11.8 s** in process; a real `spawn` child under the
+      default 4 GiB cap peaked at 887-913 MB / 9.7-12.8 s (child `VmPeak`
+      2.55 GB, of which ~2.4 GB is what pandas and pyarrow map with nothing
+      read). The 41 MB `_capture-tuning-2026-11-10T170119` copy: 2,810 MB /
+      6.9 s -> 406-410 MB / 2.2-3.2 s. Memory now follows the capture's
+      `obd` rows (477,009 of 9.21 M on leg 3, ~1.5 KB each), not its CAN volume.
+    - **Verdict unchanged.** The full `CaptureQuality.to_dict()` (channels,
+      tuples, interval, failures, notes, losses, verdict `fail` on both) saved
+      before the change and compared after: identical on both sessions except
+      `persistence.rows_on_disk` and `rows_on_disk_at_recompute` (see the
+      owed item below). A real child's result equals the in-process one.
+    - [x] *Reads only what it scores, no decode on read.*
+      `capture_coverage.read_scored_rows` = `read_acquisition_frame(session,
+      decoded="as_recorded", filters=[("source", "==", "obd")],
+      columns=SCORED_COLUMNS)`; `read_acquisition_frame` now carries
+      `filters`/`columns` down to the parquet read (refused for a frame).
+      `persisted_quality_inputs` has no other read of the session, and every
+      caller (stop, live, boot, both routes, `validation.evidence`) goes
+      through it. `rows_on_disk` is the footers' row count; the `ended_at`
+      fallback (last row of *any* source, on the acquisition clock) is
+      `last_row_seconds_outside_scored`, an Arrow scan of three columns a
+      chunk, asked only when no end was recorded.
+    - [x] *Peak memory measured on leg 3's copy* -- the numbers above.
+    - [x] *The child caps its own `RLIMIT_AS`.* `capture_finalize.recompute_under_limit`
+      puts `child_pool.limit_address_space` (moved down from `trip_end`, which
+      re-exports it) on the child before it reads anything; default
+      `digest.derived_address_space_bytes()` (RAM-derived, 1-4 GiB). A
+      `MemoryError` in the child is a `CaptureQualityUnavailableError` naming
+      the cap. On the leg-3 copy: a 1,500 MiB and a 400 MiB cap each ended in
+      "ran out of memory under its N MiB address-space cap" in 1-2 s; the
+      default scored it. A thread pool is never capped (the limit would stay
+      on the daemon or the test worker). Two silent-empty paths found and
+      closed on the way: `session_files.session_footer_span` swallowed a
+      `MemoryError` as "corrupt chunk" (a capped child then reported "no
+      telemetry rows persisted"), and a lazy `pyarrow.parquet` import failing
+      under the cap read as an unreadable chunk (now imported before the cap).
+    - [x] *Boot-time finalize survives a refusal.*
+      `capture_finalize.finalize_interrupted_capture` (never raises, logs the
+      reason) replaces the inline block in `daemon/runtime.py`;
+      `test_the_daemon_boots_past_an_interrupted_capture_it_could_not_score`
+      runs `run_daemon` over an unclosed capture whose score is refused and
+      waits for `collector_tasks_created`.
+    - [x] *Regression test: CAN rows never loaded.*
+      `tests/test_capture_quality_reads.py::test_scoring_a_capture_never_loads_its_can_rows`
+      (spy on every `pd.read_parquet`: only `obd` rows, no `payload` or
+      `value_number`, `decode_on_read` never called; the same spy sees
+      can/sensor/gps/payload on a whole read). Identity against the old
+      whole-session read: `test_the_scored_read_gives_the_whole_reads_inputs`
+      (obd/can/kline last row, with and without a given end). Refusal:
+      `test_a_child_that_runs_out_of_its_cap_is_a_named_refusal` (a real child,
+      a real `RLIMIT_AS`, a real `MemoryError`). 22 tests; 731 passed over the
+      related files (capture, finalize, digest, daemon, child pool, layering).
+    - **Owed.** (1) The Accept's "a refusal then writes a quality record
+      naming the reason": not done. A refusal is the named
+      `CaptureQualityUnavailableError` (503 on the two routes, logged at stop
+      and at boot), and the capture is left with no `capture_quality.json`,
+      which every reader takes as unknown. A record would need a schema (a
+      new clause or a `capture_quality_skipped.json` like `digest_skipped.json`);
+      that is a design decision, not a one-line change. (2) `rows_on_disk` now
+      counts stored rows (leg 3: 12,696,668 -> 9,213,483; the tuning copy:
+      3,067,924 -> 2,167,360). The old figure was `len` of a frame with the
+      CAN decoded on read, i.e. it counted rows synthesised from the frames, so
+      it exceeded what is on disk and could hide a real `persistence_loss`
+      (`rows_on_disk < rows_written`); `docs/capture-quality.md` always defined
+      it as the persisted count. Needs the operator's nod that the corrected
+      figure replaces the old one. (3) Pi: pull the build, re-score leg 3
+      (`GET /control/capture/quality/_capture-ltft-gate-2026-11-08T201601`),
+      and confirm a >= 50 min capture's normal stop leaves the unit up (cgroup
+      peak well under 6 GiB). Not run: it needs the Pi.
 ## Opened 2026-09-23 on the drive
 
 - [x] **D03.28 `GET /anomalies` parses the whole anomaly history in the collecting

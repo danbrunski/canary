@@ -234,22 +234,33 @@ def _physical_memory_bytes() -> int | None:
         return None
 
 
-def digest_address_space_bytes(config: CanaryConfig) -> int:
-    """The ``RLIMIT_AS`` ceiling to hand the digest child, in bytes.
+def derived_address_space_bytes() -> int:
+    """The ``RLIMIT_AS`` ceiling for an analysis child with no configured
+    figure: derived from physical RAM (see ``_ADDRESS_SPACE_*``). When the
+    machine will not report its RAM, the ceiling constant is used — an unknown
+    machine still gets a bounded child, which is the whole point.
 
-    ``daemon.digest_address_space_mb`` wins when set. Otherwise derived from
-    physical RAM (see ``_ADDRESS_SPACE_*``); when the machine will not report
-    its RAM, the ceiling constant is used — an unknown machine still gets a
-    bounded child, which is the whole point.
+    The digest child (:func:`digest_address_space_bytes`) and the
+    capture-quality child (``src.control.capture_finalize``, D03.64) both start
+    from this, so neither can be handed the whole machine.
     """
-    configured = config.daemon.digest_address_space_mb
-    if configured is not None:
-        return int(configured) * _MIB
     total = _physical_memory_bytes()
     if total is None:  # pragma: no cover - non-POSIX
         return _ADDRESS_SPACE_CEILING_MB * _MIB
     derived_mb = int(total * _ADDRESS_SPACE_FRACTION) // _MIB
     return max(_ADDRESS_SPACE_FLOOR_MB, min(_ADDRESS_SPACE_CEILING_MB, derived_mb)) * _MIB
+
+
+def digest_address_space_bytes(config: CanaryConfig) -> int:
+    """The ``RLIMIT_AS`` ceiling to hand the digest child, in bytes.
+
+    ``daemon.digest_address_space_mb`` wins when set, otherwise
+    :func:`derived_address_space_bytes`.
+    """
+    configured = config.daemon.digest_address_space_mb
+    if configured is not None:
+        return int(configured) * _MIB
+    return derived_address_space_bytes()
 
 
 #: Peak resident bytes per stored session row of a **whole-session raw read**
@@ -838,6 +849,7 @@ __all__ = [
     "SessionDigest",
     "clear_digest_skipped",
     "compute_digest",
+    "derived_address_space_bytes",
     "digest_address_space_bytes",
     "digest_preflight",
     "digest_row_budget",

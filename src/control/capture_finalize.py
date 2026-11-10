@@ -30,6 +30,15 @@ enough (the pandas work holds the GIL, the D01.4/inference-worker lesson), so
 every async caller goes through :func:`recompute_quality_off_loop`, which runs
 it in a spawned child process; ``recompute_capture_quality`` itself refuses to
 run on a thread with a running event loop.
+
+**The child caps its own address space** (D03.64, 2026-11-10). A 108-minute
+capture read back whole peaked at 6.19 GB on the Pi, the memory cgroup's OOM
+killer took the child, and with ``OOMPolicy=stop`` systemd failed the daemon's
+whole unit. The recompute now reads only the rows it scores, and the child
+puts ``RLIMIT_AS`` on itself before reading anything (the digest child's
+mechanism, :func:`src.control.child_pool.limit_address_space`), so a capture
+that still does not fit ends as a ``MemoryError`` in the child and a named
+:class:`CaptureQualityUnavailableError` here -- never the kernel's decision.
 """
 
 from __future__ import annotations
@@ -41,7 +50,7 @@ import threading
 import time
 import weakref
 from collections.abc import Mapping
-from concurrent.futures import BrokenExecutor, Executor
+from concurrent.futures import BrokenExecutor, Executor, ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -71,6 +80,8 @@ DRAIN_TIMEOUT_SECONDS = 5.0
 #: long, and exists only so a wedged child cannot hold a stop forever.
 RECOMPUTE_TIMEOUT_SECONDS = 600.0
 
+_MIB = 1024 * 1024
+
 
 @dataclass
 class _RecomputeLoopState:
@@ -87,9 +98,10 @@ _recompute_states: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, _Recompu
 
 
 class CaptureQualityUnavailableError(RuntimeError):
-    """The recompute produced no answer: the child failed to start, died, or
-    timed out. Distinct from the recompute's own refusals (``ValueError``),
-    which cross the process boundary unchanged."""
+    """The recompute produced no answer: the child failed to start, died,
+    timed out, or ran out of the address space it capped itself at. Distinct
+    from the recompute's own refusals (``ValueError``), which cross the
+    process boundary unchanged."""
 
 
 class CaptureHealth(Protocol):
@@ -195,6 +207,7 @@ async def recompute_quality_off_loop(  # noqa: PLR0913
     batching_start: Mapping[str, Any] | None = None,
     executor: Executor | None = None,
     timeout: float = RECOMPUTE_TIMEOUT_SECONDS,
+    address_space_bytes: int | None = None,
 ) -> CaptureQuality:
     """``recompute_capture_quality`` in a child process, awaited without
     holding the loop — the only way an async caller may score a capture.
@@ -204,9 +217,18 @@ async def recompute_quality_off_loop(  # noqa: PLR0913
     a process running asyncio plus threads inherits their locks), so a large
     capture's frame is returned to the OS with the child rather than kept
     resident in a pool on the Pi. Tests inject an executor. A child that
-    cannot start, dies, times out or is cancelled is terminated and reported
-    as :class:`CaptureQualityUnavailableError`; the recompute's own exceptions
-    (e.g. ``ValueError`` for a non-capture directory) propagate unchanged.
+    cannot start, dies, times out, runs out of memory or is cancelled is
+    terminated and reported as :class:`CaptureQualityUnavailableError`; the
+    recompute's own exceptions (e.g. ``ValueError`` for a non-capture
+    directory) propagate unchanged.
+
+    A child process this call spawns caps its own address space at
+    ``address_space_bytes`` (default: the RAM-derived ceiling the digest child
+    gets, :func:`src.analysis.digest.derived_address_space_bytes`). An
+    injected process pool is the caller's, which is not this call's to cap, so
+    it is capped only when ``address_space_bytes`` is given; an injected
+    executor that is not a process pool runs in this process and is never
+    capped, whatever is asked, because the limit would stay on this process.
     """
     kwargs: dict[str, Any] = {
         "lifetime": None if lifetime is None else dict(lifetime),
@@ -224,6 +246,7 @@ async def recompute_quality_off_loop(  # noqa: PLR0913
         _freeze_recompute_value(kwargs),
         id(executor),
         float(timeout),
+        address_space_bytes,
     )
     with _recompute_states_lock:
         task = state.in_flight.get(key)
@@ -236,6 +259,7 @@ async def recompute_quality_off_loop(  # noqa: PLR0913
                     kwargs=kwargs,
                     executor=executor,
                     timeout=timeout,
+                    address_space_bytes=address_space_bytes,
                 )
             )
             state.in_flight[key] = task
@@ -277,11 +301,16 @@ async def _coordinated_recompute(
     kwargs: dict[str, Any],
     executor: Executor | None,
     timeout: float,
+    address_space_bytes: int | None,
 ) -> CaptureQuality:
     try:
         async with state.limit:
             return await _run_recompute(
-                session_dir, kwargs=kwargs, executor=executor, timeout=timeout
+                session_dir,
+                kwargs=kwargs,
+                executor=executor,
+                timeout=timeout,
+                address_space_bytes=address_space_bytes,
             )
     finally:
         with _recompute_states_lock:
@@ -290,18 +319,52 @@ async def _coordinated_recompute(
                 state.in_flight.pop(key, None)
 
 
+def recompute_under_limit(
+    session_dir: Path, kwargs: Mapping[str, Any], *, address_space_bytes: int | None = None
+) -> CaptureQuality:
+    """The child-process entry point: cap, then score.
+
+    Module-level and picklable on purpose -- ``spawn`` has to import it by
+    name. The limit goes on *before* any row is read, so the first allocation
+    that does not fit raises ``MemoryError`` here instead of growing until the
+    kernel intervenes in the daemon's cgroup. ``None`` applies no limit (an
+    injected executor's process is not ours to cap).
+    """
+    # Everything the score will import, imported before the cap goes on: a lazy
+    # import that fails under the limit is an ``ImportError`` or an "unreadable
+    # chunk", not the ``MemoryError`` the caller maps to a named refusal.
+    import pyarrow.parquet  # noqa: F401
+
+    from src.analysis import capture_coverage
+
+    if address_space_bytes is not None:
+        child_pool.limit_address_space(address_space_bytes)
+    return capture_coverage.recompute_capture_quality(session_dir, **kwargs)
+
+
 async def _run_recompute(
     session_dir: Path,
     *,
     kwargs: dict[str, Any],
     executor: Executor | None,
     timeout: float,
+    address_space_bytes: int | None,
 ) -> CaptureQuality:
-    from src.analysis import capture_coverage
-
-    call = functools.partial(capture_coverage.recompute_capture_quality, session_dir, **kwargs)
     owned = executor is None
     pool: Executor = _spawn_pool() if executor is None else executor
+    ceiling = address_space_bytes
+    if ceiling is None and owned:
+        from src.analysis.digest import derived_address_space_bytes
+
+        ceiling = derived_address_space_bytes()
+    if not isinstance(pool, ProcessPoolExecutor):
+        # ``RLIMIT_AS`` is per process. A thread pool (a test standing in for
+        # the child) runs in *this* process, and a cap put on it would stay
+        # on the daemon, or the test worker, for good: never capped.
+        ceiling = None
+    call = functools.partial(
+        recompute_under_limit, session_dir, kwargs, address_space_bytes=ceiling
+    )
     finished = False
     try:
         try:
@@ -316,6 +379,16 @@ async def _run_recompute(
             raise CaptureQualityUnavailableError(
                 f"capture quality recompute for {session_dir.name} did not finish "
                 f"within {timeout:.0f}s"
+            ) from exc
+        except MemoryError as exc:
+            under = (
+                "the address space it was given"
+                if ceiling is None
+                else f"its {ceiling // _MIB} MiB address-space cap"
+            )
+            raise CaptureQualityUnavailableError(
+                f"capture quality recompute for {session_dir.name} ran out of memory under "
+                f"{under} (the rows it scores do not fit; the daemon was not touched)"
             ) from exc
         except BrokenExecutor as exc:
             raise CaptureQualityUnavailableError(
@@ -453,6 +526,31 @@ async def _finalize(  # noqa: PLR0913
     return payload
 
 
+async def finalize_interrupted_capture(
+    session_dir: Path, *, executor: Executor | None = None
+) -> dict[str, Any] | None:
+    """Score a capture the daemon never got to stop (it was killed or died
+    with the capture armed) and write its sidecar. The boot path.
+
+    Never raises, for the reason :func:`finalize_capture` never does and one
+    more: this runs before the collectors start, so a capture that cannot be
+    scored (a child that died, timed out, or was refused by its own
+    address-space cap -- all :class:`CaptureQualityUnavailableError`) must
+    leave the daemon starting, not stopped. Returns the sidecar payload, or
+    ``None`` when nothing could be scored; the failure is logged with its
+    reason and the capture is left without a ``capture_quality.json``, which
+    every reader takes as unknown, never as a pass.
+    """
+    try:
+        quality = await recompute_quality_off_loop(session_dir, executor=executor)
+        payload = quality.to_dict()
+        write_capture_quality(session_dir, payload)
+        return payload
+    except Exception:  # noqa: BLE001 — recovery is best effort, the stamp remains truthful
+        log.exception("failed to finalize interrupted capture %s", session_dir)
+        return None
+
+
 async def _flush(writer: _Writer | None) -> str | None:
     if writer is None:
         return None
@@ -471,8 +569,10 @@ __all__ = [
     "StartEpoch",
     "batching_baseline_for",
     "finalize_capture",
+    "finalize_interrupted_capture",
     "live_capture_quality",
     "losses_since",
     "recompute_quality_off_loop",
+    "recompute_under_limit",
     "record_capture_start",
 ]

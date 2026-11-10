@@ -229,6 +229,31 @@ cannot start, dies or exceeds `RECOMPUTE_TIMEOUT_SECONDS` (600 s) is reported
 — `503` on the live and recompute routes, "no verdict" (`None`, logged) at
 stop — never waited on.
 
+**It reads only the rows it scores, and caps itself (D03.64, 2026-11-10).**
+The score is made of `obd` rows and their round identity, so
+`persisted_quality_inputs` reads exactly those (`read_scored_rows`: a
+`source == "obd"` filter and four columns at the parquet read, nothing decoded
+on read). Before, it read every row with the CAN decoded: on a 108-minute
+`tuning` capture (80 % raw CAN, 5 % `obd`) the child reached 6.19 GB on the
+Pi, the memory cgroup's OOM killer took it, and systemd failed the whole
+daemon unit; on the laptop that session scored in 9.5 GB / 41 s, and now scores
+in 0.84 GB / 12 s with the same verdict. Memory follows the capture's `obd`
+rows (~1.5 KB each), not its CAN volume. Two figures are whole-session counts
+and are taken without that read: `rows_on_disk` is the chunk footers' row count
+(every persisted row, the number the writer's `rows_written` is compared with
+— it used to be a count of the decoded frame, which included rows synthesised
+from the CAN frames), and the interval's end, when none was recorded, still
+comes from the last row of *any* source (`last_row_seconds_outside_scored`).
+The child also puts `RLIMIT_AS` on itself before reading anything — the digest
+child's mechanism, with its RAM-derived ceiling
+(`digest.derived_address_space_bytes`, 1–4 GiB) — so a capture that still does
+not fit ends as a `MemoryError` in the child and a `CaptureQualityUnavailableError`
+naming the cap, never the kernel's OOM kill. The boot-time finalize of an
+interrupted capture (`finalize_interrupted_capture`) logs that refusal and the
+daemon starts; the capture is left without a `capture_quality.json`, which
+every reader takes as unknown, and `GET /control/capture/quality/{session_id}`
+scores it later.
+
 ### Verdicts
 
 * `pass` — interval ≥ 5 s, every capture-selected channel `ok`, the tuple
