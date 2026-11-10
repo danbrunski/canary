@@ -1976,6 +1976,39 @@ that closed its task checklist.
   or a skip record naming the reason. Fix it in the shared function, keyed by
   trip rather than by session directory. A test drives two trip ends through
   one session and checks both are on disk.
+- [ ] **D03.64 Scoring a long capture OOM-kills the daemon.** *From the
+  2026-11-10 boot.*
+  - **What happened.** At 16:59:58Z the daemon tried to finalize the
+    interrupted leg 3 (`_capture-ltft-gate-2026-11-08T201601`: 108 min,
+    167 MB, 1,299 files).
+    - `recompute_quality_off_loop`'s spawn child reached 6.19 GB anon RSS, and
+      the memory-cgroup OOM killer killed it (`MemoryMax` 6 GiB).
+    - With `OOMPolicy=stop`, systemd then failed the whole unit
+      (`Failed with result 'oom-kill'`, 6G memory peak). It restarted at
+      17:00:30Z, with the engine running. About 30 s of collection was lost.
+    - Leg 3 never got a `capture_quality.json`.
+  - **Laptop reproduction.** `recompute_capture_quality` on a copy of leg 3
+    peaked at 9.6 GB in 47 s. On a 15 MB `tuning` capture it peaked at 1.2 GB.
+    Memory runs at roughly 60 MB per MB on disk.
+  - **Cause.** `persisted_quality_inputs` calls `read_acquisition_frame(session)`.
+    That reads every row, with CAN decoded on read. On leg 3 the rows were
+    80 % `can`, 7.7 % `sensor` (fuel pressure at ~500 Hz) and 6.7 % `gps`.
+    Only 5.2 % were the `obd` rows the profile's requests and tuples are made
+    of.
+  - **The normal stop takes the same path** (`finalize_capture` →
+    `recompute_quality_off_loop`). Any capture longer than about 50–55 min at
+    `tuning` rates therefore takes the daemon down when it stops. Whole-drive
+    `capture/autostart` captures make that the usual case. On 2026-11-10 the
+    drive is split by hand every ~40 min until this lands.
+  - **Accept:**
+    - The recompute reads only the sources and channels it scores, with no
+      decode on read.
+    - Its peak memory is measured on leg 3's copy and is bounded by the
+      profile's channel count, not by the session's CAN volume.
+    - The child caps its own `RLIMIT_AS`, as the digest child does
+      (`trip_end.limit_address_space`). A refusal then writes a quality
+      record naming the reason, instead of the kernel killing the service.
+    - A regression test asserts the CAN rows are never loaded.
 ## Opened 2026-09-23 on the drive
 
 - [x] **D03.28 `GET /anomalies` parses the whole anomaly history in the collecting
