@@ -2103,6 +2103,14 @@ that closed its task checklist.
     with 0 resolvable pairs (213 BFS and 106 phi pairs before the rule on
     164007). The verdict, `passed == []`, is unchanged. The plant-validation,
     fuel-comp and sim-design files pass with their slow tests (229 passed).
+  - **The whole slow tier, run once afterwards (2026-11-11, 591 tests):** two
+    more reds, both from recording ZS44A-20261110 the same evening, not from
+    N02.8. `test_brain_routes` wanted `program_current` true: the new image
+    was not in `ecu_application_model.yaml`'s `images` (added; its program
+    hash equals the model's). `test_detector_evaluation_golden[full]` pins a
+    digest of log lines, and one warning lists the recorded revisions (one
+    digest changed in the fixture; a full `--write` also rewrites 89 floats by
+    up to 3e-14, which was left out). A flash record has to run these too.
 ## Opened 2026-09-23 on the drive
 
 - [x] **D03.28 `GET /anomalies` parses the whole anomaly history in the collecting
