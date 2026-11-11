@@ -56,7 +56,7 @@ provenance:
     against 0.006 for the monotone table. The sensor's transfer is not any
     of those shapes, and a 1/AFR fit also drifts 3.7% in slope between the
     two eras.
-active_revision: ZS44A-20261110
+active_revision: ZS44A-20261111
 # Settled 2026-08-05 (commit 78592f4). At WOT PID 0x44 reads 1.109-1.242:
 # as lambda that is a commanded 16.3-18.3 AFR, which no ECU commands under
 # power and which produced a -27% phantom delivery error. As phi it gives
@@ -459,6 +459,44 @@ target_maps:
         Target AFR at 0xE0220 and both axes equal ZS44A-20261004 byte for byte;
         the flash changed only 35 slot-1 Fuel Comp cells
         (data/analyses/2026-11-10-fuel-comp-wot-cut-prediction.md).
+  # ZS44A-20261111 leaned two cells of the last (full-pedal) column; the axes
+  # are unchanged, so the clamp declarations (ECM program behaviour) carry over
+  # through the anchor, and only the two matrices are restated.
+  - <<: *targets_20260920
+    revision: ZS44A-20261111
+    afr:
+      - [14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 12.887671]
+      - [14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 12.628188]
+      - [14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 12.628188]
+      - [14.700000, 14.700000, 14.700000, 14.700000, 13.250704, 13.066667, 13.066667, 12.628188]
+      - [14.700000, 14.700000, 14.700000, 12.800000, 12.544000, 12.628188, 12.628188, 12.628188]
+      - [14.700000, 14.700000, 13.066667, 12.800000, 12.544000, 12.298039, 12.298039, 12.298039]
+      - [14.700000, 13.536691, 12.460927, 12.298039, 11.984713, 12.139355, 12.139355, 12.298039]
+      - [12.800000, 12.378947, 11.984713, 11.760000, 11.543558, 11.833962, 11.833962, 12.298039]
+    raw_values:
+      - [0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x92]
+      - [0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x95]
+      - [0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x95]
+      - [0x80, 0x80, 0x80, 0x80, 0x8E, 0x90, 0x90, 0x95]
+      - [0x80, 0x80, 0x80, 0x93, 0x96, 0x95, 0x95, 0x95]
+      - [0x80, 0x80, 0x90, 0x93, 0x96, 0x99, 0x99, 0x99]
+      - [0x80, 0x8B, 0x97, 0x99, 0x9D, 0x9B, 0x9B, 0x99]
+      - [0x93, 0x98, 0x9D, 0xA0, 0xA3, 0x9F, 0x9F, 0x99]
+    provenance:
+      method: verified_rom_decode
+      rom_file: ZS44A-Tuned-20261111.OsirisROM
+      rom_sha256: c919ff9612304e5f7c1a93a7ca2a28b40f1b0cfb0b54007efab358a40a22f386
+      rom_modified_at: 2026-11-11T17:38:19.134045Z
+      recorded_on: 2026-11-11
+      map_slot: 1
+      cell_decode: 'AFR = 14.7 * 128 / raw cell count'
+      guide_reference: 'UpRev Nissan Tuning Guide Rev 8 (Feb 2022), pages 9-10'
+      notes: >
+        Decoded from the image at 0xE0220. Against 20261110 only row 6 / column 7
+        (9B -> 99) and row 7 / column 7 (9F -> 99) change; both axes are byte for
+        byte the same. The flash capture verified the image on the ECU
+        (tune_revisions.yaml). Predictions:
+        data/analyses/2026-11-11-wot-target-lean-prediction.md.
   # The first two UpRev flashes. No ROM file of either survives (each was
   # saved over ZS44A-Tuned.OsirisROM, later overwritten by k106), but the
   # operator edited only K on them, never a fuel-target cell (2026-10-03), so

@@ -123,3 +123,61 @@ enriching), as in `baseline.py`. The baseline is `_capture-tuning-2026-11-10T235
   DET still latched, or `0xFFFF174A` reading 0 now where a pull on 20261110 showed
   it above 0: leaning removed retard. Flash 20261110 back.
 - Any band measuring leaner than +2.5 % of the new target: flash 20261110 back.
+
+## Scored 2026-11-11 (first drive after the flash)
+
+Flashed 2026-11-11T17:44:34Z, verified from the flash capture
+(`docs/skunkworks/uprev-flash-procedure.md`). Capture
+`_capture-tuning-2026-11-11T174602` (17:46–18:09Z, 82–83 kPa, IAT 18–20 °C), ten
+full-pedal pulls above 4,000 rpm, the first four at 73–85 °C coolant. Scripts in
+`~/canary-data/analysis-scripts/2026-11-11/` (`score.py`, `ctx.py`, `mech.py`,
+`fc-samples/`). Baseline throughout: `_capture-tuning-2026-11-10T235310`.
+
+**Verdict: every prediction held on held pulls; keep the tune. One thing the
+prediction did not know: in first-gear pulls the ECM does not read the edited
+column at all.**
+
+| Prediction | Result |
+|---|---|
+| RAM target ≤ 1.195 above 4,400 rpm; lookup byte 153 from 4,000 | **Held on held pulls.** Of 37 full-pedal reads with rpm rising < 700 rpm/s, 34 read raw 153 (φ 1.195), from 4,125 to 5,712 rpm; the other three are lift-offs (timing already at 39°, or MAF at 49 g/s). On 20261110 the same pulls stepped 153 → 155 → 159. Control 2,500–3,500 rpm: 1.164 on 27 of 27. |
+| Delivery error within ±2.5 of +1.2 / +0.6 / +0.4 % | **Held, thin.** Frozen gates: +1.6 % (n 2) at 4,400–4,800, none at 4,800–5,200, +1.6 % (n 1) at 5,200–5,600, −0.3 % (n 1) above. The gates dropped most reads for a fuel cut in the previous seconds or coolant under the warm limit. |
+| Measured AFR at the top about 12.35 (12.0–12.65) | **Held.** Band medians on held pulls, same-instant reads: 12.38 / 12.48 / 12.36 / 12.39 at 4,000–4,400 / 4,400–4,800 / 4,800–5,200 / 5,200–5,600 (n 8 / 8 / 6 / 6) against 12.30 commanded. It was 12.27 / 12.00 / 11.88 above 4,400. |
+| (pulse − Ts) · rpm / MAF falls 1.9 / 3.2 / 3.8 % (±1.5) | **Held:** −2.6 / −3.1 / −3.3 % (n 8 / 6 / 6 against 18 / 13 / 5). |
+| BFS · rpm / MAF unchanged (±1.5) | **Held:** −0.3 / +0.9 / +0.5 %. |
+| Timing within ±1° per band | **Held at matched rpm, not by band median.** Each read against the 20261110 timing-versus-rpm curve at its own rpm: median −0.5° on 25 warm reads (≥ 85 °C), −1.8° on 9 reads below 85 °C, nothing advanced. The band medians read 9 / 11 / 13 / 21° against 10 / 12 / 13 / 18.5°: the +2.5° at 5,200–5,600 is rpm mix inside a band where timing climbs 13° → 21°. A band median was the wrong statistic to freeze for timing. |
+| Enrichment retard `0xFFFF174A` = 0 at full pedal | **Held:** 0 on all 76 full-pedal reads, the first loaded read of it. Its cap `0xFFFF174C` read 0–7 counts. Leaning cannot have removed retard that was never applied. |
+
+No band measured leaner than +2.5 % of the target.
+
+### The falsifier that tripped as written
+
+"A full-pedal RAM target above 1.20 above 4,400 rpm" occurred on six reads, pedal
+at 255. One is a lift-off (raw 159 with MAF at 49 g/s). The other five read raw 157,
+160, 160, 159 and 154 (φ 1.203–1.250) at 4,650–5,390 rpm. The falsifier's stated
+meaning, that the ECM is not reading the edited cells, is refuted by the 34
+held-pull reads. Those five are in three pulls where rpm rose 1,070–1,330 rpm/s
+(first gear) and calculated load read 82–90 %, not 91–95 %. The values are the
+part-pedal cells of the 4,400 and 5,200 rows (155–163), which this flash left
+alone, so there the ECM was reading the load-indexed cell with the pedal on the
+floor.
+
+20261110 could not show this: its last column held 155 / 159, the same numbers as
+the neighbouring part-pedal cells. Its three fast pulls read 155 → 159, which fits
+either source. So "at full pedal the ECM reads the last Fuel Targets column at
+every rpm" is true of held pulls and untested, now contradicted, for a fast
+first-gear pull. What selects the column there (a delay, a load condition, a gear
+or speed term) is not known. It is a firmware question.
+
+Consequence: a first-gear pull above about 4,600 rpm still gets AFR 11.8–12.0
+commanded (measured 11.5–12.2 on those reads), not 12.3. That is the richer side.
+Bringing first gear to 12.3 as well means editing the part-pedal cells of the
+4,400 and 5,200 rows, a separate flash.
+
+### What this drive did not cover
+
+- Full pedal at 3,000–4,000 rpm (3 reads). The cells there were not edited.
+- A fully warm set under the frozen delivery gates: four reads qualified. A drive
+  with pulls made after 20 s of steady cruise, not straight out of a lift, would
+  fill it.
+- The step to 12.5 still waits for the KS1 harness repair: knock control stayed in
+  its fallback (−5° target on every full-pedal read).

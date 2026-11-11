@@ -76,6 +76,12 @@ program:
     - sha256: dfe09508c9a3291794a31d4a24549b39798c19a32c67dccd1b513251855bf06a
       revision: ZS44A-20261110
       role: program_checked
+    # Checked 2026-11-11 on the decoded ZS44A-Tuned-20261111.OsirisROM: the
+    # program sha256 above (the build changed two Fuel Targets cells and the
+    # low byte of each checksum word, all outside the hashed spans).
+    - sha256: 2b42c6effb795edff69d49284f5a86d78de9340b9d1e7256fc4676f82d9ab412
+      revision: ZS44A-20261111
+      role: program_checked
     - sha256: e01cc0cb45d5beb879f82931be3054c79b7be3955220b3d93045deaabd23f18e
       revision: ZS44A-k106
       role: program_checked

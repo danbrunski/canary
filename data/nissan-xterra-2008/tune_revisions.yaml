@@ -119,6 +119,27 @@ revisions:
       that morning's capture, and the commanded phi was unchanged. Evidence and
       the predictions frozen before the flash:
       data/analyses/2026-11-10-fuel-comp-wot-cut-prediction.md.
+  - revision: ZS44A-20261111
+    calibration_id: 1ZS44A00000
+    flashed_at: 2026-11-11T17:44:34.185467Z
+    flashed_at_precision: exact
+    k: 1.06
+    rom_file: ZS44A-Tuned-20261111.OsirisROM
+    rom_sha256: c919ff9612304e5f7c1a93a7ca2a28b40f1b0cfb0b54007efab358a40a22f386
+    image_sha256: 2b42c6effb795edff69d49284f5a86d78de9340b9d1e7256fc4676f82d9ab412
+    notes: >
+      Full-pedal targets leaned to AFR 12.3: slot-1 Fuel Targets last column,
+      4,400 rpm 155 -> 153 and 5,200 rpm 159 -> 153 (0xE0257, 0xE025F). Built by
+      CANary from 20261110; Fuel Comp, K, timing, the axes and slots 2-5
+      unchanged. The flash capture
+      (/data/canary/flash-captures/flash-20261111T174424Z.candump.log, sha256
+      33a2974c769e2dfd2c155249bdc664564c7abf9f5ca7839001d7df5948b77331) shows
+      16/16 range CRCs before programming matching 20261110, only sectors 15
+      and 8 erased, all 8 uploaded pages equal to this image, and 16/16 range
+      CRCs after programming matching it. Boundary = the last post-program
+      range CRC response. Write-up: docs/skunkworks/uprev-flash-procedure.md.
+      Predictions frozen before the flash:
+      data/analyses/2026-11-11-wot-target-lean-prediction.md.
 # Known images that were never flashed as-is (W08.2). Not revisions: they have
 # no flash boundary, so sessions are never assigned to them.
 reference_images:
