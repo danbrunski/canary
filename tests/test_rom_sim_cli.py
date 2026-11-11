@@ -89,12 +89,15 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     model_path.write_text(yaml.safe_dump(model, sort_keys=False))
     sha = hashlib.sha256(image).hexdigest()
     registry_path = profile / "tune_revisions.yaml"
+    # Dated in 2099 so a synthetic revision sorts after every real flash: the
+    # registry refuses an out-of-order list, and a date just past the newest real
+    # flash broke these fixtures when ZS44A-20261110 was recorded.
     registry = _yaml(registry_path)
     registry["revisions"].append(
         {
             "revision": BASE,
             "calibration_id": "1ZS44A00000",
-            "flashed_at": "2026-10-10T00:00:00Z",
+            "flashed_at": "2099-10-10T00:00:00Z",
             "flashed_at_precision": "exact",
             "image_sha256": sha,
             "notes": "synthetic: the CLI test's base image",

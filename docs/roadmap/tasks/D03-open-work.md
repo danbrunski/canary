@@ -2087,6 +2087,21 @@ that closed its task checklist.
       `NRestarts` 0. This is the capture whose boot-time score reached 6.19 GB
       and stopped the unit that morning. Still to see: a capture of 50 minutes
       or more stopping normally on the new build (next drive).
+- [ ] **D03.65 A slow-tier plant-validation pin is red since N02.8.** *Found
+  2026-11-11 while recording ZS44A-20261110.*
+  - **What.** `tests/test_plant_validation_ecu_outputs.py::test_the_wot_null_control_does_not_pass_on_pre_flash_drives_outside_its_design`
+    expects `_capture-tuning-2026-09-23T164007` to have no eligible read
+    (`(post_reads, post_eligible, n_pairs) == (1353, 0, 0)`, "its fill byte
+    never pairs"). It now gets `(1353, 271, 0)`.
+  - **Not the new revision.** It fails the same way with
+    `tune_revisions.yaml` and `afr_calibration.yaml` at their committed state.
+    The likely cause is `cf4422c5` (N02.8, throttle route per read), which
+    lets reads pair that could not before. The test is in the slow tier and
+    needs the private sessions and ROMs, so the push gate never ran it.
+  - **Accept.** Decide whether 271 eligible reads with 0 pairs still makes the
+    control "unpowered" as the docstring claims, then re-derive the pin and
+    the docstring from the run, or fix the pairing if 271 is wrong. Run
+    `pytest -m slow` over the plant-validation files afterwards.
 ## Opened 2026-09-23 on the drive
 
 - [x] **D03.28 `GET /anomalies` parses the whole anomaly history in the collecting

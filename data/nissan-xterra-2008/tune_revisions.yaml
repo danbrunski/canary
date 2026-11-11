@@ -96,6 +96,29 @@ revisions:
       matching it over 0x000000-0x0FFFFF. Boundary = the last post-program
       range CRC response. Prediction recorded before the flash:
       data/analyses/2026-10-04-fuel-comp-restore-prediction.md.
+  - revision: ZS44A-20261110
+    calibration_id: 1ZS44A00000
+    flashed_at: 2026-11-10T23:40:00Z
+    flashed_at_precision: approximate
+    k: 1.06
+    rom_file: ZS44A-Tuned-20261110.OsirisROM
+    rom_sha256: 28d0ff291e5812d30f6c2203bc68322aad53742c21ba3970c86e49826dc7560a
+    image_sha256: dfe09508c9a3291794a31d4a24549b39798c19a32c67dccd1b513251855bf06a
+    notes: >
+      WOT Fuel Comp cut: slot-1 Fuel Comp rows 9-15 (4,000-6,400 rpm) x columns
+      11-15 (load byte 192-255) lowered 2.2-5.1 % (35 cells). Built by CANary
+      from 20261004; K, Load Point Scaler, Target AFR, timing trims, the axes
+      and slots 2-5 unchanged. The flash was not captured: the Pi was unplugged
+      from the OBD port for it. The time is bounded, not measured: no tester
+      traffic through 18:16Z, and the engine was running on the Pi's next
+      frames at 23:45:36Z, with the operator reporting the flash at 23:50Z. No
+      engine-running data exists inside that window, so the boundary assigns
+      every session correctly. Confirmed from the first drive after it
+      (_capture-tuning-2026-11-10T235310, first four pulls, 14 open-loop reads):
+      at full pedal BFS x rpm / MAF fell 2.8-3.8 % at 4,400-5,600 rpm against
+      that morning's capture, and the commanded phi was unchanged. Evidence and
+      the predictions frozen before the flash:
+      data/analyses/2026-11-10-fuel-comp-wot-cut-prediction.md.
 # Known images that were never flashed as-is (W08.2). Not revisions: they have
 # no flash boundary, so sessions are never assigned to them.
 reference_images:

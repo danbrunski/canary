@@ -216,7 +216,8 @@ def test_a_map_without_the_declarations_keeps_nan_off_both_axes() -> None:
 def test_the_k106_era_maps_declare_two_edges_and_the_base_map_none() -> None:
     """The edges are ECM program behaviour logged on k106; the 2026-09-20
     flash changed one calibration cell and inherits them through the YAML
-    anchor, as does 2026-10-04 (Fuel Comp only; same targets and axes). The
+    anchor, as do 2026-10-04 and 2026-11-10 (Fuel Comp only; same targets and
+    axes). The
     UpRev base map (the first two flashes) declares none: no log from that
     era was matched, so it stays NaN off the axes."""
     revisions = [m.revision for m in CALIBRATION.target_maps]
@@ -224,13 +225,14 @@ def test_the_k106_era_maps_declare_two_edges_and_the_base_map_none() -> None:
         "ZS44A-k106",
         "ZS44A-20260920",
         "ZS44A-20261004",
+        "ZS44A-20261110",
         "ZS44A-osiris-initial",
         "ZS44A-k105",
     ]
-    for target in CALIBRATION.target_maps[:3]:
+    for target in CALIBRATION.target_maps[:4]:
         assert target.clamps_below_first_load and target.clamps_above_last_rpm
         assert not target.clamps_above_last_load and not target.clamps_below_first_rpm
-    for target in CALIBRATION.target_maps[3:]:
+    for target in CALIBRATION.target_maps[4:]:
         assert target.load_axis_out_of_range is None and target.rpm_axis_out_of_range is None
 
 

@@ -127,12 +127,15 @@ def _library_flashes(tmp_path: Path) -> tuple[CanaryConfig, dict[str, str]]:
     shas["D"] = "d" * 64
     registry_path = profile / "tune_revisions.yaml"
     registry = load_yaml(registry_path.read_text())
+    # Dated in 2099 so a synthetic revision sorts after every real flash: the
+    # registry refuses an out-of-order list, and a date just past the newest real
+    # flash broke these fixtures when ZS44A-20261110 was recorded.
     for day, name in enumerate("ABCD", start=1):
         registry["revisions"].append(
             {
                 "revision": f"TEST-{name}",
                 "calibration_id": "1ZS44A00000",
-                "flashed_at": f"2026-11-0{day}T00:00:00Z",
+                "flashed_at": f"2099-11-0{day}T00:00:00Z",
                 "image_sha256": shas[name],
             }
         )
@@ -141,7 +144,7 @@ def _library_flashes(tmp_path: Path) -> tuple[CanaryConfig, dict[str, str]]:
 
 
 def _on(day: int) -> datetime:
-    return datetime(2026, 11, day, 12, 0, tzinfo=UTC)
+    return datetime(2099, 11, day, 12, 0, tzinfo=UTC)
 
 
 def test_a_library_image_of_the_same_program_is_a_calibration_change(tmp_path: Path) -> None:

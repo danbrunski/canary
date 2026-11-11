@@ -879,7 +879,8 @@ def test_the_shared_resolver_splits_at_a_flash_inside_the_span_only(tmp_path: Pa
     assert spanning[0].end == spanning[1].start
     assert all(s.identity.program_status == "known" for s in spanning)
     open_ended = resolver.segments(None, first_read=before)
-    assert [s.identity.calibration for s in open_ended] == [
+    # Open-ended runs on through every later flash, so it starts with the span's.
+    assert [s.identity.calibration for s in open_ended][: len(spanning)] == [
         s.identity.calibration for s in spanning
     ]
-    assert len(resolver._programs) == 2  # one program lookup per image
+    assert len(resolver._programs) == len(open_ended)  # one program lookup per image
