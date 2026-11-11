@@ -157,6 +157,55 @@ sampler, same gates, bank 1, each rpm band needing ≥ 4 eligible reads.
 
 ## After the flash
 
-Record the revision in `tune_revisions.yaml` (flash time from the CAN capture
-of the flash) and add its `target_maps` entry in `afr_calibration.yaml`,
-reusing 20261004's map with a YAML anchor: the target table is unchanged.
+Recorded as `ZS44A-20261110` in `tune_revisions.yaml` and
+`afr_calibration.yaml` (`56cc348f`). The flash itself was not captured: the Pi
+was unplugged from the OBD port for it. Its time is bounded between 18:16Z (no
+tester traffic yet) and 23:45:36Z (engine running on the Pi's next frames).
+
+## Scored: first drive after the flash (2026-11-10 23:53Z – 2026-11-11 00:23Z)
+
+`_capture-tuning-2026-11-10T235310`, 30 minutes, about seven full-pedal runs to 5,000 rpm or more,
+coolant 87–91 °C, intake air 19–23 °C, baro 82 kPa, rail 50–51 psi falling to
+48.5–49.4 in the pulls. The morning baseline was at the same coolant and baro.
+Same sampler and gates as the prediction; outputs in
+`~/canary-data/analysis-scripts/2026-11-10-drive/fc-samples-pm/` (`score.py`
+prints the table and reproduces the morning's figures from its own samples).
+
+| rpm band | Before | Predicted | After (n) | Verdict |
+|---|---|---|---|---|
+| 3,000–4,000 (control) | +2.0 % | +2.3 ± 2.5 | no reads | not scored |
+| 4,000–4,400 | −3.5 % | −0.8 ± 2.5 | no reads | not scored |
+| 4,400–4,800 | −4.2 % | −0.5 ± 2.5 | +1.2 % (3) | inside, but under the 4 reads required |
+| 4,800–5,200 | −7.1 % | −2.2 ± 2.5 | +0.6 % (4) | **missed by 0.3**: leaner than predicted |
+| 5,200–5,600 | −6.8 % | −1.9 ± 2.5 | +0.4 % (6) | inside |
+
+- **The rich error at the top is gone.** Measured AFR above 5,200 rpm is 11.9
+  against 11.8 commanded; it was 11.0. One read at 5,812 rpm: −1.3 %.
+- **It landed 2–3 points leaner than predicted.** The error moved 5.4 to 7.7
+  points for a 3–5 % cut. The prediction assumed the morning's error was all
+  table; 2–3 points of it were not. Coolant, baro and rail pressure match
+  between the two captures, so the cause is not identified. It is the size of
+  the 2.5 % WOT noise floor.
+- **Mechanism check (BFS·rpm/MAF at full pedal):** fell 2.8 % at 4,400–4,800
+  rpm (predicted 4.0 ± 1.5: inside), 2.9 % at 4,800–5,200 (predicted 4.9:
+  **missed by 0.5**) and 3.8 % at 5,200–5,600 (predicted 4.9: inside). The cut
+  is live; it reads about a point smaller on BFS than the cells say. BFS is
+  filtered, and these are 3–6 reads a band.
+- **Commanded φ unchanged:** 1.219 / 1.227 / 1.242 in the three bands, as
+  before.
+- **Control, from the repo's gated `delivery_error` (PID 0x44 as target):**
+  2,500–3,000 rpm, rows the edit did not touch, +0.9 % (n 2) before and +1.0 %
+  (n 8) after. The same digest gives −5.4 → +1.2 % at 4,500–5,000 (n 8) and
+  −7.0 → −0.2 % above 5,000 (n 13).
+- **Idle trims did not move:** closed-loop total trim at idle −2.3 / −1.6 %
+  (bank 1 / 2), against −0.8 / −1.6 % that morning.
+- **Falsifiers:** neither tripped. The top-end error moved by far more than
+  1.5 points, and no band reads leaner than +2.5 % (largest single read
+  +1.7 %).
+- **Not covered:** full pedal between 3,000 and 4,400 rpm. The 4,000–4,400 row
+  (cut 2.2–3.0 %) has no read after the flash. A pull held from about 3,000
+  rpm in 3rd would fill it.
+
+**Verdict: keep ZS44A-20261110.** WOT delivery is on target from 4,400 rpm up.
+No further cut: there is no rich margin left beyond the target itself, and
+the knock sensor is still in fallback.
