@@ -309,7 +309,7 @@ run on the Pi.
 | RE stimulus (force the engine into a known state) | **NT510 actuator tests** | Drive the vehicle yourself |
 | High-rate tuning parameters (MAF sensor V, throttle map traces, A/F ADJ) | **UpRev logger over K-line** — external tool, import its CSV | No CAN path exists; optional future K-line hardware |
 | Knock / detonation | **Not streamed by design** (FSM EC-69: self-diagnostic results only, not DATA MONITOR). Health is observed via **DTC polling** — P0327/P0328, P0332/P0333, which set no MIL | None needed; do not plan discovery captures. Retard is emergency-only (EC-34) and the engine is not knock-limited as calibrated |
-| Watching another tool own a diagnostic session | **Passive mode** (`tx_gate`) + `candump`, decoded by `scripts/decode_flash.py` | — |
+| Watching another tool own a diagnostic session | **Passive mode** (`tx_gate`) + `candump`, decoded by `scripts/decode_flash.py` (ISO-TP/UDS) or `scripts/decode_uprev_flash.py` (an UpRev flash, verified against the image) | — |
 
 ## Signal interpretation gotchas
 

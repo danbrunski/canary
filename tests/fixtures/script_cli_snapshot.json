@@ -1411,6 +1411,56 @@
       }
     }
   },
+  "decode_uprev_flash.py": {
+    "options": {
+      "--json": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "json",
+        "nargs": null,
+        "option_strings": [
+          "--json"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--new": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "new",
+        "nargs": null,
+        "option_strings": [
+          "--new"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--old": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "old",
+        "nargs": null,
+        "option_strings": [
+          "--old"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "capture": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "capture",
+        "nargs": null,
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
   "derive_sessions.py": {
     "options": {
       "--bindings": {
