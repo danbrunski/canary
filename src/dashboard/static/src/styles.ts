@@ -174,6 +174,27 @@ export const tableScrollClass =
   "max-[600px]:[&_tr>:first-child]:sticky max-[600px]:[&_tr>:first-child]:left-0 " +
   "max-[600px]:[&_tr>:first-child]:z-[1] max-[600px]:[&_tr>:first-child]:bg-elev";
 
+/** A ROM map grid: fixed-size cells, the way a tuning app draws a map, rather
+ *  than columns stretched across the panel (operator, 2026-11-11). The table is
+ *  only as wide as its cells (`w-max`); give its `TableScroll` `w-fit` so the
+ *  box hugs the grid and scrolls it sideways where it is wider than the panel. */
+export const mapGridClass = "w-max border-separate border-spacing-1 text-center";
+
+/** One map cell's size, keyed by the grid's text size: about 1.4:1, sized for
+ *  six characters (`-12.34`, `44,019`). The width is a floor, not a cap: a
+ *  cell never wraps, so a longer value widens its column instead. */
+const MAP_CELL_SIZE = {
+  xs: "h-10 w-14 px-1",
+  sm: "h-11 w-16 px-1",
+  xl: "h-16 w-24 px-2",
+} as const;
+
+export type MapCellText = keyof typeof MAP_CELL_SIZE;
+
+export function mapCellClass(text: MapCellText): string {
+  return cn(MAP_CELL_SIZE[text], "whitespace-nowrap");
+}
+
 /** A two-column key/value `<table>` that stacks into cards below 600px: each
  *  row becomes a block with the key over the value. */
 export const keyValueTableClass =

@@ -10,7 +10,7 @@ import {
 } from "../../../lib/romEditor";
 import { axisBreakpoints, formatCell } from "../../../lib/romLibrary";
 import { mapColor } from "../../../lib/romMaps";
-import { cn } from "../../../styles";
+import { cn, mapCellClass, mapGridClass } from "../../../styles";
 import type { CellSelection } from "../../../types/romEditor";
 import type { RomTableValues } from "../../../types/romLibrary";
 import {
@@ -118,7 +118,7 @@ export function CellGrid({
 
   return (
     <div className="space-y-2">
-      <TableScroll className="rounded-lg border border-border">
+      <TableScroll className="w-fit rounded-lg border border-border">
         <table
           ref={element}
           role={interactive ? "grid" : "table"}
@@ -126,7 +126,8 @@ export function CellGrid({
           aria-multiselectable={interactive ? true : undefined}
           tabIndex={interactive ? 0 : undefined}
           className={cn(
-            "w-full select-none border-separate border-spacing-1 text-center font-num outline-none focus-visible:ring-1 focus-visible:ring-accent-2",
+            mapGridClass,
+            "select-none font-num outline-none focus-visible:ring-1 focus-visible:ring-accent-2",
             large ? "text-xl" : "text-xs",
           )}
           onKeyDown={
@@ -155,7 +156,7 @@ export function CellGrid({
               <tr>
                 <th scope="col" className="p-1" />
                 {colLabels.map((name, c) => (
-                  <th key={c} scope="col" className="p-1 text-fg-dim">
+                  <th key={c} scope="col" className="whitespace-nowrap p-1 text-fg-dim">
                     {name}
                   </th>
                 ))}
@@ -165,7 +166,7 @@ export function CellGrid({
           <tbody>
             {table.raw.map((rawRow, r) => (
               <tr key={r}>
-                <th scope="row" className="p-1 text-fg-dim">
+                <th scope="row" className="whitespace-nowrap p-1 text-fg-dim">
                   {rowLabels ? (rowLabels[r] ?? r + 1) : r + 1}
                 </th>
                 {rawRow.map((raw, c) => {
@@ -221,7 +222,7 @@ export function CellGrid({
                       }}
                       className={cn(
                         "relative rounded",
-                        large ? "min-w-24 p-5" : "min-w-12 p-1.5",
+                        mapCellClass(large ? "xl" : "xs"),
                         interactive && "cursor-cell",
                         filled
                           ? inkClass(style.backgroundColor)

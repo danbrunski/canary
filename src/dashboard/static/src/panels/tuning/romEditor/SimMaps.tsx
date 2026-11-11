@@ -182,10 +182,10 @@ const SimMap = memo(function SimMap({
           {map.unit ? ` (${map.unit})` : ""}
         </span>
       </figcaption>
-      <TableScroll className="rounded-lg border border-border">
+      <TableScroll className="w-fit rounded-lg border border-border">
         <table
           aria-label={`Map: ${map.title}`}
-          className="w-full border-separate border-spacing-0.5 text-center font-num text-xs"
+          className="w-max border-separate border-spacing-0.5 text-center font-num text-xs"
         >
           <caption className="sr-only">
             Rows: {table.rows.table} ({rowUnit}). Columns: {table.cols.table} ({colUnit}). Select a
@@ -244,7 +244,7 @@ const SimMap = memo(function SimMap({
                             cell.row_axis_moved || cell.col_axis_moved ? "true" : undefined
                           }
                           className={
-                            "relative flex h-10 w-full min-w-12 flex-col items-center justify-center leading-tight outline-none focus-visible:ring-2 focus-visible:ring-accent-2" +
+                            "relative flex h-10 w-full min-w-14 flex-col items-center justify-center whitespace-nowrap px-1 leading-tight outline-none focus-visible:ring-2 focus-visible:ring-accent-2" +
                             (isSelected ? " ring-2 ring-accent-2" : "")
                           }
                           style={{

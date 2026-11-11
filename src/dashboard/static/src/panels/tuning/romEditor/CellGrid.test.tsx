@@ -230,9 +230,16 @@ describe("CellGrid live overlay", () => {
     expect(shadow.indexOf("--color-bg")).toBeLessThan(shadow.indexOf("--color-series-5"));
   });
 
+  it("draws fixed-size cells that never wrap, in a grid only as wide as its cells", () => {
+    render(<CellGrid table={table(RAW)} label="Cells" />);
+    expect(cellAt(0, 0)).toHaveClass("w-14", "h-10", "whitespace-nowrap");
+    expect(grid()).toHaveClass("w-max");
+    expect(grid()).not.toHaveClass("w-full");
+  });
+
   it("draws a large grid for the drive presentation", () => {
     render(<CellGrid table={table(RAW)} label="Cells" large />);
-    expect(cellAt(0, 0)).toHaveClass("min-w-24");
+    expect(cellAt(0, 0)).toHaveClass("w-24", "h-16", "whitespace-nowrap");
     expect(grid()).toHaveClass("text-xl");
   });
 });

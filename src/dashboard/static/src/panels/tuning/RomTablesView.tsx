@@ -16,7 +16,7 @@ import {
   tableSlots,
 } from "../../lib/romLibrary";
 import { mapColor } from "../../lib/romMaps";
-import { inputClass } from "../../styles";
+import { cn, inputClass, mapCellClass, mapGridClass } from "../../styles";
 import type {
   RomConfidence,
   RomMapSlots,
@@ -208,11 +208,8 @@ function ValuesGrid({ table }: { table: RomTableValues }) {
           : "Columns: index"}
         {" · "}Cells: {unit || "value"}
       </p>
-      <TableScroll className="rounded-lg border border-border">
-        <table
-          className="w-full border-separate border-spacing-1 text-center font-num text-xs"
-          aria-label={`${table.name} values`}
-        >
+      <TableScroll className="w-fit rounded-lg border border-border">
+        <table className={cn(mapGridClass, "font-num text-xs")} aria-label={`${table.name} values`}>
           {colLabels && (
             <thead>
               <tr>
@@ -222,7 +219,7 @@ function ValuesGrid({ table }: { table: RomTableValues }) {
                     key={c}
                     scope="col"
                     title={colAxis ? `raw ${colAxis.raw[c] ?? "?"}` : undefined}
-                    className="p-1 text-fg-dim"
+                    className="whitespace-nowrap p-1 text-fg-dim"
                   >
                     {formatCell(label)}
                   </th>
@@ -233,14 +230,14 @@ function ValuesGrid({ table }: { table: RomTableValues }) {
           <tbody>
             {values.map((row, r) => (
               <tr key={r}>
-                <th scope="row" className="p-1 text-fg-dim">
+                <th scope="row" className="whitespace-nowrap p-1 text-fg-dim">
                   {rowLabels ? formatCell(rowLabels[r] ?? r) : r}
                 </th>
                 {row.map((value, c) => (
                   <td
                     key={c}
                     title={`raw ${table.raw[r]?.[c] ?? "?"}`}
-                    className="min-w-12 rounded p-1.5 text-bg"
+                    className={cn(mapCellClass("xs"), "rounded text-bg")}
                     style={{
                       backgroundColor: value === null ? undefined : mapColor(value, min, max),
                     }}

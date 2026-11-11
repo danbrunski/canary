@@ -2,6 +2,7 @@ import { TableScroll } from "../components/TableScroll";
 import { mapColor } from "../lib/romMaps";
 import type { RomTable } from "../lib/romMaps";
 import type { CellPosition, CoverageGrid } from "../lib/romTrace";
+import { cn, mapCellClass, mapGridClass } from "../styles";
 import {
   CoverageLegend,
   HeatLegend,
@@ -54,9 +55,9 @@ export function MapTable({
           {outOfRange && (
             <p role="status">Operating point is outside the verified axes; no cell highlighted.</p>
           )}
-          <TableScroll className="rounded-lg border border-border">
+          <TableScroll className="w-fit rounded-lg border border-border">
             <table
-              className={`w-full border-separate border-spacing-1 text-center font-mono ${large ? "text-xl" : "text-sm"}`}
+              className={cn(mapGridClass, "font-mono", large ? "text-xl" : "text-sm")}
               aria-label={`Map ${table.slot} ${table.title} values`}
             >
               <caption className="sr-only">
@@ -70,7 +71,7 @@ export function MapTable({
                     RPM ↓ / {table.x_unit} →
                   </th>
                   {table.x_axis.map((x, i) => (
-                    <th scope="col" key={i} className="p-2">
+                    <th scope="col" key={i} className="whitespace-nowrap px-1 py-2">
                       {x.toFixed(2)}
                     </th>
                   ))}
@@ -79,7 +80,7 @@ export function MapTable({
               <tbody>
                 {table.values.map((row, r) => (
                   <tr key={r}>
-                    <th scope="row" className="p-2">
+                    <th scope="row" className="whitespace-nowrap p-2">
                       {table.y_axis[r]}
                     </th>
                     {row.map((value, c) => {
@@ -98,7 +99,11 @@ export function MapTable({
                           data-coverage={state.covered ?? undefined}
                           aria-label={`${table.y_axis[r]} RPM, ${table.x_axis[c]} ${table.x_unit}: ${value.toFixed(2)} ${table.unit}${overlayLabel(state)}`}
                           title={`Raw ${table.raw[r][c]} · ${value.toFixed(6)} ${table.unit}${overlayTitle(state)}`}
-                          className={`relative rounded ${inkClass(style.backgroundColor)} ${large ? "min-w-24 p-5" : "min-w-16 p-3"}`}
+                          className={cn(
+                            "relative rounded",
+                            inkClass(style.backgroundColor),
+                            mapCellClass(large ? "xl" : "sm"),
+                          )}
                           style={style}
                         >
                           <OverlayMarks state={state} />
