@@ -65,12 +65,13 @@ def test_shipped_map_carries_the_2026_10_04_findings_with_their_confidence() -> 
         5,
     )
     # The 2026-10-04 diff spans became tables once the code that reads them was
-    # found; the spans left are the two slot areas nobody has identified.
+    # found. Two spans are left: the engine torque map (identified 2026-11-11,
+    # still a span because its units are inferred) and one unidentified area.
     spans = {r.name: r for r in rom_map.map_slots.regions}
     assert "Ignition timing (probable)" not in spans
     assert "Fuel Compensation (span)" not in spans
     assert {(s.start, s.end, s.confidence) for s in spans.values()} == {
-        (0x260, 0x45F, "unknown"),
+        (0x260, 0x45F, "verified"),
         (0x460, 0x65F, "unknown"),
     }
     regions = {(r.start, r.end): r for r in rom_map.regions}

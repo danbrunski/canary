@@ -158,11 +158,21 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
   edit per flash.
 - **Closed loop exists only where the Target AFR cell is exactly 14.7.** Any
   other value in a cell opens the loop there, so its trims freeze.
-- **Near-WOT enrichment at mid rpm is a pedal switch.** At 1,600–3,600 rpm the
-  ECM goes rich when broadcast pedal reaches ≥ ~227/255 (~89 %) and uses the
-  Fuel Targets map's **last load column**. No load threshold and no timer are
-  involved (20 errors in 27,415 rows; evidence on DID `0x1134` in
-  `data/dids.yaml`). To change mid-rpm WOT fuelling, edit that column.
+- **Full-throttle enrichment is a switch on target throttle, and first gear
+  never trips it.** The ECM uses the Fuel Targets map's **last load column**
+  while its own target throttle opening is ≥ 78 % on PID `0x11`'s scale (fully
+  open reads 88.6 %), at every rpm. No load threshold and no timer are involved.
+  In the data that first found it (1,600–3,600 rpm, not split by gear) that was
+  broadcast pedal ≥ ~227/255 (20 errors in 27,415 rows; evidence on DID `0x1134`
+  in `data/dids.yaml`). **In first gear the ECM
+  holds the throttle at about 40 % with the pedal on the floor** (2,000–4,500
+  rpm, opening fully only below ~1,800 and from ~5,600 rpm), so first-gear full
+  pedal is fuelled from the load-indexed cells, not the last column. The cause is
+  a calibrated torque cap that applies while rpm ÷ vehicle speed says first gear
+  (`docs/ecu-firmware-analysis.md`, "What limits first gear"). It is not a
+  fault, not traction control, and not a restriction. To change WOT fuelling in
+  second gear and up, edit the last column. Sort full-pedal data by gear
+  (rpm ÷ wheel speed) before reading it.
 - **The factory A/F sensors floor at 10.0 AFR** in UpRev logs, so samples there
   are censored. They are good to roughly ±5 % at WOT. Don't chase a smaller WOT
   error with them.

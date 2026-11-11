@@ -35,7 +35,7 @@ observation. **Inferred** means strong evidence, not yet confirmed.
 | Load-side input to the lookup | RAM byte `0xFFFF103E` | Verified | Passed straight into the lookup. This is CANary's `mem:ECM_FUEL_TARGET_MAP_X_TRACE`. |
 | Rpm-side input to the lookup | RAM word `0xFFFF11D8` | Verified | Read as base `0xFFFF11C4` + `0x14`. This is CANary's `mem:ECM_ENGINE_SPEED_RAM`. |
 | The inputs are compared with the axes' raw bytes, so the X trace is in BFS axis counts (0.1685 ms per count) | — | Verified | See "Target AFR lookup, decoded" below. |
-| Pedal-switch enrichment: when a flag is set, the load input becomes `0xFF`, which is the last BFS column | `0x055DB2` | Verified (code); matches the 2026-09-18 data finding | The flag sets and clears with +8 counts of hysteresis on a value read from the 1-D table at `0xCEDB`. Its flag bit is bit 0 of `0xFFFF283F + 2`. |
+| Full-throttle enrichment switch: when a flag is set, the load input becomes `0xFF`, which is the last BFS column | `0x055DB2` | Verified (code); matches the 2026-09-18 data finding | The flag is bit 0 of `0xFFFF2841`. It compares the ECM's **target throttle opening**, not the pedal, with a threshold; see "The enrichment switch tests target throttle" below. The name `mem:ECM_PEDAL_ENRICH_FLAGS` predates that. |
 
 ### Map slots (an UpRev tune)
 
@@ -130,6 +130,49 @@ So the enrichment command equals the lookup word when three things hold: the sta
 
 The model's `equals_output_when` names each condition. The 58-byte read from `0xFFFF26BE` covers `w26C0`, `w26CC`, `w26CE` and `w26F6` in one read, which settles all three per sample.
 
+### The enrichment switch tests target throttle, and first gear never reaches it
+
+Read from the listing on 2026-11-11, after the ZS44A-20261111 drive showed
+first-gear full-pedal pulls reading the load-indexed Fuel Targets cells and not
+the last column (`data/analyses/2026-11-11-wot-target-lean-prediction.md`).
+
+| What | Confidence | Evidence |
+|---|---|---|
+| The switch's input is the byte `0xFFFF3CDC` = min(255, `w2D28` × 20571 >> 16), i.e. `w2D28` × 0.3139. The flag sets when it reaches the threshold and clears 8 counts lower. | Verified (code) | `0x05535C` writes the byte; `0x055DC6`–`0x055DFA` compares it and adds 8 while the flag is set. |
+| The threshold is the 16-entry curve `0xCEDB` read at rpm / 25 (`0xFFFF11CF`), also stored to `0xFFFF15F8`. It is **200 at every rpm** in ZS44A. | Verified (code and bytes) | Sixteen bytes of `0xC8`. |
+| `w2D28` (`0xFFFF2D28`) is a throttle position in sensor counts above closed: the area-to-position curve (axis `0xDD94`, values `0xEE6A`, the pair the air model uses the other way round) applied to the driver-demand target area `0xFFFF1A64`, then `>> 2`. | Verified (code) | `0x07248C`. `0xFFFF1A64` is the area before the idle-air and purge terms are added (`0x0752C0`). |
+| So the switch sets at a **target** opening of 638 counts and clears below 612. On PID `0x11`'s scale (counts × 100 / 321 of 255) that is 77.9 % and 74.7 %; a fully open throttle reads 88.6 % there (725 counts). | Derived from the three rows above | 200 / 0.3139 = 637.2. |
+| The target area comes from a torque demand: `0x0756E0` caps the air-quantity word `0xFFFF1C36` at `0xFD50` (the curves `0xEB0C` × `0xEB2C`, both flat), converts it to area per swept volume through the curve pair `0xEEDA` / `0xEDCA` (or `0xEF1A` / `0xEE0A` from `0xFC00` up), and multiplies by rpm × 158 (cal `0x8D25`). | Verified (code) | `0x0756E0`–`0x075A04`. |
+| **The `+0x260` slot map is the engine torque map**: torque as a function of rpm (rows, axis `0xCAE9`) and a normalised air quantity (columns, axis `0xE25E`, 0 to 65,535), 16 × 16 words biased by `0x8000`. `0x075A16` reads the RAM copy `0xFFFFB2A0` **backwards**: it interpolates the rpm row, then finds the air quantity at which that row gives the demanded torque `0xFFFF1C74`. The result is `0xFFFF1C36`. | Verified (code and bytes). The units are inferred: the last column peaks at 3,749 in row 80, which fits N·m × 10 and rpm ÷ 50 for an engine rated 381 N·m at 4,000 rpm. What UpRev calls the map is not known. | Inverse read: `0x026D2C` with the map row as the axis and `0xE25E` as the values. The forward wrapper `0x026B14` gives the full-load torque (column `0xFFFF`) and the minimum torque (column 0) for the rpm, and the torque at a given air quantity (`0x0778E8`, `0x07BB3C`, `0x07BC58`). |
+| `0xFFFF1C74` is the arbitrated torque demand: `0x07B57C` takes `0xFFFF1C76` and applies upper limits `0xFFFF3C36` (a torque-down request, `0x07A00C`), `0xFFFF37A2` (baro × rpm and intake-temperature table `0xB374`, all 1.0 here) and `0xFFFF3C4A` (the lowest of the rev-limit, overheat and speed-limiter words, `0x0726DC`), and the lower limit `0xFFFF473A` (the torque of the idle air, `0x07BB3C`). `0xFFFF3C6C` is `0x7FFF` outside cruise. | Verified (code) | `0x07B57C`, `0x0C254C`, `0x07BB3C`, `0x07BC58`. |
+| `0xFFFF1C76` copies `0xFFFF2814`, and `0xFFFF2814` is written by `0x0726DC`: the driver demand `0xFFFF280E` (not below `0xFFFF3C80`), under the lowest of eight limit words (`0xFFFF3C60`, `3C62`, `3C64`, `3C66`, `3C6E`, `3C7E`, `3C86`, `3C8A`). The driver demand comes from `0xFFFF2812` through `0xFFFF2810` (`0x073068`: the lower of it and the rev-limit, overheat and speed-limiter words) and `0xFFFF280E` (`0x071A2E`). | Verified (code) | **`0x0726DC` was missing from the disassembly**: it is reached only through the task table entry at `0x021A20`, so no reference search found the store. Found by scanning the image for the store's opcode pattern, then disassembled read-only (2026-11-11). Other gaps in the listing may hide stores the same way. |
+
+What limits first gear:
+
+| What | Confidence | Evidence |
+|---|---|---|
+| The ECM estimates the transmission ratio as rpm ÷ vehicle speed, clamped to 748–4,696 (× 1/1024: 0.73–4.59, the span of this gearbox's 0.763–4.368), default 4,696 when stopped. Two copies: `0xFFFF27D2` (`0x0773D0`) and `0xFFFF1F72` (`0x076448`). | Verified (code); the scale is inferred from the clamp | The five-entry table `0xEBBC` (3,919 … 854) holds the automatic's ratios on the same scale. |
+| **A torque cap applies while that ratio is at or above the cal word `0x9308` = 3,584 (3.50).** `0x073474` then sets the limit word `0xFFFF3C62` to the cal word `0x8EBC` = **3,138**, and otherwise to `0x8EBA` = `0x7FFF` (no limit). First gear is 4.368 and second is 2.518, so first is the only forward gear capped (the default ratio at a standstill is also above the threshold). | Verified (code and bytes) | The branch needs cal `0x8AD4` bit 7 and `0x8ADE` bit 7, both set (`0xA0`, `0x80`). A second term, the 8-entry curve `0xE634` on rpm, is `0xFFFF` throughout, which is no limit. The cap drops in at once and is released at 400 per tick (cal `0x9446`). Seven sibling limit words (`0x0735AE` onward) follow a state byte `0xFFFF2208` and were not read further. |
+| The cap is a flat torque, so the throttle it allows changes with rpm: the torque map's rpm row decides how much air 3,138 needs. If the unit is N·m × 10 it is 314 N·m at the crank. | Derived from the two tables above | Full-load torque in the map (last column) is 3,065 at 1,600 rpm, 3,344 at 2,000, 3,749 at 4,000, 3,320 at 5,600 and 3,082 at 6,000. It crosses 3,138 at **1,705 rpm** rising and **5,906 rpm** falling, so the cap cannot bind outside that range. |
+| **Measured: first-gear full-pedal throttle follows the cap.** Every local session since 2026-05, 0x23D pedal ≥ 250 with the throttle byte from the same frame, gear from rpm ÷ 0x284 wheel speed (8,755 first-gear frames, 23 sessions). | Measured; matches the prediction at the low end and in shape. The high end is not reached in the data. | The throttle byte is 255 on 94 % of frames at 1,600–1,800 rpm and on 30 % at 1,800–2,000, then never until 5,600 rpm. Band medians: 99–104 of 255 at 2,400–3,200 rpm, 115–117 at 3,400–3,800, **110–111 at 3,800–4,200**, 130 at 4,400–4,600, 175 at 5,000–5,200, 203 at 5,400–5,600, 229 at 5,600–5,800 (26 % of frames at 255). The dip at 4,000 rpm is the map's torque peak: the air the cap asks for falls from 0.908 of scale at 3,700 rpm to 0.871 at 4,100. Spread inside a band is a few counts (10th to 90th percentile 98–100 at 2,400–2,600). Second to fifth gear, 130,000 frames: median 255 and 25th percentile at least 250 in every band from 2,000 to 5,500 rpm. |
+| The driver demand itself goes through a drive-torque stage that also uses the ratio: a target from the 16 × 16 map at flash `0xF71A` (the word `0xFFFF1248` on axis `0xFFE0`, 0–727, which fits accelerator counts; a vehicle-speed word `0xFFFF10E2` on axis `0x10000`; a second identical map at `0xF51A`) is divided by the estimated ratio (`0x0769B0`, `0x0776AA`) and capped at the full-load torque for the rpm to give `0xFFFF2812` (`0x0778E8`). | Verified (code) for each step; not the cause | Its numbers were not reconciled with the truck (the speed word's unit is not established). The cap above accounts for first gear without it. |
+
+So "full pedal reads the last Fuel Targets column" holds wherever the ECM opens
+the throttle fully, which is second gear and up. In first gear the torque cap
+holds the target opening under 78 % from about 1,800 rpm to about 5,600 rpm, the
+flag stays clear, and the lookup uses the BFS-indexed cell.
+
+The cap and its ratio threshold are two calibration words (`0x8EBC`, `0x9308`)
+in the main calibration, outside the map slots. Raising either would open the
+throttle fully in first gear. Why Nissan caps first gear is not read from the
+code (driveline or traction protection are the usual reasons).
+
+Not checked on the truck: the limit word itself. One RAM window during a
+first-gear pull would show it: `0xFFFF27D2` (ratio), `0xFFFF3C62` (expect 3,138),
+`0xFFFF2814`, `0xFFFF1C74`, `0xFFFF1C36`, `0xFFFF2D28`, `0xFFFF3CDC` and the flag
+byte `0xFFFF2841`. The check script is
+`~/canary-data/analysis-scripts/2026-11-11/first_gear_cap_check.py`.
+
 ### Diagnostic service handlers
 
 | What | Where | Confidence |
@@ -186,7 +229,7 @@ Confirmed exact: `0x1123`–`0x1126` (high byte of a 0x6400 = 1.0 word, 1 % per 
 |---|---|---|---|
 | `+0x020` (`0xFFFFB060`) and `+0x120` (`0xFFFFB160`) | **Ignition timing trims**, two 16 × 16 tables. Their axes are rpm (`0xCC93`, raw × 50 = 400–6,000 rpm) × BFS-X counts (`0xCC83`, 8–128), and cells are read masked with `& 0x7F`. (Corrected 2026-10-04: an earlier version swapped the two axes. canary-60 found it from the wrapper's register use, and the axis contents agree.) **The HI DET latch chooses between them:** `FUN_0004e6d8` loads `0xFFFFB160` (trim B, `+0x120`) and switches to `0xFFFFB060` (trim A, `+0x020`) only when `0xFFFF283F` bit 6 is clear (`tst #0x40` at `0x04E6FE`). (Corrected 2026-10-05, canary-6e's listing trace, checked here. An earlier version said `0xFFFF2842`; its bit 2 gates the knock controller's trim-difference branch at `0x04A512` instead.) HI DET latches on accumulated knock or a knock-sensor fault (see "Knock monitoring"), so trim B is the High Det table. A coolant condition (cal `0x8CCC`/`0x8CCD` = 110/106 raw) follows in the same routine. | Verified location and selection; that B is used after knock is verified, its tuning intent inferred | The readers of both tables, and the flag gating. The `+0x09C` cells k106 changed are **inside** the `+0x020` table (cell `0x7C`), not a separate table. |
 | `+0x220` (`0xFFFFB260`) | Target AFR, 8 × 8 | Verified | As above. |
-| `+0x260` (`0xFFFFB2A0`) | A 16-bit-valued map on the axes `0xCAE9` (rpm-like) and `0xE25E` (16-bit). It is the most-read switchable map, with at least 21 readers. | Location verified; identity unknown | Candidates: cam phasing, or electronic throttle / torque. |
+| `+0x260` (`0xFFFFB2A0`) | **Engine torque map**: torque on rpm (`0xCAE9`) × normalised air quantity (`0xE25E`), 16 × 16 words biased by `0x8000`. The most-read switchable map, with at least 21 readers. | Verified (code and bytes, 2026-11-11); units inferred | "The enrichment switch tests target throttle" above: the throttle path reads it backwards to turn a torque demand into air. |
 | `+0x660` (`0xFFFFB6A0`) | **Fuel Compensation**, 16 × 16 (`+0x660–0x75F`). Axes: **rpm = `0xCACD`** (raw × 50 = 400–6,400) and **load ("Volumetric Flow Ratio") = `0xCB29`**, compared bytewise with `0xFFFF118A`. **UpRev's editor labels them the other way round.** | Verified from code (2026-10-04) | Call site `0x02DC34–0x02DC46`: r4 = table `0xFFFFB6A0`, r5 = `0xCACD`, r6 = `0xCB29`, r7 = engine-speed word `0xFFFF1210` (the PID 0x0C rpm word), stack byte = `0xFFFF118A`. Wrapper `0x026A24` searches r5's axis with r7 through `0x027194` (axis byte `shll2`, compared with the word: the rpm search), and r6's axis with the byte through `0x027114` (a direct byte compare: the load search), then interpolates through `0x026F40`. It is the Target AFR wrapper `0x0269AC` instruction for instruction, apart from the table size, and that mapping is verified on live data (W05.1). Stock `0xCB29` runs 16…255, the full range of a load byte (12,750 "rpm" in UpRev's display). **The k105/k106 "rpm axis 800–12,750 → 800–7,200" edit compressed the load axis to 16–144**: 25 % of the 2026-10-04 drive's samples (up to 218) read the last column. **ZS44A-20261004 restored the axis to 16…255** and slot-1 cells to base (flashed 2026-10-04 23:02Z; read back byte-exact). |
 | `+0x760` | Load Point Scaler copy (44019) | Verified (bytes) | See above. |
 | `+0x762` (`0xFFFFB7A2`) | **K**, big-endian 16-bit, multiplied into the air-charge accumulator: Tp = K · Qa / Ne. | Verified | The read at `0x03C6E0` inside `0x03C4D0`. It holds 28,715 in all five slots, and the base value 27,089 is in the ratio 1.0600. |
@@ -195,7 +238,7 @@ The four switchable maps and their axis pairs:
 - `{0xCC83, 0xCC93}` timing trims (`0xCC93` rpm, `0xCC83` BFS-X);
 - `{0xC894, 0xCAA5}` Target AFR;
 - `{0xCACD, 0xCB29}` Fuel Comp (probably `0xCACD` rpm, `0xCB29` VFR; see above);
-- `{0xCAE9, 0xE25E}` the `+0x260` map.
+- `{0xCAE9, 0xE25E}` the `+0x260` engine torque map.
 
 ### UpRev's Fuel Comp display, checked against memory
 
@@ -881,5 +924,13 @@ ratio of (DID − Ts) to the predicted pulse has median 1.006, p10–p90
 - **ROM map data:** move the confirmed slot tables (timing trims, Fuel
   Comp, K, Load Point Scaler) into `rom_map.yaml`. (`rom_trace`'s BFS-axis
   refusal is lifted: W05.1, `rom_viewer.yaml`.)
-- **Unidentified tables:** the `+0x260` map, the remaining 1-D curve
-  inputs, and the flash-resident 2-D maps.
+- **Unidentified tables:** the remaining 1-D curve inputs and the
+  flash-resident 2-D maps. The `+0x260` map is the engine torque map
+  (2026-11-11); `rom_map.yaml` names it but does not yet declare it as a table.
+- **Throttle demand:** a live read of the first-gear limit word `0xFFFF3C62`;
+  the seven sibling limits and their state byte `0xFFFF2208`; the unit of the
+  speed word `0xFFFF10E2` in the drive-torque stage ("The enrichment switch
+  tests target throttle").
+- **Disassembly gaps:** `0x0726DC` was found only by an opcode scan. Functions
+  reached through task tables are not all in the listing, so "no store found"
+  is not evidence until the gaps are seeded.

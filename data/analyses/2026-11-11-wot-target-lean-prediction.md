@@ -166,12 +166,59 @@ the neighbouring part-pedal cells. Its three fast pulls read 155 → 159, which 
 either source. So "at full pedal the ECM reads the last Fuel Targets column at
 every rpm" is true of held pulls and untested, now contradicted, for a fast
 first-gear pull. What selects the column there (a delay, a load condition, a gear
-or speed term) is not known. It is a firmware question.
+or speed term) was not known when this was written. It is answered below.
 
 Consequence: a first-gear pull above about 4,600 rpm still gets AFR 11.8–12.0
 commanded (measured 11.5–12.2 on those reads), not 12.3. That is the richer side.
 Bringing first gear to 12.3 as well means editing the part-pedal cells of the
 4,400 and 5,200 rows, a separate flash.
+
+### Why first gear does not read the last column (firmware, same day)
+
+The switch is not on the pedal. The ECM compares its own **target throttle
+opening** with a flat threshold of 78 % (on PID 0x11's scale, where fully open
+reads 88.6 %), with 3 % of hysteresis, and only above it replaces the load input
+with the last column (`docs/ecu-firmware-analysis.md`, "The enrichment switch
+tests target throttle"). In first gear the ECM does not open the throttle fully at
+full pedal:
+
+| Pull | Gear (rpm ÷ wheel) | rpm | Pedal | Throttle, PID 0x11 | Target raw |
+|---|---|---|---|---|---|
+| 233 s | 1st (0.73) | 3,425 → 4,950 | 255 | 41 → 59 % | 134, 149, 157, 160 |
+| 375 s | 1st (0.76–0.82) | 4,775 → 5,100 | 255 | 53 → 62 % | 154, 160 |
+| 470 s | 1st (0.72–0.76) | 3,588 → 5,513 | 255 | 43 → 73 % | 141, 153, 159, 149 |
+| all others | 2nd (0.42–0.46), 3rd (0.30), 5th (0.17) | 2,525 → 5,638 | 255 | 88–89 % once the pull is established | last column: 149 below 3,500 rpm, 153 from 4,125 on the 34 held reads |
+
+Each row pairs a RAM target read with the 0x23D frame within 0.1 s (pedal and
+throttle bytes from one frame; the throttle byte reads 108–206 of 255 in the
+first-gear rows and 253–255 in the others) and Mode 01 rpm and throttle within 0.3 s
+(`~/canary-data/analysis-scripts/2026-11-11/throttle_switch.py`). The rpm rise
+rate and the 82–90 % load that marked these pulls were symptoms of first gear at
+part throttle, not causes.
+
+This is not new with either November flash. Across every local session since
+2026-05, at pedal ≥ 250, first gear holds the throttle byte at 98–130 of 255 from
+2,000 to 4,500 rpm and reaches 255 only from about 5,600 rpm (8,878 frames, up to
+21 sessions per band); second to fifth gear sit at 255 throughout (130,000 frames;
+`throttle_by_gear.py` beside the script above).
+
+The cause is a first-gear torque cap in the calibration. While the ECM's
+estimate of the transmission ratio (rpm ÷ vehicle speed) is 3.50 or more, which
+only first gear reaches, it limits its torque demand to a flat 3,138 (314 N·m if
+the unit is N·m × 10) and opens the throttle only as far as that torque needs at
+the current rpm. The engine's full-load torque in the ECM's own map crosses that
+value at 1,705 rpm and again at 5,906 rpm, and the measured first-gear throttle
+leaves 255 between 1,700 and 1,900 rpm and is back near it from 5,600. The
+throttle even dips at 4,000 rpm, where the torque map peaks
+(`docs/ecu-firmware-analysis.md`, "What limits first gear";
+`first_gear_cap_check.py`). The cap word itself has not been read live.
+
+So the last column is the full-throttle column for second gear and up. First-gear
+full pedal is a part-throttle condition to the ECM from about 1,800 to 5,600 rpm,
+and is fuelled from the load-indexed cells. Two ways to change that, both separate
+flashes: lean the part-pedal cells of the 4,400 and 5,200 rpm rows, or raise the
+cap (cal words `0x8EBC` and `0x9308`, a main-calibration edit that also gives
+first gear more torque, which is presumably what the cap is there to prevent).
 
 ### What this drive did not cover
 

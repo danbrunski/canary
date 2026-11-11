@@ -247,20 +247,27 @@ map_slots:
     been observed live (0 on 196/196 reads, 2026-10-04), which is why the
     Maps 2-5 copies of each table stay inferred.
   regions:
-    - name: Unidentified 16-bit map
+    - name: Engine torque map
       start: 0x260
       end: 0x45F
-      kind: unknown
-      confidence: unknown
+      kind: calibration
+      confidence: verified
       added_by_uprev: true
       evidence: >-
-        Read from its RAM copy 0xFFFFB2A0 by at least 21 call sites through the
-        wrapper 0x026B14, the most-read switchable table. That wrapper searches
-        a 16-entry byte axis (0xCAE9, rpm-like) and a 16-entry 16-bit axis
-        (0xE25E, 0 to 65,535) and interpolates 16-bit cells (0x027018), so the
-        span is 16 x 16 x 2 bytes. What it controls is not known (cam phasing
-        or throttle/torque are candidates); it is a span, not a table, until it
-        is identified.
+        Read from its RAM copy 0xFFFFB2A0 by at least 21 call sites, the
+        most-read switchable table: 16 x 16 big-endian words biased by 0x8000,
+        rows on the byte axis 0xCAE9 (rpm) and columns on the 16-bit axis
+        0xE25E (a normalised air quantity, 0 to 65,535). The cells are engine
+        torque. The throttle path reads it backwards (0x075A16 through
+        0x026D2C) to turn the arbitrated torque demand into an air quantity,
+        and forwards (0x026B14) for the full-load and minimum torque at the
+        current rpm (docs/ecu-firmware-analysis.md, "The enrichment switch
+        tests target throttle", 2026-11-11). Known answer: the first-gear cap
+        of 3,138 against this map's last column predicts part throttle from
+        1,705 rpm, and the truck leaves full throttle between 1,700 and 1,900
+        rpm in first gear. The units are inferred (the last column peaks at
+        3,749 in the 4,000 rpm row, which fits N.m x 10), so it stays a span
+        and not an editable table until they are confirmed.
     - name: Unidentified slot data (+0x460)
       start: 0x460
       end: 0x65F

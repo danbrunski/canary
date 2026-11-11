@@ -119,7 +119,7 @@ def test_describe_synthetic_image() -> None:
     assert result["map_slots"]["count"] == 5
     assert result["map_reason"] is None
     names = {r["name"] for r in result["regions"]}
-    assert {"Boot vector table", "Map 1: Unidentified 16-bit map", "UpRev map slots"} <= names
+    assert {"Boot vector table", "Map 1: Engine torque map", "UpRev map slots"} <= names
     fuel = [t for t in result["tables"] if t["kind"] == "fuel_targets" and t["slot"] == 1]
     assert fuel[0]["offset"] == 0xE0220 and fuel[0]["confidence"] == "verified"
 

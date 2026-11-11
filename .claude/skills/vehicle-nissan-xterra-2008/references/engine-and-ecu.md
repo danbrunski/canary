@@ -172,7 +172,10 @@ this truck:
   out WOT further. **Don't propose a K change for this**; the tables do the
   work, and K changes anyway with the 700 cc injectors
   (`docs/roadmap/tasks/N01-na-rom-response-experiments.md` → "Not now").
-- **Mid-rpm WOT enrichment is a pedal switch** (≥ ~227/255 broadcast pedal) into
+- **WOT enrichment is a switch on the ECM's target throttle opening** (≥ 78 % on
+  PID `0x11`'s scale; ≥ ~227/255 broadcast pedal where it was first measured, never
+  in first gear from ~1,800 to ~5,600 rpm, where a calibrated first-gear torque cap
+  holds full pedal to about 40 % throttle) into
   the Target AFR table's last BFS column, overriding the column the BFS lookup
   would pick. `0x1134` holds that active rich target (raw/64 as φ). The code
   confirms it (`docs/ecu-firmware-analysis.md`): the target function at
