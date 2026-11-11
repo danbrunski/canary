@@ -1392,10 +1392,16 @@ def _wot_private() -> tuple[InterventionCase, Boundary, Any, Any]:
 def test_the_wot_null_control_does_not_pass_on_pre_flash_drives_outside_its_design() -> None:
     """Known answer: the base image on both sides, scored against the REAL
     second prediction under its block. Neither drive passes, and neither can
-    fail either: 142926 gives no resolvable pair (both outputs
-    ``prediction_unresolvable``, 354 / 179 pairs before the rule), and 164007
-    has no eligible read at all (``filtered``: its fill byte never pairs and
-    the rest is transient). The control is unpowered; that is its measurement."""
+    fail either: no pair on either drive predicts a change beyond the noise
+    floor (both outputs ``prediction_unresolvable``; 354 / 179 pairs before the
+    rule on 142926, 213 / 106 on 164007). The control is unpowered; that is its
+    measurement.
+
+    164007 had no eligible read at all until N02.8 (2026-11-08, ``cf4422c5``):
+    its fill byte never paired, because the throttle route was chosen per
+    session. Chosen per read, its DID 0x120F reads pair, which is that item's
+    acceptance. The drive now reaches the same refusal as 142926 one step
+    later, and the verdict is unchanged."""
     from src.analysis.plant_validation import ecu_null_control
 
     case, boundary, registry, resolver = _wot_private()
@@ -1442,11 +1448,18 @@ def test_the_wot_null_control_does_not_pass_on_pre_flash_drives_outside_its_desi
         261,
     )
     early = null["drives"]["_capture-tuning-2026-09-23T164007"]
-    for output, reads in (("base_fuel_schedule", 1353), ("target_phi", 708)):
+    for output, reads, eligible, before, floor, floor_pairs in (
+        ("base_fuel_schedule", 1353, 271, 213, 3.1863, 330),
+        ("target_phi", 708, 134, 106, 0.0, 171),
+    ):
         test = early[output]
         assert test["outcome"] == "insufficient_evidence"
-        assert (test["post_reads"], test["post_eligible"], test["n_pairs"]) == (reads, 0, 0)
-        assert test["empty"].startswith("filtered")
+        assert test["reason"].startswith("prediction_unresolvable")
+        assert test["empty"] == test["reason"]
+        assert (test["post_reads"], test["post_eligible"]) == (reads, eligible)
+        assert (test["n_pairs"], test["pairs_before_resolvable"]) == (0, before)
+        assert test["noise_floor_pct"] == pytest.approx(floor, abs=1e-3)
+        assert test["floor_pairs"] == floor_pairs
 
 
 @pytest.mark.slow
