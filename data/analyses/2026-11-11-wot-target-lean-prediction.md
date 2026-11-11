@@ -1,0 +1,125 @@
+# ZS44A-Tuned-20261111: full-pedal targets to AFR 12.3 — edit, evidence, frozen predictions
+
+Written 2026-11-11 ~17:40Z, **before the flash**, at the operator's request ("do
+we want to try a flash with leaner AFR targets": yes, targets only, one modest
+step). The file is `Tuned ROMs/ZS44A-Tuned-20261111.OsirisROM`, built by CANary
+from `ZS44A-Tuned-20261110.OsirisROM` (the running tune). The operator reviews
+it in UpRev and flashes it. Nothing here wrote to the ECU.
+
+- Container sha256 `c919ff9612304e5f7c1a93a7ca2a28b40f1b0cfb0b54007efab358a40a22f386`
+- Image sha256 `2b42c6effb795edff69d49284f5a86d78de9340b9d1e7256fc4676f82d9ab412`
+- Checksum words: sum `0x0C0604CC`, xor `0x69CB4D4C` (parent `0x0C0604D4`, `0x69CB4D48`)
+- Build script, review file, baseline script:
+  `~/canary-data/analysis-scripts/2026-11-11/build_rom.py`,
+  `~/canary-data/rom-candidates/2026-11-11/review.json`,
+  `~/canary-data/analysis-scripts/2026-11-11/baseline.py`
+- Checks: the same build path reproduces UpRev's own `ZS44A-Tuned-20260920.OsirisROM`
+  byte for byte from k106 (a Fuel Targets edit, the same table); checksum verify;
+  container round trip; an independent re-read of the copied file differs from
+  20261110 at four image bytes only (the two cells, the low byte of each checksum
+  word); Fuel Targets in slots 2–5 unchanged.
+
+## What changed
+
+**Fuel Targets, Map 1, two cells of the last column** (the column the ECM reads at
+full pedal at every rpm). Raw is φ × 128; AFR = 1881.6 / raw.
+
+| Row | rpm | Old | New | Fuel at full pedal |
+|---|---|---|---|---|
+| 6 | 4,400 | 155 (AFR 12.14, φ 1.211) | 153 (AFR 12.30, φ 1.195) | −1.3 % |
+| 7 | 5,200 and above | 159 (AFR 11.83, φ 1.242) | 153 (AFR 12.30, φ 1.195) | −3.8 % |
+
+The full-pedal column now reads 12.89 / 12.63 / 12.63 / 12.63 / 12.63 / 12.30 /
+12.30 / 12.30 AFR at 1,200 … 5,200 rpm. In UpRev: the right-most column of Fuel
+Targets, the 4,400 and 5,200 rpm rows.
+
+Nothing else: Fuel Compensation, K, timing, the axes and Maps 2–5 are
+byte-identical to 20261110.
+
+## Why
+
+- **Operator decision (2026-11-10/11):** home is 79–82 kPa and the truck runs 89/91
+  octane in preparation for the supercharger; 11.8 at the top is rich of best power
+  (roughly 12.5–13.0 for an NA engine). The expected gain is small, a few percent of
+  power at most. The value is learning the response before the build.
+- **Delivery is already on target** above 4,400 rpm (`2026-11-10-fuel-comp-wot-cut-prediction.md`,
+  scored: +1.2 / +0.6 / +0.4 % at 4,400–4,800 / 4,800–5,200 / 5,200–5,600, negative =
+  rich). A target edit therefore carries through to the exhaust.
+- **Why one step, and only to 12.3.** The 20261110 write-up deferred leaning the
+  targets to the KS1 harness repair. It is still pegged: knock control is in its
+  fallback (−5° retard target), and HI DET is latched, so timing comes from trim B.
+  Timing that held back is what makes 12.3 reasonable without knock feedback.
+  Going past 12.3 waits for the repair.
+
+## What was not changed, and why
+
+- **Fuel Compensation: no edit.** It corrects delivery to the commanded target,
+  and delivery is within about 1 % of it. Leaning it as well would lean the
+  mixture twice and make two edits in one flash, which can't be attributed.
+- **Full pedal at 4,000 rpm and below: no edit.** The 4,000 row is already 12.3,
+  and 12.6–12.9 at 3,600 and below is already lean of 12.5.
+- **The part-pedal cells of the 4,400 and 5,200 rows (columns 0–6): no edit.** At
+  5,200 rpm columns 2–4 hold 157 / 160 / 163 (AFR 12.0 / 11.8 / 11.5). Below the
+  pedal switch, high load near the top therefore stays richer than full pedal
+  does: the safe side.
+
+## What else the edit moves
+
+- **Nothing on the load axis.** Fuel Targets does not feed the base fuel schedule
+  (BFS), so BFS, the timing trims' and Fuel Comp's axis, does not move.
+- **The enrichment gate still latches.** 153 is above the gate threshold (130,
+  cal 0x8B39), so full pedal still enriches. The multiplier `0xFFFF26C0` ramps to
+  the new `0xFFFF174B << 7`.
+- **The enrichment retard `0xFFFF174A` reads `0xFFFF174B`.** It is subtracted in
+  the base timing sum, so a leaner target could change timing through it. It read
+  0 on every one of 4,038 reads on 2026-11-11 (KOEO and unloaded full-pedal stabs,
+  lookup byte 146–149), with its cap at 0–3 counts. No loaded read exists before
+  this flash unless a pull on 20261110 lands first. If it is 0 under load at the
+  old target, it is at its floor and leaning can only leave it there or add retard.
+  The timing prediction below is the check either way.
+- **HI DET fuel scaling:** the curve 0xD247 is 128 (×1.0) in all cells, so the
+  latch does not change the target.
+
+## Predictions (frozen before the flash)
+
+Scored on the next warm drive with full-pedal pulls in 2nd or 3rd gear. Full pedal
+is ENGINE_LOAD ≥ 85 %, rpm ≥ 2,500 and the paired RAM target ≥ 1.10 (the ECM
+enriching), as in `baseline.py`. The baseline is `_capture-tuning-2026-11-10T235310`.
+
+| rpm band | RAM target before (median) | Predicted | Timing before (median, n) |
+|---|---|---|---|
+| 2,500–3,500 (control) | 1.164 | 1.164, unchanged | 9° (17) |
+| 4,000–4,400 | 1.203 | 1.195 | 10° (6) |
+| 4,400–4,800 | 1.219 | 1.195 | 12° (18) |
+| 4,800–5,200 | 1.234 | 1.195 | 13° (20) |
+| 5,200–5,600 | 1.238 | 1.195 | 18.5° (12) |
+
+- **Commanded:** `mem:ECM_TARGET_EQUIV_RATIO` at full pedal reads no more than
+  1.195 above 4,400 rpm (ramps aside), and `mem:ECM_TARGET_LOOKUP_GATED` reads 153
+  from 4,000 rpm up. Control bands unchanged.
+- **Delivery error against the RAM target** (same sampler and gates as the
+  20261110 scoring, bank 1) stays within ±2.5 points of the scored values: +1.2 /
+  +0.6 / +0.4 % at 4,400–4,800 / 4,800–5,200 / 5,200–5,600. The error belongs to
+  delivery, not to the target.
+- **Measured AFR at the top** (PID 0x24, baro gain applied): about 12.35, between
+  12.0 and 12.65; it was 11.9. UpRev's AFR display skips the barometric gain and
+  reads 1.5–4.5 % lean at altitude, so expect about 12.5–12.9 there.
+- **Mechanism check, independent of the A/F sensor:** at full pedal, the injected
+  pulse minus dead time per unit air ((DID 0x1206 − Ts(PID 0x42)) × rpm / MAF)
+  falls by about 1.9 % at 4,400–4,800, 3.2 % at 4,800–5,200 and 3.8 % above 5,200
+  rpm, each ±1.5 points; BFS · rpm / MAF does not move (±1.5).
+- **Timing:** median full-pedal timing per band within ±1° of the table above,
+  with HI DET still latched and the knock fallback still active.
+- **Enrichment retard `0xFFFF174A`:** 0 at full pedal.
+- **Idle and cruise trims do not move because of this flash.** The flash resets
+  long-term trim to 0.00 and the readiness monitors again, so the key-on MIL blink
+  returns until they complete.
+
+**Falsifiers:**
+
+- A full-pedal RAM target above 1.20 above 4,400 rpm: the ECM is not reading the
+  edited cells (wrong slot, or the flash did not take).
+- Median full-pedal timing up by more than 1° in any band from 4,400 rpm with HI
+  DET still latched, or `0xFFFF174A` reading 0 now where a pull on 20261110 showed
+  it above 0: leaning removed retard. Flash 20261110 back.
+- Any band measuring leaner than +2.5 % of the new target: flash 20261110 back.
