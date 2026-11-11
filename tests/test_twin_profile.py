@@ -98,13 +98,15 @@ FUEL_AWAITING_LIVE_READ = frozenset(
 #: (0xFFFF11CB read a constant 0 inside the spark window's reply on the
 #: ram-study, which cannot identify it). A live read of each window (as on
 #: 2026-10-08 for the knock bytes) is what moves one out of this set, and the
-#: accept test then asks for it in a profile.
+#: accept test then asks for it in a profile. The enrichment retard
+#: 0xFFFF174A left it on 2026-11-11 (timing_trim read on the truck; the two
+#: trim bytes of that window were read too but not checked against their
+#: tables, so they stay).
 TIMING_CHAIN_AWAITING_LIVE_READ = frozenset(
     f"mem:{name}"
     for name in (
         "ECM_TIMING_TRIM_SELECTED",
         "ECM_TIMING_TRIM_A",
-        "ECM_TIMING_ENRICH_RETARD",
         "ECM_TIMING_TRIM_SUBTRAHEND",
         "ECM_TIMING_TRIM_TERM",
         "ECM_TIMING_TERM_279A",
@@ -534,7 +536,8 @@ def test_the_twin_profile_is_a_corpus_ineligible_capture(twin_profile: CapturePr
 #: The profile's in-window reads: the paired DIDs (DID 0x1101 is the coolant
 #: byte the timing trim lookup reads, derived since 2026-10-17) and memory
 #: windows, in the catalog's window order (knock_target is the knock retard
-#: target the knock controller reads).
+#: target the knock controller reads; timing_trim is the enrichment retard's
+#: one byte, since its live read on 2026-11-11).
 TWIN_DIDS = ("DID_1101", "DID_1206", "DID_1208", "DID_1209")
 TWIN_WINDOWS = (
     "fuel_target",
@@ -544,6 +547,7 @@ TWIN_WINDOWS = (
     "fuel_comp_x",
     "flags_2841",
     "knock_target",
+    "timing_trim",
 )
 
 
@@ -554,22 +558,25 @@ def _plan(profile: CaptureProfile) -> dict[str, object]:
 #: The cycle plan the loop reports for this profile on the Pi's collection
 #: settings (``/status.obd_scheduler.did_profile.cycle.plan``, built by
 #: ``hybrid_cycle.plan_cycle``): 16 PIDs and the three DTC polls in four
-#: six-PID batches, 4 DIDs and 7 memory windows, entry and exit, at 90 req/s,
+#: six-PID batches, 4 DIDs and 8 memory windows, entry and exit, at 90 req/s,
 #: plus the 0.05 s exit grace. ``worst_case_seconds`` is that plus one request
 #: timeout (1.0 s), the cycle one unanswered request costs. Before ignition
-#: timing was derived (2026-10-17): 18 / 3 / 9, 0.2056 s and 1.2056 s.
+#: timing was derived (2026-10-17): 18 / 3 / 9, 0.2056 s and 1.2056 s; before
+#: the timing_trim window (2026-11-11): 11 in-window requests, 0.2389 s and
+#: 1.2389 s.
 CYCLE_PLAN: dict[str, Any] = {
     "mode01_channels": 19,
     "mode01_requests": 4,
-    "did_requests": 11,
+    "did_requests": 12,
     "session_requests": 2,
-    "required_seconds": 0.2389,
-    "worst_case_seconds": 1.2389,
+    "required_seconds": 0.25,
+    "worst_case_seconds": 1.25,
     "feasible": True,
 }
 #: ``plan_cycle`` for the same work with batching refused (one PID a request);
-#: 0.3722 / 1.3722 before the timing channels.
-UNBATCHED_CYCLE_PLAN = {"required_seconds": 0.4056, "worst_case_seconds": 1.4056}
+#: 0.3722 / 1.3722 before the timing channels, 0.4056 / 1.4056 before the
+#: timing_trim window.
+UNBATCHED_CYCLE_PLAN = {"required_seconds": 0.4167, "worst_case_seconds": 1.4167}
 
 
 def _cycle_plan(batch_max_pids: int) -> dict[str, object]:
@@ -605,10 +612,10 @@ def test_the_planned_demand_is_the_capacity_evidence(twin_profile: CaptureProfil
     for window in windows:
         assert rates[f"mem:{window}"] == pytest.approx(2.0)
     requests = plan["diagnostic_requests_per_second"]
-    assert plan["channel_reads_per_second"] == pytest.approx(61.0, abs=0.05)
-    assert requests["single_request_fallback"] == pytest.approx(65.0, abs=0.05)  # type: ignore[index]
-    assert requests["best_case_batched"] == pytest.approx(33.0, abs=0.05)  # type: ignore[index]
-    assert twin_profile.expected_total_demand_hz == 65.0
+    assert plan["channel_reads_per_second"] == pytest.approx(63.0, abs=0.05)
+    assert requests["single_request_fallback"] == pytest.approx(67.0, abs=0.05)  # type: ignore[index]
+    assert requests["best_case_batched"] == pytest.approx(35.0, abs=0.05)  # type: ignore[index]
+    assert twin_profile.expected_total_demand_hz == 67.0
     assert plan["bus_budget_requests_per_second"] == 90.0
     assert plan["fallback_feasible"] is True
     # The cycle's work, counted as the loop counts it (_cycle_plan_for): every
@@ -759,16 +766,17 @@ def test_one_session_window_carries_every_did_and_window_the_twin_pairs(
     clock: FakeClock, twin_profile: CaptureProfile
 ) -> None:
     """On the fake clock (10 ms answers, 90 req/s), every 0.5 s window from
-    the first reads the four paired DIDs and the seven memory windows, memory
+    the first reads the four paired DIDs and the eight memory windows, memory
     last and back to back (B08.4), every channel runs at its planned rate, and
     the loop reports the cycle plan :data:`CYCLE_PLAN` states. Each kernel
     pairing sits inside its tolerance by :data:`PAIRING_MARGIN_S` on every
     read: pulse to BFS DID 0.011 s (0.1), BFS to MAF DID 0.022 s (0.1), BFS
-    DID to Mode 01 rpm 0.184 s (0.25), pulse to Mode 01 rpm and MAF 0.173 s
+    DID to Mode 01 rpm 0.195 s (0.25), pulse to Mode 01 rpm and MAF 0.184 s
     (0.3), the lookup's windows within 0.052 s (0.25), and the fill byte
-    0.083 s after the pulse DID (E07.4, 0.1). Before ignition timing was
-    derived (DID 0x1101, PID 0x0E, the knock_target window; 2026-10-17) those
-    were 0.160, 0.149 and 0.069 s."""
+    0.083 s after the pulse DID (E07.4, 0.1). Before the timing_trim window
+    (2026-11-11) the first two were 0.184 and 0.173 s; before ignition timing
+    was derived (DID 0x1101, PID 0x0E, the knock_target window; 2026-10-17)
+    the three were 0.160, 0.149 and 0.069 s."""
     metrics: list[ObdSchedulerMetrics] = []
     requests, readings = simulate(clock, twin_profile, SIMULATED_S, metrics)
     after = _first_entry(requests)
@@ -799,8 +807,9 @@ def test_one_session_window_carries_every_did_and_window_the_twin_pairs(
         assert _within(nearest_gaps(readings, anchor, other, after), limit), (anchor, other)
     # E07.4's comparison on the ram-study (0 of 192 fill-byte reads had PID
     # 0x0C within 0.1 s) is not asserted here any more: with DID 0x1101 in
-    # the window the fake clock puts it at 0.090 s, within one request slot
-    # of 0.1 s, which by PAIRING_MARGIN_S decides nothing (0.080 s before).
+    # and timing_trim in the window the fake clock puts it at 0.100 s (0.090 s
+    # before timing_trim), which by PAIRING_MARGIN_S decides nothing (0.080 s
+    # before DID 0x1101).
     # No kernel pairs the two: E07.4 pairs the fill byte with the pulse read,
     # asserted above.
     reported = [m.did_profile["cycle"]["plan"] for m in metrics if m.did_profile]
@@ -863,7 +872,8 @@ def test_the_awaited_timing_windows_do_not_fit_beside_the_fuel_pairings(
 ) -> None:
     """The measured reason :data:`TIMING_CHAIN_AWAITING_LIVE_READ` cannot simply
     join this profile when its live reads land (E09.1 Remaining). The chain
-    adds eight windows and knock_chain, nine reads in every session window:
+    adds seven windows and knock_chain (its eighth, timing_trim, is polled
+    since 2026-11-11), eight more reads in every session window:
     the window grows from 0.13 s to 0.25 s, the 4 Hz Mode 01 group falls to
     about 1.96 Hz, DID 0x1208 to PID 0x0C reaches 0.298 s (the steady-BFS
     pairing allows 0.25), and the fill byte trails the pulse DID by 0.093 s,
@@ -879,7 +889,7 @@ def test_the_awaited_timing_windows_do_not_fit_beside_the_fuel_pairings(
         budget_rps=90.0,
         mode01_channels=CYCLE_PLAN["mode01_channels"],
         batch_max_pids=6,
-        did_requests=CYCLE_PLAN["did_requests"] + 9,
+        did_requests=CYCLE_PLAN["did_requests"] + 8,
         fast_exit=True,
         exit_grace_seconds=0.05,
         lapse_seconds=5.0,
@@ -891,7 +901,7 @@ def test_the_awaited_timing_windows_do_not_fit_beside_the_fuel_pairings(
     after = _first_entry(requests)
     windows = session_windows(requests)
     for window, _ in windows:
-        assert sum(1 for _at, d in window if d[1] == 0x23) == len(TWIN_WINDOWS) + 9
+        assert sum(1 for _at, d in window if d[1] == 0x23) == len(TWIN_WINDOWS) + 8
     span = max(r.acquired_at or 0 for r in readings) - after
     counts = Counter(r.pid for r in readings if (r.acquired_at or 0) > after)
     for pid in FOUR_HZ_GROUP:

@@ -4675,6 +4675,8 @@ memory:
   # scale here (none is invented). Code-verified from the listing (E05.4 trace,
   # E09.7 nodes); `confidence: hypothesized` and out of every capture profile
   # until a live read shows each (tests/test_memory_catalog_knock_lambda.py).
+  # The timing_trim window was read on 2026-11-11: the enrichment retard and
+  # the two bytes after it (its input and its cap) are polled since.
   # Every window sits after fuel_comp_x in catalog order, so a profile adding
   # them reads them after the fill byte and E07.4's 0.1 s pairing is untouched.
   # Windows (contiguous spans, <= 63 bytes): timing_byte 0xFFFF11FF-1215 (23),
@@ -4826,8 +4828,8 @@ memory:
     length: 1
     byte_length: 1
     unit: counts
-    confidence: hypothesized
-    verified_tune_revision: ZS44A-20261004
+    confidence: low
+    verified_tune_revision: ZS44A-20261110
     window: timing_trim
     evidence:
       - session: firmware-ZS44A-20261004 (E09.7 base_timing_sum)
@@ -4837,14 +4839,110 @@ memory:
           g = 0 while the Target AFR lookup byte 0xFFFF174B is below 0x82
           (0x04C9D8). Name from that use; units kept as counts (manifest
           timing_term_174a).
-    notes: 'No known answer expressible; 0 whenever the Target AFR lookup is below 0x82.'
+      - session: live-read-2026-11-11 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          Read 0 on every one of 4,038 answered reads of the 49-byte
+          timing_trim window (tools.can_memory_log, 01:31-01:36Z): 1,110 at
+          KOEO, three full pedal presses included (DID 0x120D 0.785 -> 4.605 V;
+          the whole window was one constant payload), and 2,928 at about 28 Hz
+          across an engine start and three full-pedal stabs in neutral to
+          4,240 rpm. On 44 of those the gated lookup byte 0xFFFF174B in the
+          same reply was at or above the 0x82 threshold (146-149 during the
+          stabs, 131-139 on the release near 3,700-4,100 rpm) and this byte
+          still read 0, with the cap 0xFFFF174C at 2 or 3. So the address
+          answers and "0 below the threshold" holds, but the byte was never
+          seen nonzero: its identity rests on the listing, and g is not
+          positive merely because 174B passed the threshold (the 0xFFFF26C0
+          term of g, not read here, is what that leaves). The engine was
+          unloaded; no loaded full-pedal read exists yet.
+    notes: >
+      No known answer expressible. Never seen nonzero (see the live read): a
+      first nonzero read under load, with mem:ECM_TARGET_LOOKUP_GATED and
+      mem:ECM_TIMING_ENRICH_RETARD_CAP in the same reply, is what would raise
+      the confidence above low.
+  - name: ECM_TARGET_LOOKUP_GATED
+    address: 0xFFFF174B
+    length: 1
+    byte_length: 1
+    scale: 0.0078125   # phi x 128: raw / 128
+    offset: 0.0
+    unit: phi
+    confidence: medium
+    plausible_min: 0.9
+    plausible_max: 1.4
+    verified_tune_revision: ZS44A-20261110
+    window: timing_trim
+    evidence:
+      - session: firmware-ZS44A-20261004 (manifest ram gated_lookup_cell, node enrichment_gate)
+        method: disassembly
+        finding: >
+          u8, phi x 128: the Target AFR lookup after the enrichment gate. The
+          cell when the lookup is >= 130 (cal 0x8B39; >= 129 while 0xFFFF2886
+          bit 3 is already set), else 0x80 (phi 1.0). The enrichment multiplier
+          0xFFFF26C0 ramps toward this byte << 7, and the enrichment retard
+          0xFFFF174A compares it against cal 0x8792 / 0x8793.
+      - session: live-read-2026-11-11 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          0x80 on all 1,110 KOEO reads, pedal released or floored, and at
+          idle. On three full-pedal stabs in neutral (DID 0x120D >= 4.5 V, DID
+          0x1219 rpm read after each reply) it went to 146 from the first
+          floored read and climbed 147, 148, 149 between about 1,400 and
+          1,900 rpm: the last Fuel Targets column, raw 146 at the 1,200 rpm
+          row and 149 at 1,600 (ZS44A-20261110). Against that column
+          interpolated on the rpm DID, 37 floored reads at or below 1,900 rpm
+          sat between -1.18 and 0.00 counts (the rpm read trails the reply
+          while rpm rises). The bytes either side do not do this: 0xFFFF174A
+          stayed 0 and 0xFFFF174C stayed 0-3. Above about 1,900 rpm, still
+          floored and unloaded, it read 0x80 again (33 reads to 3,700 rpm),
+          and 131-139 on six reads as the pedal came off near 3,700-4,100 rpm.
+          One read at key-off was 0.
+    notes: >
+      Known answer: the Fuel Targets cell the ECM chose, x 128, wherever the
+      gate is latched; 0x80 otherwise. The relation schema has no table
+      lookup, so the twin's enrichment_gate node is the check. Unloaded
+      full pedal above ~1,900 rpm read 0x80 on 2026-11-11, where a loaded
+      pull reads the last column: not explained.
+  - name: ECM_TIMING_ENRICH_RETARD_CAP
+    address: 0xFFFF174C
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: low
+    verified_tune_revision: ZS44A-20261110
+    window: timing_trim
+    evidence:
+      - session: firmware-ZS44A-20261004 (E09.7 base_timing_sum)
+        method: disassembly
+        finding: >
+          u8: the cap of the enrichment retard, 0xFFFF174A = max(0,
+          min(this, g)). (X - 0xFFFF174D) x 0xFFFF174E / (0x80 - 0xFFFF174D),
+          capped at 0xFFFF174E, the two bytes from curves 0xD177 / 0xD19F
+          (0xD187 / 0xD1AF with 0xFFFF283F bit 6) at rpm (0x04C9D8; a divide
+          the exports do not resolve).
+      - session: live-read-2026-11-11 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          2 on all 1,110 KOEO reads. Engine running and unloaded it read 0 at
+          idle and 0-3 through three full-pedal stabs to 4,240 rpm, never
+          above 0xFFFF174E in the same reply (4 below about 3,000 rpm, 5-6
+          from there to 4,240), and 0xFFFF174D read 0 throughout: consistent
+          with the listing's X x 174E / 128, but X was not in the read, so the
+          formula is not reproduced.
+    notes: >
+      No known answer expressible without X in the same reply (it is in the
+      fuel_target window). Bounds what the enrichment retard can subtract.
   - name: ECM_TIMING_TRIM_SELECTED
     address: 0xFFFF1777
     length: 1
     byte_length: 1
     unit: counts
     confidence: hypothesized
-    verified_tune_revision: ZS44A-20261004
+    verified_tune_revision: ZS44A-20261110
     window: timing_trim
     evidence:
       - session: firmware-ZS44A-20261004 (E05.4 trace, timing_trim_lookup 0x04E6D8)
@@ -4855,6 +4953,18 @@ memory:
           before the interpolation and ORs bit 7 back). Coolant byte above 110:
           trim B while 0xFFFF283F bit 6 (HI DET) is set, else trim A; at or
           below 106: trim A; between: a blend.
+      - session: live-read-2026-11-11 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          Read in the same replies as mem:ECM_TIMING_ENRICH_RETARD: 49 at
+          KOEO, 45-66 in bits 0-6 with the engine running, bit 7 set on 86 of
+          2,928 reads (all during the full-pedal stabs). Equal to 0xFFFF177A
+          on 2,917 reads; on the other 11, all above 1,850 rpm with bit 7 set,
+          it was 1-2 counts below (179-181 against 180-182), the direction
+          trim B differs from trim A there. 0xFFFF283F was not in the read,
+          and neither byte was checked against its table, so the channel
+          stays hypothesized.
     notes: >
       Raw byte, deliberately unscaled: the trim is raw & 0x7F, and the flag is
       bit 7, so a scale would mix the two. With HI DET clear and warm it equals
@@ -4867,7 +4977,7 @@ memory:
     byte_length: 1
     unit: counts
     confidence: hypothesized
-    verified_tune_revision: ZS44A-20261004
+    verified_tune_revision: ZS44A-20261110
     window: timing_trim
     evidence:
       - session: firmware-ZS44A-20261004 (E05.4 trace, timing_trim_lookup 0x04E6D8)
@@ -4875,6 +4985,13 @@ memory:
         finding: >
           u8: trim A's lookup, always (bits 0-6 the trim, bit 7 the cell flag,
           as for 0xFFFF1777).
+      - session: live-read-2026-11-11 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          Read in the same replies as mem:ECM_TIMING_TRIM_SELECTED (see
+          there): 49 at KOEO, moving with rpm and pedal, never checked
+          against the trim A table, so the channel stays hypothesized.
     notes: 'Raw byte, unscaled, as mem:ECM_TIMING_TRIM_SELECTED.'
   - name: ECM_BASE_TIMING_SUM
     address: 0xFFFF1A58

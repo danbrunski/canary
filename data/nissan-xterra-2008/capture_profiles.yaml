@@ -170,7 +170,17 @@ profiles:
     2026-10-15: adds module (battery) voltage, PID 0x42, at the context rate. The
     ECM''s injector dead time Ts is a function of it, and the fuel plant pairs it
     as slow context (fuel_plant.yaml battery_max_age_s 10 s). Without it no tuning
-    drive can feed an E08 simulation design (operator, 2026-10-15).'
+    drive can feed an E08 simulation design (operator, 2026-10-15).
+
+
+    2026-11-11: adds the enrichment retard 0xFFFF174A with its input, the gated Target
+    AFR lookup byte 0xFFFF174B, and its cap 0xFFFF174C: three adjacent bytes of the
+    timing_trim window, one 3-byte read every cycle (operator, 2026-11-10: log it
+    before leaning the full-pedal targets). The term is subtracted in the base timing
+    sum, so a leaner target could add advance through it. A live read that day (KOEO,
+    then three full-pedal stabs in neutral) had it at 0 on every read, the lookup byte
+    reproducing the last Fuel Targets column and the cap at 0-3 counts. No loaded
+    full-pedal read exists yet: that is what these channels are in the profile for.'
   experimental: false
   mode01:
     RPM: 1.0
@@ -227,6 +237,9 @@ profiles:
   - ECM_KS_FAULT_FLAGS
   - ECM_KS1_LEVEL
   - ECM_KS2_LEVEL
+  - ECM_TIMING_ENRICH_RETARD
+  - ECM_TARGET_LOOKUP_GATED
+  - ECM_TIMING_ENRICH_RETARD_CAP
   memory_rate_weights:
     ECM_HIGH_DET_FLAGS: 0.5
     ECM_KNOCK_RETARD: 0.5
@@ -267,7 +280,11 @@ profiles:
     1.0 Hz; knock status 0.5 Hz; the 4 Hz batch 2.1-2.5 Hz (FUEL_STATUS, load,
     throttle 2.5; RPM, MAF, timing, lambda, 0x44 2.1; p95 0.6-0.65 s). 58 reads/s
     in all, 17 timeouts, no negative responses. capture_quality reports
-    rate_shortfall for the 4 Hz batch: that is this plan, not a fault.'
+    rate_shortfall for the 4 Hz batch: that is this plan, not a fault. 2026-11-11:
+    the timing_trim window (3 bytes) joins every cycle, one more in-window request:
+    77.5 channel reads/s, 81.5 req/s unbatched (46.5 batched) by preview_polling_plan.
+    No capture with it yet; expect the 4 Hz batch a request slot (1/90 s) slower per
+    cycle, and read the achieved rates off the first one.'
   required_tuple: []
   min_achieved_rate_hz: null
   max_tuple_skew_s: null
@@ -344,7 +361,18 @@ profiles:
     (limit 0.25) and the fill byte 0.093 s (inside 0.1 s by less than a slot),
     on the fake clock (test_the_awaited_timing_windows_do_not_fit_beside_the_fuel_pairings).
     When their live reads land they need a second, timing-only profile (E09.1
-    Remaining).'
+    Remaining).
+
+
+    2026-11-11: the enrichment retard 0xFFFF174A was read on the truck (KOEO, an
+    engine start, three full-pedal stabs in neutral: 0 on every read, its input
+    byte 0xFFFF174B reproducing the Fuel Targets column in the same reply), so it
+    left the awaited set and the accept test asks for it here: one 1-byte read of
+    the timing_trim window, after the fill byte in window order, so the fill byte
+    stays at 0.083 s. The window grows a request slot: BFS DID to Mode 01 rpm
+    0.195 s (limit 0.25), pulse to rpm and MAF 0.184 s (0.3). The other fifteen
+    chain words still wait, the two trim bytes of that window included (read that
+    day, not checked against their tables).'
   experimental: true
   mode01:
     RPM: 1.0
@@ -381,6 +409,7 @@ profiles:
   - ECM_FUEL_TARGET_MAP_X_TRACE
   - ECM_FUEL_COMP_X_INPUT
   - ECM_KNOCK_RETARD_TARGET
+  - ECM_TIMING_ENRICH_RETARD
   memory_rate_weights: {}
   mode01_enabled: true
   mode22_enabled: true
@@ -391,26 +420,28 @@ profiles:
   did_continuous: false
   bus_budget_override: 90.0
   priority_channels: null
-  expected_total_demand_hz: 65.0
+  expected_total_demand_hz: 67.0
   capacity_evidence: 'Demand (preview_polling_plan, the live plan asked early): 6
     Mode 01 PIDs at 4 Hz (PID 0x0E since 2026-10-17), 5 at 2 Hz (fuel status,
-    four trims) and 5 at 1 Hz, 4 DIDs and 7 memory windows at 2 Hz: 61 channel
-    reads/s, plus entry and exit every 0.5 s cycle (4 req/s): 65 req/s
-    unbatched, 33 batched six PIDs to a request, against the 90 req/s budget.
+    four trims) and 5 at 1 Hz, 4 DIDs and 8 memory windows at 2 Hz (timing_trim,
+    the enrichment retard''s byte, since 2026-11-11): 63 channel reads/s, plus
+    entry and exit every 0.5 s cycle (4 req/s): 67 req/s unbatched, 35 batched
+    six PIDs to a request, against the 90 req/s budget.
     Cycle (hybrid_cycle.plan_cycle, the plan the loop reports as
     /status.obd_scheduler.did_profile.cycle.plan): 19 Mode 01-side requests (16
-    PIDs and the three DTC polls) in 4 batches, 11 in-window requests and 2
+    PIDs and the three DTC polls) in 4 batches, 12 in-window requests and 2
     session requests at 90 req/s plus the 0.05 s exit grace: required_seconds
-    0.2389 of the 0.5 s cycle (0.2056 before the timing channels); 0.4056 with
-    batching refused (0.3722 before). worst_case_seconds 1.2389 (1.4056
+    0.25 of the 0.5 s cycle (0.2389 before timing_trim, 0.2056 before the timing
+    channels); 0.4167 with batching refused (0.4056, 0.3722 before).
+    worst_case_seconds 1.25 (1.4167
     unbatched) is that plus one request timeout (1.0 s): one unanswered request
     makes a cycle of about 1.2 s and the boundaries it overruns are skipped, not
     burst. On the fake clock the loop reports that plan, every channel runs at
-    its planned rate, and a window takes 0.133-0.135 s entry to exit (0.11 s
-    before). Before the timing channels the three cycles that held an
+    its planned rate, and a window takes 0.144-0.145 s entry to exit (0.133-0.135 s
+    before timing_trim, 0.11 s before the timing channels). Before the timing channels the three cycles that held an
     unanswered DTC poll ran 1.18-1.21 s. Parent evidence: the tuning profile ran
     62 req/s at the same budget and cycle on six drives (2026-09-21..23; DID
-    0x1208 to 0x1209 p50 0.011 s on 09-23T142926). 65 req/s is under the
+    0x1208 to 0x1209 p50 0.011 s on 09-23T142926). 67 req/s is under the
     116.8 req/s the event loop sustained on the truck (2026-09-10), so the
     request rate is not the risk; the storage writer is: the 2026-07-29
     overload (records dropped at 25 req/s) was the writer, not the bus, and
@@ -498,6 +529,9 @@ profiles:
   - ECM_KS_FAULT_FLAGS
   - ECM_KS1_LEVEL
   - ECM_KS2_LEVEL
+  - ECM_TIMING_ENRICH_RETARD
+  - ECM_TARGET_LOOKUP_GATED
+  - ECM_TIMING_ENRICH_RETARD_CAP
   - ECM_LTFT_LEARN_COND_1518
   - ECM_LTFT_LEARN_STABLE_151A
   - ECM_LTFT_GATE_COND_179C

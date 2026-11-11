@@ -366,7 +366,13 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
        0x118A, 0x283C–0x2842, 0x2332 and 0x232E only, the rest none.
        *(2026-10-17: E05.4 (b)/(c)'s addresses now have channels, all
        hypothesized; see *Ignition timing in*. They need the key-on/idle
-       live read, then their own profile.)* Each
+       live read, then their own profile.)* *(2026-11-11: the timing_trim
+       window was read on the truck. The enrichment retard 0xFFFF174A read 0
+       throughout and is `low`; `twin` and `tuning` poll it, with its input
+       0xFFFF174B and cap 0xFFFF174C in `tuning`. The window's two trim
+       bytes were read but not checked against their tables and stay
+       hypothesized, as do the other seven windows.
+       `data/analyses/2026-11-10-drive-log.md`.)* Each
        needs a catalog channel and then a live read before a profile may
        poll it. A window read before fuel_comp_x moves the fill byte one
        memory read later (10 ms on the fake clock): from 0.083 s (since DID

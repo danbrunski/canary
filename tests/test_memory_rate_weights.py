@@ -317,7 +317,8 @@ def test_tracked_xterra_profiles_keep_their_digests_and_memory_rates() -> None:
     did, and memory reads run at the rate they ran at before: `tuning` reads
     its two original windows at its 4 Hz target capped to one per 0.5 s
     cycle, i.e. 2 Hz. The knock windows it gained on 2026-10-08 are weighted:
-    0.5 still hits the 2 Hz cap, 0.125 runs at 0.5 Hz."""
+    0.5 still hits the 2 Hz cap, 0.125 runs at 0.5 Hz. The enrichment retard's
+    three bytes (timing_trim, 2026-11-11) are unweighted: 2 Hz."""
     catalog = CaptureProfileCatalog.model_validate(load_yaml(XTERRA_CATALOG.read_text()))
     for profile in catalog.profiles:
         if not profile.memory_rate_weights:
@@ -338,6 +339,7 @@ def test_tracked_xterra_profiles_keep_their_digests_and_memory_rates() -> None:
     assert rates == {
         f"{MEMORY_SOURCE}:fuel_target": 2.0,
         f"{MEMORY_SOURCE}:spark": 2.0,
+        f"{MEMORY_SOURCE}:timing_trim": 2.0,
         **{
             f"{MEMORY_SOURCE}:{window}": 2.0
             for window in ("flags_2841", "knock_retard", "knock_target", "knock_flags")

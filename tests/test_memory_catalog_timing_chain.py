@@ -139,15 +139,47 @@ def test_decode_follows_the_manifest_ram_entries() -> None:
             assert channel.scale is None, name
 
 
-def test_no_channel_was_read_live_so_none_may_be_polled() -> None:
-    """Code-verified from the listing, never read; 0xFFFF11CB's constant 0
-    inside the spark reply on the ram-study is recorded under a method that
-    is not a live read, because a constant cannot identify a byte."""
+#: The timing_trim window was read on the truck on 2026-11-11 (KOEO, an engine
+#: start and three full-pedal stabs in neutral). name -> confidence after it.
+#: The enrichment retard read 0 throughout, beside an input byte that
+#: reproduced its table, so it left ``hypothesized`` at ``low`` and may be
+#: polled; the two trim bytes moved but were not checked against their tables
+#: (X is in another window), so they carry the read and stay hypothesized.
+READ_LIVE = {
+    "ECM_TIMING_ENRICH_RETARD": "low",
+    "ECM_TIMING_TRIM_SELECTED": "hypothesized",
+    "ECM_TIMING_TRIM_A": "hypothesized",
+}
+
+
+def test_only_the_timing_trim_window_was_read_live() -> None:
+    """Every other channel is code-verified from the listing and never read;
+    0xFFFF11CB's constant 0 inside the spark reply on the ram-study is
+    recorded under a method that is not a live read, because a constant
+    cannot identify a byte."""
     for name in PINNED:
         channel = BY_NAME[name]
-        assert channel.confidence == "hypothesized", name
         assert any(e.method == "disassembly" for e in channel.evidence), name
-        assert not any(e.method in LIVE_READ_METHODS for e in channel.evidence), name
+        live = any(e.method in LIVE_READ_METHODS for e in channel.evidence)
+        assert live is (name in READ_LIVE), name
+        assert channel.confidence == READ_LIVE.get(name, "hypothesized"), name
+
+
+def test_the_enrichment_retard_was_read_with_its_input_and_its_cap() -> None:
+    """The three bytes a profile polls for the enrichment retard share one
+    3-byte read, and the input byte decodes as phi (raw / 128)."""
+    names = ("ECM_TIMING_ENRICH_RETARD", "ECM_TARGET_LOOKUP_GATED", "ECM_TIMING_ENRICH_RETARD_CAP")
+    (read,) = plan_memory_reads([BY_NAME[n] for n in names])
+    assert (read.name, read.address, read.length) == ("timing_trim", 0xFFFF174A, 3)
+    for name in names:
+        channel = BY_NAME[name]
+        assert channel.confidence != "hypothesized", name
+        assert any(e.method in LIVE_READ_METHODS for e in channel.evidence), name
+    lookup = BY_NAME["ECM_TARGET_LOOKUP_GATED"]
+    for raw, phi in ((0x80, 1.0), (149, 149 / 128)):
+        word = decode_memory_raw(lookup, bytes([raw]))
+        assert word == raw
+        assert apply_memory_scaling(lookup, word) == phi
 
 
 def test_the_declared_checks_are_the_ones_the_window_plan_states() -> None:
@@ -194,6 +226,8 @@ def test_one_timing_trim_reply_keeps_the_cell_flag_and_one_term_reply_its_sign()
     }
     assert raws == {
         "ECM_TIMING_ENRICH_RETARD": 0,
+        "ECM_TARGET_LOOKUP_GATED": 0,
+        "ECM_TIMING_ENRICH_RETARD_CAP": 0,
         "ECM_TIMING_TRIM_SELECTED": 0x8C,
         "ECM_TIMING_TRIM_A": 9,
     }
