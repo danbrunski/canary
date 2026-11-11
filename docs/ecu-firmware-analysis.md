@@ -157,6 +157,15 @@ What limits first gear:
 | **Measured: first-gear full-pedal throttle follows the cap.** Every local session since 2026-05, 0x23D pedal ≥ 250 with the throttle byte from the same frame, gear from rpm ÷ 0x284 wheel speed (8,755 first-gear frames, 23 sessions). | Measured; matches the prediction at the low end and in shape. The high end is not reached in the data. | The throttle byte is 255 on 94 % of frames at 1,600–1,800 rpm and on 30 % at 1,800–2,000, then never until 5,600 rpm. Band medians: 99–104 of 255 at 2,400–3,200 rpm, 115–117 at 3,400–3,800, **110–111 at 3,800–4,200**, 130 at 4,400–4,600, 175 at 5,000–5,200, 203 at 5,400–5,600, 229 at 5,600–5,800 (26 % of frames at 255). The dip at 4,000 rpm is the map's torque peak: the air the cap asks for falls from 0.908 of scale at 3,700 rpm to 0.871 at 4,100. Spread inside a band is a few counts (10th to 90th percentile 98–100 at 2,400–2,600). Second to fifth gear, 130,000 frames: median 255 and 25th percentile at least 250 in every band from 2,000 to 5,500 rpm. |
 | The driver demand itself goes through a drive-torque stage that also uses the ratio: a target from the 16 × 16 map at flash `0xF71A` (the word `0xFFFF1248` on axis `0xFFE0`, 0–727, which fits accelerator counts; a vehicle-speed word `0xFFFF10E2` on axis `0x10000`; a second identical map at `0xF51A`) is divided by the estimated ratio (`0x0769B0`, `0x0776AA`) and capped at the full-load torque for the rpm to give `0xFFFF2812` (`0x0778E8`). | Verified (code) for each step; not the cause | Its numbers were not reconciled with the truck (the speed word's unit is not established). The cap above accounts for first gear without it. |
 
+How the ratio estimate is formed, and what a regear does to it (2026-11-11):
+
+| What | Confidence | Evidence |
+|---|---|---|
+| The ratio is engine rpm ÷ output-shaft rpm. Engine rpm is `0xFFFF1174` (`w120A` × 50 / 16, filtered). Output-shaft rpm is `0xFFFF1180`, computed from the ECM's vehicle speed `0xFFFF10C2` as speed × 32,768 ÷ the **cal word `0x91F8` = 25,491**. | Verified (code) | `0x076128`, `0x0761C4` (speed × `0x1C71C`, then `>> 6`, × 18, ÷ the word), `0x0773D0` (rpm × 1,024 ÷ output rpm). |
+| That one word is tire circumference ÷ final drive. With the speed word at 0.05 km/h per count it gives 25.71 output-shaft rpm per km/h, which is 0.648 m of travel per shaft revolution: the stock 3.692 axle with a 2.39 m tire. | Inferred: the speed word's unit is taken from the result being a gearbox ratio | The same word turns output rpm back into the 0.1 km/h speed word `0xFFFF116E` (`0x0762B4`), so the ECM's speed does not depend on it. Two more readers, `0x03B126` and `0x093478`, were not traced. |
+| **The 4.08 regear makes every gear read about 10–12 % short.** The speed comes from the wheel-speed sensors, so tire size cancels and the axle change shows through in full: 4.08 / 3.692 = 1.105. From the measured speed error instead (PID `0x0D` is 0.92 × GPS, 2.559 m tire) the factor is 1.123. | Derived; not read live | Expected `0xFFFF27D2`: first 4.83–4.91 (clamped to 4.59), second 2.78–2.83, fifth 1.105–1.123 where a stock truck reads 1.000. Second stays under the 3.50 threshold, so the regear does not move the first-gear cap to another gear. |
+| Scaling the word by 3.692 / 4.08 (to about 23,070) would put the estimate back on the gearbox ratios. A steady fifth-gear read of `0xFFFF27D2` gives the exact factor: new word = 25,491 × 1,024 ÷ the reading. | Proposed, not done | A main-calibration edit, its own flash. What else the two untraced readers do with it is open. |
+
 So "full pedal reads the last Fuel Targets column" holds wherever the ECM opens
 the throttle fully, which is second gear and up. In first gear the torque cap
 holds the target opening under 78 % from about 1,800 rpm to about 5,600 rpm, the
@@ -927,7 +936,10 @@ ratio of (DID − Ts) to the predicted pulse has median 1.006, p10–p90
 - **Unidentified tables:** the remaining 1-D curve inputs and the
   flash-resident 2-D maps. The `+0x260` map is the engine torque map
   (2026-11-11); `rom_map.yaml` names it but does not yet declare it as a table.
-- **Throttle demand:** a live read of the first-gear limit word `0xFFFF3C62`;
+- **Throttle demand:** a live read of the first-gear limit word `0xFFFF3C62`
+  and of the ratio word `0xFFFF27D2` in a steady fifth-gear cruise (expect about
+  1,130–1,150 with the 4.08 axles, 1,024 stock); the readers `0x03B126` and
+  `0x093478` of the cal word `0x91F8`;
   the seven sibling limits and their state byte `0xFFFF2208`; the unit of the
   speed word `0xFFFF10E2` in the drive-torque stage ("The enrichment switch
   tests target throttle").
