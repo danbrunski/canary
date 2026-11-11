@@ -629,7 +629,14 @@ per trim cell (below; `rom_sim run --high-det --knock-control` gives the same
 block). A trim cell is a byte whose bit 7 is a flag the ECM strips (decode mask
 `0x7F`): `add_raw` and `scale` act on `raw & 0x7F` and keep bit 7, a result
 outside 0..127 is `value_out_of_range`, and a `set_raw` that would change bit 7
-is `masked_bits_changed`. Anything else is refused by name: `table_not_editable`,
+is `masked_bits_changed`. A table may carry `raw_range` (`[low, high]`, `null`
+when it has none): the raw values the code that reads the cell can take, such as
+0..32,767 for a word the ECM compares signed. A value outside it is
+`value_out_of_range`, never clamped. The 2008 also marks three main-calibration
+words editable, each one cell at an absolute offset with no `slot`:
+`first_gear_torque_cap`, `first_gear_ratio_threshold` and
+`output_shaft_speed_constant`. No simulator node reads them, so a preview's
+levers report `mapped_unmodelled`. Anything else is refused by name: `table_not_editable`,
 `slot_not_simulated`. E08.1's refusals keep their names: `no_edits`,
 `duplicate_edit`, `no_op_edit`, `value_out_of_range`, `rounding_undeclared`,
 `rounding_without_scale`, `selector_ambiguous`, `operation_ambiguous`,

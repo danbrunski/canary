@@ -701,6 +701,15 @@ def make_candidate(
             raise RomEffectRefusalError(
                 "value_out_of_range", f"{edit.raw} does not fit a {table.dtype} cell"
             )
+        if table.raw_range is not None and not (
+            table.raw_range[0] <= edit.raw <= table.raw_range[1]
+        ):
+            raise RomEffectRefusalError(
+                "value_out_of_range",
+                f"{edit.raw} is outside {table.id}'s raw_range {table.raw_range[0]}.."
+                f"{table.raw_range[1]} (rom_map.yaml: the code that reads this cell does "
+                "not take the rest of the dtype's range)",
+            )
         key = (table.id, edit.slot, edit.row, edit.col)
         if key in seen:
             raise RomEffectRefusalError("duplicate_edit", f"{key} edited twice")

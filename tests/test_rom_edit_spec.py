@@ -572,6 +572,35 @@ def test_value_out_of_range_comes_from_make_candidate_and_is_never_clamped(
     assert "300 does not fit a u8 cell" in refused.value.message
 
 
+def test_a_main_calibration_word_edits_at_its_absolute_offset(world: dict[str, Any]) -> None:
+    """A 1 x 1 table outside the map slots takes ``cells: [[0, 0]]`` with no
+    slot, and the candidate differs from the base in that word alone."""
+    spec = parse_edit_spec(
+        _spec(world, {"table": "first_gear_ratio_threshold", "cells": [[0, 0]], "set_raw": 0x7FFF})
+    )
+    made = _build(world, spec)
+    changed = [i for i, (a, b) in enumerate(zip(world["image"], made.image, strict=True)) if a != b]
+    assert set(changed) <= {0x9308, 0x9309} and changed
+    assert made.image[0x9308:0x930A] == b"\x7f\xff"
+
+
+@pytest.mark.parametrize(
+    ("table", "raw"),
+    [
+        ("first_gear_torque_cap", 0x8000),  # a negative torque limit to a signed compare
+        ("first_gear_ratio_threshold", 0xFFFF),
+        ("output_shaft_speed_constant", 0),  # a divisor
+    ],
+)
+def test_a_value_outside_a_tables_raw_range_is_refused_not_clamped(
+    world: dict[str, Any], table: str, raw: int
+) -> None:
+    with pytest.raises(RomEffectRefusalError) as refused:
+        _resolve(world, {"table": table, "cells": [[0, 0]], "set_raw": raw})
+    assert refused.value.reason == "value_out_of_range"
+    assert f"{raw} is outside {table}'s raw_range" in refused.value.message
+
+
 def test_a_scale_that_rounds_every_cell_back_names_the_cells(world: dict[str, Any]) -> None:
     with pytest.raises(EditSpecRefusalError) as refused:
         _resolve(

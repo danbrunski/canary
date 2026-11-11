@@ -377,6 +377,10 @@ export interface RomTableValues {
   /** `rom_map.yaml` marks it editable (never an axis). Whether the page
    *  takes an edit to this copy is `isEditableTable`'s: Map 1 or single-copy. */
   editable: boolean;
+  /** `[low, high]` raw values the ECU's code can take in this cell, when the
+   *  map narrows the dtype's range (a word compared signed, a divisor); a
+   *  value outside it is `value_out_of_range`. Null or absent: the dtype's. */
+  raw_range?: [number, number] | null;
   decode?: RomDecode | null;
   /** Absolute byte offset of the table's first cell in this slot. */
   offset?: number | null;

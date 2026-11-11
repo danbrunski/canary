@@ -227,6 +227,26 @@ describe("buildEdits", () => {
     ).toMatchObject({ ok: false, reason: "value_out_of_range" });
   });
 
+  it("holds a table's raw_range inside the dtype: a signed word stops at 0x7FFF", () => {
+    // The first-gear torque cap is compared signed by the ECM, so the map allows 0..32767.
+    const cap: RomTableValues = {
+      ...kConstant,
+      id: "first_gear_torque_cap",
+      name: "First-gear torque cap",
+      slot: null,
+      raw: [[3138]],
+      raw_range: [0, 0x7fff],
+    };
+    expect(buildEdits(cap, sel([0, 0], [0, 0]), { kind: "set_raw", raw: 0x7fff }).ok).toBe(true);
+    const negative = buildEdits(cap, sel([0, 0], [0, 0]), { kind: "set_raw", raw: 0x8000 });
+    expect(negative).toMatchObject({ ok: false, reason: "value_out_of_range" });
+    expect(negative.ok === false && negative.message).toContain("allowed 0..32767");
+    expect(buildEdits(cap, sel([0, 0], [0, 0]), { kind: "add_raw", delta: 30000 })).toMatchObject({
+      ok: false,
+      reason: "value_out_of_range",
+    });
+  });
+
   it("refuses an edit that changes nothing, a fraction as a raw, and a stray selection", () => {
     expect(
       buildEdits(fuelTargets, sel([0, 0], [0, 0]), { kind: "set_raw", raw: 128 }),

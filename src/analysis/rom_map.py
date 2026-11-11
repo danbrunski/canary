@@ -299,6 +299,12 @@ class Table(_Strict):
     #: another uses as an axis (:class:`RomMap` checks): a moved breakpoint
     #: moves every lookup through it.
     editable: bool = False
+    #: The raw values an edit may write, inclusive ``[low, high]``, where the
+    #: code that reads the cell makes the rest of the dtype's range wrong: a
+    #: word the ECM compares signed reads 0x8000 and up as negative, and a
+    #: divisor must not be 0. ``make_candidate`` refuses a value outside it
+    #: (``value_out_of_range``); nothing clamps.
+    raw_range: tuple[int, int] | None = None
 
     @property
     def tree_label(self) -> str:
@@ -317,6 +323,13 @@ class Table(_Strict):
             raise ValueError(
                 f"table {self.id!r}: mask 0x{mask:X} is wider than a {self.dtype} cell"
             )
+        if self.raw_range is not None:
+            low, high = self.raw_range
+            if not 0 <= low <= high < 1 << (8 * DTYPE_BYTES[self.dtype]):
+                raise ValueError(
+                    f"table {self.id!r}: raw_range {list(self.raw_range)} must be low <= high "
+                    f"inside a {self.dtype} cell"
+                )
         if self.editor_disagreement is not None and (
             self.axes.rows is None or self.axes.cols is None
         ):

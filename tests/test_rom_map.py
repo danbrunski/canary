@@ -639,7 +639,8 @@ def test_copies_in_different_slots_may_share_a_label() -> None:
 
 def test_the_shipped_map_marks_the_fuel_chain_and_trims_editable_in_map_1() -> None:
     """The ROM Editor's editable tables are the map's ``editable: true``:
-    each verified, so its edits export."""
+    each verified, so its edits export. Since 2026-11-11 that includes three
+    main-calibration words outside the map slots."""
     rom_map = load_rom_map(PROFILE)
     editable = [t for t in rom_map.tables if t.editable]
     assert {t.id for t in editable} == {
@@ -648,8 +649,42 @@ def test_the_shipped_map_marks_the_fuel_chain_and_trims_editable_in_map_1() -> N
         "k_constant",
         "timing_trim_a",
         "timing_trim_b",
+        *MAIN_CAL_WORDS,
     }
     assert all(t.confidence == "verified" for t in editable)
+
+
+#: id -> (absolute offset, raw_range). The words 0x073474 and 0x0761C4 read.
+MAIN_CAL_WORDS = {
+    "first_gear_torque_cap": (0x8EBC, (0, 0x7FFF)),
+    "first_gear_ratio_threshold": (0x9308, (0, 0x7FFF)),
+    "output_shaft_speed_constant": (0x91F8, (1, 0xFFFF)),
+}
+
+
+def test_the_main_calibration_words_are_placed_and_bounded_as_the_code_reads_them() -> None:
+    """Each is one big-endian word in the main calibration, inside the
+    checksum range and outside every map slot, so no map switch falls back
+    from it. The two the ECM loads sign-extended stop at 0x7FFF (0x8000 would
+    be a negative torque limit), and the divisor excludes 0."""
+    rom_map = load_rom_map(PROFILE)
+    assert rom_map.map_slots is not None
+    for table_id, (offset, raw_range) in MAIN_CAL_WORDS.items():
+        table = rom_map.table(table_id)
+        assert (table.offset, table.slot_offset) == (offset, None)
+        assert (table.rows, table.cols, table.dtype) == (1, 1, "be16")
+        assert table.raw_range == raw_range
+        assert rom_map.checksums.start <= offset < rom_map.map_slots.base
+
+
+@pytest.mark.parametrize(
+    ("raw_range", "match"),
+    [([5, 4], "low <= high"), ([0, 0x10000], "inside a be16 cell"), ([-1, 4], "low <= high")],
+)
+def test_a_raw_range_must_be_ordered_and_fit_the_cell(raw_range: list[int], match: str) -> None:
+    data = _shipped()
+    _by_id(data, "first_gear_torque_cap")["raw_range"] = raw_range
+    _refuse(data, match)
 
 
 def test_an_axis_cannot_be_editable() -> None:

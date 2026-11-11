@@ -531,6 +531,7 @@ def table_values(image: bytes, rom_map: RomMap) -> list[dict[str, Any]]:
                 "dtype": table.dtype,
                 "role": "axis" if table.id in axes else "table",
                 "editable": table.editable,
+                "raw_range": None if table.raw_range is None else list(table.raw_range),
                 "unit": None if table.decode is None else table.decode.unit,
                 "raw": raw,
                 "decoded": _decoded(table.decode, raw),

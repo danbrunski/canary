@@ -7,8 +7,8 @@
 //
 // What this makes impossible rather than documented:
 // - a scale has no default rounding (`rounding_undeclared`);
-// - a raw outside the cell's dtype is refused (`value_out_of_range`), never
-//   clamped;
+// - a raw outside the cell's dtype, or outside the map's `raw_range` for the
+//   table, is refused (`value_out_of_range`), never clamped;
 // - an edit that changes no selected cell is refused (`no_op_edit`);
 // - only a table the map marks `editable` is offered, a slotted one in Map 1
 //   only (`table_not_editable`, `slot_not_simulated`): editable is the map's
@@ -553,6 +553,13 @@ export function buildEdits(
       );
     }
     const newRaw = onValue ? (oldRaw & ~mask) | next : next;
+    const range = table.raw_range ?? null;
+    if (range !== null && (newRaw < range[0] || newRaw > range[1])) {
+      return refuse(
+        "value_out_of_range",
+        `row ${row + 1}, column ${col + 1}: raw ${newRaw} is outside ${table.name}'s allowed ${range[0]}..${range[1]} (the ECU's code does not take the rest of a ${table.dtype ?? "u8"} cell). Nothing is clamped.`,
+      );
+    }
     planned.push({
       row,
       col,

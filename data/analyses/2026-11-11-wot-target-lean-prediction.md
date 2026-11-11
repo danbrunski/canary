@@ -196,8 +196,8 @@ first-gear rows and 253–255 in the others) and Mode 01 rpm and throttle within
 rate and the 82–90 % load that marked these pulls were symptoms of first gear at
 part throttle, not causes.
 
-This is not new with either November flash. Across every local session since
-2026-05, at pedal ≥ 250, first gear holds the throttle byte at 98–130 of 255 from
+This is not new with either November flash. Across every local session on
+disk, at pedal ≥ 250, first gear holds the throttle byte at 98–130 of 255 from
 2,000 to 4,500 rpm and reaches 255 only from about 5,600 rpm (8,878 frames, up to
 21 sessions per band); second to fifth gear sit at 255 throughout (130,000 frames;
 `throttle_by_gear.py` beside the script above).

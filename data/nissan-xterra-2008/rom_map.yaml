@@ -1282,6 +1282,82 @@ tables:
       the signed sum of the idle-speed feedback integrator w3CB2 and the
       non-volatile learned w5EA6; w63FC is its snapshot, subtracted from the
       throttle area. So the idle-air word can never exceed this.
+  # -- First-gear torque cap and the gear-ratio estimate (2026-11-11;
+  # docs/ecu-firmware-analysis.md, "What limits first gear"). Main-calibration
+  # words in sector 8, outside the map slots: no map switch falls back from
+  # them, and each is its own category of edit.
+  - id: first_gear_torque_cap
+    name: First-gear torque cap (cal 0x8EBC)
+    group: airflow
+    short_name: First-gear torque cap
+    editable: true
+    offset: 0x8EBC
+    rows: 1
+    cols: 1
+    dtype: be16
+    raw_range: [0, 0x7FFF]
+    confidence: verified
+    evidence: >-
+      FUN_00073474 loads the word at 0x8EBA + 2 (0x073528, 3,138) as the limit
+      word 0xFFFF3C62 while flag bit 1 of 0xFFFF285F is set, and the word at
+      0x8EBA (0x7FFF, no limit) otherwise; 0x0726DC takes the lowest of the
+      limit words over the driver's torque demand. The flag sets when the
+      estimated transmission ratio 0xFFFF27D2 reaches first_gear_ratio_threshold,
+      and also when the state byte 0xFFFF2208 is 1, 8 or 9 with bit 4 of
+      0xFFFF2858 clear, a state nobody has identified: so this word is the cap
+      for both, and the threshold is the narrower edit for first gear alone.
+      Same units as the engine torque map's cells (slot +0x260), N.m x 10
+      inferred. Compared signed (cmp/gt), so 0x8000 and up would be a negative
+      torque limit: raw_range stops at 0x7FFF, which is no limit.
+  - id: first_gear_ratio_threshold
+    name: First-gear cap ratio threshold (cal 0x9308)
+    group: airflow
+    short_name: First-gear cap ratio threshold
+    editable: true
+    offset: 0x9308
+    rows: 1
+    cols: 1
+    dtype: be16
+    raw_range: [0, 0x7FFF]
+    decode:
+      kind: linear
+      quantity: transmission ratio
+      unit: ":1"
+      scale: 0.0009765625
+      confidence: inferred
+      evidence: >-
+        1/1024, from the estimate's clamp 748..4,696 spanning this gearbox's
+        0.763..4.368 and the automatic's ratio table 0xEBBC on the same scale.
+    confidence: verified
+    evidence: >-
+      FUN_00073474 compares the estimated transmission ratio 0xFFFF27D2 with
+      this word (0x0734CC-0x0734D2 and 0x0734FC-0x073502, cmp/hs, 3,584 = 3.50)
+      while cal 0x8ADE bit 7 is set (it is): at or above it the first-gear
+      torque cap applies. The estimate is clamped to 4,696 (cal 0x924A), so
+      any value above that switches the ratio trigger off; first gear is 4.368
+      and second 2.518 before the regear error. The only literal reference to
+      0x9308 in the image is this function's. Both words are loaded
+      sign-extended, so raw_range stops at 0x7FFF.
+  - id: output_shaft_speed_constant
+    name: Vehicle speed per output-shaft revolution (cal 0x91F8)
+    group: airflow
+    short_name: Speed per output-shaft rev
+    editable: true
+    offset: 0x91F8
+    rows: 1
+    cols: 1
+    dtype: be16
+    raw_range: [1, 0xFFFF]
+    confidence: verified
+    evidence: >-
+      FUN_000761c4 divides the vehicle-speed long 0xFFFF3CFC (>> 6, x 18) by
+      this word (25,491) to make the output-shaft speed 0xFFFF117E / 0xFFFF1180,
+      the denominator of the gear-ratio estimates (0x0773D0, 0x076448), and
+      FUN_000762b4 multiplies by it to get back the speed word 0xFFFF116E. It
+      is tire circumference / final drive: 0.648 m per shaft revolution, the
+      stock 3.692 axle (unit of the speed word inferred). A divisor, read
+      unsigned, so raw_range excludes 0. Two more readers, 0x03B126 and
+      0x093478, are not traced: what else an edit moves is open.
   - id: etc_limp_home_area
     name: Electronic-throttle limp-home area
     group: airflow
