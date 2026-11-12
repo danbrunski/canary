@@ -42,7 +42,7 @@ computed output.
 |---|---|---|---|
 | Fuel Comp, Fuel Targets, K | yes | BFS, φ, pulse, λ | plant unqualified (E07.3); closed loop unsupported (E09.10) |
 | Timing trims A/B | CLI only | none | base timing table unmapped; chain untraced (E09.7); no torque plant *(2026-10-17: CLI + API; reaches `ignition_timing_deg` (Δ, ECU side, E09.7); page too (editable trim grids, HI DET / knock state inputs, per-cell Δ° grid); torque stage built, not validated (E07.5 stage 4: H07.10/H07.5/H07.12/H07.8/N01.2 and spark sweeps owed))* |
-| MAF curve `0xE27E` | no | none | not in `rom_map.yaml`; airflow pipeline unmodelled (E09.8) |
+| MAF curve `0xE27E` | yes (F01.8) | none | mapped as `maf_transfer_curve` (axis and decode verified, 2026-11-12); airflow pipeline unmodelled (E09.8) |
 | Injector scaler `0x9254`, dead time, short pulse | no | none | constants not mapped as tables (E09.9) |
 | Load Point Scaler | yes | X | not editable on the page |
 | Cam target map `0xA579`, rev limiter words, cold tables | no | none | unmapped; no consumer |
@@ -1069,6 +1069,12 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
   **Accept:** a flat +5 % curve edit moves BFS +5 % at every point (as
   E08.7's K check); a one-cell edit moves only the points whose reading
   falls in that cell; negative control exact; `inspect` names the curve.
+  - [~] 2026-11-12 (F01.8): the mapping half is done. `maf_transfer_curve`
+    in `rom_map.yaml` has 64 be16 cells, entry *i* at A/D word 16 *i*, and
+    the airflow word's unit. `airflow_qa` cites it, and `inspect` names the
+    curve. Routing an edit through the airflow word is still owed, and so
+    are the +5 % and one-cell checks. Firmware doc: "The MAF curve and the
+    MAF-fault fallback".
 
 - [ ] **E09.9 — Injector constants as editable tables.** **listing**
   Map the injector-flow scaler `0x9254`, dead time `0x8C41`/`0x84F2`, the
