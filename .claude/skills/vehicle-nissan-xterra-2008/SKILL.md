@@ -156,8 +156,15 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
   to a different cell of those tables. Only the product K × MAF matters. Compare
   logs across such an edit on g/s × rpm, never on BFS, and make one category of
   edit per flash.
-- **Closed loop exists only where the Target AFR cell is exactly 14.7.** Any
-  other value in a cell opens the loop there, so its trims freeze.
+- **Rich Target AFR cells open the loop and reset STFT to 0 %; lean cells do
+  not open it** (firmware, F01.2, 2026-11-12). The loop is held open whenever
+  the enrichment multiplier is off 1.0, which a cell does at lookup ≥ 130
+  (AFR ≤ ~14.5). STFT is then forced to exactly 1.0, not frozen at its last
+  value. A lean cell, or 128–129, is read as 14.7 and stays closed loop, so
+  UpRev's "anything but 14.7 is open loop" is wrong on the lean side. Mode 01
+  `FUEL_STATUS` is the firmware's own report of every gate (4 = open by
+  condition). Details: `docs/ecu-firmware-analysis.md`, "Closed-loop enable and
+  trim authority".
 - **Full-throttle enrichment is a switch on target throttle, and first gear
   never trips it.** The ECM uses the Fuel Targets map's **last load column**
   while its own target throttle opening is ≥ 78 % on PID `0x11`'s scale (fully

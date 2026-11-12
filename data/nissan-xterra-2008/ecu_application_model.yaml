@@ -216,8 +216,28 @@ ram:
      meaning: 'Floor-path state.'}
   - {address: 0xFFFF111C, width: 8, signed: false, name: unidentified_111c, units: raw_counts, confidence: unknown,
      meaning: 'Compared with cal 0x8D51 for 0xFFFF288E bit 2.'}
-  - {address: 0xFFFF26B9, width: 8, signed: false, name: fuel_flags_26b9, units: flags, confidence: unknown,
-     meaning: 'Bits 0 and 1 gate the corrections and the curve term.'}
+  - {address: 0xFFFF26B9, width: 8, signed: false, name: fuel_flags_26b9, units: flags, confidence: code,
+     meaning: 'Closed-loop ready latch, bit b per bank (0x05CCD0, F01.2): set once the start/coolant/sensor conditions have held 200 cycles; clear makes Mode 01 PID 0x03 report 1. Bits 0 and 1 also gate the corrections and the curve term.'}
+  - {address: 0xFFFF26BA, width: 8, signed: false, name: feedback_in_use_26ba, units: flags, confidence: code,
+     meaning: 'Bit b set while the STFT controller 0x05E368 drives bank b''s trim (no gate or forced value; 0x05CCD0). Clear with the ready latch set makes PID 0x03 report 4.'}
+  - {address: 0xFFFF2D08, width: 16, signed: false, name: stft_controller_out_b1, units: q_0x6400, confidence: code,
+     meaning: 'STFT controller output, bank 1, clamped to cal 0x8F64..0x8F62 (0.75..1.25). 0xFFFF2D0A is bank 2; 0xFFFF2D30/2D32 are last cycle''s copies.'}
+  - {address: 0xFFFF2D0A, width: 16, signed: false, name: stft_controller_out_b2, units: q_0x6400, confidence: code,
+     meaning: 'STFT controller output, bank 2 (see 0xFFFF2D08).'}
+  - {address: 0xFFFF1076, width: 8, signed: false, name: closed_loop_start_temp, units: raw_counts, confidence: inferred,
+     meaning: 'Input of the closed-loop delay curve 0xD07F (axis 0xDB5F, 10..160) and of the 45-count coolant-threshold switch in 0x05D78E; read as the coolant byte (degC + 50) at start, inferred.'}
+  - {address: 0xFFFF10D6, width: 8, signed: false, name: af_sensor_ready, units: flags, confidence: inferred,
+     meaning: 'Bit b: the bank-b A/F sensor may be used for feedback (0x05D78E needs it for the ready latch); meaning inferred from use.'}
+  - {address: 0xFFFF28BB, width: 8, signed: false, name: tps_fault_select_flags, units: flags, confidence: code,
+     meaning: 'Throttle-sensor failsafe flags; bit 6 with BFS above 0xFFFF1BEA opens the fuel loop (0x05DD04).'}
+  - {address: 0xFFFF2F8E, width: 8, signed: false, name: stft_force_select, units: flags, confidence: code,
+     meaning: 'Bit b forces bank b''s STFT to 0xFFFF2E86[b] (first in the 0x05CCD0 priority; written by 0x09DA10).'}
+  - {address: 0xFFFF2D24, width: 8, signed: false, name: stft_alt_select, units: flags, confidence: code,
+     meaning: 'Bit b sets bank b''s STFT to 0xFFFF17BE[b] (second in the 0x05CCD0 priority; written by 0x0599C8); PID 0x03 still reports 2.'}
+  - {address: 0xFFFF4741, width: 8, signed: false, name: fuel_status_b1, units: enum, confidence: code,
+     meaning: 'Mode 01 PID 0x03 byte A, bank 1 (0x083058): 8 fault, 1 not ready, 4 open loop by condition, 2 closed loop. 0xFFFF4742 is bank 2.'}
+  - {address: 0xFFFF4742, width: 8, signed: false, name: fuel_status_b2, units: enum, confidence: code,
+     meaning: 'Mode 01 PID 0x03 byte B, bank 2 (see 0xFFFF4741).'}
   - {address: 0xFFFF1796, width: 8, signed: false, name: fuel_flags_1796, units: flags, confidence: unknown,
      meaning: 'Bits 0 and 1, with the multiplier above 0x4000, gate two corrections.'}
   - {address: 0xFFFF135F, width: 8, signed: false, name: fuel_flags_135f, units: flags, confidence: unknown,
@@ -2555,18 +2575,21 @@ uncovered:
   # E05.3 (d): what the override trace reached and did not resolve.
   - id: closed_loop_enable
     where: >-
-      What starts, freezes and resets the STFT controller 0x05E368 (cells,
-      coolant, time after start or fuel cut). In the fuel task the gate writes
-      phi 1.0 (0x80) for every lookup below cal 0x8B39 (130), lean cells
-      included, so UpRev's "closed loop only where the cell is exactly 14.7"
-      is not the gate; it would have to be this enable.
+      Narrowed by F01.2 (2026-11-12): the enable, holds and reset are traced
+      (override closed_loop_feedback_stft). The loop opens whenever the
+      enrichment multiplier 0xFFFF26C0 is not 0x4000, so it runs in every
+      cell the gate reads as phi 1.0 (lookup below 130, lean cells
+      included) and is reset in every enriching one. Open: what the flags
+      0xFFFF3054, 0xFFFF3057, 0xFFFF2D0C, 0xFFFF479E bit 5, 0xFFFF47BE bit 0,
+      0xFFFF47D3 bit 7 and the correction 0xFFFF1736 stand for.
     blocks: 'knowing where the feedback trims run (closed_loop_feedback_stft) and so which samples carry feedback'
     next_evidence: >-
-      Desk: trace the enable of 0x05E368 and the writer that holds
-      0xFFFF26B4/0xFFFF26B6 at 0x6400 (both read exactly 0x6400 on all 21
-      fuel-cut reads of the 2026-10-04 slice, against 13 and 12 of 153
-      outside cut). Vehicle: read 0xFFFF26B4, 0xFFFF4722 and 0xFFFF46B2 in
-      one window at warm cruise in a 14.7 cell and in an enriching cell.
+      Vehicle: read 0xFFFF26B9, 0xFFFF26BA, 0xFFFF26B4 and 0xFFFF26C0 in one
+      window through a cold start's first minute and a warm decel, and see
+      which of the open flags is set when the loop opens with 0xFFFF26C0 at
+      0x4000 (fuel status 4 at phi 1.0: 922 of 17,061 reads, 2026-10-26..11-12).
+      Desk: name the writers of 0xFFFF3054/3057, 0xFFFF2D0C (0x0C2C8E) and the
+      0xFFFF47xx monitor bits.
   - id: fuel_cut_paths
     where: >-
       The writer of 0xFFFF26B8 and its place in the cycle; the routines and
@@ -2710,7 +2733,7 @@ overrides:
     consistent_with:
       - '2026-10-04: 149 of 153 command reads were exactly 0x4000 with X at or below 100, mostly below the first BFS column where the table reads 128; the gate latch and state were not read, so the drive cannot separate this override from the table (docs/ecu-firmware-analysis.md)'
     gaps:
-      - 'cells 128 and 129 and every lean cell give 0x80 alike; whether the feedback runs in them is the enable, not traced (uncovered closed_loop_enable)'
+      - 'cells 128 and 129 and every lean cell give 0x80 alike, and the feedback runs in all of them: it is reset only while 0xFFFF26C0 is not 0x4000 (closed_loop_feedback_stft, F01.2)'
     verify_with: 'Warm: read 0xFFFF174B, 0xFFFF2886 and 0xFFFF14C4 with the fuel_target window (all four members: 0xFFFF26AE, 57 bytes) across cells at 128, 129, 130 and above.'
 
   - id: closed_loop_curve_term
@@ -2742,14 +2765,40 @@ overrides:
     regime: closed_loop
     acts_on_ram: [0xFFFF26B4, 0xFFFF26B6]
     routine: 0x05E368
-    condition: 'feedback running; its enable is not traced'
+    condition: >-
+      Per bank b, in the main cycle (task 0x0219D0 entries 56/57): the
+      controller's output reaches the trim only while the ready latch
+      0xFFFF26B9 bit b is set and no gate holds it (arbitration 0x05CCD0,
+      F01.2). Otherwise the trim is exactly 0x6400 or a forced value; see
+      effect.
     effect: >-
       Moves the short-term trims 0xFFFF26B4 / 0xFFFF26B6 (0x6400 = 1.0) to
       bring the measured A/F words 0xFFFF4722 / 0xFFFF4724 (AFR x 500) to
       the target 0xFFFF46B2 (default 7350, 14.7). The trims add into the
       bank pulse factor (1 + STFT + LTFT), not into the phi word.
-    reads: [0xFFFF4722, 0xFFFF4724, 0xFFFF46B2]
-    writes: [0xFFFF26B4, 0xFFFF26B6]
+      Controller 0x05E368 writes 0xFFFF2D08 / 0xFFFF2D0A, clamped to
+      [cal 0x8F64, cal 0x8F62] = [19200, 32000] = 0.75..1.25, and stops
+      integrating at either clamp. Arbitration 0x05CCD0 (F01.2) then picks
+      per bank, first match wins: a forced value (0xFFFF2F8E bit b), an
+      alternate value (0xFFFF2D24 bit b), exactly 0x6400 while the ready
+      latch 0xFFFF26B9 bit b is clear or any hold applies, else the
+      controller; clamped again to [cal 0x8F66, cal 0x8F68] (the same
+      values) and copied to 0xFFFF26B4/B6 by 0x05C9F4. The holds include the
+      enrichment gate: the trim is 0x6400 whenever the multiplier 0xFFFF26C0
+      is not 0x4000. The ready latch needs the time since start to pass
+      curve 0xD07F on 0xFFFF1076, the coolant 0xFFFF1079 warm, and the A/F
+      sensor ready bit 0xFFFF10D6 bit b, held 200 cycles. 0xFFFF26BA bit b is
+      set while the controller drives the trim, and Mode 01 PID 0x03
+      (0xFFFF4741 / 0xFFFF4742) reports 1 with the latch clear, 4 when the
+      controller is not driving it, else 2. The full gate list is in
+      docs/ecu-firmware-analysis.md, "Closed-loop enable and trim authority".
+    reads: [0xFFFF4722, 0xFFFF4724, 0xFFFF46B2, 0xFFFF26C0, 0xFFFF1079, 0xFFFF1076, 0xFFFF10D6, 0xFFFF2F8E, 0xFFFF2D24]
+    writes: [0xFFFF26B4, 0xFFFF26B6, 0xFFFF2D08, 0xFFFF2D0A, 0xFFFF26B9, 0xFFFF26BA, 0xFFFF4741, 0xFFFF4742]
+    rom:
+      - {offset: 0x8F62, width: 16, value: 32000, role: 'controller upper clamp (1.25)'}
+      - {offset: 0x8F64, width: 16, value: 19200, role: 'controller lower clamp (0.75)'}
+      - {offset: 0x8F68, width: 16, value: 32000, role: 'trim upper clamp (1.25)'}
+      - {offset: 0x8F66, width: 16, value: 19200, role: 'trim lower clamp (0.75)'}
     established_by: decompile_text
     confidence: code
     evidence:
@@ -2759,11 +2808,13 @@ overrides:
     consistent_with:
       - 'the pulse chain with the logged trims reproduces DIDs 0x1206/0x1207 at median 1.006 over 5,039 steady samples (six tuning captures, not in this repo); that checks how the trims are applied, not when the controller runs'
       - 'both trim words read exactly 0x6400 on all 21 fuel-cut reads of the 2026-10-04 slice, against 13 (bank 1) and 12 (bank 2) of 153 outside cut: consistent with the feedback being suspended and reset in cut; the code that does it is not traced (tests/test_ecu_overrides.py::test_both_trims_sit_at_neutral_on_every_october_4_fuel_cut_read)'
+      - '2026-10-26..11-12, ten tuning captures, 17,061 FUEL_STATUS reads paired with SHORT_FUEL_TRIM_1 and mem:ECM_TARGET_EQUIV_RATIO (within 0.4 s): with commanded phi above 1.02, 519 of 536 report status 4 and 13 status 1 (cold); STFT reads exactly 0 % on 99.1 % of them. Enrichment resets the trim to 1.0, it does not freeze it (F01.2)'
     gaps:
-      - 'the enable, freeze and reset conditions are not traced (uncovered closed_loop_enable)'
+      - 'several hold flags are not identified (uncovered closed_loop_enable; the list is in the firmware doc)'
+      - 'the coolant byte is read as degC + 50 (DID 0x1101); 0xFFFF1076 as the coolant at start is inferred'
       - 'gains and step size are not recorded'
-      - 'decompile text only'
-    verify_with: 'Read 0xFFFF26B4, 0xFFFF4722 and 0xFFFF46B2 in one window at warm cruise in a 14.7 cell, in an enriching cell and through a decel cut.'
+      - 'decompile text, with the clamp constants and the PID 0x03 mapping line-checked in the listing'
+    verify_with: 'Read 0xFFFF26B4, 0xFFFF26B9, 0xFFFF26BA, 0xFFFF2D08, 0xFFFF4722 and 0xFFFF46B2 in one window at warm cruise in a 14.7 cell, in an enriching cell, through a decel cut and through the first minute after a cold start.'
 
   # -- transient
   - id: enrichment_ramp

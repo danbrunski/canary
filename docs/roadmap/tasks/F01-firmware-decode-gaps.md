@@ -99,6 +99,24 @@ Same conventions as the other task files: task-level truth is the checkboxes,
     calibration addresses; a same-window read of `0xFFFF26B4`, `0xFFFF4722`
     and `0xFFFF46B2` at warm cruise in a 14.7 cell and in an enriching cell
     agrees; E09's `closed_loop_trim_authority_undecoded` is lifted.
+  - [~] 2026-11-12: enable, holds, reset and clamp traced; the truck read and
+    the simulator follow-on are owed. Controller `0x05E368` → `0xFFFF2D08`,
+    clamp cal `0x8F64`/`0x8F62` (0.75–1.25, anti-windup at the clamp);
+    arbitration `0x05CCD0` → `0xFFFF26B4` via `0x05C9F4`, clamp cal
+    `0x8F66`/`0x8F68` (same values, identical on all seven images). Ready
+    latch `0xFFFF26B9`: time since start beyond curve `0xD07F`, coolant warm,
+    A/F sensor ready, held 200 cycles. The enrichment gate (`0x05DB04`) forces
+    STFT to 1.0 whenever `0xFFFF26C0` ≠ `0x4000`, so the loop runs in lean
+    cells and resets in rich ones. Mode 01 PID 0x03 is the firmware's own
+    report of these gates (`0x083058`). Data: ten captures, 519/536 enriching
+    reads report status 4 and STFT reads exactly 0 % on 99.1 %. Written up in
+    the firmware doc ("Closed-loop enable and trim authority") and the model
+    (`closed_loop_feedback_stft`; `closed_loop_enable` narrowed to the
+    unidentified hold flags). The "rear-sensor trim" part is not done. Not
+    lifted: `closed_loop_trim_authority_undecoded`. The clamp is decoded, but
+    the reason lifts only when every closed-loop override is
+    vehicle-qualified (E09.10), so applying the ±25 % clamp in `paired_steady`
+    is a Deep follow-on.
 
 - [ ] **F01.3 Cold start, after-start and warm-up fuelling.** UpRev documents
   a Cold Fuel Comp table used below 70 °C; the traced Fuel Comp lookup

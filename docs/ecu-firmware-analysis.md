@@ -1032,6 +1032,92 @@ ratio of (DID − Ts) to the predicted pulse has median 1.006, p10–p90
   - Limp cut at 2,800 rpm on diagnostic item `0x30`.
   - No BFS- or airflow-based cut while moving.
 
+### Closed-loop enable and trim authority (F01.2, 2026-11-12)
+
+Decompile text of `0x05E368`, `0x05CCD0`, `0x05C9F4` and their helpers, with
+the clamp constants and the PID 0x03 mapping line-checked in the listing. The
+calibration values are identical in the ecuread and all six tuned images.
+Both routines run in the main cycle (task `0x0219D0` entries 56 and 57).
+
+- **Controller** `0x05E368`. Measured A/F `0xFFFF4722`/`4724` (×500, clamped
+  1,500–20,000) against target `0xFFFF46B2`/`46B4`. Output `0xFFFF2D08`/`2D0A`
+  is clamped to [cal `0x8F64`, cal `0x8F62`] = [19200, 32000], i.e. 0.75–1.25
+  with 0x6400 = 1.0. The integrator stops while last cycle's output
+  (`0xFFFF2D30`/`2D32`) sits at a clamp and the error pushes further. The
+  target is 7350 (14.7) unless one of three special modes in `0x060E6A`
+  selects another; it does **not** follow the enrichment command.
+- **Arbitration** `0x05CCD0`, per bank b, first match wins:
+  1. `0xFFFF2F8E` bit b: the forced value `0xFFFF2E86[b]` (written by
+     `0x09DA10`, a diagnostic routine).
+  2. `0xFFFF2D24` bit b: `0xFFFF17BE[b]` (written by `0x0599C8`).
+  3. Ready latch `0xFFFF26B9` bit b clear: `0x6400`.
+  4. Post-transition hold `0xFFFF88BC[b]` (`0x05CB70`): `0x6400`. It starts
+     when the multiplier `0xFFFF26C0` returns to `0x4000`, the correction
+     `0xFFFF1736` returns to 0, or `0xFFFF15B3` returns to 0. It ends when the
+     measured A/F is within ±150 (±0.3 AFR) of the target, or after
+     20 × curve `0x237D2` cycles (axis `0x237CA` on `0xFFFF11D8 >> 1`; values
+     20, 10, 5, 3, 3, 2, 2, 1, code constants): about 4 s at the lowest axis
+     point, 0.2 s at the highest.
+  5. Global sensor hold `0xFFFF8960` (`0x05D94E`, sentinel readings of the
+     coolant and speed bytes): `0x6400`.
+  6. Open-loop condition `0xFFFF8963[b]` (`0x05DD04`): `0x6400`. Any of: base
+     pulse at its floor (`0xFFFF2886` bit 4), `0xFFFF3057` bit b (a test mode
+     `0xFFFF99D0` bit 1, or `0xFFFF47FE` bit 5 with `0xFFFF286E` bit 4, or
+     `0xFFFF2880` bit 7 with `0xFFFF286E` bit 3), any cylinder in fuel cut,
+     `0xFFFF479E` bit 5 (written by `EVAP_purge_control` among others),
+     `0xFFFF2D0C`, `0xFFFF47BE` bit 0 or `0xFFFF47D3` bit 7, or the throttle
+     failsafe `0xFFFF28BB` bit 6 with BFS above `0xFFFF1BEA`.
+  7. **Enrichment gate** `0xFFFF8961[b]` (`0x05DB04`): `0x6400` while the
+     multiplier `0xFFFF26C0` ≠ `0x4000`, or `0xFFFF1736` ≠ 0, or
+     `0xFFFF3054` bit b, or a sentinel timer runs.
+  8. Backup controller `0xFFFF8965[b]` (`0x05DDDA`): `0xFFFF46A8[b]`.
+  9. Otherwise the controller output.
+
+  The choice is clamped again to [cal `0x8F66`, cal `0x8F68`] (the same
+  19200/32000) and `0x05C9F4` copies it to `0xFFFF26B4`/`26B6`. With
+  `0xFFFF99D0` bit 1 set it writes `0xFFFF9931 << 8` instead (a test mode).
+- **Ready latch** `0xFFFF26B9` bit b. It sets once `0xFFFF8958[b]` has held
+  200 cycles (`0xFFFF1797 > 19`, about 2 s), or when `0xFFFF39B6[b]` > 807.
+  It clears at once when the conditions fail. `0xFFFF8958[b]` (`0x05D78E`)
+  requires all three of:
+  - **Time since start.** `0xFFFF3C94` counts main cycles from the falling
+    edge of `0xFFFF4785` bit 6 and must exceed 100 × curve `0xD07F` (axis
+    `0xDB5F` on `0xFFFF1076`). The curve is 30 below 40 counts, 8 from 50 to
+    110, and 4 from 120. Reading `0xFFFF1076` as start coolant in °C + 50,
+    that is about 31 s below −10 °C, 8 s from 0 to 60 °C, and 4 s above
+    70 °C.
+  - **Coolant.** `0xFFFF1079` (°C + 50) ≥ 70 (20 °C), or ≥ 60 (10 °C) when
+    `0xFFFF1076` ≥ 45, or > 69 once a second timer allows.
+  - **A/F sensor ready**, `0xFFFF10D6` bit b.
+- **Mode 01 PID 0x03** reads `0xFFFF4741`/`4742`, set by `0x083058`:
+  - 8 if `0xFFFF11C9` or `0xFFFF26BC` (backup controller) bit b;
+  - 1 if the ready latch is clear;
+  - 4 if neither the controller (`0xFFFF26BA` bit b) nor the alternate value
+    (`0xFFFF2D24` bit b) drives the trim;
+  - otherwise 2.
+
+  So `FUEL_STATUS` is the firmware's own verdict on every gate above, and
+  CANary already logs it.
+- **Data check** (ten tuning captures 2026-10-26 to 11-12, 17,061
+  `FUEL_STATUS` reads paired with Mode 01 STFT and `mem:ECM_TARGET_EQUIV_RATIO`
+  within 0.4 s):
+  - With commanded φ above 1.02, 519 of 536 reads report status 4 and 13
+    report 1 (cold). STFT reads exactly 0 % on 99.1 % of them. Enrichment
+    **resets** the trim to 1.0; it does not freeze it.
+  - At φ 1.0, 922 reads report 4: decel cut, the post-enrichment hold, or the
+    pulse floor. They were not separated.
+- **What UpRev's rule gets right and wrong.** "Closed loop only where the cell
+  is exactly 14.7" holds for rich cells: a gated lookup of 130 or more
+  (cal `0x8B39`; 129 while releasing) moves the multiplier off `0x4000` and
+  the trim resets. It is wrong for lean cells and cells of 128–129. The gate
+  writes φ 1.0 for those, the multiplier stays at `0x4000`, and the loop runs
+  at 14.7 there, so a lean cell is ignored, not open-loop.
+- **Trim authority:** each bank's STFT is limited to ±25 %. The
+  controller's gains and step size are not recorded.
+- **Open:** the meanings of `0xFFFF3054`, `0xFFFF3057`'s sources,
+  `0xFFFF2D0C`, the `0xFFFF47xx` monitor bits, `0xFFFF1736` and the sentinel
+  timer.
+
 ### Scheduler and task tables (F01.1, 2026-11-12)
 
 The application's vector base is VBR = `0x20004` (vector v at

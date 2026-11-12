@@ -127,12 +127,18 @@ this truck:
   runs raw `0x34`–`0x80` (8.76–21.57 ms), rpm breakpoints are raw × 50, and
   `AFR = 14.7 × 128 / raw` (`docs/uprev-rom-table-verification.md`,
   `rom_viewer.yaml`).
-- **Closed loop is a property of the target cell.** UpRev: closed loop is
-  active only where the Target AFR cell is exactly 14.7, and "anything BUT
-  14.7 the engine will operate in open loop". Editing a cruise cell off 14.7
-  silently opens the loop there, so trims freeze and the A/F error in that cell
-  becomes the MAF/K/fuel-comp error directly. Fuel Comp has a separate *Cold*
-  table used below 70 °C coolant.
+- **Closed loop depends on the target cell, but only on the rich side.**
+  UpRev says closed loop is active only where the Target AFR cell is exactly
+  14.7, and "anything BUT 14.7 the engine will operate in open loop". The
+  firmware (F01.2) agrees for rich cells. A lookup ≥ 130 (cal `0x8B39`) moves
+  the enrichment multiplier off 1.0, and the trim is then forced to 0 % (not
+  frozen). The A/F error in that cell becomes the MAF/K/fuel-comp error
+  directly. A lean cell, or 128–129, is gated to φ 1.0 and stays in closed
+  loop at 14.7: the edit is ignored, not open-loop. After enrichment, STFT
+  stays at 0 % until the A/F is within 0.3 AFR of target or a speed-dependent
+  timeout of 0.2–4 s. Each bank's STFT is limited to ±25 % (cal
+  `0x8F62`–`0x8F68`). UpRev also documents a *Cold* Fuel Comp table used below
+  70 °C coolant (not yet found in the code, F01.3).
 - **`0x1208` (`ECM_AIR_CHARGE`) is BFS**, confirmed at raw × 0.00049 ms
   (405/405 rows against UpRev's display) and accepted by the operator as the
   verified BFS on 2026-10-02. It responds to air and to K, not to fuel. Its
