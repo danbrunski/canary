@@ -279,7 +279,7 @@ Same conventions as the other task files: task-level truth is the checkboxes,
       relative throttle position. Its rpm bands end in a fuel cut at 2,400
       rpm, the FSM's MAF fail-safe.
 
-- [ ] **F01.9 Throttle area units.** The area curve (axis `0xDD94`, values
+- [x] **F01.9 Throttle area units.** The area curve (axis `0xDD94`, values
   `0xEE6A`) is used both ways: by the air model that makes the Fuel Comp load
   byte and by the torque-to-throttle path. Its absolute units and the
   displacement factor (158) are unconfirmed.
@@ -288,6 +288,16 @@ Same conventions as the other task files: task-level truth is the checkboxes,
   - **Accept:** the units are pinned from a second calibration or program
     (another VQ40 or VQ35 image with a different throttle body), or the item
     is closed as not settleable at the desk with the truck measurement named.
+  - [x] 2026-11-12: closed as not settleable at the desk. Firmware doc:
+    "Throttle area units: not settleable at the desk".
+    - **Why.** Every image is one program and calibration lineage, and the
+      code applies no physical constant to the area or to 158.
+    - **The swap does not need the unit.** Both paths are wrong by the ratio
+      of new to old effective area at each sensor reading, which is
+      measurable.
+    - **The measurement that would pin it:** a choked-flow window of
+      `0xFFFF2C32`, `0xFFFF63FC`, MAF, baro and IAT at idle and on closed
+      coasts. That gives Cd·A mm² per count.
 
 - [ ] **F01.10 Idle speed control.** Only the integrator and the learned
   value appear (`w63FC = min(w3CB2 + w5EA6, 1185)`). Nothing recorded: the

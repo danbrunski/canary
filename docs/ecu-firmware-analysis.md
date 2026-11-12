@@ -1279,6 +1279,42 @@ table:
   Above 8.6 % throttle the table stops rising. So a truck with a failed MAF
   makes little more than light-throttle power, up to the 2,400 rpm cut.
 
+### Throttle area units: not settleable at the desk (F01.9, 2026-11-12)
+
+**Why the desk can't settle them.**
+
+- The area curve (axis `0xDD94`, values `0xEE6A`) and the factor 158
+  (cal `0x8D25`) are relative units.
+- Nothing in the code multiplies either by a physical constant (see the
+  table above and "Absolute units").
+- Every image on hand is one program, ZS44A, in one calibration lineage. So
+  no second calibration with a different throttle body exists to scale
+  against.
+- The reading of 158 as 3,954 cc / 25 stays speculation.
+
+**The swap does not need the absolute unit.** Both users of the curve map a
+sensor reading to an area in the ECM's own unit:
+
+- the air model's fill byte, through `0xFFFF2C32`;
+- the electronic throttle's target position, through `0xFFFF2D28`.
+
+A larger throttle body passes more air at the same sensor reading. Both
+paths are therefore wrong by the ratio of the new effective area to the old
+at each reading, whatever the unit. That ratio is what an edit to `0xEE6A`
+has to apply, and it can be measured before and after the swap.
+
+**The measurement that would pin the unit** (on the truck, no second image
+needed). In choked flow (manifold pressure below about 0.53 × baro: idle
+and closed-throttle coasting), mass flow is
+Cd·A × P0 × 0.0404 / √T0 (SI). Read these in one window:
+
+- `0xFFFF2C32` (area) and `0xFFFF63FC` (the idle-air subtrahend);
+- MAF (DID `0x1209`), baro (PID `0x33`) and IAT.
+
+That gives Cd·A in mm² per area count at several openings. It yields the
+effective area (Cd included), which is the quantity the ECM's model stands
+for.
+
 ### Ignition timing chain: the remaining terms (F01.6, 2026-11-12)
 
 E09.7 decoded the chain's spine: `0xFFFF27C6`, `0xFFFF279A`, the trim term,
