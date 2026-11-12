@@ -36,7 +36,7 @@ from src.analysis.channels import (
     ROUND_ID_COLUMN,
     read_acquisition_frame,
 )
-from src.collection.capture_lifetime import ChannelAccumulator
+from src.collection.capture_lifetime import ChannelAccumulator, row_channels_observing
 from src.collection.capture_quality import (
     TUPLE_CHANNEL,
     CaptureQuality,
@@ -124,7 +124,9 @@ def channel_lifetimes_from_rows(
     out: dict[str, dict[str, Any]] = {}
     for channel in channels:
         accumulator = ChannelAccumulator(channel)
-        mask = upper == channel.upper()
+        # A memory sentinel row observes its value channel too, exactly as the
+        # live ledger counts it (``capture_lifetime.observed_channels``).
+        mask = upper.isin([name.upper() for name in row_channels_observing(channel)])
         for value in sorted(seconds[mask].tolist()):
             offset = value - started_at
             if offset < 0 or offset > elapsed:

@@ -48,10 +48,14 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.collection.capture_lifetime import LONG_GAP_SECONDS, subtract_windows
+from src.collection.capture_lifetime import (
+    LONG_GAP_SECONDS,
+    MEMORY_READING_PREFIX,
+    MEMORY_SENTINEL_SUFFIX,
+    subtract_windows,
+)
 from src.collection.kline.names import capture_key
 from src.collection.obd_scheduler import BATCHING_COUNTERS, MODE22_BATCHING_COUNTERS
-from src.decode.dids import MEMORY_SOURCE
 from src.storage.capture_losses import (
     CONTROLLER,
     RECORDING,
@@ -86,11 +90,6 @@ MIN_STALL_SECONDS = 2.0
 #: the contract's first live run. They are diagnostics, not capture channels.
 EXCLUDED_KINDS = frozenset({"dtc"})
 EXCLUDED_TIERS = frozenset({"dtc", "on_demand"})
-
-#: Prefix of a decoded memory reading's channel: ``mem:<NAME>``.
-MEMORY_READING_PREFIX = f"{MEMORY_SOURCE}:"
-#: Suffix of the state channel a memory sentinel decodes to instead of a value.
-MEMORY_SENTINEL_SUFFIX = "_SENTINEL"
 
 #: Minimum verification interval. Below this the sample is too short to
 #: separate a slow channel from an unlucky one, and a "pass" would be noise.
@@ -730,6 +729,9 @@ def _lifetime_row(
     if not row and kind == "memory":
         # A sentinel is an answer ("the ECU commands nothing"), stored on its
         # own state channel; a read that only ever returned it was answered.
+        # The ledger now also counts a sentinel against its value channel
+        # (``capture_lifetime.observed_channels``, D03.69), so this serves
+        # lifetimes persisted before that.
         row = lifetime_channels.get(f"{channel}{MEMORY_SENTINEL_SUFFIX}")
     return row or {}
 

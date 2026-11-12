@@ -2549,13 +2549,16 @@ that closed its task checklist.
       was zero. The scorer counts the main channel's silence as a gap
       (D03.69).
     - **12 are real window gaps, 2.5–4.1 s, about three per 20 minutes.**
+      (The D03.69 re-score, on the scorer's own gap rule, counts **10**,
+      2.5–4.5 s, every one at an `ECM_ENGINE_PERIOD` gap. That count is the one
+      to use.)
       `ECM_ENGINE_PERIOD` (same window) goes silent at the same instants while
       the spark window keeps reading. They do not follow a start: the 11-11
       capture, begun about 20 min after its daemon came up, has none, and the
       03:42 capture, begun about a minute after boot, has four spread to
       1,195 s. Several sit at a throttle opening (89, 56, 56 %), some at idle.
       Cause not identified (D03.70).
-- [ ] **D03.69 A fuel-cut sentinel is scored as an acquisition gap.** A memory
+- [x] **D03.69 A fuel-cut sentinel is scored as an acquisition gap.** A memory
   channel with a `sentinel_raw` decodes a zero word to
   `mem:<NAME>_SENTINEL` instead of a value (AGENTS.md: a sentinel is a state).
   Both feeders of the gap ledger key on the exact channel name: the live
@@ -2573,11 +2576,53 @@ that closed its task checklist.
     a real silence still does, on both the live ledger and the rebuild.
     Re-scoring the four captures above drops the target word's long gaps to
     the 12 real ones.
+  - **Done 2026-11-12.** One mapping in `capture_lifetime`
+    (`observed_channels` for the live ledger, its inverse
+    `row_channels_observing` for the rebuild), so `CaptureLedger.observe` and
+    `channel_lifetimes_from_rows` cannot disagree; only a `mem:<NAME>_SENTINEL`
+    maps (a non-memory name ending in `_SENTINEL` is itself), and the sentinel
+    channel keeps its own ledger row. A window read decodes to a value *or* a
+    sentinel per channel (`obd_response_decode`, memory branch), so nothing is
+    double-counted. `MEMORY_READING_PREFIX` / `MEMORY_SENTINEL_SUFFIX` now live
+    in `capture_lifetime` (re-used by `capture_quality`, which keeps its
+    sentinel fallback for sidecars persisted before the fix).
+    Tests: `tests/test_capture_lifetime.py` (mapping; sentinel-only stretch no
+    gap; silence still a 40.5 s gap; `_SENTINEL` non-memory untouched),
+    `tests/test_capture_coverage.py` (same on the rebuild; `recompute` of a
+    synthetic fuel-cut capture), `tests/test_capture_quality.py` (verdict with
+    and without the sentinel reads). The rebuild tests fail without the fix.
+    **Re-scored the four captures** (copies, `recompute_capture_quality`, HEAD
+    vs fix): `ECM_TARGET_EQUIV_RATIO` long gaps 27/16/7/16 = 66 before ->
+    2/0/3/5 = **10** after, at exactly `ECM_ENGINE_PERIOD`'s instants (2/0/3/5).
+    The count is 10, not the 12 estimated above (and in D03.70). Each capture's
+    overall verdict stays `fail` (clauses other than this channel's gaps were
+    not examined). The verifier traced the 4.5 s gap at 828.7 s in
+    `-11-12T034249`: its sentinel reads sit on its edges (828.66, 833.18 s),
+    with nothing between, the same as `ECM_ENGINE_PERIOD`. It is real.
+  - **Two follow-ups from the verifier (2026-11-12).**
+    - The first version imported `src.decode.dids` into `capture_lifetime` for
+      two string constants. That module loads pandas, and `capture_lifetime` is
+      under `tx_gate`, so `import src.main` went from 0.15 s / 361 modules to
+      0.44 s / 809. The constants are spelled locally again.
+      `test_the_memory_spellings_match_the_decode_layer` pins them to
+      `MEMORY_SOURCE` / `SENTINEL_SUFFIX`, and
+      `tests/test_cold_start_imports.py::test_capture_lifetime_imports_nothing_from_src`
+      refuses any `src` import there.
+    - `record_read` promises that the dashboard's trailing window and the
+      ledger "see identical events", but only the ledger used the mapping, so
+      a fuel cut showed the target word at 0 Hz live. The trailing window now
+      loops over `observed_channels` too.
+      `tests/test_tuning_profile.py::test_achieved_hz_counts_a_memory_sentinel_read_for_its_value_channel`
+      fails against the old `metrics.py`.
 - [ ] **D03.70 The `fuel_target` memory window misses 2.5–4 s at a time, about
   three times per 20 minutes.** From the item above: `ECM_TARGET_EQUIV_RATIO`
   and `ECM_ENGINE_PERIOD` drop together with no sentinel read while the spark
-  window keeps reading. 12 such gaps on four captures, at
-  throttle openings and at idle alike, not tied to daemon start.
+  window keeps reading. 10 such gaps on four captures (the D03.69 re-score;
+  first estimated as 12), 2.5–4.5 s, at capture seconds 18.7 and 540.1
+  (`-11-10T170119`), none (`-11-11T174602`), 264.9, 269.9 and 277.4
+  (`-11-12T010305`), and 61.7, 385.2, 700.7, 828.7 and 1195.7
+  (`-11-12T034249`). They come at throttle openings and at idle alike, and
+  are not tied to daemon start.
   - Owed: the daemon log (`journalctl -u canary`) around those instants
     (NRCs on 0x23, a session re-entry, scheduler starvation by a Mode 01
     batch), and the memory scheduler's per-window counters if it keeps any.

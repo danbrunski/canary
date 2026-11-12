@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from src.analysis.capture_coverage import (
@@ -18,8 +19,13 @@ from src.analysis.capture_coverage import (
     recompute_capture_quality,
 )
 from src.analysis.channels import read_acquisition_frame
-from src.collection.capture_quality import TUPLE_INCOMPLETE, UNKNOWN_LOSS_COUNTERS
+from src.collection.capture_quality import (
+    ACQUISITION_GAP,
+    TUPLE_INCOMPLETE,
+    UNKNOWN_LOSS_COUNTERS,
+)
 from src.storage.parquet_writer import write_records_to_parquet
+from src.telemetry import TelemetryRecord
 from tests.builders import (
     CAPTURE_T0,
     capture_obd_record,
@@ -126,3 +132,74 @@ def test_member_channels_resolve_dids_through_the_catalogue() -> None:
     assert members["RPM"] == "RPM"
     assert members["ECM_MAF_GPS"].startswith("DID_")
     assert members["NOT_A_DID"] == "NOT_A_DID"
+
+
+def _target_rows(*, answered: bool) -> pd.DataFrame:
+    """The rows the live ledger test sees: a value every 0.5 s except
+    100-140 s, where a sentinel row (or nothing) stands in."""
+    target = "mem:ECM_TARGET_EQUIV_RATIO"
+    records = []
+    for i in range(601):
+        t = i * 0.5
+        if 100.0 <= t < 140.0:
+            if answered:
+                records.append(
+                    TelemetryRecord.obd(CAPTURE_T0 + t, f"{target}_SENTINEL", "fuel_cut", "")
+                )
+            continue
+        records.append(TelemetryRecord.obd(CAPTURE_T0 + t, target, 1.0, ""))
+    records.append(TelemetryRecord.obd(CAPTURE_T0 + 5, "DID_FOO_SENTINEL", "x", ""))
+    return read_acquisition_frame(pd.DataFrame([r.parquet_row() for r in records]))
+
+
+def test_a_sentinel_only_stretch_leaves_no_long_gap_in_the_rebuild() -> None:
+    target = "mem:ECM_TARGET_EQUIV_RATIO"
+    rows = channel_lifetimes_from_rows(
+        _target_rows(answered=True),
+        [target, f"{target}_SENTINEL", "DID_FOO", "DID_FOO_SENTINEL"],
+        started_at=CAPTURE_T0,
+        ended_at=CAPTURE_T0 + 300,
+    )
+    assert rows[target]["long_gaps"] == []
+    assert rows[target]["observations"] == 601
+    assert rows[target]["max_interarrival_s"] == pytest.approx(0.5)
+    # The sentinel channel keeps its own rows; a non-memory name is untouched.
+    assert rows[f"{target}_SENTINEL"]["observations"] == 80
+    assert rows["DID_FOO"]["observations"] == 0
+    assert rows["DID_FOO_SENTINEL"]["observations"] == 1
+
+
+def test_a_real_silence_still_scores_as_a_gap_in_the_rebuild() -> None:
+    target = "mem:ECM_TARGET_EQUIV_RATIO"
+    rows = channel_lifetimes_from_rows(
+        _target_rows(answered=False),
+        [target],
+        started_at=CAPTURE_T0,
+        ended_at=CAPTURE_T0 + 300,
+    )
+    assert rows[target]["long_gaps"] == [[pytest.approx(99.5), pytest.approx(140.0)]]
+
+
+def test_recompute_does_not_fail_acquisition_gap_for_a_fuel_cut(tmp_path: Path) -> None:
+    target = "mem:ECM_TARGET_EQUIV_RATIO"
+    records = []
+    for r in range(601):
+        t = CAPTURE_T0 + r * 0.5
+        records.append(capture_obd_record(t, "A", round_id=r))
+        records.append(capture_obd_record(t + 0.003, "B", round_id=r))
+        name = f"{target}_SENTINEL" if 100.0 <= r * 0.5 < 140.0 else target
+        records.append(capture_obd_record(t + 0.006, name, round_id=r))
+    session = write_capture_session(
+        tmp_path,
+        records,
+        profile={
+            "memory": ["ECM_TARGET_EQUIV_RATIO"],
+            "target_rate_hz": 2.0,
+            "min_achieved_rate_hz": 1.5,
+        },
+    )
+    quality = recompute_capture_quality(session, ended_at=CAPTURE_T0 + 300)
+    gaps = [f for f in quality.failures if f["clause"] == ACQUISITION_GAP]
+    assert not any(target in f.get("evidence", {}) for f in gaps), gaps
+    row = next(c for c in quality.channels if c.transport_channel == target)
+    assert row.coverage["fraction"] == pytest.approx(1.0, abs=0.01)

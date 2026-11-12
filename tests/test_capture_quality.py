@@ -1036,3 +1036,58 @@ def test_kline_windows_without_reasons_fall_back_to_every_window() -> None:
     assert kline_pause_windows(
         {"pause_reasons": [{"start_s": 1.0, "end_s": None, "reasons": ["passive"]}]}, 10.0
     ) == [(1.0, 10.0)]
+
+
+# ---------------------------------------------------------------------------
+# D03.69: a fuel-cut sentinel is an answer, not an acquisition gap
+# ---------------------------------------------------------------------------
+
+TARGET_WORD = "mem:ECM_TARGET_EQUIV_RATIO"
+
+
+def _target_word_quality(*, cut: str) -> Any:
+    """300 s capture; the target word is read every 0.5 s except 100-140 s,
+    where it reads as the sentinel (``cut="sentinel"``) or not at all."""
+    ledger = CaptureLedger()
+    ledger.begin(0.0, profile="fuel-map", generation=1, started_wall=1_700_000_000.0)
+    t = 0.0
+    while t <= 300.0 + 1e-9:
+        for name in TUPLE:
+            ledger.observe(name, t)
+        if not 100.0 <= t < 140.0:
+            ledger.observe(TARGET_WORD, t)
+        elif cut == "sentinel":
+            ledger.observe(f"{TARGET_WORD}_SENTINEL", t)
+        t += 0.5
+    snap = ledger.snapshot(300.0)
+    assert snap is not None
+    scheduler = _scheduler(TUPLE)
+    scheduler["requests"].append(
+        {
+            "channel": "mem:fuel_target",
+            "kind": "memory",
+            "capture_selected": True,
+            "decoded_channels": [TARGET_WORD],
+        }
+    )
+    return evaluate_capture_quality(
+        profile=_profile(memory=["ECM_TARGET_EQUIV_RATIO"]),
+        scheduler=scheduler,
+        lifetime=snap.to_dict(),
+        tuples=_tuples(600, elapsed=300.0),
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
+
+
+def test_a_fuel_cut_does_not_fail_acquisition_gap_for_the_target_word() -> None:
+    quality = _target_word_quality(cut="sentinel")
+    gaps = [f for f in quality.failures if f["clause"] == ACQUISITION_GAP]
+    assert not any("ECM_TARGET_EQUIV_RATIO" in f.get("evidence", {}) for f in gaps), gaps
+    row = next(c for c in quality.channels if c.transport_channel == TARGET_WORD)
+    assert row.coverage["max_gap_s"] < 2.0
+
+
+def test_a_silent_target_word_still_fails_acquisition_gap() -> None:
+    quality = _target_word_quality(cut="silence")
+    gap = next(f for f in quality.failures if f["clause"] == ACQUISITION_GAP)
+    assert gap["evidence"]["ECM_TARGET_EQUIV_RATIO"]["max_gap_s"] == pytest.approx(40.5)

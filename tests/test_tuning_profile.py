@@ -553,6 +553,26 @@ def test_achieved_hz_reports_a_trailing_window_not_a_lifetime_average() -> None:
     assert "MAF" not in stats.achieved_hz(now)
 
 
+def test_achieved_hz_counts_a_memory_sentinel_read_for_its_value_channel() -> None:
+    """D03.69: the dashboard's trailing window and the capture ledger see the
+    same events. Through a fuel cut the target word reads as its sentinel; the
+    ECU answered, so the word's rate holds while the sentinel keeps its own."""
+    from src.collection.obd_scheduler import ACHIEVED_HZ_WINDOW, CanObdLoopStats
+
+    stats = CanObdLoopStats()
+    now = 1000.0
+    target, sentinel = "mem:ECM_TARGET_EQUIV_RATIO", "mem:ECM_TARGET_EQUIV_RATIO_SENTINEL"
+    # achieved_hz rounds to 0.01: 30 and 15 reads over 60 s are exact.
+    for i in range(30, 0, -1):
+        stats.record_read(target if i > 15 else sentinel, now - i)
+    achieved = stats.achieved_hz(now)
+    assert achieved[target] == pytest.approx(30 / ACHIEVED_HZ_WINDOW, rel=1e-6)
+    assert achieved[sentinel] == pytest.approx(15 / ACHIEVED_HZ_WINDOW, rel=1e-6)
+    # A name that merely ends in _SENTINEL feeds nothing else.
+    stats.record_read("DID_FOO_SENTINEL", now)
+    assert "DID_FOO" not in stats.achieved_hz(now)
+
+
 def test_achieved_hz_is_per_channel() -> None:
     """A capture can be fine for one channel and starved for another.
 

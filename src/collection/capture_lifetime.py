@@ -17,6 +17,11 @@ numbers — per capture member, from arm to stop, on the capture clock:
   an intentional pause explicitly, and one that promised continuous
   acquisition cannot silently exclude an engine-off gap.
 
+A memory channel's fuel-cut sentinel (``mem:<NAME>_SENTINEL``) is an
+*answer* from the ECU, not silence, so it also observes ``mem:<NAME>``
+(:func:`observed_channels` / :func:`row_channels_observing`, the one mapping
+both the live ledger and the rebuild from rows use).
+
 Like ``capture_generation`` this is a process-wide ledger with no imports from
 the rest of ``src``: ``tuning_profile.activate`` / ``set_paused`` and
 ``tx_gate.set_passive`` call it, and the collector's ``record_read`` feeds it,
@@ -31,6 +36,16 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
+#: Prefix of a decoded memory reading's channel: ``mem:<NAME>``.
+#: Suffix of the state channel a memory sentinel decodes to instead of a value.
+#: Spelled here, not imported from ``src.decode``: ``src.decode.dids`` loads
+#: pandas, and this module is on the recording path (``tx_gate`` imports it), so
+#: importing it there took ``import src.main`` from 0.15 s to 0.44 s (S01.3,
+#: verifier 2026-11-12). ``tests/test_capture_lifetime.py`` pins both to the
+#: decode layer's ``MEMORY_SOURCE`` and ``SENTINEL_SUFFIX``.
+MEMORY_READING_PREFIX = "mem:"
+MEMORY_SENTINEL_SUFFIX = "_SENTINEL"
+
 #: Interarrivals kept per channel for the cadence quantiles. A reservoir
 #: sample (Algorithm R): O(1) memory however long the capture runs.
 RESERVOIR_CAPACITY = 1024
@@ -41,6 +56,44 @@ LONG_GAP_SECONDS = 2.0
 #: Individually recorded long gaps per channel. Beyond this the largest are
 #: kept and the overflow is counted — the sum stays exact either way.
 LONG_GAP_CAPACITY = 64
+
+
+def observed_channels(channel: str) -> tuple[str, ...]:
+    """The ledger channels one read of ``channel`` is an observation of.
+
+    A memory read whose word is the declared sentinel decodes to
+    ``mem:<NAME>_SENTINEL`` instead of ``mem:<NAME>`` (a state, not a number),
+    and the ECU did answer, so it also observes ``mem:<NAME>``: a decel fuel cut
+    must not read as the target word falling silent. A window read yields
+    either the value or the sentinel for a channel, never both, so this never
+    double-counts. Only memory channels map; any other name ending in
+    ``_SENTINEL`` is itself.
+    """
+    base = _sentinel_base(channel)
+    return (channel,) if base is None else (channel, base)
+
+
+def row_channels_observing(channel: str) -> tuple[str, ...]:
+    """The stored row channels (any case) whose rows observe ``channel``.
+
+    The inverse of :func:`observed_channels`, for the rebuild from rows: the
+    channel's own rows, plus its sentinel's when it is a memory value channel.
+    """
+    if not channel.upper().startswith(MEMORY_READING_PREFIX.upper()) or (
+        _sentinel_base(channel) is not None
+    ):
+        return (channel,)
+    return (channel, f"{channel}{MEMORY_SENTINEL_SUFFIX}")
+
+
+def _sentinel_base(channel: str) -> str | None:
+    """``mem:<NAME>`` for ``mem:<NAME>_SENTINEL``; ``None`` for anything else."""
+    if not channel.startswith(MEMORY_READING_PREFIX):
+        return None
+    base = channel.removesuffix(MEMORY_SENTINEL_SUFFIX)
+    if base == channel or base == MEMORY_READING_PREFIX:
+        return None
+    return base
 
 
 class InterarrivalReservoir:
@@ -321,16 +374,21 @@ class CaptureLedger:
             return self._started is not None
 
     def observe(self, channel: str, now: float) -> None:
-        """One successful observation of ``channel`` at monotonic ``now``."""
+        """One successful observation of ``channel`` at monotonic ``now``.
+
+        Also an observation of every channel :func:`observed_channels` names
+        (a memory sentinel answers for its value channel).
+        """
         with self._lock:
             started = self._started
             if started is None or now < started:
                 return
-            accumulator = self._channels.get(channel)
-            if accumulator is None:
-                accumulator = ChannelAccumulator(channel, seed=_seed_for(channel))
-                self._channels[channel] = accumulator
-            accumulator.observe(now - started)
+            for name in observed_channels(channel):
+                accumulator = self._channels.get(name)
+                if accumulator is None:
+                    accumulator = ChannelAccumulator(name, seed=_seed_for(name))
+                    self._channels[name] = accumulator
+                accumulator.observe(now - started)
 
     def mark_paused(self, paused: bool, *, reason: str, now: float) -> None:
         """Open or close a pause window; several reasons may overlap."""
@@ -465,6 +523,8 @@ def _reset_for_tests() -> None:
 __all__ = [
     "LONG_GAP_CAPACITY",
     "LONG_GAP_SECONDS",
+    "MEMORY_READING_PREFIX",
+    "MEMORY_SENTINEL_SUFFIX",
     "RESERVOIR_CAPACITY",
     "CaptureLedger",
     "CaptureLifetime",
@@ -477,6 +537,8 @@ __all__ = [
     "is_active",
     "mark_paused",
     "observe",
+    "observed_channels",
+    "row_channels_observing",
     "snapshot",
     "subtract_windows",
 ]

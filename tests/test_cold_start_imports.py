@@ -148,6 +148,20 @@ _MOVED_OFF_THE_RECORDING_PATH = {
 }
 
 
+def test_capture_lifetime_imports_nothing_from_src() -> None:
+    """``tx_gate`` imports it, and ``src.main`` imports ``tx_gate``. D03.69 once
+    imported ``src.decode.dids`` here for two string constants, which loaded
+    pandas: ``import src.main`` went from 0.15 s and 361 modules to 0.44 s and
+    809 (verifier, 2026-11-12)."""
+    loaded = _modules_loaded_by("import src.collection.capture_lifetime\n")
+    assert {name for name in loaded if name.startswith("src")} == {
+        "src",
+        "src.collection",
+        "src.collection.capture_lifetime",
+    }
+    assert "pandas" not in loaded
+
+
 @pytest.mark.parametrize("module", sorted(_MOVED_OFF_THE_RECORDING_PATH))
 def test_recording_path_does_not_import(module: str, recording_path_modules: set[str]) -> None:
     """S01.3: each module moved off the path stays off it."""

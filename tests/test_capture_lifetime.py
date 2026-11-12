@@ -168,3 +168,86 @@ def test_subtract_windows_removes_only_the_overlap() -> None:
     assert subtract_windows(10.0, 100.0, [(0.0, 5.0)]) == pytest.approx(90.0)
     assert subtract_windows(10.0, 100.0, [(0.0, 200.0)]) == pytest.approx(0.0)
     assert subtract_windows(10.0, 10.0, []) == 0.0
+
+
+# --- D03.69: a memory sentinel is an answer, not silence ----------------------
+
+TARGET = "mem:ECM_TARGET_EQUIV_RATIO"
+SENTINEL = f"{TARGET}_SENTINEL"
+
+
+def test_observed_channels_maps_only_a_memory_sentinel_to_its_value_channel() -> None:
+    from src.collection.capture_lifetime import observed_channels, row_channels_observing
+
+    assert observed_channels(SENTINEL) == (SENTINEL, TARGET)
+    assert observed_channels(TARGET) == (TARGET,)
+    # Not a memory channel: a name that merely ends in _SENTINEL is itself.
+    assert observed_channels("DID_FOO_SENTINEL") == ("DID_FOO_SENTINEL",)
+    assert observed_channels("decoded:BAR_SENTINEL") == ("decoded:BAR_SENTINEL",)
+    assert observed_channels("mem:_SENTINEL") == ("mem:_SENTINEL",)
+    # The rebuild's inverse names the same pairing.
+    assert row_channels_observing(TARGET) == (TARGET, SENTINEL)
+    assert row_channels_observing(SENTINEL) == (SENTINEL,)
+    assert row_channels_observing("DID_FOO") == ("DID_FOO",)
+
+
+def test_the_memory_spellings_match_the_decode_layer() -> None:
+    """``capture_lifetime`` spells the memory prefix and sentinel suffix itself,
+    because ``src.decode.dids`` loads pandas and this module is on the recording
+    path. They must still be the decode layer's."""
+    from src.collection.capture_lifetime import MEMORY_READING_PREFIX, MEMORY_SENTINEL_SUFFIX
+    from src.decode.dids import MEMORY_SOURCE
+    from src.decode.slices import SENTINEL_SUFFIX
+
+    assert MEMORY_READING_PREFIX == f"{MEMORY_SOURCE}:"
+    assert MEMORY_SENTINEL_SUFFIX == SENTINEL_SUFFIX
+
+
+def _fuel_cut_ledger(*, answered: bool) -> CaptureLedger:
+    """Value every 0.5 s except 100-140 s, where the word reads zero (a
+    sentinel read on the same cadence) or, if ``answered`` is false, nothing."""
+    ledger = CaptureLedger()
+    ledger.begin(1000.0, profile="tuning", generation=1)
+    t = 0.0
+    while t <= 300.0 + 1e-9:
+        in_cut = 100.0 <= t < 140.0
+        if not in_cut:
+            ledger.observe(TARGET, 1000.0 + t)
+        elif answered:
+            ledger.observe(SENTINEL, 1000.0 + t)
+        t += 0.5
+    return ledger
+
+
+def test_a_sentinel_only_stretch_leaves_no_long_gap_on_the_live_ledger() -> None:
+    snap = _fuel_cut_ledger(answered=True).snapshot(1300.0)
+    assert snap is not None
+    target = snap.channels[TARGET]
+    assert target.long_gaps == ()
+    assert target.max_interarrival_s == pytest.approx(0.5)
+    assert target.median_interarrival_s == pytest.approx(0.5)
+    assert target.observations == 601
+    # The sentinel channel keeps its own rows, and only its own.
+    sentinel = snap.channels[SENTINEL]
+    assert sentinel.observations == 80
+    assert sentinel.first_observed_at == pytest.approx(100.0)
+
+
+def test_a_real_silence_still_scores_as_a_gap_on_the_live_ledger() -> None:
+    snap = _fuel_cut_ledger(answered=False).snapshot(1300.0)
+    assert snap is not None
+    assert SENTINEL not in snap.channels
+    target = snap.channels[TARGET]
+    assert len(target.long_gaps) == 1
+    start, end = target.long_gaps[0]
+    assert start == pytest.approx(99.5)
+    assert end == pytest.approx(140.0)
+
+
+def test_a_non_memory_channel_ending_in_sentinel_does_not_feed_a_neighbour() -> None:
+    ledger = CaptureLedger()
+    ledger.begin(1000.0, profile="tuning", generation=1)
+    ledger.observe("DID_FOO_SENTINEL", 1001.0)
+    snap = ledger.snapshot(1010.0)
+    assert snap is not None
+    assert set(snap.channels) == {"DID_FOO_SENTINEL"}

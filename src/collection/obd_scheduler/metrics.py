@@ -238,16 +238,20 @@ class CanObdLoopStats:
         The same read also feeds the capture-lifetime ledger (C03.2): the
         trailing window here is what the dashboard shows, the ledger is what
         the capture verdict is scored on, and they must see identical events.
+        So a memory sentinel read counts for its value channel here too
+        (``capture_lifetime.observed_channels``, D03.69): a fuel cut is the ECU
+        answering, and must not show the target word at 0 Hz.
         """
         capture_lifetime.observe(channel, now)
-        window = self.recent_reads.get(channel)
-        if window is None:
-            window = deque()
-            self.recent_reads[channel] = window
-        window.append(now)
         cutoff = now - ACHIEVED_HZ_WINDOW
-        while window and window[0] < cutoff:
-            window.popleft()
+        for observed in capture_lifetime.observed_channels(channel):
+            window = self.recent_reads.get(observed)
+            if window is None:
+                window = deque()
+                self.recent_reads[observed] = window
+            window.append(now)
+            while window and window[0] < cutoff:
+                window.popleft()
 
     def achieved_hz(self, now: float) -> dict[str, float]:
         """Per-channel reads/s over the trailing window."""
