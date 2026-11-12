@@ -111,6 +111,16 @@ channel against the standard PID, a wideband against the ECU's own λ, MAF-deriv
 against a speed-density estimate. That single comparison catches a wrong scale, offset,
 unit, or endianness without anyone having to state the right answer in advance.
 
+**"Independent" means a different sensor, so count sensors, not channels.** A scan tool's
+AFR, the ECU's λ PID and the sensor-voltage DID from one probe are one instrument read
+three ways; agreement among them proves the decode, not the sensor. A third-party tool that
+converts the raw voltage itself skips whatever compensation the ECU applies (barometric or
+exhaust-pressure gain), so the three can disagree by a scale factor with nothing wrong. And
+a closed-loop controller working on that sensor makes agreement with *target* circular: the
+loop drives the reading to the target whatever the sensor's error. A genuinely independent
+check needs a second probe (an external wideband) or a quantity that does not pass through
+that sensor (fuel flow against airflow).
+
 Its measured blind spot: slope is a ratio, so a +4% scale error shows up as only about
 −2.9% slope error. Pin exact decode parameters separately rather than relying on the slope
 check to catch small scale errors.
@@ -138,6 +148,18 @@ the confounders:
 - adaptation settled (not immediately after a reset or reflash)
 - **more than one pull.** One pull is an anecdote; the run-to-run spread is what tells you
   whether a difference is real.
+
+Comparing pulls adds three rules:
+
+- **Match on rpm, not on the band.** A band median moves with where in the band the samples
+  fall: one timing median moved +2.5° between two logs from rpm composition alone, because
+  timing climbs steeply across the band. Compare at matched rpm (read each sample against
+  the other pull's curve at its own rpm) and at matched pedal or throttle.
+- **Drop the first ~0.05 s after tip-in**; the throttle and fuel transients are still
+  settling.
+- **Write the statistic and its pass band down before the data exists.** Choosing the
+  statistic afterward (median, band mean, a different band edge) is a free parameter that
+  can be tuned to the answer. Prediction and statistic are both fixed in advance.
 
 If you are planning to vary more than one thing, or want the fewest runs that can separate
 several factors, stop and use the `designed-experiments` skill — a designed matrix usually

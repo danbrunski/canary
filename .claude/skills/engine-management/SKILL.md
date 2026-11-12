@@ -95,7 +95,7 @@ The highest-yield diagnostic in the whole domain. Plot trim against load/airflow
 
 | Trim shape vs load | Error class | Candidates |
 |---|---|---|
-| Large at idle, **shrinks** as load rises | fixed-*quantity* (additive) | vacuum/intake leak, unmetered air, leaking purge valve, idle-air path |
+| Large at idle, **shrinks** as load rises | fixed-*quantity* (additive) | vacuum/intake leak, unmetered air, leaking purge valve, idle-air path; or **heat** (hot fuel, rail-pressure sag, hot air at the meter) if the idle trim differs between cool and hot sessions: compare at matched intake temperature and rail pressure before sizing anything |
 | Roughly **constant in percent** across load | *scaling* (multiplicative) | MAF drift/contamination, fuel pressure, injector flow, fuel blend |
 | Both | two faults, or a scaling error plus a leak | — |
 | One bank only | bank-specific hardware | that bank's sensor, injectors, exhaust leak |
@@ -107,13 +107,16 @@ scaling error is the same percentage everywhere.
 Two calibration points. **Trims are not zero on a healthy engine** — ±3–6% is ordinary
 drift from injector tolerance, fuel volatility, and sensor aging, so *exactly* 0.0% on both
 banks after warm-up is a stronger fault signal than ±8% (codes just cleared, adaptation
-reset by a disconnect or reflash, loop not closed, or the channel isn't live). And **there
+reset by a disconnect or reflash, loop not closed, the channel isn't live, or a learning
+gate, e.g. one that needs a long purge-open stretch, that short trips never open). And **there
 is no universal DTC threshold**: P0171/P0174 are manufacturer-calibrated monitors with
 their own entry conditions. Some use the active adaptation cell, others a filtered
 average. Don't quote a constant.
 
 Before diagnosing hardware, rule out the confounders that move trims with nothing broken:
-**purge** (unmetered fuel → negative trims), **secondary air** (upstream sensor reads
+**purge** (unmetered fuel → negative trims; many ECUs also cut their own pulse by a purge
+factor, and some gate adaptation on purge, so split trims and pulse checks by purge state),
+**secondary air** (upstream sensor reads
 artificially lean on cold start), **exhaust leak upstream of the sensor** (reads lean →
 trims rich), **adaptation reset**, **MAF pulsation error** (negative trims in specific
 cells only), **fuel blend**. Details and the sensor physics: `references/fuel-and-lambda.md`.
@@ -211,8 +214,12 @@ Pedal ≠ throttle ≠ airflow ≠ torque; each link is arbitrated and limitable
 cap output silently — "down on power, no codes" is their normal presentation.** The diagnostic
 is the requested-vs-actual pair at each stage, not any absolute value. Air is the slow
 bidirectional path; spark and fuel are the fast, essentially downward-only path, which is why
-knock retard, traction control, and shift cuts all land on spark. See
-`references/torque-structure.md`.
+knock retard, traction control, and shift cuts all land on spark. Full pedal is not full
+throttle: a gear-dependent limiter holds the plate short in some gears, and an ECU that
+switches to its power-enrichment target on *target throttle* then fuels the same pedal
+differently by gear, so sort full-pedal λ, timing and airflow by gear and read them against
+throttle, not pedal (without the torque PIDs, pedal versus throttle is the requested-versus-
+actual pair you have). See `references/torque-structure.md`.
 
 ## Prescribing a change
 
@@ -237,7 +244,8 @@ You are allowed to say what to change and roughly by how much. Do it in this ord
    from table edits, one category per flash, or the response can't be attributed.
 6. **State the expected result and the falsifier *before* the drive**: "if this is right,
    the next log shows X; if instead you see Y, the hypothesis was wrong." A prediction
-   written after the data arrives is a description.
+   written after the data arrives is a description, and so is a statistic chosen after:
+   name the statistic and its pass band too (matched-rpm, not a band median).
 7. **Re-log and verify.** One pull is an anecdote. Judge the change against the measured
    run-to-run spread *under the same conditions* (two logs of an unchanged tune give it),
    not against zero.
@@ -251,6 +259,11 @@ table.
 - **Never compare two signals by their aggregates.** Per-window means, or two summary
   series correlated against each other, manufacture confident numbers from nothing. Pair
   same-instant values, and refuse when there are too few pairs or one side barely moves.
+- **Count sensors, not channels, before calling two instruments independent.** A scan
+  tool's AFR, the ECU's λ PID and the sensor-voltage DID from one probe are one instrument
+  read three ways, they can differ by a compensation the ECU applies and the tool skips,
+  and agreement with a target the loop is steering to is circular. See
+  `references/log-analysis-method.md`.
 - **r² alone is not a finding** — over one drive nearly everything correlates with rpm.
   Check whether the *scale* is stable across sub-windows.
 - **Watch sample age, not just sample rate.** Rotation-polled channels never share a

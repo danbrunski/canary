@@ -10,8 +10,21 @@ here.
 CANary logs, requests, decodes and analyzes, and its ad-hoc request path will
 send any diagnostic service. It does **not** flash a calibration: the operator
 does that with the tuning software (UpRev on the dev vehicle). CANary can view a
-ROM and prepare a hash-bound *offline* Fuel Targets edit
-(`docs/offline-rom-targets.md`), but writing it to the ECU is the operator's act.
+ROM and prepare a hash-bound *offline* edit (`docs/offline-rom-targets.md`), but writing
+it to the ECU is the operator's act. What it offers short of that:
+
+- **ROM Editor.** `preview_rom_edit` and `simulate_rom_edit` (`src/analysis/rom_editor.py`,
+  `tools/rom_sim.py`) show and simulate an edit before anything is flashed. Which tables are
+  editable comes from the profile's `rom_map.yaml`, not from the code.
+- **Twin and plant.** `get_twin_session_evaluation` (the target twin's evaluation of one
+  stored session), `get_ecu_application_model` (what the ECU application twin implements,
+  observes and assumes, and where its coverage stops) and `tools.fuel_plant_check` (the
+  pulse-chain known answer, then plant identification and held-out evaluation) compare what
+  the ECU's model predicts against what the engine did.
+- **Flash record.** `scripts/decode_uprev_flash.py` verifies and dates a flash from its
+  capture, and `<profile>/tune_revisions.yaml` is the calibration history that
+  `resolve_session_revision` reads.
+
 Any non-volatile ECU write needs the two conditions in `AGENTS.md`: explicit
 per-operation permission, and `vehicle_state == ignition_only`. So "tuning" here
 means *measure → decide the change → the operator flashes it → measure again*.
@@ -34,7 +47,7 @@ one.
 
 | Question | Tool |
 |---|---|
-| What is the engine doing right now, and is it even running? | `get_status`, then read `vehicle_state` first (`engine_running` / `ignition_only` / `engine_off` / `replay` / `no_data`). A conclusion drawn without this is unsafe. |
+| What is the engine doing right now, and is it even running? | `get_status`, then read `vehicle_state` first. Nine states: `engine_running`, `ignition_only` (key on, engine off), `engine_off` (CAN fresh, OBD stale), `parked` (both buses asleep on a live battery), `bench` (no vehicle on the port: USB-C or UPS power), `no_data`, `replay`, `passive` (CANary is not transmitting, so stale OBD means "not asking", not "engine off"), `unknown`. `parked` and `bench` are normal, not faults; the OBD collector stays quiet in both. A conclusion drawn without this is unsafe. |
 | Which PIDs does this ECU actually answer? | `get_obd_coverage` |
 | Aligned channels over a past drive | `get_session_timeseries` (use `source:CHANNEL`, e.g. `obd:RPM`). 1 Hz for a whole drive; higher only to resolve a transient. |
 | Arbitrary SQL over the Parquet ring buffer | `query_telemetry` (DuckDB) |
@@ -45,6 +58,12 @@ one.
 | Stored DTCs and MIL state | `get_dtc` |
 | Another tool (UpRev, a scan tool) needs the ECU to itself | `set_passive_mode` with a TTL, which gates every CANary transmit |
 | Test an analysis without the truck | `start_replay` / `replay_window` over a stored session |
+
+Two operating rules: **pull a session to the laptop before analyzing it** (no analysis on
+the Pi while it collects: an analysis run on the Pi once cost a 3-minute outage and
+150k dropped records), and **a tuning capture runs for the whole drive**, started at
+`engine_running` and kept to parking, because the driver cannot announce the pulls in
+advance.
 
 Capture sessions are written under `_`-prefixed directories so they never
 contaminate the training corpus. That also means **"which session is live"
@@ -72,7 +91,8 @@ retracted findings.
 | Bin anything by anything | `src.analysis.binned_analysis.compute_binned_analysis`. It uses the training pipeline's forward-fill resample, so it describes; it does not pair. |
 | Fit an expected-behavior surface over rpm × load | `src.analysis.surface_2d.fit_grid_binned_mean`: per-cell mean/std/**count**. Empty cells stay empty instead of getting a made-up value. |
 | Derived physics channels (fuel rate, air mass/cycle, bank balances) | `src.signals.derived`: `compute_derived_channels`, `compute_anomaly_signals` |
-| Measured/target AFR reconstruction and the error surface | `src.signals.afr`: `append_afr_channels`, `afr_error_surface` |
+| Measured/target AFR reconstruction | `src.signals.afr`: `append_afr_channels` |
+| Closed-loop total trim (STFT + LTFT) per bank over rpm × airflow, per session beside pooled | `src.analysis.workbench.trim_surface` (the surface the dashboard draws). `afr_error_surface` in `src.signals.afr` has no caller outside its own tests; don't cite it. |
 
 Before trusting a new analysis chain, run it where the answer is already known.
 `tests/test_analysis_ground_truth.py` runs the real chain over a committed slice
@@ -113,6 +133,12 @@ The general rules are in `log-analysis-method.md`. What is specific here:
   been measured 0.1–0.35 s away from the Mode 01 batch it was compared with. On a fast
   transient that skew alone reads as a scale error: one "MAF is 5 % low at high
   flow" finding was exactly this, and it vanished once gated to |dMAF/dt| ≤ 5 %/s.
+- **A round-stamped capture's `timestamp` is a presentation stamp, not the wire time.**
+  Polled rows carry the round's scheduled start as `timestamp`; the time the answer was
+  actually acquired is `metadata_json.acquired_at`, and RAM reads sit a median ~164 ms
+  after their stamp. Pair polled rows against broadcast frames on the acquired clock
+  (`read_channels(..., acquired_time=True)`, which `compare_channels` already does); a
+  hand join on `timestamp` manufactured a "stray read" that was withdrawn.
 - Two channels in the same Mode 01 batch share a request time, so a lag scan
   between them resolves only to the batch period. Split them into separate
   batches when lag is the question.

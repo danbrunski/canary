@@ -175,6 +175,15 @@ The physics behind it: a fixed leak is a large fraction of a small idle airflow 
 negligible fraction of a large WOT airflow. A scaling error is the same percentage
 everywhere.
 
+**An idle-only lean trim is not always a leak.** The additive *shape* does not prove a
+fixed *quantity*. If the idle trim moves with under-hood or fuel temperature between
+sessions (hot fuel, rail-pressure sag, hot air at the meter, all worst at idle where airflow
+is small and heat soak is large), it has the leak's shape without being a fixed leak: with
+purge off, one engine read near 0 % trim on a cool morning (intake air 19–28 °C) and +7–10 %
+on a hot afternoon (41–65 °C). Compare idle trim at **matched intake temperature and rail
+pressure** across sessions before calling a leak or sizing an idle correction, and do not
+size a fixed idle edit from one hot drive.
+
 ### How big is too big
 
 | Total (STFT+LTFT) | Reading |
@@ -184,9 +193,16 @@ everywhere.
 | ±10–20% | a real fault exists — diagnose it even with no DTC |
 | beyond ~±20% | DTC territory |
 
+"Total" is ECU-specific: some ECUs **add** the two corrections (`1 + STFT + LTFT`), others
+**multiply** them (`(1 + STFT)(1 + LTFT)`). The two differ by the product term STFT × LTFT,
+at most 1 point while each trim stays within ±10 %. That is negligible for a banding table and not for a
+residual-sized argument, and a reconstruction of the pulse must use the ECU's own form.
+
 Two cautions. **Exactly 0.0% on both banks after warm-up is a stronger fault signal than
 ±8%** — it usually means codes were just cleared, adaptation was reset by a disconnect or
-reflash, the loop is not closed, or the channel isn't live. And **there is no standardized
+reflash, the loop is not closed, or the channel isn't live. A fifth cause is a learning
+gate that has not opened: where adaptation is gated on purge, a run of short trips leaves
+a reset table at zero indefinitely, and that is a driving pattern, not a fault. And **there is no standardized
 numeric threshold for P0171/P0174**: it is a manufacturer-calibrated monitor with its own
 entry conditions. Ford's, for example, trips on long-term trim > 25 % in the *currently
 active* adaptation cell (plus short-term > 1 %), only with purge at 0 %, and lights the MIL
@@ -208,7 +224,21 @@ Check these *before* diagnosing hardware — each one moves trims with nothing b
   reads rich, trims swing **negative**. Purge-correlated trim excursions are the single
   most common false "rich" finding. Exclude purge-active windows or carry purge duty as
   a covariate. (The factory's own adaptation procedure disables purge before trusting
-  learned values — copy that.)
+  learned values — copy that.) Purge does three more things, none of them visible in a
+  trim alone:
+  - **Many ECUs cut the injector pulse by a purge factor of their own** while purging,
+    because they estimate the vapor they are ingesting. A pulse-versus-airflow check, or
+    any fuel model built from the pulse, must be split by purge state, or the factor
+    reads as a 5–10 % injector-model error that is not there and then vanishes with purge
+    off.
+  - **Adaptation can be gated on purge.** Some ECUs learn only after the canister has been
+    cleaned out within the current engine start (a clean-out accumulator that restarts at
+    every start), or only in purge-off phases. Long-term trim then holds a value for as
+    long as the gate stays shut, and a pattern of short trips never opens it.
+  - **A learned cell may have been learned with vapor in it.** The same cell read with
+    purge off can need several points more correction than the stored value implies.
+  Report trims **split by purge state** before reading their shape; a pooled trim surface
+  mixes two different corrections.
 - **Secondary air injection** during cold start — pumps ambient air into the exhaust, so
   the upstream sensor reads artificially **lean** while it runs. Fueling data from that
   window is uninterpretable.
@@ -268,8 +298,12 @@ constant, then multiply by corrections:
 
 ```
 base pulse  = K × airflow per rev (or per intake event)       e.g. Nissan Tp, "base fuel schedule"
-final pulse = base × target/enrichment × (closed-loop + learned correction) + dead time
+final pulse = base × target/enrichment × purge factor × (closed-loop + learned correction) + dead time
 ```
+
+The purge factor is 1.0 with purge off and below 1.0 while purging, on ECUs that apply one.
+The trim combination in the last term is ECU-specific (sum or product, see "How big is too
+big"); use the ECU's own form when reconstructing a pulse.
 
 Three consequences an analyst needs:
 

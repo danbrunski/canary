@@ -79,6 +79,50 @@
         "Says a smaller pulley is a calibration change requiring a retune (fuel and timing), with more heat and knock risk and blower-speed limits to check, not a repair"
       ],
       "files": []
+    },
+    {
+      "id": 5,
+      "name": "purge-split-pulse-and-trim",
+      "prompt": "Port-injected V6, factory ECU, closed loop. I'm checking my injector model by comparing the logged pulse width to what I compute from MAF airflow and the injector constant. On steady cruise the logged pulse comes out 5-10% shorter than my model on some drives and dead on in others, and the long-term trims are exactly 0.0% on both banks after three weeks of mostly 10-minute town trips. No codes, and I haven't touched the fuel system. Is the injector constant wrong, and is the ECU just refusing to learn?",
+      "expected_output": "Splits by purge state before blaming the injector model. Many ECUs cut the injector pulse by a purge factor of their own while purging (they estimate the vapor they are ingesting), so a pulse-versus-airflow check made on purging cruise reads 5-10% short and on purge-off cruise reads right; that pattern is the purge factor, not a wrong injector constant, and the check should be run on purge-off samples (or carry purge state as a covariate). Trims at exactly 0.0% on both banks are a stronger fault signal than +/-8%, but there is a fifth cause beside the usual four (codes cleared, adaptation reset, loop not closed, channel not live): adaptation can be gated on purge, with learning allowed only after the canister has been cleaned out within the current engine start, or only in purge-off phases, and a run of short trips never opens that gate. So zeros here may be a driving pattern, not a fault. Says what to log or do next: purge duty/state alongside trims and pulse, one longer drive with sustained purge (or whatever the gate needs), and trims reported split by purge state; notes a learned cell may have been learned with vapor in it. Does not recommend changing the injector constant.",
+      "assertions": [
+        "Splits the pulse-versus-airflow comparison by purge state, or carries purge as a covariate, before drawing any conclusion about the injector model",
+        "Says a purge factor applied by the ECU to the injector pulse reads as a 5-10% pulse or injector-model error on purging samples and disappears with purge off",
+        "Does not recommend changing the injector constant or MAF scaling from the purging samples",
+        "Identifies that exactly 0.0% trims after weeks of short trips can be a learning gate (adaptation allowed only after enough purge or only in purge-off phases) that short trips never open, in addition to the other causes of zero trim (codes or adaptation just cleared, loop not closed, channel not live)",
+        "Does not call the zero trims a healthy result or a fault by itself, and says what to log next (purge state alongside trims and pulse) and what a longer drive or purge-off re-log should show if the gate hypothesis is right",
+        "Notes that any learned trim cell may have been learned with vapor in it, and that trims should be reported split by purge state before their shape is read"
+      ],
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "three-instruments-same-sensor",
+      "prompt": "I'm validating a new wideband reading from my ECU's data stream. I have three things that all agree to within 1% across a drive: the AFR my scan tool shows, the lambda PID the ECU reports, and the raw O2 sensor voltage DID converted with the textbook formula. Closed-loop cruise sits right on target. That's three independent instruments agreeing, so I'm going to call the sensor calibration verified and use it to size a fuel table change for wide-open throttle. Any reason not to?",
+      "expected_output": "Does not accept 'three independent instruments'. Independence means different sensors: count sensors, not channels. The scan-tool AFR, the ECU's lambda PID and the sensor-voltage DID all come from the one upstream probe read three ways, so their agreement validates the decoding and unit conversion, not the sensor. Agreement at closed-loop cruise with the target is also circular: the fuel controller drives that sensor's reading to the target whatever the sensor's error, so on target proves the loop works, not that the sensor is right. A wideband's gain error shows away from lambda = 1 (WOT, fuel cut), exactly where the table change is going. And a third-party conversion of the raw voltage skips whatever compensation the ECU applies (barometric or exhaust-pressure gain), so the channels can differ by a scale factor with nothing wrong. A genuinely independent check needs a second sensor (an external wideband bolted in the exhaust) or a quantity that doesn't pass through that sensor (fuel flow against measured airflow), or a fuel-cut free-air check of the gain. Recommends not sizing a WOT edit from this sensor alone yet and says what measurement would separate sensor error from delivery error.",
+      "assertions": [
+        "States that the three channels are one sensor read three ways and are not independent instruments (count sensors, not channels)",
+        "Explains that agreement with target at closed-loop cruise is circular because the controller steers this sensor's reading to the target",
+        "Notes that wideband gain error shows away from lambda = 1 (WOT, fuel cut), where cruise agreement says nothing, and that WOT is where the edit is being sized",
+        "Notes that a tool which converts the raw voltage itself can skip a compensation the ECU applies (barometric or exhaust-pressure gain), so channels can disagree by a scale factor with nothing wrong, or agree while both are wrong",
+        "Names a genuinely independent check: a second probe or external wideband, a fuel-flow against airflow check that bypasses the sensor, or a free-air reading in fuel cut",
+        "Does not endorse sizing a WOT fuel table change from this evidence alone"
+      ],
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "idle-only-lean-trim-follows-heat",
+      "prompt": "My engine shows a lean idle trim that looks like a vacuum leak by the book: total trim about +8% at warm idle, shrinking to roughly zero by light cruise, both banks the same, purge off, no codes. But the same idle logged on a cool morning at around 20 C intake was about 0%. I'm planning to add a fixed amount of fuel in the idle cells sized from yesterday's hot-afternoon log to cancel the +8%. Good plan?",
+      "expected_output": "Not yet. The additive shape (big at idle, shrinking with load, both banks equal) fits a leak, but a fixed leak would not change between a cool morning and a hot afternoon, so the idle trim moving with temperature is the discriminating fact: it has the leak's shape without being a fixed quantity. Candidates are heat-related: hot fuel and rail-pressure sag or vapor, hot air at the meter or intake-temperature compensation, heat soak at idle where airflow is low. Compares idle trim at matched intake temperature and matched rail pressure across sessions (purge off in all of them) before calling a leak or sizing anything. A fixed idle edit sized from one hot drive would be wrong on every cool day. A smoke test is still cheap and would rule a leak in or out directly. States what each hypothesis predicts: a true leak gives similar idle trim cool and hot, a heat effect tracks intake temperature or rail pressure. Does not make the edit from one session.",
+      "assertions": [
+        "Recognizes that the idle trim differing between a cool and a hot session is inconsistent with a fixed-quantity leak and treats temperature (or rail pressure) as a candidate cause",
+        "Recommends comparing idle trims at matched intake temperature and matched rail pressure across sessions, with purge state held the same, before sizing anything",
+        "Does not recommend a fixed idle fuel correction sized from a single hot-afternoon log",
+        "States what a real leak versus a heat effect would each predict in the next log (leak: similar trim cool and hot; heat: trim tracks intake temperature or rail pressure)",
+        "May still offer a smoke or vacuum test as a cheap direct check, without treating the trim shape alone as proof of a leak"
+      ],
+      "files": []
     }
   ]
 }

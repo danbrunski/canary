@@ -56,6 +56,18 @@ protection, boost limit at altitude, catalyst protection, gear-dependent torque 
 clutch/driveline limit, over-temperature. You find it only by logging the
 requested/actual torque pair, or the manufacturer's torque-limitation-reason channel.
 
+**Full pedal is not full throttle, and the fuel target can follow the throttle.** A
+gear-dependent torque limit (or any limiter that trims the throttle request) holds the plate
+short of wide open at a pedal that would otherwise open it. Some ECUs select their
+power-enrichment target on *target throttle*, not pedal, so the same full-pedal pull is
+fueled by a different target column in a capped gear than in an uncapped one, and its timing
+and airflow differ too. Sort full-pedal λ, timing and airflow **by gear** (rpm ÷ road speed
+identifies the gear without a gear channel) and read them against **throttle**, not pedal.
+Pooling gears pools two different calibrations. On a vehicle without the torque PIDs, pedal
+versus throttle is the requested-versus-actual pair that is available, and a pedal-minus-
+throttle gap at full pedal is the limiter showing itself. A limiter is a property of the
+calibration revision, so resolve which calibration was in the ECU before comparing pulls.
+
 **Tuning corollary:** changing fuel or spark maps without the torque model agreeing
 produces arbitration fights — the ECU re-derives actual torque from its air model and
 pulls throttle or boost back to hit the *modeled* target. Torque-model and limiter

@@ -129,6 +129,18 @@ Further consequences for reading logs:
 - Some ECUs do not stream a knock channel at all and expose knock health only through
   DTCs. Absence of a knock channel is not absence of knock protection — check whether the
   channel exists before treating a flat reading as evidence.
+- **A knock-system fault can be invisible to a generic reader.** Knock-sensor circuit codes
+  are often non-MIL and may be absent from the generic stored/pending DTC services
+  (Mode 03/07) altogether, visible only to manufacturer self-diagnosis. "No codes" on a
+  generic reader therefore does not clear the knock system; check the manufacturer's
+  knock-sensor level and fault-flag channels, or the fixed-retard signature above.
+- **A fallback can switch timing tables, not only subtract degrees.** Some ECUs select a
+  different map (a "high detonation" spark table) when knock control is faulted or detonation
+  is latched. Then a timing-table edit may not be the table being read. Check which table
+  is live (from the ECU's table-select flag or by comparing logged timing against each
+  table) before editing, and treat timing data taken in fallback as describing the
+  fallback, not the healthy calibration. Clearing the code with Mode 04 clears the code,
+  not the fault, and the fallback can return as soon as the fault is seen again.
 - Because knock adaptation is persistent, a tank of poorer fuel shows as a
   slowly-developing advance deficit across the whole map rather than a burst of events —
   and it will survive into the next drive.

@@ -165,8 +165,32 @@ command at hot idle / low oil pressure presents as a *tracking error*, not an ou
 value. And note that a VE map is only valid at a given cam phase — comparing VE across a
 phase change compares two different engines.
 
+## Fuel pressure (rail pressure)
+
+Rail pressure is the discriminator between a fuel-delivery fault and an air-model error (a
+lean high-rpm region that looks like a VE error is either), and many engines have no sensor
+for it, so it is often an added gauge.
+
+- **An added gauge's analog output may be regenerated in steps at the gauge's own update
+  rate.** That aliases rail pulsation and limits usable bandwidth to half that rate. A
+  output stepped at 100 Hz carries nothing above 50 Hz that is rail pressure. Know the gauge's
+  rate before reading a waveform.
+- **Average over at least half a second for a pressure.** An instantaneous sample is a
+  pulsation phase, not the rail level.
+- **Compare ratios on one instrument, not absolute readings across two.** An analog output
+  and the gauge's own face (or a mechanical gauge) can differ by a fixed offset of a psi or
+  two. A before/after change on the same sensor is meaningful where the absolute level may
+  not be.
+- **A brown-out during cranking reads as a pressure fault.** Supply voltage sagging under
+  the starter can read as low or implausible rail pressure; check supply voltage before
+  calling the pump or the sensor, and read pressure only after voltage has recovered.
+
 ## Reading DTCs, freeze frames, and readiness honestly
 
+- **A diagnostic read can have a side effect.** A status read that clears flags (reading one
+  manufacturer data item resets a per-DTC status bit, for example) is a write dressed as a
+  read. Know what a read does before polling it, and keep such items out of sweeps and
+  loggers.
 - **OBD's threshold is emissions, not performance.** A large driveability defect can set no
   code; a trivial emissions issue can set one. A code is not a measure of severity.
 - **A freeze frame is one sample.** Its value is that it names the *operating point* so you

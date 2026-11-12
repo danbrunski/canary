@@ -156,12 +156,19 @@ which claws a little back (standard-atmosphere density ratios 0.83 and 0.68). Us
 | **VE (manifold-referenced)** | 0.95 | **~0.95 — essentially unchanged** | ~0.95 |
 | `LOAD_ABS` at WOT | ~0.93 | **~0.73** | ~0.58 |
 | `LOAD_PCT` at WOT | ~100% | **~100%** | ~100% |
-| Idle manifold *gauge* vacuum | spec value | reads ~20% lower | reads ~38% lower |
+| Idle manifold *gauge* vacuum | spec value (e.g. 20 inHg / 68 kPa) | **falls by ~21 kPa (6.3 inHg)**: ~14 inHg / 46 kPa | **falls by ~38 kPa (11.3 inHg)**: ~9 inHg / 29 kPa |
 
 **The apparent-restriction failure mode:** comparing this engine's WOT `LOAD_ABS` (0.73) or
 WOT MAP (78 kPa) against a sea-level reference (0.93, 98 kPa) manufactures a phantom ~20%
 intake restriction — phantom cam wear, phantom throttle-body problem, weeks of chasing
-nothing. Vacuum-gauge diagnostic specs are sea-level specs too.
+nothing. Vacuum-gauge diagnostic specs are sea-level specs too, and they do *not* scale by
+the pressure ratio. Idle needs a roughly fixed air mass, so idle **absolute** MAP stays
+about where it was (~34 kPa for a 20 inHg sea-level idle) and gauge vacuum, which is
+ambient minus MAP, falls by about the barometric difference. From 20 inHg that is ~30 %
+lower at 80 kPa and ~55 % lower at 63 kPa (31 % and 57 % at exactly constant MAP; a little
+less in practice, since pumping work falls too). The service rule of about 1 inHg per
+1,000 ft says the same (it slightly overstates above ~10,000 ft). Quote idle vacuum in
+inHg or kPa below ambient, never as a percent of the sea-level spec.
 
 **How to normalize, in order of preference:**
 
