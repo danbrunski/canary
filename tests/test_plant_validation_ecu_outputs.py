@@ -445,9 +445,13 @@ def test_the_real_cases_ecu_rules_are_frozen_and_name_e08_7s_hashes() -> None:
 def test_bfs_and_target_phi_read_no_trim_word_in_the_application_model() -> None:
     model, _ = load_application_model(PROFILE)
     found = trim_independence(model, ["base_fuel_schedule_word", "target_equiv_ratio"])
+    # The STFT controller outputs were catalogued by F01; BFS and target phi
+    # read none of the four (trim_independence would refuse).
     assert found["trim_words"] == {
         "0xFFFF26B4": "short_term_trim_b1",
         "0xFFFF26B6": "short_term_trim_b2",
+        "0xFFFF2D08": "stft_controller_out_b1",
+        "0xFFFF2D0A": "stft_controller_out_b2",
     }
     # Long-term trim has no RAM word in the model: said, not claimed checked.
     assert found["long_term_trim_in_model"] == []
