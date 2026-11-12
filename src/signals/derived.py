@@ -1365,10 +1365,22 @@ def _accel_metrics(
 ) -> tuple[float | None, float | None, float | None]:
     """0-60 mph time and 1/4-mile ET / trap speed from the speed trace.
 
-    Scans every launch (a sample at ≤ ~2 mph followed by acceleration). For
-    each launch, integrates distance forward and watches speed; a run that
-    drops back to launch speed before 60 mph / 402 m is abandoned (not a
-    clean pull). Reports the best (minimum) ET across launches.
+    A run starts at the **last** sample at or below launch speed (~2 mph):
+    every such sample restarts the clock and zeroes the distance, so time
+    spent waiting at the line is never counted (M01.1 — the clock used to
+    start at the *first* stopped sample, and 30 s at 0 km/h turned a 9 s
+    0-60 into 39 s). A run that drops back to launch speed is thereby
+    abandoned and a new one begins; a non-finite speed or a gap outside
+    ``(0, _ACCEL_MAX_SEGMENT_DT_S]`` ends the run. Distance is the
+    trapezoid integral of speed. Reports the best (minimum) time across runs.
+
+    Crossings are **linearly interpolated** between the two samples that
+    straddle them, so a 1 Hz trace does not quantize the result to whole
+    seconds: the 60 mph time interpolates speed, the quarter-mile ET
+    interpolates the cumulative distance, and the trap speed is the speed
+    interpolated at that same instant. The start is not interpolated: it is
+    the last stopped sample, so the figures can read long by up to one
+    sample interval of the moment the truck actually left the line.
     """
     speed = speed_kph.to_numpy(dtype=float)
     t = t_s.to_numpy(dtype=float)
@@ -1376,37 +1388,49 @@ def _accel_metrics(
     best_060: float | None = None
     best_qm: float | None = None
     best_qm_trap: float | None = None
-    i = 0
-    while i < n - 1:
-        if not (np.isfinite(speed[i]) and speed[i] <= _LAUNCH_SPEED_KPH):
-            i += 1
+    #: Time of the last at-or-below-launch-speed sample of the current run;
+    #: ``None`` while no run is in progress.
+    launch_t: float | None = None
+    dist_m = 0.0
+    got_060 = False
+    for j in range(n):
+        v = speed[j]
+        if not np.isfinite(v):
+            launch_t = None
             continue
-        launch_t = t[i]
-        dist_m = 0.0
-        got_060: float | None = None
-        j = i + 1
-        while j < n:
-            if not np.isfinite(speed[j]):
-                break
+        if launch_t is not None:
             seg_dt = t[j] - t[j - 1]
             if seg_dt <= 0 or seg_dt > _ACCEL_MAX_SEGMENT_DT_S:
-                break
-            # bogged back down to a stop — abandon this run
-            if speed[j] <= _LAUNCH_SPEED_KPH and dist_m > 0:
-                break
-            dist_m += (speed[j] + speed[j - 1]) / 2.0 / 3.6 * seg_dt
-            if got_060 is None and speed[j] >= _SIXTY_MPH_KPH:
-                got_060 = t[j] - launch_t
-            if dist_m >= _QUARTER_MILE_M:
-                et = t[j] - launch_t
-                if best_qm is None or et < best_qm:
-                    best_qm = et
-                    best_qm_trap = float(speed[j])
-                break
-            j += 1
-        if got_060 is not None and (best_060 is None or got_060 < best_060):
-            best_060 = got_060
-        i = max(i + 1, j)
+                launch_t = None
+        if v <= _LAUNCH_SPEED_KPH:
+            # At (or back at) the line: the clock restarts here.
+            launch_t = float(t[j])
+            dist_m = 0.0
+            got_060 = False
+            continue
+        if launch_t is None:
+            continue
+        v_prev = speed[j - 1]
+        t_prev = t[j - 1]
+        # ``v_prev`` is in this run, so it is below 60 mph whenever
+        # ``got_060`` is unset, and below ``v`` here — the fraction is in (0, 1].
+        if not got_060 and v >= _SIXTY_MPH_KPH:
+            frac = (_SIXTY_MPH_KPH - v_prev) / (v - v_prev)
+            et_060 = float(t_prev + frac * seg_dt - launch_t)
+            if best_060 is None or et_060 < best_060:
+                best_060 = et_060
+            got_060 = True
+        seg_m = (v + v_prev) / 2.0 / 3.6 * seg_dt
+        if dist_m + seg_m >= _QUARTER_MILE_M:
+            frac = (_QUARTER_MILE_M - dist_m) / seg_m
+            et_qm = float(t_prev + frac * seg_dt - launch_t)
+            if best_qm is None or et_qm < best_qm:
+                best_qm = et_qm
+                best_qm_trap = float(v_prev + frac * (v - v_prev))
+            # A run ends at the quarter mile; the next needs a new stop.
+            launch_t = None
+            continue
+        dist_m += seg_m
     return best_060, best_qm, best_qm_trap
 
 

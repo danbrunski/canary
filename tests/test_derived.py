@@ -10,6 +10,7 @@ from src.config import VehicleParameters
 from src.signals.afr import AfrCalibration
 from src.signals.derived import (
     FUEL_PROPERTIES,
+    _accel_metrics,
     compute_derived_channels,
     compute_instantaneous_channels,
     fuel_properties,
@@ -232,6 +233,71 @@ def test_summarize_trip_accel_metrics() -> None:
     assert summary.quarter_mile_trap_kph is not None
     assert summary.fuel_used_l is not None and summary.fuel_used_l > 0
     assert summary.co2_kg is not None and summary.co2_kg > 0
+
+
+def _wait_then_constant_accel(wait_s: int, accel_mps2: float, run_s: int) -> list[float]:
+    """1 Hz speed trace (kph): ``wait_s`` at exactly 0, then constant accel."""
+    return [0.0] * wait_s + [accel_mps2 * k * 3.6 for k in range(run_s + 1)]
+
+
+def test_accel_metrics_clock_starts_at_last_stopped_sample() -> None:
+    """M01.1: 30 s at 0 km/h then 3 m/s² must time the run, not the wait.
+
+    Before the fix the clock started at the first stopped sample and this
+    returned 0-60 = 39.0 s and ¼ mile = 47.0 s. The analytic run is
+    26.8224 / 3 = 8.941 s to 60 mph and sqrt(2 · 402.336 / 3) = 16.377 s to
+    the quarter mile, at 3 · 16.377 m/s = 176.9 kph.
+    """
+    speed = _wait_then_constant_accel(30, 3.0, 30)
+    t = pd.Series(np.arange(len(speed), dtype=float))
+    zero_60, qm, trap = _accel_metrics(pd.Series(speed, dtype=float), t)
+    assert zero_60 == pytest.approx(26.8224 / 3.0, abs=1e-6)
+    # Linear interpolation of the trapezoid distance between 1 Hz samples:
+    # within 0.01 s of the analytic 16.377 s, not quantized to 17 s.
+    assert qm == pytest.approx(np.sqrt(2 * 402.336 / 3.0), abs=0.01)
+    assert trap == pytest.approx(3.0 * np.sqrt(2 * 402.336 / 3.0) * 3.6, abs=0.1)
+
+
+def test_accel_metrics_wait_is_excluded_through_summarize_trip() -> None:
+    speed = _wait_then_constant_accel(30, 3.0, 30)
+    df = _frame(len(speed), **{"obd:SPEED": speed})
+    summary = summarize_trip(df, GASOLINE)
+    assert summary.zero_to_60_mph_s == pytest.approx(8.941, abs=0.01)
+    assert summary.quarter_mile_s == pytest.approx(16.377, abs=0.01)
+
+
+def test_accel_metrics_creep_below_launch_speed_restarts_clock() -> None:
+    """Rolling forward at under 2 mph before the pull is still 'at the line':
+    the clock starts at the last sample at or below launch speed, whatever
+    distance the creep covered."""
+    speed = [0.0, 2.0, 3.0, 2.0, 0.0, 3.0] + [3.0 * k * 3.6 for k in range(1, 31)]
+    t = pd.Series(np.arange(len(speed), dtype=float))
+    zero_60, qm, _ = _accel_metrics(pd.Series(speed, dtype=float), t)
+    # Last stopped sample is index 5 (3 kph ≤ 2 mph = 3.22 kph), so the clock
+    # starts there, not at index 0: 0-60 is the ramp's 8.94 s (the old code gave 10.0 s).
+    assert zero_60 is not None and 8.6 < zero_60 < 8.95
+    assert qm is not None and 16.0 < qm < 16.4
+
+
+def test_accel_metrics_bogged_run_does_not_count() -> None:
+    """A run that drops back to a stop before 60 mph is abandoned; the clean
+    pull after it is timed from its own start."""
+    bog = [0.0, 10.8, 21.6, 10.8, 0.0, 0.0, 0.0]
+    pull = [3.0 * k * 3.6 for k in range(1, 31)]
+    speed = bog + pull
+    t = pd.Series(np.arange(len(speed), dtype=float))
+    zero_60, _, _ = _accel_metrics(pd.Series(speed, dtype=float), t)
+    assert zero_60 == pytest.approx(26.8224 / 3.0, abs=1e-6)
+
+
+def test_accel_metrics_crossing_is_interpolated_not_quantized() -> None:
+    """At 1 Hz the crossing lies between samples; the reported time must be
+    the interpolated instant, not the next whole second."""
+    # 4 m/s²: 60 mph at 6.7056 s, between the 6 s and 7 s samples.
+    speed = [4.0 * k * 3.6 for k in range(0, 21)]
+    t = pd.Series(np.arange(len(speed), dtype=float))
+    zero_60, _, _ = _accel_metrics(pd.Series(speed, dtype=float), t)
+    assert zero_60 == pytest.approx(26.8224 / 4.0, abs=1e-6)
 
 
 def test_summarize_trip_no_accel_event() -> None:

@@ -45,7 +45,7 @@ does, the fix is a spec change and a retrain is owed (the 2026-09 IF incident).
 
 ## Part A — Trip, economy and acceleration figures
 
-- [ ] **M01.1 (Error) 0–60 mph and quarter-mile times include the time spent
+- [~] **M01.1 (Error) 0–60 mph and quarter-mile times include the time spent
   stationary.** `signals/derived.py` `_accel_metrics` sets `launch_t` at the
   *first* sample at or below launch speed (2 mph). While the truck sits at
   exactly 0 km/h, which is what the integer speed PID reads at a stop,
@@ -56,14 +56,36 @@ does, the fix is a spec change and a retrain is owed (the 2026-09 IF incident).
     18.0 s at 1 Hz sampling.
   - The "best across launches" rule hides it only when some launch in the
     session had no stop before it.
-  - [ ] Reset `launch_t` and `dist_m` on every sample at or below launch
+  - [x] Reset `launch_t` and `dist_m` on every sample at or below launch
     speed, so the clock starts at the last one. Regression test: the case
     above.
-  - [ ] The thresholds are on raw `obd:SPEED` (M01.2), so "60 mph" is reached
+    *Done 2026-11-12:* `_accel_metrics` rewritten as one pass; every sample
+    ≤ launch speed restarts the clock and zeroes distance (which also covers
+    the old "bogged down" abandon). The case above, run through the function
+    on the old code, returned (39.0, **47.0**) — not 48.0 — and returns
+    (8.9408, 16.3704, trap 176.8 kph) now; analytic is 8.941 s and
+    sqrt(2·402.336/3) = **16.377 s** (the 18.0 s above was a slip).
+    Tests in `tests/test_derived.py`:
+    `test_accel_metrics_clock_starts_at_last_stopped_sample`,
+    `test_accel_metrics_wait_is_excluded_through_summarize_trip`,
+    `test_accel_metrics_creep_below_launch_speed_restarts_clock` (creep at
+    ≤ 2 mph before the pull), `test_accel_metrics_bogged_run_does_not_count`.
+  - [~] The thresholds are on raw `obd:SPEED` (M01.2), so "60 mph" is reached
     at about 65 true and the quarter mile ends at about 437 m. Use corrected
     speed.
-  - [ ] At 1 Hz the crossing time is quantized to a second. Interpolate the
+    *Remaining:* needs M01.2's per-profile speed correction function, which
+    does not exist yet; `summarize_trip` still feeds raw `obd:SPEED`. Wire
+    the corrected series into the `_accel_metrics` call when M01.2 lands.
+  - [x] At 1 Hz the crossing time is quantized to a second. Interpolate the
     crossing between samples, or report the resolution with the figure.
+    *Done 2026-11-12:* linear interpolation between the straddling samples —
+    speed for the 60 mph time, cumulative trapezoid distance for the
+    quarter-mile ET, and the trap speed is the speed at that interpolated
+    instant (docstring says so). The start is still the last stopped sample,
+    so figures can read long by up to one sample interval of the real
+    launch. `test_accel_metrics_crossing_is_interpolated_not_quantized`
+    (4 m/s²: 6.7056 s, not 7 s); the 3 m/s² case lands within 0.007 s of the
+    analytic quarter mile.
 
 - [ ] **M01.2 (Error) Trip distance integrates the ECM's speed, which reads
   0.9203 × true on this truck.** `compute_derived_channels`
