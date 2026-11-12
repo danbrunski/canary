@@ -1963,7 +1963,7 @@ that closed its task checklist.
   Rollback: `data/nissan-xterra-2008/_prior/2026-09-24T024700/` (laptop) or git
   `2971d79^`. **Owed (Pi):** pull the build carrying the 09-25 change and confirm
   a live off-map row reads `severity: null` with its `not_scored` kind.
-- [ ] **D03.63 A second trip inside one session gets no digest and no reason.**
+- [~] **D03.63 A second trip inside one session gets no digest and no reason.**
   *From the 2026-11-08 drive (leg 3, pulled 2026-11-10).*
   `_capture-ltft-gate-2026-11-08T201601` covered two trips. The first trip
   ended at 21:02:28Z after 300 s stationary, and its `digest.json` was written.
@@ -1976,6 +1976,67 @@ that closed its task checklist.
   or a skip record naming the reason. Fix it in the shared function, keyed by
   trip rather than by session directory. A test drives two trip ends through
   one session and checks both are on disk.
+  - **Landed (2026-11-11).** Per-trip records in `trip_digests/`
+    (`<trip-start>.json` digest, `<trip-start>.skipped.json` refusal; key from
+    the digest's `trip.started_at`, `session` for a trip-less call), written by
+    `write_digest` / `write_digest_skipped` (`src/analysis/digest.py`) and read
+    by `read_trip_digest*` / `list_trip_records` / `trip_index`
+    (`src/storage/session_products.py`). `digest.json` / `digest_skipped.json`
+    stay the session's *newest* trip's answer, so every existing reader
+    (catalog, brain jobs, route, backfill) is unchanged; a refusal for the
+    newest trip removes the top-level `digest.json`, and the earlier digest
+    stays in `trip_digests/`. A session digested before this holds one
+    `digest.json`: it reads as one trip and is copied into `trip_digests/`
+    before a second trip overwrites it. `handle_trip_end_off_loop` is
+    idempotent per trip (not per session), `_IN_FLIGHT` is keyed by
+    `(session, trip)` so a second trip ending mid-digest is not dropped, and
+    `record_trip_end_unobservable` takes the trip (the daemon hook passes it).
+    The digest child and its `RLIMIT_AS` are untouched. The digest route adds
+    `trips` (one line per trip) to the 200 body and the 409 body; the MCP
+    docstring and `docs/mcp-server.md` say so.
+  - **Top-level order.** The top level follows *trip* order, never write
+    order: a trip's answer becomes `digest.json` / `digest_skipped.json` only
+    when its parsed `started_at` is not older than the trip already there
+    (`_top_level_may_take`; keys and file names are never compared). A trip-less
+    record never displaces a real trip's answer, except that a computed
+    whole-session digest replaces a real trip's *refusal* (raise a budget, ask
+    again). `clear_digest_skipped` clears a top-level refusal only if it is the
+    same trip's or an older one's. Every read-compare-write of the top level runs
+    under one module lock (`_TOP_LEVEL_LOCK`), so the unobservable-trip thread
+    and the loop's `persist_digest` cannot interleave into both answers.
+    `write_digest_skipped` re-indexes the catalog (`catalog_db`), since a
+    newest-trip refusal removes the top-level `digest.json`.
+  - **Behaviour change (readers).** For a session whose newest trip was refused
+    while an earlier trip has a digest, `GET /control/sessions/{id}/digest` and
+    MCP `get_session_digest` now answer **409** (the newest trip's refusal, with
+    `trips` listing the earlier digest) where they used to serve the first
+    trip's digest. The catalog row likewise shows the refusal.
+  - **Evidence.** `tests/test_trip_digests_per_trip.py` (22 tests, incl.
+    `test_two_trip_ends_in_one_session_both_leave_a_digest`,
+    `test_a_refused_second_trip_leaves_a_record_naming_why`,
+    `test_a_second_trip_ending_while_the_first_digest_runs_is_not_dropped`,
+    `test_a_session_digested_before_per_trip_records_keeps_its_first_trip`,
+    `test_a_second_unobservable_trip_is_recorded_beside_the_first_trips_answer`,
+    `test_an_older_trips_digest_landing_late_does_not_displace_a_newer_refusal`,
+    `test_an_older_trips_refusal_landing_late_does_not_displace_a_newer_digest`,
+    `test_concurrent_writers_never_leave_the_top_level_claiming_both`,
+    `test_a_refusal_that_removes_the_top_level_digest_reindexes_the_catalog`),
+    `test_get_session_digest_409_lists_the_trips_a_session_held`
+    (`tests/test_dashboard_api.py`); `tests/test_trip_end_digest.py`,
+    `test_digest.py`, `test_storage_catalog.py`, `test_brain_jobs.py` and
+    `test_daemon_shutdown_deadline.py` pass unchanged.
+  - **Not landed / owed.** (1) A digest's *statistics* still cover the whole
+    session, so trip two's digest includes trip one's anomalies and modes; its
+    `trip` block names the window but the anomaly/ledger/fingerprint windows
+    are not cut to it. (2) The synchronous `handle_trip_end` (offline scripts)
+    takes no trip. (3) Pi/drive: confirm two digests from a real two-trip
+    capture (`trip_digests/` holds two `.json` after a stop-and-go). (4) A
+    narrow misorder remains through the trip-less path (verifier, 2026-11-12):
+    an on-demand whole-session digest may replace trip two's refusal, and if
+    trip one's real digest lands after it, trip one takes the top level back,
+    because a trip-less record has no start time to rank. It needs an on-demand
+    compute while trip one's child is still running. Fix: give a trip-less
+    digest that replaces a refusal the replaced trip's start as its rank.
 - [~] **D03.64 Scoring a long capture OOM-kills the daemon.** *From the
   2026-11-10 boot.*
   - **What happened.** At 16:59:58Z the daemon tried to finalize the

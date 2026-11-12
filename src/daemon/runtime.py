@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import importlib
 import logging
 import os
@@ -227,7 +228,7 @@ def shutdown_trip_target(
 
 
 async def record_trip_end_unobservable(
-    session_dir: Path, config: CanaryConfig, detail: str
+    session_dir: Path, config: CanaryConfig, detail: str, trip: TripEnd | None = None
 ) -> None:
     """:func:`src.control.trip_end.record_trip_end_unobservable` in a thread.
 
@@ -237,16 +238,29 @@ async def record_trip_end_unobservable(
     """
     try:
         trip_end = await asyncio.to_thread(importlib.import_module, "src.control.trip_end")
-        await asyncio.to_thread(trip_end.record_trip_end_unobservable, session_dir, config, detail)
+        await asyncio.to_thread(
+            functools.partial(
+                trip_end.record_trip_end_unobservable,
+                session_dir,
+                config,
+                detail,
+                trip=trip,
+                catalog_db=config.daemon.catalog_db,
+            )
+        )
     except Exception:  # noqa: BLE001 — best-effort, like the digest itself
         log.exception("recording the unobservable trip end for %s failed", session_dir.name)
 
 
-def _run_trip_unobservable_hook(session_dir: Path, detail: str, config: CanaryConfig) -> None:
+def _run_trip_unobservable_hook(
+    session_dir: Path, detail: str, config: CanaryConfig, trip: TripEnd | None = None
+) -> None:
     """``on_trip_unobservable`` callback (D03.29): schedule the
     ``no_speed_source`` refusal for ``session_dir`` as a tracked task, like
-    :func:`_run_trip_end_hook`, so the trip sink never waits on the write."""
-    task = asyncio.create_task(record_trip_end_unobservable(session_dir, config, detail))
+    :func:`_run_trip_end_hook`, so the trip sink never waits on the write.
+    ``trip`` files it under that trip, so a second unobservable trip in one
+    session is recorded beside the first's answer (D03.63)."""
+    task = asyncio.create_task(record_trip_end_unobservable(session_dir, config, detail, trip))
     _TRIP_END_TASKS.add(task)
     task.add_done_callback(_TRIP_END_TASKS.discard)
 
@@ -656,7 +670,7 @@ async def run_daemon(
                     session_dir, config, components, end
                 ),
                 on_trip_unobservable=lambda session_dir, end: _run_trip_unobservable_hook(
-                    session_dir, end.detail, config
+                    session_dir, end.detail, config, end if end.started_epoch is not None else None
                 ),
             ),
         )

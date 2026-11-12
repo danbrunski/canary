@@ -29,6 +29,11 @@ async def get_session_digest(client: DaemonClient, *, session_id: str) -> dict[s
       child that hit its address-space ceiling. That is a fact about the session, not a
       missing sidecar — do not retry it expecting a different answer.
 
+    A session can hold several trips (D03.63). Each trip end gets its own digest
+    or refusal; the answer here is the *newest* trip's, and ``trips`` (on the
+    digest, and in the 409 body) lists every trip's status, so an earlier trip's
+    digest is visible even when the newest was refused.
+
     Authenticated (auth-consistency follow-up to Task 5.6): the digest
     aggregates the vehicle ledger and per-session fingerprint z-scores,
     both otherwise only readable via authenticated ``/control/*`` routes

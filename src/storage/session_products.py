@@ -13,10 +13,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from src.storage.sidecar import read_json_object
+from src.timefmt import parse_iso_utc
 
 # --------------------------------------------------------------------------- #
 # Digest (analysis.digest)
@@ -41,6 +43,160 @@ def read_digest(session_dir: Path) -> dict[str, Any] | None:
 def read_digest_skipped(session_dir: Path) -> dict[str, Any] | None:
     """Load the refusal sidecar, or ``None`` if absent / unreadable."""
     return read_json_object(session_dir / DIGEST_SKIPPED_FILENAME)
+
+
+# A session can hold several trips (D03.63): a whole-drive capture, or a key
+# cycle the daemon rode through, ends more than one drive inside one directory.
+# ``digest.json`` / ``digest_skipped.json`` stay what they always were, the
+# session's *current* answer, and are always the newest trip's. Each trip's own
+# answer is kept as well, in ``trip_digests/``, keyed by when the trip began.
+
+#: Per-trip records, one directory per session: ``<key>.json`` is a trip's
+#: digest, ``<key>.skipped.json`` the refusal that stands in for one.
+TRIP_DIGESTS_DIRNAME = "trip_digests"
+
+#: The key of a digest that names no trip (computed on demand, or by a caller
+#: with no tracker edge): it covers the session as a whole.
+SESSION_TRIP_KEY = "session"
+
+_SKIPPED_SUFFIX = ".skipped.json"
+
+
+def trip_started_at(trip: Mapping[str, Any] | None) -> datetime | None:
+    """When the trip began, parsed (UTC), or ``None`` for a record naming no trip.
+
+    The one way to order trips. Never compare :func:`trip_key` strings or file
+    names for "which is newer": a key is an identity, not a clock, and the same
+    instant can be written with ``Z`` or ``+00:00`` or fractional seconds.
+    """
+    started = trip.get("started_at") if trip else None
+    if not isinstance(started, str):
+        return None
+    try:
+        return parse_iso_utc(started)
+    except ValueError:
+        return None
+
+
+def trip_key(trip: Mapping[str, Any] | None) -> str:
+    """The key a digest or refusal is filed under, from its ``trip`` block.
+
+    The trip's first motion (``trip.started_at``) identifies it: unique inside
+    a session, stable between the tracker's edge and the shutdown fallback that
+    may name the same trip again, and the same whichever way the instant is
+    spelled (``Z`` or ``+00:00``). A record with no trip block (on-demand, or
+    written before D03.63 by a caller without one) is :data:`SESSION_TRIP_KEY`.
+    """
+    started = trip_started_at(trip)
+    if started is None:
+        return SESSION_TRIP_KEY
+    fraction = f"{started.microsecond:06d}" if started.microsecond else ""
+    return started.strftime("%Y%m%dT%H%M%S") + fraction + "Z"
+
+
+def trip_digest_path(session_dir: Path, key: str) -> Path:
+    """Where trip ``key``'s digest is filed."""
+    return session_dir / TRIP_DIGESTS_DIRNAME / f"{key}.json"
+
+
+def trip_digest_skipped_path(session_dir: Path, key: str) -> Path:
+    """Where trip ``key``'s refusal is filed."""
+    return session_dir / TRIP_DIGESTS_DIRNAME / f"{key}{_SKIPPED_SUFFIX}"
+
+
+def read_trip_digest(session_dir: Path, key: str) -> dict[str, Any] | None:
+    """The digest filed for trip ``key``, or ``None``.
+
+    A session digested before D03.63 holds only ``digest.json``; it is that
+    trip's digest when its own trip block says so.
+    """
+    stored = read_json_object(trip_digest_path(session_dir, key))
+    if stored is not None:
+        return stored
+    legacy = read_digest(session_dir)
+    return legacy if legacy is not None and trip_key(legacy.get("trip")) == key else None
+
+
+def read_trip_digest_skipped(session_dir: Path, key: str) -> dict[str, Any] | None:
+    """The refusal filed for trip ``key``, or ``None`` (legacy rule as above)."""
+    stored = read_json_object(trip_digest_skipped_path(session_dir, key))
+    if stored is not None:
+        return stored
+    legacy = read_digest_skipped(session_dir)
+    return legacy if legacy is not None and trip_key(legacy.get("trip")) == key else None
+
+
+def list_trip_records(session_dir: Path) -> list[dict[str, Any]]:
+    """Every trip's answer in this session, oldest trip first.
+
+    One entry per trip: ``{"trip_key", "status", "trip", "record"}`` with
+    ``status`` ``"digest"`` or ``"skipped"`` (a digest wins if a directory ever
+    holds both) and ``record`` the stored payload. A session digested before
+    D03.63 contributes its top-level answer as one entry. Empty when nothing
+    was ever attempted.
+    """
+    found: dict[str, dict[str, Any]] = {}
+    directory = session_dir / TRIP_DIGESTS_DIRNAME
+    if directory.is_dir():
+        for path in sorted(directory.glob("*.json")):
+            skipped = path.name.endswith(_SKIPPED_SUFFIX)
+            key = path.name[: -len(_SKIPPED_SUFFIX)] if skipped else path.stem
+            record = read_json_object(path)
+            if record is None or (skipped and key in found):
+                continue
+            found[key] = {
+                "trip_key": key,
+                "status": "skipped" if skipped else "digest",
+                "trip": record.get("trip"),
+                "record": record,
+            }
+    for status, record in (
+        ("digest", read_digest(session_dir)),
+        ("skipped", read_digest_skipped(session_dir)),
+    ):
+        if record is None:
+            continue
+        key = trip_key(record.get("trip"))
+        if key not in found:
+            found[key] = {
+                "trip_key": key,
+                "status": status,
+                "trip": record.get("trip"),
+                "record": record,
+            }
+    # Oldest trip first by parsed start time; the trip-less session record leads.
+    epoch = datetime.min.replace(tzinfo=UTC)
+
+    def order(key: str) -> tuple[bool, datetime, str]:
+        started = trip_started_at(found[key]["trip"])
+        return (key != SESSION_TRIP_KEY, started or epoch, key)
+
+    return [found[key] for key in sorted(found, key=order)]
+
+
+def trip_index(session_dir: Path) -> list[dict[str, Any]]:
+    """A summary line per trip (:func:`list_trip_records` without the payloads).
+
+    ``trip_key``, ``status``, the trip's ``started_at`` / ``stopped_at`` /
+    ``end_session`` when it names them, and ``reason`` / ``detail`` for a
+    refusal; what the digest route attaches as ``trips`` so a reader of the
+    session's newest answer can see the others exist.
+    """
+    index: list[dict[str, Any]] = []
+    for entry in list_trip_records(session_dir):
+        trip = entry["trip"] if isinstance(entry["trip"], dict) else {}
+        line: dict[str, Any] = {
+            "trip_key": entry["trip_key"],
+            "status": entry["status"],
+            "started_at": trip.get("started_at"),
+            "stopped_at": trip.get("stopped_at"),
+            "end_session": trip.get("end_session"),
+        }
+        if entry["status"] == "skipped":
+            line["reason"] = entry["record"].get("reason")
+            line["detail"] = entry["record"].get("detail")
+        index.append(line)
+    return index
 
 
 # --------------------------------------------------------------------------- #
@@ -242,6 +398,8 @@ __all__ = [
     "FINGERPRINT_FILENAME",
     "FINGERPRINT_SCHEMA_VERSION",
     "ROLLING_CIRCUMFERENCE_FILENAME",
+    "SESSION_TRIP_KEY",
+    "TRIP_DIGESTS_DIRNAME",
     "DetectedEvent",
     "Disposition",
     "ModeSegment",
@@ -252,4 +410,12 @@ __all__ = [
     "read_digest_skipped",
     "read_fingerprint",
     "read_rolling_circumference",
+    "read_trip_digest",
+    "read_trip_digest_skipped",
+    "list_trip_records",
+    "trip_digest_path",
+    "trip_index",
+    "trip_digest_skipped_path",
+    "trip_key",
+    "trip_started_at",
 ]

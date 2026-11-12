@@ -27,6 +27,8 @@ from __future__ import annotations
 import logging
 import math
 import os
+import threading
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -44,7 +46,16 @@ from src.preprocessing.loader import resample_and_segment
 from src.session import DTC_SIDECAR_FILENAME
 from src.storage.catalog import record_session_best_effort
 from src.storage.session_files import count_session_rows, session_time_span_seconds
-from src.storage.session_products import DIGEST_FILENAME, DIGEST_SKIPPED_FILENAME, read_digest
+from src.storage.session_products import (
+    DIGEST_FILENAME,
+    DIGEST_SKIPPED_FILENAME,
+    read_digest,
+    read_digest_skipped,
+    trip_digest_path,
+    trip_digest_skipped_path,
+    trip_key,
+    trip_started_at,
+)
 from src.storage.sessions import is_session_dir_name, session_started_at
 from src.storage.sidecar import read_json_object, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
@@ -196,6 +207,11 @@ class DigestSkipped:
     digest_schema_version: int = SCHEMA_VERSION
     span_seconds: float | None = None
     span_budget_seconds: float | None = None
+    #: D03.63 — the trip this refusal stands in for (``trip_block``), so a
+    #: session that held two trips can say which one went undigested and why.
+    #: ``None`` for a refusal that names no trip (on demand, or a session-level
+    #: one); it is filed under :data:`~src.storage.session_products.SESSION_TRIP_KEY`.
+    trip: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -209,6 +225,7 @@ class DigestSkipped:
             "span_seconds": self.span_seconds,
             "span_budget_seconds": self.span_budget_seconds,
             "digest_schema_version": self.digest_schema_version,
+            "trip": self.trip,
         }
 
 
@@ -473,10 +490,97 @@ def digest_preflight(
     return None
 
 
-def write_digest_skipped(session_dir: Path, skipped: DigestSkipped) -> Path:
-    """Persist the refusal sidecar (atomic tmp+rename, like every sibling)."""
+#: Guards every read-compare-write of the session's top-level answer
+#: (``digest.json`` / ``digest_skipped.json``). Writers run on the event loop
+#: (``persist_digest``) and in threads (``record_trip_end_unobservable``), and
+#: two trips of one session can be in flight at once, so without one lock a
+#: refusal and a digest interleave into a directory that claims both, or an
+#: older trip overwrites a newer one. Every writer goes through it; there is no
+#: unlocked way to touch the mirror.
+_TOP_LEVEL_LOCK = threading.RLock()
+
+
+def _file_away_current_answer(session_dir: Path) -> None:
+    """Keep the session's top-level answer as its trip's own record (D03.63).
+
+    ``digest.json`` / ``digest_skipped.json`` are the newest trip's answer, so
+    writing a second trip's replaces the first's. A session digested before
+    per-trip records existed has the first trip's answer *only* there; copy it
+    into ``trip_digests/`` before it is overwritten, unless that is already done.
+    """
+    for current, path_for in (
+        (read_digest(session_dir), trip_digest_path),
+        (read_digest_skipped(session_dir), trip_digest_skipped_path),
+    ):
+        if current is None:
+            continue
+        target = path_for(session_dir, trip_key(current.get("trip")))
+        if not target.exists():
+            write_json_sidecar(target, current, default=_json_default, mkdir=True)
+
+
+def _top_level_may_take(
+    session_dir: Path, trip: Mapping[str, Any] | None, *, is_digest: bool
+) -> bool:
+    """Whether this trip's answer may become the session's top-level answer.
+
+    The top level is the *newest trip's*, by parsed ``started_at`` (never by
+    write order, and never by key or file name). A trip that began before the
+    one already there is filed under ``trip_digests/`` only. A record naming no
+    trip (on demand, or a caller with no tracker edge) never displaces a real
+    trip's answer, with one exception: a computed whole-session digest may
+    replace a real trip's *refusal*, so raising a budget and asking again still
+    serves the session instead of the stale 409. Called under
+    :data:`_TOP_LEVEL_LOCK`.
+    """
+    new_start = trip_started_at(trip)
+    held = read_digest(session_dir)
+    refused = read_digest_skipped(session_dir)
+    digest_start = trip_started_at(held.get("trip")) if held else None
+    refusal_start = trip_started_at(refused.get("trip")) if refused else None
+    if new_start is None:
+        if digest_start is not None:
+            return False
+        return is_digest or refusal_start is None
+    newest = max((start for start in (digest_start, refusal_start) if start), default=None)
+    return newest is None or new_start >= newest
+
+
+def _clear_top_level_skipped(session_dir: Path) -> None:
+    with suppress(OSError):
+        (session_dir / DIGEST_SKIPPED_FILENAME).unlink(missing_ok=True)
+
+
+def write_digest_skipped(
+    session_dir: Path, skipped: DigestSkipped, *, catalog_db: Path | None = None
+) -> Path:
+    """Persist the refusal sidecar (atomic tmp+rename, like every sibling).
+
+    Filed twice (D03.63): under its trip in ``trip_digests/``, which is that
+    trip's answer for good, and as the session's top-level
+    ``digest_skipped.json``, which is the newest trip's. A ``digest.json``
+    left by an *earlier* trip is removed from the top level (it stays in
+    ``trip_digests/``), so the top level never answers "computed" for a
+    session whose latest trip was refused. A refusal for a trip *older* than
+    the one the top level holds is filed under its trip only. ``catalog_db``
+    re-indexes the session afterwards, like :func:`persist_digest`: a refusal
+    can remove the top-level ``digest.json``, and the catalog row must not keep
+    showing it.
+    """
+    key = trip_key(skipped.trip)
+    payload = skipped.to_dict()
     path = session_dir / DIGEST_SKIPPED_FILENAME
-    write_json_sidecar(path, skipped.to_dict(), default=_json_default)
+    with _TOP_LEVEL_LOCK:
+        _file_away_current_answer(session_dir)
+        write_json_sidecar(
+            trip_digest_skipped_path(session_dir, key), payload, default=_json_default, mkdir=True
+        )
+        if _top_level_may_take(session_dir, skipped.trip, is_digest=False):
+            write_json_sidecar(path, payload, default=_json_default)
+            earlier = read_digest(session_dir)
+            if earlier is not None and trip_key(earlier.get("trip")) != key:
+                with suppress(OSError):
+                    (session_dir / DIGEST_FILENAME).unlink(missing_ok=True)
     log.warning(
         "digest skipped for %s: %s (%s)",
         skipped.session_id,
@@ -484,18 +588,43 @@ def write_digest_skipped(session_dir: Path, skipped: DigestSkipped) -> Path:
         skipped.reason,
         extra={"digest_skip_reason": skipped.reason, "digest_row_count": skipped.row_count},
     )
+    record_session_best_effort(catalog_db, session_dir)
     return path
 
 
-def clear_digest_skipped(session_dir: Path) -> None:
+def clear_digest_skipped(session_dir: Path, key: str | Mapping[str, Any] | None = None) -> None:
     """Drop a stale refusal once a digest has actually been written.
 
-    A directory must never hold both: "computed" and "refused" are mutually
-    exclusive answers, and a leftover refusal beside a real ``digest.json``
-    is the contradiction a reader would have to arbitrate.
+    A directory must never hold both for one trip: "computed" and "refused"
+    are mutually exclusive answers, and a leftover refusal beside a real
+    ``digest.json`` is the contradiction a reader would have to arbitrate.
+    ``key`` is the trip (its ``trip`` block, or its :func:`trip_key`) whose
+    refusal goes from ``trip_digests/``. The top-level refusal goes only if it
+    is that trip's own or an older trip's (parsed ``started_at``): a refusal for
+    a *newer* trip is still the session's newest answer and stays.
     """
-    with suppress(OSError):
-        (session_dir / DIGEST_SKIPPED_FILENAME).unlink(missing_ok=True)
+    with _TOP_LEVEL_LOCK:
+        trip: Mapping[str, Any] | None
+        if isinstance(key, str):
+            stored = read_json_object(trip_digest_path(session_dir, key)) or read_json_object(
+                trip_digest_skipped_path(session_dir, key)
+            )
+            trip = stored.get("trip") if stored else None
+            key_name: str | None = key
+        else:
+            trip = key
+            key_name = None if key is None else trip_key(key)
+        refused = read_digest_skipped(session_dir)
+        if refused is not None:
+            refused_trip = refused.get("trip")
+            own = key_name is not None and trip_key(refused_trip) == key_name
+            refused_start, start = trip_started_at(refused_trip), trip_started_at(trip)
+            older = refused_start is None or (start is not None and refused_start <= start)
+            if key_name is None or own or older:
+                _clear_top_level_skipped(session_dir)
+        if key_name is not None:
+            with suppress(OSError):
+                trip_digest_skipped_path(session_dir, key_name).unlink(missing_ok=True)
 
 
 def _session_start(session_dir: Path) -> datetime | None:
@@ -698,9 +827,26 @@ def compute_digest(
 
 def write_digest(session_dir: Path, digest: SessionDigest) -> Path:
     """Atomic tmp+rename write, matching ``classification.json`` /
-    ``fingerprint.json`` / ``dtc.json`` / ``trip_summary.json``."""
+    ``fingerprint.json`` / ``dtc.json`` / ``trip_summary.json``.
+
+    Filed under its trip in ``trip_digests/`` and, when this trip is not older
+    than the one the top level already holds (:func:`_top_level_may_take`),
+    mirrored to ``digest.json`` with the top-level refusal removed, all under
+    one lock so no reader sees both. The trip's own refusal, if any, goes too.
+    """
     path = session_dir / DIGEST_FILENAME
-    write_json_sidecar(path, digest.to_dict(), default=_json_default)
+    key = trip_key(digest.trip)
+    payload = digest.to_dict()
+    with _TOP_LEVEL_LOCK:
+        _file_away_current_answer(session_dir)
+        write_json_sidecar(
+            trip_digest_path(session_dir, key), payload, default=_json_default, mkdir=True
+        )
+        with suppress(OSError):
+            trip_digest_skipped_path(session_dir, key).unlink(missing_ok=True)
+        if _top_level_may_take(session_dir, digest.trip, is_digest=True):
+            write_json_sidecar(path, payload, default=_json_default)
+            _clear_top_level_skipped(session_dir)
     if digest.rolling_circumference is not None:
         write_rolling_circumference(session_dir, digest.rolling_circumference)
     return path
@@ -725,7 +871,6 @@ def persist_digest(
     byte-identically and clears any earlier refusal.
     """
     write_digest(session_dir, digest)
-    clear_digest_skipped(session_dir)
 
     record_session_best_effort(catalog_db, session_dir)
     return read_digest(session_dir)
@@ -785,7 +930,16 @@ def write_refreshed_tuning(
             "refreshed_at": _format_timestamp(datetime.now(UTC) if now is None else now),
         },
     }
-    write_json_sidecar(session_dir / DIGEST_FILENAME, refreshed, default=_json_default)
+    key = trip_key(refreshed.get("trip"))
+    with _TOP_LEVEL_LOCK:
+        held = read_digest(session_dir)
+        # A newer trip's answer may have landed since ``payload`` was read; the
+        # top level then is not this trip's to rewrite.
+        if held is not None and trip_key(held.get("trip")) == key:
+            write_json_sidecar(session_dir / DIGEST_FILENAME, refreshed, default=_json_default)
+        stored = trip_digest_path(session_dir, key)
+        if stored.exists():
+            write_json_sidecar(stored, refreshed, default=_json_default)
     record_session_best_effort(catalog_db, session_dir)
     return read_digest(session_dir)
 
@@ -822,7 +976,7 @@ def get_or_compute_digest(
             return cached
     skipped = digest_preflight(session_dir, config, now=now)
     if skipped is not None:
-        write_digest_skipped(session_dir, skipped)
+        write_digest_skipped(session_dir, skipped, catalog_db=catalog_db)
         return None
     try:
         digest = compute_digest(session_dir, config, now=now)

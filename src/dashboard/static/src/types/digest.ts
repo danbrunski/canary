@@ -14,6 +14,19 @@ export interface BehaviorDeviationEntry {
   abs_mean_deviation: number;
 }
 
+/** One trip's answer in the session (D03.63): a digest, or the refusal that
+ *  stands in for one. Added by the route; never stored in the sidecar. */
+export interface SessionDigestTrip {
+  trip_key: string;
+  status: "digest" | "skipped";
+  started_at: string | null;
+  stopped_at: string | null;
+  end_session: string | null;
+  /** Refusals only: the `REASON_*` kind and its one-line detail. */
+  reason?: string | null;
+  detail?: string | null;
+}
+
 export interface SessionDigestResponse {
   schema_version: number;
   computed_at: string;
@@ -29,4 +42,7 @@ export interface SessionDigestResponse {
   fingerprint_top_movers: FingerprintTopMover[];
   new_dtcs: Array<Record<string, unknown>>;
   new_ledger_events: Array<Record<string, unknown>>;
+  /** The digest served is the session's newest trip's; this lists every
+   *  trip's answer (D03.63). Absent on a response from an older daemon. */
+  trips?: SessionDigestTrip[];
 }

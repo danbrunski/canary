@@ -119,7 +119,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
         # digest.json for this session.
         from src.control.digest import get_session_digest_refusal
         from src.control.trip_end import handle_trip_end_off_loop, refresh_stale_tuning_off_loop
-        from src.storage.session_products import read_digest
+        from src.storage.session_products import read_digest, trip_index
 
         try:
             session_dir = resolve_session(config.collection.storage_path, session_id)
@@ -153,6 +153,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
                         "error": "digest_refused",
                         "session_id": session_id,
                         "digest_skipped": refusal,
+                        "trips": trip_index(session_dir),
                     },
                 )
             raise HTTPException(status_code=404, detail=f"no digest for session {session_id!r}")
@@ -163,7 +164,11 @@ def build_router(ctx: ControlContext) -> APIRouter:
         result, note = await refresh_stale_tuning_off_loop(
             session_dir, config, result, catalog_db=config.daemon.catalog_db
         )
-        return result if note is None else {**result, "tuning_refresh": note}
+        # D03.63: the digest served is the session's newest trip's; ``trips``
+        # lists every trip's answer (digest or refusal) so the others are not
+        # invisible. Never stored in the sidecar — it is a view of the directory.
+        served = {**result, "trips": trip_index(session_dir)}
+        return served if note is None else {**served, "tuning_refresh": note}
 
     @router.get("/control/classifications/summary")
     def get_corpus_classification_summary() -> dict[str, Any]:

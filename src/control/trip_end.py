@@ -17,9 +17,16 @@ speed source could see a drive end at all, :func:`record_trip_end_unobservable`
 writes a ``no_speed_source`` refusal instead, so the session says why it has
 no digest rather than looking like one nobody got round to.
 
-Idempotent either way: a session that already has a ``digest.json`` is
-treated as already handled, so the fallback firing after the GPS edge
-already ran (or vice versa) never double-computes or double-notifies.
+Idempotent either way, **per trip** (D03.63): a trip that already has its
+digest is treated as already handled, so the fallback firing after the GPS edge
+already ran (or vice versa) never double-computes or double-notifies. A session
+can hold several trips (a whole-drive capture, a key cycle the daemon rode
+through), and each trip end is answered on its own: with a digest, or with a
+``digest_skipped`` record naming the reason. Both are filed under the trip
+(``trip_digests/``, keyed by when it began) and mirrored to ``digest.json`` /
+``digest_skipped.json``, which stay the session's newest answer. Before D03.63
+the first trip's ``digest.json`` made every later trip in the session return
+silently, with nothing on disk to say why.
 
 **The digest never runs on the daemon's event loop, and never without a
 memory ceiling.** It reads the session once, through
@@ -95,9 +102,12 @@ from src.analysis.rolling_circumference import measure_session, write_rolling_ci
 from src.config import CanaryConfig
 from src.control import child_pool
 from src.storage.session_products import (
-    read_digest,
-    read_digest_skipped,
+    SESSION_TRIP_KEY,
+    list_trip_records,
     read_rolling_circumference,
+    read_trip_digest,
+    read_trip_digest_skipped,
+    trip_key,
 )
 from src.storage.sessions import is_session_dir_name
 from src.timefmt import format_timestamp
@@ -272,12 +282,14 @@ _discard_pool = child_pool.discard_pool
 limit_address_space = child_pool.limit_address_space
 
 
-#: Sessions with a digest computation in flight on this loop. The GPS edge
-#: fires once per drive and the shutdown fallback is idempotent via
-#: ``digest.json``, but that check only covers a *finished* computation —
+#: Digest computations in flight on this loop, by ``(session, trip key)``. The
+#: GPS edge fires once per drive and the shutdown fallback is idempotent via the
+#: trip's digest, but that check only covers a *finished* computation —
 #: without this, a shutdown landing mid-digest would start a second child
-#: over the same multi-gigabyte session.
-_IN_FLIGHT: dict[Path, asyncio.Task[dict[str, Any] | None]] = {}
+#: over the same multi-gigabyte session. Keyed by trip as well as session, so a
+#: second trip ending while the first's digest still runs is digested too
+#: instead of waiting on the first's result and recording nothing (D03.63).
+_IN_FLIGHT: dict[tuple[Path, str], asyncio.Task[dict[str, Any] | None]] = {}
 
 #: Sessions whose digest child this process cancelled at shutdown (D03.6).
 #: ``_settle_trip_end_tasks`` cancels what will not finish inside the unit's
@@ -297,7 +309,7 @@ def digest_interrupted(session_dir: Path) -> bool:
 
 def digest_in_flight(session_dir: Path) -> bool:
     """Whether a digest for this session is already being computed."""
-    return session_dir in _IN_FLIGHT
+    return any(path == session_dir for path, _key in _IN_FLIGHT)
 
 
 def any_digest_in_flight() -> bool:
@@ -369,7 +381,9 @@ async def handle_trip_end_off_loop(  # noqa: PLR0913
         # The next trip gets its own push budget regardless of which path
         # (fresh, refused or idempotent re-fire) got us here.
         emitter.reset_notification_count()
-    if read_digest(session_dir) is not None:
+    block = None if trip is None else trip_block(trip, session_dir)
+    key = trip_key(block)
+    if _trip_already_digested(session_dir, key, named=block is not None):
         return None
     if session_dir in _INTERRUPTED:
         # Cancelled at shutdown earlier in this process; the refusal sidecar
@@ -377,20 +391,23 @@ async def handle_trip_end_off_loop(  # noqa: PLR0913
         # child the shutdown deadline cannot afford.
         return None
     current_task = asyncio.current_task()
-    existing = _IN_FLIGHT.get(session_dir)
+    flight = (session_dir, key)
+    existing = _IN_FLIGHT.get(flight)
     if existing is not None and existing is not current_task:
         log.debug("digest for %s already in flight; awaiting shared result", session_dir.name)
         await asyncio.shield(existing)
         return None
     skipped = digest_preflight(session_dir, config, now=now)
     if skipped is not None:
-        write_digest_skipped(session_dir, skipped)
+        write_digest_skipped(
+            session_dir, dataclasses.replace(skipped, trip=block), catalog_db=catalog_db
+        )
         if skipped.reason != REASON_NOT_A_SESSION:
             await _measure_tires_off_loop(session_dir, config, executor=executor, timeout=timeout)
         return None
 
     if current_task is not None:
-        _IN_FLIGHT[session_dir] = current_task
+        _IN_FLIGHT[flight] = current_task
     try:
         digest = await compute_digest_off_loop(
             session_dir,
@@ -418,7 +435,9 @@ async def handle_trip_end_off_loop(  # noqa: PLR0913
                 REASON_INTERRUPTED_AT_SHUTDOWN,
                 "digest child cancelled before it finished (daemon shutdown)",
                 now=now,
+                trip=block,
             ),
+            catalog_db=catalog_db,
         )
         raise
     except MemoryError:
@@ -431,13 +450,16 @@ async def handle_trip_end_off_loop(  # noqa: PLR0913
                 f"digest child exceeded its {digest_address_space_bytes(config) // _MIB} MiB "
                 "address-space ceiling",
                 now=now,
+                trip=block,
             ),
+            catalog_db=catalog_db,
         )
         return None
     except TripEndDigestUnavailableError as exc:
         write_digest_skipped(
             session_dir,
-            _child_failure(session_dir, config, exc.reason, str(exc), now=now),
+            _child_failure(session_dir, config, exc.reason, str(exc), now=now, trip=block),
+            catalog_db=catalog_db,
         )
         return None
     except Exception as exc:  # noqa: BLE001 — a digest is a report, not a gate
@@ -450,15 +472,17 @@ async def handle_trip_end_off_loop(  # noqa: PLR0913
                 REASON_CHILD_FAILED,
                 f"{type(exc).__name__}: {exc}",
                 now=now,
+                trip=block,
             ),
+            catalog_db=catalog_db,
         )
         return None
     finally:
-        if _IN_FLIGHT.get(session_dir) is current_task:
-            _IN_FLIGHT.pop(session_dir, None)
+        if _IN_FLIGHT.get(flight) is current_task:
+            _IN_FLIGHT.pop(flight, None)
 
-    if trip is not None:
-        digest = dataclasses.replace(digest, trip=trip_block(trip, session_dir))
+    if block is not None:
+        digest = dataclasses.replace(digest, trip=block)
     payload = persist_digest(session_dir, digest, catalog_db=catalog_db)
     if payload is None:
         return None
@@ -508,6 +532,7 @@ def _child_failure(
     detail: str,
     *,
     now: datetime | None,
+    trip: dict[str, Any] | None = None,
 ) -> DigestSkipped:
     """A refusal sidecar for a failure that happened *after* the pre-flight.
 
@@ -526,7 +551,21 @@ def _child_failure(
         row_budget=budgets.row_budget,
         span_seconds=budgets.span_seconds,
         span_budget_seconds=budgets.span_budget_seconds,
+        trip=trip,
     )
+
+
+def _trip_already_digested(session_dir: Path, key: str, *, named: bool) -> bool:
+    """Whether this trip end was already answered with a digest.
+
+    A trip the tracker named is answered when *its* digest exists. A call that
+    names no trip (an on-demand read, the shutdown fallback with no trip open)
+    asks about the session as a whole: it is answered when any trip in it has a
+    digest, whichever one the top level currently shows.
+    """
+    if named:
+        return read_trip_digest(session_dir, key) is not None
+    return any(record["status"] == "digest" for record in list_trip_records(session_dir))
 
 
 def record_trip_end_unobservable(
@@ -535,6 +574,8 @@ def record_trip_end_unobservable(
     detail: str,
     *,
     now: datetime | None = None,
+    trip: TripEnd | None = None,
+    catalog_db: Path | None = None,
 ) -> DigestSkipped | None:
     """Record that no usable speed source could see this session's drive end.
 
@@ -546,15 +587,27 @@ def record_trip_end_unobservable(
     beyond Parquet footers. Blocking file I/O, so the daemon calls it in a
     thread.
 
-    Never replaces an answer already on disk — a computed digest, or a more
-    specific refusal (a row budget, a failed child) — and never writes into a
-    directory that is not a session (replay output describes no drive).
+    Never replaces an answer already on disk *for the same trip* — a computed
+    digest, or a more specific refusal (a row budget, a failed child) — and never
+    writes into a directory that is not a session (replay output describes no
+    drive). ``trip`` (D03.63) is the tracker's end: a drive whose speed was lost
+    is one trip among those in the session, so an earlier trip's answer does not
+    stand in for it. Without one the whole session is the trip, as before.
     Returns what it wrote, or ``None``.
     """
 
     if not is_session_dir_name(session_dir.name) or not session_dir.is_dir():
         return None
-    if read_digest(session_dir) is not None or read_digest_skipped(session_dir) is not None:
+    block = None if trip is None else trip_block(trip, session_dir)
+    key = trip_key(block)
+    if block is None:
+        # No trip named: the session is the unit, and any answer on disk stands.
+        if list_trip_records(session_dir):
+            return None
+    elif (
+        read_trip_digest(session_dir, key) is not None
+        or read_trip_digest_skipped(session_dir, key) is not None
+    ):
         return None
     budgets = DigestBudgets.of(session_dir, config)
     skipped = DigestSkipped(
@@ -567,8 +620,9 @@ def record_trip_end_unobservable(
         row_budget=budgets.row_budget,
         span_seconds=budgets.span_seconds,
         span_budget_seconds=budgets.span_budget_seconds,
+        trip=block,
     )
-    write_digest_skipped(session_dir, skipped)
+    write_digest_skipped(session_dir, skipped, catalog_db=catalog_db)
     return skipped
 
 
@@ -597,7 +651,7 @@ def handle_trip_end(
     """
     if emitter is not None:
         emitter.reset_notification_count()
-    if read_digest(session_dir) is not None:
+    if _trip_already_digested(session_dir, SESSION_TRIP_KEY, named=False):
         return None
     digest = get_or_compute_digest(session_dir, config, now=now, catalog_db=catalog_db)
     if digest is None:

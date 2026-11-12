@@ -1249,6 +1249,9 @@ def test_get_session_digest_returns_computed_shape(
     assert (session / "digest.json").exists()
     again = client.get(f"/control/sessions/{session_id}/digest", headers=headers)
     assert again.json() == body
+    # D03.63: the response lists every trip's answer; the sidecar does not carry it.
+    assert [trip["status"] for trip in body["trips"]] == ["digest"]
+    assert "trips" not in json.loads((session / "digest.json").read_text())
 
 
 def test_get_session_digest_404_for_missing_session(
@@ -1294,6 +1297,73 @@ def test_get_session_digest_409s_with_the_reason_when_refused(
     assert detail["digest_skipped"]["span_budget_seconds"] == 1
     assert detail["digest_skipped"]["row_budget"] is None
     assert not (session / "digest.json").exists()
+
+
+def test_get_session_digest_409_lists_the_trips_a_session_held(
+    config: CanaryConfig, anomalies_dir: Path
+) -> None:
+    """D03.63: the newest trip was refused while an earlier one has its digest.
+    The route answers about the newest (409, with its reason) and ``trips``
+    shows the earlier digest exists, so it is not invisible."""
+    from dataclasses import replace
+
+    from src.analysis.digest import (
+        DigestSkipped,
+        SessionDigest,
+        write_digest,
+        write_digest_skipped,
+    )
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
+
+    session_id = "2026-07-19T120000"
+    session = config.collection.storage_path / session_id
+    records = [TelemetryRecord.obd(1_779_400_000.0 + i, "SPEED", 60.0, "km/h") for i in range(10)]
+    write_records_to_parquet(records, session, max_rows=10_000)
+    first = {"started_at": "2026-07-19T12:00:00Z", "stopped_at": "2026-07-19T12:05:00Z"}
+    second = {"started_at": "2026-07-19T13:00:00Z", "stopped_at": "2026-07-19T13:05:00Z"}
+    digest = SessionDigest(
+        schema_version=2,
+        computed_at="2026-07-19T12:06:00Z",
+        session_id=session_id,
+        duration_seconds=1.0,
+        mode_seconds={},
+        anomaly_counts_by_source={},
+        top_behavior_deviations=[],
+        fingerprint_top_movers=[],
+        new_dtcs=[],
+        new_ledger_events=[],
+        trip=first,
+    )
+    write_digest(session, digest)
+    write_digest_skipped(
+        session,
+        replace(
+            DigestSkipped(
+                schema_version=2,
+                session_id=session_id,
+                reason="child_failed",
+                detail="boom",
+                recorded_at="2026-07-19T13:06:00Z",
+                row_count=10,
+                row_budget=None,
+            ),
+            trip=second,
+        ),
+    )
+    assert not (session / "digest.json").exists()
+
+    app = create_app(config, anomalies_dir=anomalies_dir, control_token="secret")
+    response = TestClient(app).get(
+        f"/control/sessions/{session_id}/digest", headers={"Authorization": "Bearer secret"}
+    )
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["digest_skipped"]["reason"] == "child_failed"
+    assert [(t["status"], t["started_at"]) for t in detail["trips"]] == [
+        ("digest", first["started_at"]),
+        ("skipped", second["started_at"]),
+    ]
 
 
 def test_get_session_digest_route_updates_the_catalog(tmp_path: Path) -> None:
