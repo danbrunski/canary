@@ -1118,6 +1118,48 @@ Both routines run in the main cycle (task `0x0219D0` entries 56 and 57).
   `0xFFFF2D0C`, the `0xFFFF47xx` monitor bits, `0xFFFF1736` and the sentinel
   timer.
 
+### Cold and warm-up fuelling, first pass (F01.3, 2026-11-12)
+
+- **No Cold Fuel Comp table on this ROM.** UpRev's guide says the Cold table
+  exists "depending on the ROM being used". Here, the only callers of the
+  Fuel Comp wrapper `0x026A24` are `Fuel_state_init` (`0x02DC44`, once at
+  reset) and the per-cycle lookup (`0x03D0F4`). Both pass the slot table
+  `0xFFFFB6A0` with axes `0xCACD`/`0xCB29`. No other code loads those axis
+  addresses or the table base, and an opcode scan finds no other access to
+  `0xFFFFB6A0`–`0xFFFFB79F`. The alternate BFS `w1282`, selected by
+  `0xFFFF2838` bit 6, is BFS plus a transient term (`INJ_transient_cyl_task`,
+  `0x0528FC`), not a cold table. Below 70 °C this engine fuels through the φ
+  corrections.
+- **`L175C`, the warm-up enrichment** (`0x0537AE`). Its regime is set by
+  F01.2's flags:
+  - While the closed-loop ready latch `0xFFFF26B9` is clear (and not
+    `0xFFFF2867` bit 6), it is (`w1762` + `w1726`) × `w14DA` >> 14.
+  - `w14DA` falls by 49 per call once both banks' loop conditions
+    (`0xFFFF1796`) hold, so the enrichment fades out as closed loop arrives.
+  - `w1762` = `w1760` − (`b173F` × (`w1760` − curve `0xC774`[rescaled
+    coolant] << 8)) >> 8: a blend toward a coolant curve, with
+    `b173F` = (`b17FD` × 166 + `b17FE` × …) >> 8. Inputs are not identified.
+  - With the latch set, a second formula applies, in `w1765`, `b173F`,
+    `w1802`, `b1BB7` × `w1820` and `w3716`; it is not decoded further.
+- **The curve term `w27DC`** (`0x055966`) applies only during F01.2's
+  post-transition STFT hold: `0xFFFF135F` bits 0 and 1, the multiplier at
+  `0x4000`, the ready latch set, and `0xFFFF2A90` clear. Its input
+  max(`0xFFFF2D10`, `0xFFFF2D14`) is a per-bank state that `0x05F970` (main
+  entry 53) computes from the measured A/F's excess over 14.7, or from the
+  command when a sensor is not in use. It goes through a two-stage
+  estimator (`0x05FB6A`, `0x0605EA`; states `0xFFFF2D38`/`2D44`). `0x05BC58`
+  (main entry 58) presets it to `0x1820` once. That this is a catalyst
+  oxygen-storage estimate, enriching after a lean excursion such as a fuel
+  cut, is inferred.
+- **Multiplier hold `0xFFFF2947`.** A 10.24 ms byte timer (F01.1), loaded
+  with cal `0x879E` = 2 by `0x05687E` while `0xFFFF2BA9` < `0x20`. So it
+  forces the multiplier to `0x4000` for about 20 ms. `0xFFFF2BA9` is still
+  unidentified.
+- **Not done:** the start and minimum pulse curves, the wall-film term's
+  purpose, `0xFFFF1114`/`0xFFFF10C6` (their stores are indexed, and the
+  opcode scan does not resolve them), and the vehicle check, a cold-start
+  capture that reproduces `mem:ECM_TARGET_EQUIV_RATIO`.
+
 ### Scheduler and task tables (F01.1, 2026-11-12)
 
 The application's vector base is VBR = `0x20004` (vector v at
@@ -1151,23 +1193,43 @@ The application's vector base is VBR = `0x20004` (vector v at
   then calls `0x020EF2`, which clears the bit at its start (`0x20F24`). A
   cycle that overruns is not caught up: the period is 10.24 ms nominal and
   longer under load, so it must be measured, never assumed.
-- **The event-flag byte `0xFFFF84BB` and its snapshots.** Each group copies
-  `84BB` to its own snapshot after running: `84BD` (1 ms group), `84BE`
-  (2 ms), `84BF` (4 ms, `0x20BF6`), `84C0` (10 ms, `0x20CEA`), `84C1`
-  (`84BA`.7 group), `84C2` (`84BA`.6 group). The main cycle starts with
-  `84C3 ← 84C4`, `84C4 ← 84BB` (`0x20F26`–`0x20F36`), so during cycle k,
-  `84C3` holds `84BB` as of the start of cycle k−1. Readers of `84C3` test
-  bit 7 (77 sites), bit 6 (48), bit 5 (13) and bit 4 (1); every enrichment
-  timer steps on bit 7, and the VTC start delay counts 30 of them.
-  - **No writer of `0xFFFF84BB` was found**: not by Ghidra references, an
-    opcode scan of every `0xFFFF84B8`-word access, data words, the GBR bases
-    of the seeded functions, nor emulation of startup plus 1,200 ticks and 120
-    main cycles (with and without crank segments every 3 ticks). Emulation
-    writes it only in the RAM test (`0x08ED32`–`0x08ED6A`). The writer is
-    either a computed address or a path the emulator's peripheral model never
-    reaches. So the rate of `84C3` bit 7 (application model
-    `enrichment_tick_rate`) is a vehicle read: sample `0xFFFF84B9`–`0xFFFF84C4`
-    repeatedly in one window at KOEO and at idle.
+- **The time base and its event bytes.** The tick ISR keeps a 32-bit tick
+  counter `0xFFFF84B0` (+1 per tick, `0x0204F0`) and a cascade of dividers.
+  Each divider ORs one event bit into every per-consumer event byte (`84BC`,
+  `84BD`–`84C2`, `84C4`):
+
+  | Bit | Period | Divider | Set at |
+  |---|---|---|---|
+  | `0x80` | 10 ticks, 10.24 ms | `0xFFFF9EA4` | `0x02071A`–`0x02075C` |
+  | `0x40` | 100 ticks, 102.4 ms | `0xFFFF9EA8` | `0x020810`–`0x020846` |
+  | `0x20` | 1,000 ticks, 1.024 s | `0xFFFF9EAA` | `0x02084E`–`0x020880` |
+  | `0x10` | 10,000 ticks, 10.24 s | `0xFFFF9EAC` | `0x020890`–`0x0208C2` |
+
+  Each consumer clears its own byte after reading it, by copying `0xFFFF84BB`
+  into it. `84BB` is never written after the RAM test, so it reads 0. That is
+  why F01.1's search for its writer found none. The dispatcher clears `84BD`
+  (1 ms group), `84BE` (2 ms), `84BF` (4 ms, `0x20BF6`), `84C0` (10 ms,
+  `0x20CEA`), `84C1` (`84BA`.7 group) and `84C2` (`84BA`.6 group) after each
+  group runs. The main cycle starts with `84C3 ← 84C4` and then `84C4 ← 84BB`
+  (`0x20F26`–`0x20F36`).
+  - **So `84C3` holds the events since the previous main-cycle start.** Its
+    readers test bit 7 (77 sites), bit 6 (48), bit 5 (13) and bit 4 (1).
+  - **Every enrichment timer steps on bit 7**: once per main cycle, nominally
+    10.24 ms. When a cycle overruns past the next boundary, two events
+    coalesce into one step, so the timers run slow under load rather than
+    catching up. The VTC start delay is 30 steps, about 0.31 s.
+  - **Byte timers.** The same ISR also decrements arrays of byte and word
+    timers, each at one of three rates. Every tick: `0xFFFF2A71`,
+    `0xFFFF2ABC`, `0xFFFF4A99`, `0xFFFF4BAA`. Every 10.24 ms:
+    `0xFFFF28FD`–`0xFFFF29A7`, so `0xFFFF2947`, the multiplier's hold
+    counter (loaded with cal `0x879E` = 2 by `0x05687E`), lasts 20 ms. Every
+    102.4 ms: `0xFFFF28BC`, `0xFFFF2A96`, `0xFFFF485C`, `0xFFFF4B7E`.
+  - The 1.024 ms tick rests on the inferred Pφ 20 MHz. Two host-timestamped
+    reads of `0xFFFF84B0` measure it, and settle `enrichment_tick_rate`
+    together with the run-time words below.
+  - (Earlier on 2026-11-12, before the ISR was read, this section said `84C3`
+    held `84BB` from one cycle earlier and that `84BB`'s writer was missing.
+    Both were wrong; the emulation simply never wrote it.)
 - **Run-time words.** The dispatcher times each group with the free-running
   ATU counter `0xFFFFF430`: `0xFFFF2380` (background/main), `0xFFFF204C`,
   `0xFFFF2060`, `0xFFFF20E8` (4 ms group), `0xFFFF224C`, `0xFFFF2250`,
@@ -1216,10 +1278,9 @@ The application's vector base is VBR = `0x20004` (vector v at
 - **Disassembly gaps:** seeded 2026-11-12 (F01.1): every task-table entry is
   now a function, and about 0.9 KB of unreferenced code remains ("Scheduler
   and task tables"). A "no store found" search is evidence for anything a
-  task table reaches; it is still not evidence for a computed address, which
-  is how `0xFFFF84BB` escapes it.
-- **Scheduler timing (vehicle):** the `0xFFFF84B9`–`0xFFFF84C4` flag reads,
-  two timed reads of `0xFFFFF430`, and the run-time words, to give the real
-  main-cycle period and the `84C3` bit-7 rate.
+  task table reaches; it is still not evidence for a computed address.
+- **Scheduler timing (vehicle):** two timed reads of the tick counter
+  `0xFFFF84B0` (Pφ) and of `0xFFFFF430` (the run-time words' clock), and the
+  run-time words, to give the real main-cycle period under load.
 - **Short-pulse stage (vehicle):** `0xFFFF279C` against `0xFFFF27A8` at hot
   idle.

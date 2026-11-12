@@ -72,12 +72,16 @@ Same conventions as the other task files: task-level truth is the checkboxes,
     listing regenerated; all 254 entries of the eight task tables
     (`0x021818`–`0x021BE8`) resolve to functions, including the three that did
     not (`0x0726DC`, `0x05152C`, `0x051F48`). Group periods, the main-cycle
-    trigger and the `84BB` → `84C3` snapshot chain are in the firmware doc,
-    "Scheduler and task tables"; `enrichment_tick_rate` is narrowed. Not
-    decodable at the desk: no writer of `0xFFFF84BB` (references, opcode scan,
-    emulation of 1,200 ticks), and the clock of the ATU counter `0xFFFFF430`.
-    Owed on the truck: repeated window reads of `0xFFFF84B9`–`0xFFFF84C4` at
-    KOEO and idle, two timed reads of `0xFFFFF430`, and the run-time words.
+    trigger and the time base are in the firmware doc, "Scheduler and task
+    tables". The ISR's divider cascade sets `84C3` bit 7 every 10.24 ms, bit 6
+    every 102.4 ms, bit 5 every 1.024 s and bit 4 every 10.24 s. Each
+    enrichment step is one main cycle that saw a 10.24 ms event (nominal
+    10.24 ms; steps coalesce on overrun). `0xFFFF84BB` is the constant-zero
+    clear source, not an event source. The byte-timer arrays tick at 1.024 ms,
+    10.24 ms or 102.4 ms. `enrichment_tick_rate` is narrowed to Pφ and
+    overrun. Owed on the truck: two host-timestamped reads of the tick counter
+    `0xFFFF84B0` (the acceptance's paced counter) and of `0xFFFFF430` (the
+    run-time words' clock, not decoded), plus the run-time words.
     Side finding: `~/ecu-re` SeedCode.java's prologue mask `0xF0FF` can never
     match `mov.l Rn,@-r15` (needs `0xFF0F`), and it skipped GBR-saving
     prologues.
@@ -133,6 +137,21 @@ Same conventions as the other task files: task-level truth is the checkboxes,
   - **Accept:** the cold table is in `rom_map.yaml` with its reader; each
     correction input has a name and a source; a cold-start capture reproduces
     `mem:ECM_TARGET_EQUIV_RATIO` from coolant and time since start.
+  - [~] 2026-11-12, first desk pass. **This ROM has no Cold Fuel Comp
+    table**: both calls of the Fuel Comp wrapper read the one slot table, and
+    nothing else touches its axes or RAM copy. UpRev's guide says the cold
+    table is ROM-dependent. The acceptance's first clause becomes "shown
+    absent", and `uncovered: cold_fuel_comp_table` is removed (the evidence is
+    on node `fuel_comp_lookup`).
+    - Warm-up enrichment `L175C` runs while F01.2's ready latch is clear and
+      fades out (`w14DA` −49 per call) once the loop conditions hold.
+    - `w27DC`'s input `0xFFFF2D10`/`2D14` is a per-bank estimator state from
+      the A/F excess over 14.7, applied only in the post-transition STFT
+      hold; a catalyst oxygen-storage estimate, inferred.
+    - The hold counter `0xFFFF2947` is a 10.24 ms byte timer, about 20 ms.
+    - Firmware doc: "Cold and warm-up fuelling, first pass".
+    - Not done: `0xFFFF1114`/`10C6`, the start and min pulse curves, the wall
+      film's purpose, `0xFFFF2BA9`, and the cold-start capture.
 
 - [ ] **F01.4 The short-pulse correction.** Cal `0x9120`–`0x9126`, applied
   after DID `0x1206` is taken, undecoded (`short_pulse_undecoded`).

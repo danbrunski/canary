@@ -259,11 +259,11 @@ ram:
   - {address: 0xFFFF26B8, width: 8, signed: false, name: fuel_cut_state, units: enum, confidence: observed,
      meaning: '0x3F during fuel cut: the final word is written 0 (the twin''s sentinel).'}
   - {address: 0xFFFF84C3, width: 8, signed: false, name: task_tick_flags, units: flags, confidence: code,
-     meaning: 'Bit 7 gates every ramp and timer step.'}
+     meaning: 'Events since the previous main-cycle start: bit 7 a 10.24 ms boundary, bit 6 102.4 ms, bit 5 1.024 s, bit 4 10.24 s (set by the tick ISR in 0xFFFF84C4, copied at cycle start, F01.1). Bit 7 gates every ramp and timer step, so they step once per main cycle and coalesce when one overruns.'}
   - {address: 0xFFFF84C4, width: 8, signed: false, name: task_tick_flags_next, units: flags, confidence: code,
-     meaning: 'Pipeline stage between 0xFFFF84BB and 0xFFFF84C3.'}
+     meaning: 'Event accumulator: the tick ISR ORs 0x80/0x40/0x20/0x10 into it every 10/100/1,000/10,000 ticks (0x02072E-0x0208C2); the main cycle copies it to 0xFFFF84C3 and clears it.'}
   - {address: 0xFFFF84BB, width: 8, signed: false, name: task_tick_flags_source, units: flags, confidence: code,
-     meaning: 'Source of the tick flags.'}
+     meaning: 'Never written after the RAM test, so it reads 0: the main cycle copies it into 0xFFFF84C4 as the clear (F01.1).'}
   # -- correction operands
   - {address: 0xFFFF1114, width: 8, signed: false, name: unidentified_1114, units: raw_counts, confidence: unknown,
      meaning: 'Threshold input (0xA0/0xAA) to the 0xFFFF1736 gate.'}
@@ -625,7 +625,8 @@ nodes:
       0xFFFF26B8 -> 0xFFFF26C6 (one 14-byte copy); 0xFFFF1083 -> 0xFFFF1079
       (10 bytes); 0xFFFF1202 -> 0xFFFF11CA, 0xFFFF1207 -> 0xFFFF11CF and
       0xFFFF1210 -> 0xFFFF11D8 (one 0x38-byte copy); 0xFFFF104E -> 0xFFFF103E;
-      0xFFFF103A -> 0xFFFF1038; 0xFFFF84BB -> 0xFFFF84C4 -> 0xFFFF84C3;
+      0xFFFF103A -> 0xFFFF1038; 0xFFFF84C4 -> 0xFFFF84C3 then 0xFFFF84BB (0)
+      -> 0xFFFF84C4, which clears the event accumulator;
       0xFFFF1177 -> 0xFFFF10EB (the 0x8C-byte block 0x53 bytes below each,
       E09.7: the base timing term's charge factor).
     rounding: none
@@ -898,6 +899,7 @@ nodes:
     implemented_by: src.decode.air_charge.rpm_load_lookup
     evidence:
       - 'listing 0x03D06E-0x03D100 (call 0x03D0F4, store 0x03D100); 0x02D5F4 at 0x02DC44'
+      - 'no cold variant (F01.3, 2026-11-12): the two calls above are the only callers of 0x026A24 and the only loads of the axis addresses 0xCACD/0xCB29 or the table base 0xFFFFB6A0 in the listing, and an opcode scan finds no other access to 0xFFFFB6A0..0xFFFFB79F. UpRev''s Cold Fuel Comp exists only on some ROMs; below 70 degC this one fuels through the phi corrections.'
       - 'docs/ecu-firmware-analysis.md "Map-slot tables": the wrapper 0x026A24 is 0x0269AC apart from the size; UpRev''s grid equals the table row-major 256/256'
 
   - id: fill_coefficient
@@ -2493,15 +2495,34 @@ uncovered:
       window (0xFFFF2841) in one window set through pedal crossings near
       78 % requested opening, plus 0xFFFF2D28 and 0xFFFF1A64.
   - id: multiplier_hold_counter
-    where: '0xFFFF2947 (set to 2 at init and while 0xFFFF2BA9 < 0x20); its decrement was not found'
+    where: >-
+      0xFFFF2947 (set to cal 0x879E = 2 at init and by 0x05687E while
+      0xFFFF2BA9 < 0x20). Its countdown is found (F01.1, 2026-11-12): it is
+      slot 0x4A of the byte-timer array 0xFFFF28FD..0xFFFF29A7 that the tick
+      ISR decrements every 10.24 ms (0x02067E), so a load holds the
+      multiplier at 0x4000 for about 20 ms. Left: what 0xFFFF2BA9 is.
     blocks: 'knowing when the multiplier is forced to 0x4000'
-    next_evidence: 'Find the countdown (likely an indexed timer table); identify 0xFFFF2BA9.'
+    next_evidence: 'Identify 0xFFFF2BA9 (its writer); read it with 0xFFFF2947 and 0xFFFF26C0 in one window during a tip-in.'
   - id: enrichment_flags
-    where: '0xFFFF26B9 bits 0/1, 0xFFFF1796 bits 0/1, 0xFFFF135F bits 0/1, 0xFFFF2A90, 0xFFFF2833 bit 4, 0xFFFF10C5'
+    where: >-
+      0xFFFF2A90, 0xFFFF2833 bit 4, 0xFFFF10C5. Identified by F01.2
+      (2026-11-12, arbitration 0x05CCD0): 0xFFFF26B9 bits 0/1 are the
+      closed-loop ready latch, 0xFFFF1796 bits 0/1 the latch's conditions
+      (time since start, coolant, A/F sensor ready), 0xFFFF135F bits 0/1 the
+      post-transition STFT hold (override closed_loop_feedback_stft).
     blocks: 'gating of the three corrections and the curve term'
     next_evidence: 'Trace each writer; read them in the fuel window alongside the corrections.'
   - id: correction_inputs
-    where: '0xFFFF1114, 0xFFFF10C6, 0xFFFF2D10/2D14, w1762/w1726/w14DA (0xFFFF1077 is now identified: the rescaled coolant byte, node coolant_rescale)'
+    where: >-
+      0xFFFF1114, 0xFFFF10C6 (stores indexed, not resolved), w1726, and the
+      inputs of w1762's blend (0xFFFF17FD/17FE) and of the latched branch of
+      0x0537AE. Narrowed by F01.3 (2026-11-12): w14DA is the warm-up fade (-49
+      per call once both banks' loop conditions hold); w1762 blends w1760
+      toward curve 0xC774 on the rescaled coolant; 0xFFFF2D10/2D14 are a
+      per-bank estimator state from the measured A/F's excess over 14.7
+      (0x05F970, preset 0x1820 by 0x05BC58; a catalyst oxygen-storage
+      estimate, inferred). 0xFFFF1077 is the rescaled coolant byte (node
+      coolant_rescale).
     blocks: 'computing 0xFFFF26F6 and 0xFFFF27DC'
     next_evidence: 'Trace writers; until then observe 0xFFFF26F6 and 0xFFFF27DC directly.'
   - id: other_174b_readers
@@ -2553,20 +2574,19 @@ uncovered:
       and check timing_term_27c6_chain against each read (E05.4 (c)).
   - id: enrichment_tick_rate
     where: >-
-      0xFFFF84C3 bit 7 (the tick every enrichment timer steps on) and the
-      0x020EF2 cycle period. Narrowed by F01.1 (2026-11-12): 84C3 is the main
-      cycle's one-cycle-delayed copy of the event-flag byte 0xFFFF84BB
-      (84C3 <- 84C4 <- 84BB at 0x20F26-0x20F36); the cycle is nominally
-      10.24 ms but not caught up when late. No writer of 84BB was found by
-      reference, opcode scan or emulation, so its set rate is not decodable
-      at the desk.
-    blocks: 'predicting enrichment transition timing (E05.3); a measured requirement, never fitted'
+      Decoded at the desk by F01.1 (2026-11-12): 0xFFFF84C3 bit 7 is set when
+      a 10.24 ms boundary (every 10th tick of the 1.024 ms ISR) passed since
+      the previous main-cycle start, so every enrichment timer steps once per
+      main cycle, nominally 10.24 ms, and a step is lost when a cycle
+      overruns past the next boundary. Left: the tick itself rests on the
+      inferred Pclock 20 MHz, and how often cycles overrun under load.
+    blocks: 'predicting enrichment transition timing (E05.3) in seconds rather than cycles; a measured requirement, never fitted'
     next_evidence: >-
-      Vehicle: sample 0xFFFF84B9..0xFFFF84C4 repeatedly in one window at KOEO
-      and at idle (how often 84BB/84C3 bit 7 is set), two host-timestamped
-      reads of the ATU counter 0xFFFFF430, and the run-time words (0xFFFF2380
-      and the peak-holds listed in docs/ecu-firmware-analysis.md "Scheduler
-      and task tables") for the real cycle period. Also same-window reads of
+      Vehicle: read the 32-bit tick counter 0xFFFF84B0 (+1 per tick,
+      0x0204F0) twice, host-timestamped, a few seconds apart at KOEO and at
+      idle; ticks per second gives Pclock. The run-time word 0xFFFF2380 and
+      its peak-hold (docs/ecu-firmware-analysis.md "Scheduler and task
+      tables") give the cycle period under load. Also same-window reads of
       0xFFFF1742..0xFFFF1749 and 0xFFFF14C4/0xFFFF14C5 while a request is held.
   - id: slot_0x260_map
     where: 'slot +0x260 (RAM 0xFFFFB2A0), >= 21 readers through 0x026B14'
@@ -2601,13 +2621,6 @@ uncovered:
       fuel_cut_recovery_slew limit (it holds only if 0xFFFF26B8 is cleared
       after the fuel task in the cycle)
     next_evidence: 'Desk, with the listing (~/ecu-re, not on every machine): find every store to 0xFFFF26B8 and its task-table entry.'
-  - id: cold_fuel_comp_table
-    where: >-
-      UpRev documents a Cold Fuel Comp table used below 70 degC. The traced
-      Fuel Comp lookup (0x03CC3C, 0x03D06E-0x03D100) reads only the slot
-      table at 0xFFFFB6A0 and has no coolant branch in that span.
-    blocks: 'warm-up BFS below 70 degC (base_fuel_schedule_word); a warm-up override may be missing from overrides'
-    next_evidence: 'Desk: locate the cold table in the calibration block and find its readers.'
 
 # E05.3 (d): command overrides by regime, each a traced condition -> effect
 # with how it was established and how far it has been checked. Consolidated
@@ -2839,7 +2852,7 @@ overrides:
     confidence: code
     evidence: ['listing 0x0566BE-0x0568B4 (node enrichment_multiplier)']
     qualification: traced
-    gaps: ['the tick rate of 0xFFFF84C3 bit 7 is not decoded (uncovered enrichment_tick_rate), so the ramp''s duration in time is unknown']
+    gaps: ['each step is one main cycle that saw a 10.24 ms event (F01.1); the real cycle period, and so the ramp''s duration under load, is a vehicle read (uncovered enrichment_tick_rate)']
     verify_with: 'E05.3 (b): 0xFFFF14C4-0xFFFF14C5, 0xFFFF1742-0xFFFF1749, 0xFFFF2866, 0xFFFF2875, 0xFFFF2876, 0xFFFF174B and 0xFFFF26C0 held through enrichment entry and exit in each rpm band.'
 
   - id: command_cap_and_slew
