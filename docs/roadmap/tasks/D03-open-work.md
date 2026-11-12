@@ -2521,7 +2521,7 @@ that closed its task checklist.
     *2026-09-24 16:04Z key-on (Pi up since 04:55Z):* `/status.gps` showed a fix
     within ~1 min of the engine starting (fix_quality 1, 10 satellites, HDOP
     1.07, 2,014 m). One good start; the 09-23 no-fix drive stays unexplained.
-- [ ] **`tuning` memory windows gap for seconds right after a daemon start
+- [x] **`tuning` memory windows gap for seconds right after a daemon start
   (2026-10-27).** `_capture-tuning-2026-10-27T160919` started 29 s after a
   daemon restart and stopped with `fail`: `rate_shortfall` (the 4 Hz batch at
   its planned 2–3.4 Hz, which is expected) and `acquisition_gap`.
@@ -2533,6 +2533,51 @@ that closed its task checklist.
   long after boot. If it only follows a start, look at the memory scheduler's
   first minute (session 0xC0 re-entry, window verify) before calling it a
   fault.
+  - **Answered 2026-11-12 (laptop, four captures): it is not start-related,
+    and most of it is not a gap.** `~/canary-data/analysis-scripts/2026-11-12/target_gaps.py`
+    walked every `ECM_TARGET_EQUIV_RATIO` long gap in
+    `_capture-tuning-2026-11-10T170119`, `-11-11T174602`, `-11-12T010305` and
+    `-11-12T034249`, all `acquisition_gap`, on the wire-arrival clock.
+    - **54 of 66 gaps (381 of 407 s) are fuel cut.** Throttle closed (PID 0x11
+      5–12 %), rpm 1,400–5,300, and `mem:ECM_TARGET_EQUIV_RATIO_SENTINEL` read
+      every ~0.5 s through each one. The window was read on cadence; the word
+      was zero. The scorer counts the main channel's silence as a gap
+      (D03.69).
+    - **12 are real window gaps, 2.5–4.1 s, about three per 20 minutes.**
+      `ECM_ENGINE_PERIOD` (same window) goes silent at the same instants while
+      the spark window keeps reading. They do not follow a start: the 11-11
+      capture, begun about 20 min after its daemon came up, has none, and the
+      03:42 capture, begun about a minute after boot, has four spread to
+      1,195 s. Several sit at a throttle opening (89, 56, 56 %), some at idle.
+      Cause not identified (D03.70).
+- [ ] **D03.69 A fuel-cut sentinel is scored as an acquisition gap.** A memory
+  channel with a `sentinel_raw` decodes a zero word to
+  `mem:<NAME>_SENTINEL` instead of a value (AGENTS.md: a sentinel is a state).
+  Both feeders of the gap ledger key on the exact channel name: the live
+  `obd_scheduler.metrics.record_read` → `capture_lifetime.observe`, and the
+  post-hoc `capture_coverage.channel_lifetimes_from_rows`. So a fuel cut reads
+  as the main channel falling silent, and every `tuning` capture with a decel
+  fails `acquisition_gap`. On the four captures above, 54 of 66
+  target-word gaps are this. The unanswered check already treats a sentinel
+  as an answer (`capture_quality._lifetime_row`); the gap timeline does not.
+  - Fix in one shared place, used by both feeders, so a sentinel read
+    observes its main channel for coverage and gaps. The sentinel channel
+    keeps its own rows.
+  - A true silence (no value and no sentinel) still scores as a gap.
+  - **Accept:** a test where a sentinel-only stretch leaves no long gap while
+    a real silence still does, on both the live ledger and the rebuild.
+    Re-scoring the four captures above drops the target word's long gaps to
+    the 12 real ones.
+- [ ] **D03.70 The `fuel_target` memory window misses 2.5–4 s at a time, about
+  three times per 20 minutes.** From the item above: `ECM_TARGET_EQUIV_RATIO`
+  and `ECM_ENGINE_PERIOD` drop together with no sentinel read while the spark
+  window keeps reading. 12 such gaps on four captures, at
+  throttle openings and at idle alike, not tied to daemon start.
+  - Owed: the daemon log (`journalctl -u canary`) around those instants
+    (NRCs on 0x23, a session re-entry, scheduler starvation by a Mode 01
+    batch), and the memory scheduler's per-window counters if it keeps any.
+  - Until then, read the target word's silence beside `ECM_ENGINE_PERIOD`'s
+    before calling a gap real.
 - [x] **GNSS sees no satellites (since at least 2026-10-10).** The no-fix case
   above has come back, and this time it doesn't clear. Every GPS row in
   `2026-10-10T171856`, `_capture-tuning-2026-10-10T171518`,
