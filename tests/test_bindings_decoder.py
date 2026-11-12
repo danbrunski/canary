@@ -15,6 +15,7 @@ from src.decode.bindings import (
     is_plausible,
     load_bindings,
 )
+from src.yaml_load import YamlModelError
 from tools.decode_bindings import collect_stats
 
 # ---------------------------------------------------------------------------
@@ -270,8 +271,9 @@ signals: []
 made_up_field: hello
 """
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(YamlModelError, match="bindings.yaml") as refused:
         load_bindings(path)
+    assert "made_up_field" in str(refused.value)
 
 
 def test_load_actual_project_bindings():

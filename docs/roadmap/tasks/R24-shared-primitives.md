@@ -41,7 +41,7 @@ a fixture per caller proves it.
   - Must not change: any schema's accepted input. The YAML fixtures under
     `data/` loading unchanged is the test.
 
-- [ ] **R24.3 Load a YAML file into a model, once, with the file named in
+- [x] **R24.3 Load a YAML file into a model, once, with the file named in
   the error.** `Model.model_validate(load_yaml(path))` is written 35 times in
   `src/`, `scripts/` and `tools/`; thirteen sites also hash the file and cache
   the result, each its own way. Only `dyno_profile` guards an empty file.
@@ -49,12 +49,54 @@ a fixture per caller proves it.
   parse; `data/dids.yaml` (296 kB) about 10 ms to re-validate per call, and
   `read_channels` does that per call (R26.3); `/status` re-reads several per
   poll (R29.9).
-  - [ ] `load_yaml_model(path, Model)`: a validation error that names the
+  - [x] `load_yaml_model(path, Model)`: a validation error that names the
     file, the sha256 of the raw bytes for provenance, and a cache keyed by
     `(path, mtime_ns, size)`. Callers that mutate the result get a copy and
     say so.
-  - [ ] Migrate R26.3's catalogs and R29.9's status blocks first; they are
-    the ones with a measured cost.
+    Evidence: `src/yaml_load.py` `load_yaml_model(path, Model) ->
+    LoadedModel(model, sha256)`, `YamlModelError(ValueError)` (names the file,
+    keeps the pydantic detail as message and `__cause__`), cache keyed by
+    `(resolved path, st_mtime_ns, st_size, Model)` (64 entries),
+    `clear_yaml_model_cache()`. Empty file or a non-mapping document raises
+    `YamlModelError` naming the file (the `dyno_profile` rule, now the
+    helper's); failures are not cached. `tests/test_yaml_load_model.py`
+    (18 collected): file named, empty / comment-only / list, sha256 == hashlib
+    over the raw bytes, cache hit is the same object, per-Model-type entries,
+    re-read on mtime change and on size change, failure not cached.
+    Racy-stat guard (verifier finding): on this ext4/WSL2 kernel 1987 of 2000
+    back-to-back same-size writes kept the same `st_mtime_ns`, so a same-size
+    rewrite after a load was served stale (and the cached sha256 described the
+    wrong bytes). An entry cached within `RACY_WINDOW_NS` (2 s) of its file's
+    mtime is verified by reading the bytes and comparing sha256 (re-validate on
+    a difference); once verified after the window it settles and a hit is one
+    `stat`. Tests: `test_a_same_size_rewrite_straight_after_a_load_is_not_served_stale`
+    (200 same-size rewrites, no `os.utime`) and
+    `test_a_same_size_rewrite_with_an_identical_stat_is_reread` both fail with
+    the guard disabled (checked: `RACY_WINDOW_NS` forced negative, 2 failed,
+    16 passed) and pass with it; `test_a_settled_file_is_trusted_by_its_stat_alone`
+    and `test_a_racy_entry_settles_once_the_window_has_passed` pin the
+    steady-state cost (no byte read).
+    Mutation audit of `load_did_map` / `load_bindings` callers: none mutates
+    (static scan: the `model_copy(update=...)` sites build new models; the
+    `limits.py` `entry.unit` write is a builder entry, not the catalog). No
+    caller needed `model_copy(deep=True)`, so none pays for one; the helper's
+    docstring says callers must not mutate. Contract change: `load_bindings`
+    and `load_did_map` now raise `YamlModelError` (a `ValueError`) rather than
+    `ValidationError`; no `src`/`scripts`/`tools` caller catches
+    `ValidationError` from them (`plausibility_live` catches `ValueError`);
+    two tests (`test_bindings_decoder`, `test_bindings_validation`) updated.
+    Not migrated: the other ~30 `model_validate(load_yaml(...))` sites and
+    `dyno_profile` (own guard kept).
+  - [x] Migrate R26.3's catalogs and R29.9's status blocks first; they are
+    the ones with a measured cost. Scope done: the R26.3 catalogs
+    (`load_did_map`, `load_bindings`, hence `_Catalogs`) and the status path's
+    catalog read (`memory_verify_summary`, `src/control/calibration.py`, calls
+    `load_did_map`, so box 1 covers it; `src/dashboard/status.py` is no longer
+    held, R29.14 committed). R29.9's other `/status` costs (manifests, session
+    list, CPU) are JSON and directory reads, not YAML-model work, and belong to
+    R29.9. The other ~30 `model_validate(load_yaml(...))` sites (and
+    `dyno_profile`, which keeps its own guard) migrate as their files are
+    touched; none was migrated here.
   - Must not change: the bytes-keyed flash-history cache
     (`test_an_edited_flash_history_is_reread`).
 

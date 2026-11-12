@@ -34,7 +34,7 @@ from src.decode.memory_relations import (
 )
 from src.decode.slices import ByteSlice, LinearScale, PlausibleRange
 from src.paths import DIDS_YAML
-from src.yaml_load import load_yaml
+from src.yaml_load import load_yaml_model
 
 log = logging.getLogger(__name__)
 
@@ -762,21 +762,15 @@ class DidMap(_Strict):
 
 
 def load_did_map(path: Path) -> DidMap:
-    """Load and validate dids.yaml. Raises ValidationError on schema mismatch.
+    """Load and validate dids.yaml. Raises ``YamlModelError`` (a ``ValueError``
+    naming the file) on a parse or schema mismatch.
 
-    The YAML parse (libyaml when available) is cached by the file's
-    identity and stat, so an edited file is re-read; validation (~2 ms) runs
-    every call, so each caller gets its own model to mutate.
+    Cached by the file's identity and stat (:func:`src.yaml_load.load_yaml_model`),
+    so an edited file is re-read. Callers share the one model and none mutates
+    it (checked over every caller of this and ``load_bindings``, R26.3); one
+    that needs to should ``model_copy(deep=True)``.
     """
-    stat = path.stat()
-    raw = _parsed_yaml(str(path.resolve()), stat.st_mtime_ns, stat.st_size)
-    return DidMap.model_validate(raw)
-
-
-@lru_cache(maxsize=8)
-def _parsed_yaml(path: str, mtime_ns: int, size: int) -> Any:
-    del mtime_ns, size  # cache key only
-    return load_yaml(Path(path).read_text())
+    return load_yaml_model(path, DidMap).model
 
 
 # The repo catalog accessors (R01.2): the one cached loader of the checked-in

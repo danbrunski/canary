@@ -35,7 +35,7 @@ from src.decode.slices import (
     SentinelState,
     check_sentinel,
 )
-from src.yaml_load import load_yaml
+from src.yaml_load import load_yaml_model
 
 
 class _Strict(BaseModel):
@@ -297,9 +297,13 @@ def on_read_signals(bindings: Bindings) -> list[Signal]:
 
 
 def load_bindings(path: Path) -> Bindings:
-    """Load and validate a bindings.yaml file. Raises ValidationError on schema mismatch."""
-    raw = load_yaml(path.read_text())
-    return Bindings.model_validate(raw)
+    """Load and validate a bindings.yaml file. Raises ``YamlModelError`` (a
+    ``ValueError`` naming the file) on a parse or schema mismatch.
+
+    Cached by the file's identity and stat (:func:`src.yaml_load.load_yaml_model`);
+    callers share the one model and none mutates it (R26.3). One that needs to
+    should ``model_copy(deep=True)``."""
+    return load_yaml_model(path, Bindings).model
 
 
 def decode_raw(signal: Signal, data: bytes) -> int | None:

@@ -27,9 +27,9 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from src.decode.bindings import Signal, apply_scaling, decode_raw, is_plausible, load_bindings
+from src.yaml_load import YamlModelError
 
 SESSIONS_ROOT = Path("data/sessions")
 BINDINGS_PATH = Path("data/bindings.yaml")
@@ -149,5 +149,6 @@ def test_superseded_by_must_name_a_real_signal(tmp_path: Path) -> None:
         "    superseded_by: NAME_THAT_IS_NOT_HERE\n"
     )
 
-    with pytest.raises(ValidationError, match="superseded_by names no such signal"):
+    with pytest.raises(YamlModelError, match="superseded_by names no such signal") as refused:
         load_bindings(path)
+    assert str(path) in str(refused.value)

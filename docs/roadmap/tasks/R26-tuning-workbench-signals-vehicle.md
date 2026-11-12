@@ -87,16 +87,49 @@ The cross-cutting copies found here (`_aware`, `_iso`,
     unreachable when the same read fails, but it is the same shape; found by
     the verifier).
 
-- [ ] **R26.3 The catalogs are validated again on every `read_channels`.**
+- [x] **R26.3 The catalogs are validated again on every `read_channels`.**
   `channels.py` builds a `_Catalogs` per `raw_read_filters`, `read_channels`
   and `rescale_channel_rows` call. `decode/bindings.load_bindings` has no
   cache; `decode/dids.load_did_map` caches the parse and re-validates. Each
   measured about 10 ms on the laptop (pydantic over `data/dids.yaml`,
   296 kB). `read_channels` has 39 call sites; with R26.1 that is a quarter of
   a second of validation per session.
-  - [ ] A module cache keyed by `(path, mtime_ns, size)` that `_Catalogs`
+  - [x] A module cache keyed by `(path, mtime_ns, size)` that `_Catalogs`
     shares. `load_did_map`'s docstring says each caller gets its own model to
     mutate: find out whether any caller does, and return a copy only if so.
+    Evidence: `load_did_map` and `load_bindings` both go through
+    `src.yaml_load.load_yaml_model` (R24.3), so `_Catalogs` (unchanged) shares
+    one cached model per file; `dids._parsed_yaml` removed. No caller mutates
+    the returned models: a static scan of every `load_did_map`/`load_bindings`
+    caller in `src`, `scripts`, `tools` (the `model_copy(update=...)` sites
+    build new models), and the verifier's own AST scan agrees. A scratch pytest
+    plugin (not committed) that snapshotted each cached model's JSON and
+    compared on every hit also logged no drift across a 5923-test sweep of every
+    test file mentioning the loaders (1 unrelated failure, in
+    `test_plant_validation_ecu_outputs`). So no copy is returned.
+    `tests/test_yaml_load_model.py::test_an_edited_dids_yaml_is_picked_up_by_the_next_read_channels`
+    (edit in `tmp_path` seen by the next `read_channels` and `raw_read_filters`).
+    Measured on the laptop (median of 40 calls, hand-built 3-row frame with one
+    DID row, not a session; ratios, not Pi numbers), command
+    `.venv/bin/python <scratchpad>/bench.py` (loads `data/dids.yaml` and
+    `data/bindings.yaml`, times `load_did_map`, `load_bindings`,
+    `read_channels(frame, ["did:ECM_COOLANT_TEMP"])`, the same plus
+    `decoded:ECM_COOLANT_TEMP`, and `raw_read_filters` on both specs):
+
+    | call | before | after |
+    |---|---|---|
+    | `load_did_map` | 6.71 ms | 0.04 ms |
+    | `load_bindings` | 16.0 ms | 0.04 ms |
+    | `raw_read_filters` (2 specs) | 26.0 ms | 0.15 ms |
+    | `read_channels` (1 did spec) | 24.2 ms | 13.9 ms |
+    | `read_channels` (did + decoded) | 53.7 ms | 31.8 ms |
+
+    Absolute numbers vary with laptop load; the ratio is what reproduced. The
+    verifier's re-run measured `load_did_map` 1.99 to 0.01 ms, `load_bindings`
+    4.41 to 0.01, `raw_read_filters` 6.94 to 0.04, `read_channels`
+    5.71 to 3.67 and 14.43 to 6.63. The remaining `read_channels` cost is the
+    frame work, not the catalogs.
+    The first call after a file change still pays the parse and validation.
 
 - [ ] **R26.4 `vehicle/profiles.py` (1,724 lines) is six modules.** By line
   range: schema and naming; registry file I/O and overlay merge;
