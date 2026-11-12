@@ -16,6 +16,7 @@ from uuid import uuid4
 from src.coerce import optional_str as _optional_str
 from src.config import CanaryConfig
 from src.jsonl_store import append_jsonl_line
+from src.models.override_reason import require_override_reason, stated_override_reason
 from src.session import format_session_timestamp
 from src.storage.sessions import resolve_session
 
@@ -140,8 +141,12 @@ class JobController:
             reason = clean_params["accept_thin_calibration"]
             # A02.2: the override is an operator's stated reason, stamped into
             # the manifest. Anything but a non-empty string is not a reason.
-            if not isinstance(reason, str) or not reason.strip():
-                raise ValueError("accept_thin_calibration must be a non-empty reason string")
+            refusal = "accept_thin_calibration must be a non-empty reason string"
+            if not isinstance(reason, str):
+                raise ValueError(refusal)
+            clean_params["accept_thin_calibration"] = require_override_reason(
+                reason, refusal=refusal
+            )
         job_id = uuid4().hex
         log_path = self._jobs_dir / f"{job_id}.log"
         command = tuple(self._build_command(kind, clean_params, job_id=job_id))
@@ -241,8 +246,8 @@ class JobController:
         # A02.2: the sequence trainer refuses a calibration that does not cover
         # what it will score; an operator's stated reason (and only that)
         # publishes anyway, stamped into the manifest.
-        thin_reason = str(params.get("accept_thin_calibration") or "").strip()
-        thin_arg = ["--accept-thin-calibration", thin_reason] if thin_reason else []
+        thin_reason = stated_override_reason(str(params.get("accept_thin_calibration") or ""))
+        thin_arg = ["--accept-thin-calibration", thin_reason] if thin_reason is not None else []
         if kind in ("retrain_lstm", "retrain_tcn"):
             device = str(params.get("device", "cpu"))
             sequence_model = "lstm" if kind == "retrain_lstm" else "tcn"

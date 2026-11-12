@@ -247,6 +247,42 @@ def test_a_mode_calibrated_on_too_few_drives_is_refused_unless_overridden() -> N
     assert trained.manifest.calibration["override"] == "bench test"
 
 
+@pytest.mark.parametrize("blank", ["", "  ", "\t\n"])
+def test_a_blank_calibration_override_is_refused_like_a_missing_one(blank: str) -> None:
+    """R27.1: ``if not calibration_override:`` let ``"  "`` publish a thin mode
+    from any caller that skipped the CLI's argparse check."""
+    train = _drive_frame(sessions=THREE_DRIVES)
+    calibration = _drive_frame(
+        sessions={"2026-09-05T100000": "2026-09-05T10:00:00Z"}, rows_per_session=200, seed=9
+    )
+    with pytest.raises(ValueError, match=SKIP_TOO_FEW_CALIBRATION_DRIVES):
+        fit_isolation_forest(
+            train,
+            _DriveFloorConfig(),
+            feature_columns=FEATURES,
+            calibration_frame=calibration,
+            calibration_override=blank,
+        )
+
+
+def test_a_calibration_override_reason_is_stamped_stripped() -> None:
+    train = _drive_frame(sessions=THREE_DRIVES)
+    calibration = _drive_frame(
+        sessions={"2026-09-05T100000": "2026-09-05T10:00:00Z"}, rows_per_session=200, seed=9
+    )
+    trained = fit_isolation_forest(
+        train,
+        _DriveFloorConfig(),
+        feature_columns=FEATURES,
+        calibration_frame=calibration,
+        calibration_override="  bench test\n",
+    )
+    assert [mode.calibration_override for mode in trained.manifest.modes] == ["bench test"] * len(
+        trained.manifest.modes
+    )
+    assert trained.manifest.calibration["override"] == "bench test"
+
+
 def test_a_mode_trained_on_too_few_drives_is_refused_and_named() -> None:
     frame = _drive_frame(sessions=dict(list(THREE_DRIVES.items())[:1]), rows_per_session=400)
 

@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from src.artifact_hash import sha256_file
+from src.models.override_reason import require_override_reason
 
 #: The incident every refusal names.
 ALERT_BUDGET_INCIDENT = (
@@ -229,8 +230,10 @@ def check_alert_budget(
     (A06.6): the sequence and fused detectors fail on a report scored at
     another one.
     """
-    if override_reason is not None and not override_reason.strip():
-        raise ValueError("an alert-budget override needs a stated reason")
+    if override_reason is not None:
+        override_reason = require_override_reason(
+            override_reason, refusal="an alert-budget override needs a stated reason"
+        )
     if budget is None:
         # Imported here: ``false_positive_benchmark`` pulls in torch, and the
         # daemon reads this module's verdict helpers at model load.

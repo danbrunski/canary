@@ -25,7 +25,7 @@ Timings below are laptop microbenchmarks on synthetic frames. Read them as
 ratios; the Pi is several times slower and the truck's real column count was
 not measured.
 
-- [ ] **R27.1 The IF trainer accepts a blank calibration-override reason.**
+- [x] **R27.1 The IF trainer accepts a blank calibration-override reason.**
   `isolation_forest._plan_mode` tests `if not calibration_override:`, so a
   whitespace reason from any caller that is not the CLI publishes a mode
   calibrated on fewer than three drives and stamps `"  "` into the manifest.
@@ -34,12 +34,52 @@ not measured.
   (`isolation_forest._plan_mode`, `sequence_autoencoder_training` with
   `.strip()`, `alert_budget`, `budget_level`, `scripts/_cli.override_reason`).
   The refusal holds only while every caller goes through argparse.
-  - [ ] One `require_override_reason(value) -> str` (strips, raises
+  - [x] One `require_override_reason(value) -> str` (strips, raises
     `ValueError`) in `src/models/`, called by the three trainers and gates and
     used as the argparse `type` in `_cli`.
-  - [ ] Library-level tests passing `"  "` to each trainer.
+    New `src/models/override_reason.py` (imports nothing): `require_override_reason(value,
+    *, refusal=...)` keeps each gate's own wording; `stated_override_reason` (None
+    for absent or blank) serves the two trainers whose refusal is their own. Called
+    by `isolation_forest.fit_isolation_forest` + `_plan_mode`,
+    `sequence_autoencoder_training`, `alert_budget.check_alert_budget`,
+    `budget_level.unbudgeted_record`, `_cli.override_reason` (re-raises as
+    `ArgumentTypeError`, same message) and a sixth copy found by grep,
+    `control/jobs.JobController.submit` and `_build_command` (via
+    `stated_override_reason`). Regrowth guard:
+    `tests/test_override_reason.py::test_no_override_reason_check_is_written_outside_the_shared_rule`
+    matches `.strip()` on `*override*` / `accept_*` / `reason`, `if not` on
+    those names, and the `isinstance(reason, str) or not` shape;
+    `::test_the_guard_matches_each_retired_form` pins all six pre-R27.1 copies
+    (the HEAD `_cli` and `jobs` forms included). Three non-override hits are
+    allowlisted by file and function (`rom_editor.TypicalLeftEmpty._reason_is_text`,
+    `rom_levers._plant_text`, `evidence/records.WhatIfPoint._both_or_reason`);
+    the allowlist is shrink-only (a stale entry fails the test).
+  - [x] Library-level tests passing `"  "` to each trainer.
+    `test_isolation_forest_a04.py::test_a_blank_calibration_override_is_refused_like_a_missing_one`
+    (`""`/`"  "`/`"\t\n"` → `SKIP_TOO_FEW_CALIBRATION_DRIVES`, failed before:
+    `"  "` published), `::test_a_calibration_override_reason_is_stamped_stripped`;
+    `test_sequence_calibration.py::test_a_blank_override_is_refused_like_a_missing_one`;
+    `alert_budget` / `budget_level` already had `"  "` tests, now also assert the
+    stored reason is stripped.
   - Must not change: manifest fields, refusal messages
-    (`test_accept_flag_refuses_a_blank_reason`).
+    (`test_accept_flag_refuses_a_blank_reason`). Held: no field added or
+    renamed, every refusal string unchanged; a valid reason is now stored
+    stripped on every path (the CLI already stripped). Runs 2026-11-12:
+    `pytest -n 4 -m "not integration" tests/test_override_reason.py
+    tests/test_isolation_forest_a04.py tests/test_sequence_calibration.py
+    tests/test_alert_budget.py tests/test_budget_level.py
+    tests/test_script_cli_snapshot.py tests/test_control_api.py
+    tests/test_layering.py tests/test_retrain_script.py` — 257 passed (after
+    the guard widening); `pytest -n 4 -m "not integration"
+    tests/test_lstm_training.py tests/test_tcn_training.py
+    tests/test_train_lstm.py tests/test_sequence_cadence.py
+    tests/test_isolation_forest.py` — 121 passed;
+    `pytest -n 4 -m "not integration" tests/test_train_anomaly_model.py
+    tests/test_isolation_forest_evaluation.py` — 23 passed;
+    `pytest -n 4 -m ml_training tests/test_budget_level.py
+    tests/test_sequence_autoencoder_training.py tests/test_lstm_training.py
+    tests/test_tcn_training.py tests/test_train_lstm.py tests/test_train_tcn.py`
+    — 58 passed. The new tests carry no `ml_training` marker.
 
 - [ ] **R27.2 `scripts/label_sessions.py` re-implements the classification
   pass.** Its `main` runs classify → `write_classification` →

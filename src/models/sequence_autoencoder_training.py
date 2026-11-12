@@ -39,6 +39,7 @@ from src.models.manifest import (
     validate_model_feature_spec,
     write_artifact,
 )
+from src.models.override_reason import stated_override_reason
 from src.models.sequence_dataset import (
     OBSERVATION_MASK_SCHEMA_KEY,
     SequenceWindowDataset,
@@ -522,15 +523,16 @@ def _plan_training(
             context_columns=preflight.context_columns,
         )
         if violations:
-            if calibration_override is None or not calibration_override.strip():
+            override_reason = stated_override_reason(calibration_override)
+            if override_reason is None:
                 raise CalibrationCoverageError(violations)
             log.warning(
                 "%s calibration published under operator override: %s",
                 backend.model_type,
                 "; ".join(violations),
-                extra={"override_reason": calibration_override},
+                extra={"override_reason": override_reason},
             )
-            override_record = {"reason": calibration_override.strip(), "violations": violations}
+            override_record = {"reason": override_reason, "violations": violations}
     calibration_health = (
         validate_dataset_observations(
             preflight.calibration_source,

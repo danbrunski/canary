@@ -64,6 +64,7 @@ from src.models.evaluation_detectors import (
 )
 from src.models.false_positive_benchmark import V1_ALERTS_PER_HOUR_BUDGET
 from src.models.inference import BUDGET_CADENCE_KEY
+from src.models.override_reason import require_override_reason
 from src.models.sequence_autoencoder_training import (
     TrainedSequenceAutoencoder,
     save_sequence_autoencoder_model,
@@ -407,8 +408,10 @@ def budget_level_sessions(manifest: Any) -> tuple[str, ...]:
 def unbudgeted_record(*, reason: str, override_reason: str) -> dict[str, Any]:
     """The stamp of an artifact published without a budget level, by an
     explicit operator override (``--accept-unbudgeted-thresholds``)."""
-    if not override_reason.strip():
-        raise ValueError("publishing without an alert-budget level needs a stated reason")
+    override_reason = require_override_reason(
+        override_reason,
+        refusal="publishing without an alert-budget level needs a stated reason",
+    )
     return {
         "applied": False,
         "refusal": reason,

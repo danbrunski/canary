@@ -41,6 +41,7 @@ from src.models.manifest import (
     validate_model_feature_spec,
     write_artifact,
 )
+from src.models.override_reason import stated_override_reason
 from src.models.sequence_calibration import coerce_timestamp
 from src.preprocessing.drives import count_drives
 from src.preprocessing.normalization import ZScoreScaler
@@ -1094,6 +1095,9 @@ def fit_isolation_forest(
     mode; :func:`_build_manifest` applies the dropped-fraction gate and writes
     the manifest.
     """
+    # R27.1: blank text is no reason. It gets the A04.4 refusal a missing
+    # override gets, and nothing blank or unstripped reaches the manifest.
+    calibration_override = stated_override_reason(calibration_override)
     settings = _resolve_fit_settings(
         frame,
         config,
@@ -1435,7 +1439,8 @@ def _plan_mode(
             else 0
         )
         if calibration_drives < settings.min_calibration_drives:
-            if not calibration_override:
+            stated = stated_override_reason(calibration_override)
+            if stated is None:
                 log.warning(
                     "IsolationForest mode %r refused: its threshold would rest on %d "
                     "physical drive(s); %d are required per mode "
@@ -1454,13 +1459,13 @@ def _plan_mode(
                         f"{settings.min_calibration_drives} required"
                     ),
                 )
-            override = calibration_override
+            override = stated
             log.warning(
                 "IsolationForest mode %r calibrates on %d drive(s) (< %d); published anyway: %s",
                 mode,
                 calibration_drives,
                 settings.min_calibration_drives,
-                calibration_override,
+                stated,
             )
 
     return _ModeFitPlan(

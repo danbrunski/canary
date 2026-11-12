@@ -239,6 +239,13 @@ def test_an_override_needs_a_reason_and_keeps_the_violation_on_record() -> None:
     assert not check.refused
     assert check.violations
     assert check.to_dict()["override_reason"] == "bench fault-injection drive, operator 2026-09-23"
+    stripped = check_alert_budget(
+        report,
+        roles_by_source=ALERT,
+        published_sources=["isolation_forest"],
+        override_reason="  bench drive\n",
+    )
+    assert stripped.override_reason == "bench drive"
 
 
 # --- scripts/retrain.py: the refusal where artifacts are published ----------

@@ -280,6 +280,24 @@ def test_a_thin_held_out_calibration_is_refused_before_training() -> None:
     assert any("never observed in calibration: ['c']" in v for v in violations)
 
 
+def test_a_blank_override_is_refused_like_a_missing_one() -> None:
+    """R27.1: whitespace is not a reason; the coverage refusal stands."""
+    from src.models.lstm_training import train_lstm_autoencoder
+    from src.models.sequence_autoencoder_training import CalibrationCoverageError
+
+    training = _dataset(_mode_frame(_TRAINING))
+    calibration = _dataset(
+        _mode_frame([("2026-09-18T134345", "2026-09-18T13:43:45Z", "city")], c_observed=False)
+    )
+    with pytest.raises(CalibrationCoverageError):
+        train_lstm_autoencoder(
+            training,
+            _tiny_lstm_config(),
+            calibration_dataset=calibration,
+            calibration_override=" \t ",
+        )
+
+
 def test_sessions_of_one_drive_count_once() -> None:
     from src.models.sequence_autoencoder_training import calibration_coverage_violations
 

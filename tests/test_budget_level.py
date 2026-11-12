@@ -252,6 +252,8 @@ def test_an_unbudgeted_override_needs_a_reason() -> None:
     record = unbudgeted_record(reason="too small", override_reason="bench, operator")
     assert record["applied"] is False
     assert record["override_reason"] == "bench, operator"
+    stripped = unbudgeted_record(reason="too small", override_reason="  bench, operator\n")
+    assert stripped["override_reason"] == "bench, operator"
 
 
 # ---------------------------------------------------------------------------

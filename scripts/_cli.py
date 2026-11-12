@@ -26,6 +26,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from src.config import CanaryConfig  # noqa: E402
+from src.models.override_reason import require_override_reason  # noqa: E402
 from src.paths import BINDINGS_YAML  # noqa: E402
 from src.preprocessing import discover_sessions  # noqa: E402
 from src.session import LIVE_SESSION_KINDS, iter_sessions  # noqa: E402
@@ -81,12 +82,15 @@ def override_reason(value: str) -> str:
 
     Blank or whitespace-only is refused at parse time. The IF path checked
     ``if calibration_override:``, so ``"  "`` passed the A04.4 refusal there
-    while the sequence path stripped it and refused (R06.2).
+    while the sequence path stripped it and refused (R06.2). The rule itself is
+    :func:`src.models.override_reason.require_override_reason`, which the
+    trainers and gates call too (R27.1); this only re-raises its refusal as the
+    error argparse reports verbatim.
     """
-    reason = value.strip()
-    if not reason:
-        raise argparse.ArgumentTypeError("an override needs a stated reason, not blank text")
-    return reason
+    try:
+        return require_override_reason(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def add_override_reason_arg(parser: argparse.ArgumentParser, flag: str, *, help: str) -> None:
