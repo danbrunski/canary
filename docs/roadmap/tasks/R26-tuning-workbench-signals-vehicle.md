@@ -43,7 +43,7 @@ The cross-cutting copies found here (`_aware`, `_iso`,
   - Must not change: `Unavailable.missing` order, the `not_captured` /
     `refused` split.
 
-- [ ] **R26.2 The digest reports a failed read as "none measured".**
+- [x] **R26.2 The digest reports a failed read as "none measured".**
   `tuning_digest.py` has eleven `except Exception`. Three of them turn an
   exception into a count: `_infer_wot` (`except Exception: measured = 0`),
   the Mode 01 branch of `_wot_inventory` (`paired = 0`) and the tagged-pull
@@ -52,11 +52,40 @@ The cross-cutting copies found here (`_aware`, `_iso`,
   AFR … delivery error cannot be computed". A read that raised on a bad spec
   or a corrupt chunk is then stated as a fact about the drive. This is
   `AGENTS.md`'s "an empty result must say which kind of empty it is".
-  - [ ] Catch the set `workbench._read_optional` catches
+  - [x] Catch the set `workbench._read_optional` catches
     (`ChannelSpecError`, `ValueError`, `KeyError`); carry the cause in
     `WotInventory.reason` (the field exists) and log it with the session name.
-  - [ ] Test: make `read_aligned` raise and assert the digest says it could
-    not read, not that no pair exists.
+    Done in `tuning_digest.py`: `_READ_FAILURES` is that set; the three blocks
+    now catch only it, log `log.warning(... session_dir.name ...)`, and put
+    "could not read <specs>: <cause>" in `reason`. New `WotInventory.read_failed`
+    (also in `to_dict`) marks a count as unknown, not zero; `_section_wot`
+    then emits "WOT inventory is incomplete — a read failed: <cause>" instead
+    of the "none carry both ... delivery error cannot be computed" note. A
+    failed tagged read falls through to inference as before but the result
+    carries `read_failed` and says the tags could not be used (the tagged
+    `try` now wraps only the `read_channels` call). Anything outside the set
+    propagates to `digest._tuning_section`, which already turns it into
+    `{"available": False, "kind": "failed", "error": ...}` (MemoryError
+    re-raised). Left alone, as the item allows: the two first-read
+    `except Exception` blocks (`_infer_wot`, Mode 01) already return
+    `unavailable` with the cause and no count.
+  - [x] Test: make `read_aligned` raise and assert the digest says it could
+    not read, not that no pair exists. `tests/test_tuning_digest.py`: Mode 01
+    pair read and tagged read through `compute_tuning_digest`; the inferred
+    measured-AFR read through `_infer_wot` directly (the digest never reaches
+    it on the Xterra DID profile, whose measured AFR is refused for want of a
+    baro); each paired with a test that a `RuntimeError`/`TypeError` still
+    propagates. `pytest tests/test_tuning_digest.py -n0`: 27 passed; the other
+    `tuning_digest` test files: 89 passed.
+  - Same shape found, not changed (follow-up): `tuning_digest.py` baro read
+    in `_measured_afr_summary` (`baro_long = None` is then reported as
+    "baro_missing"), the bank read there (`continue`, bank silently absent),
+    `_did_pull_inventory` RPM read ("RPM provider could not be read", no
+    cause) and the per-spec read fallback in `_read_specs`. Also
+    `_coverage_notes`, which prints "{n} WOT seconds, {with_afr_pair}
+    carrying an AFR pair" without checking `read_failed` (probably
+    unreachable when the same read fails, but it is the same shape; found by
+    the verifier).
 
 - [ ] **R26.3 The catalogs are validated again on every `read_channels`.**
   `channels.py` builds a `_Catalogs` per `raw_read_filters`, `read_channels`

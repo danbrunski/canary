@@ -689,3 +689,183 @@ def test_the_digest_reads_its_capture_once_and_says_the_same(
     assert json.dumps(shared.to_dict(), sort_keys=True, default=str) == json.dumps(
         per_call_digest.to_dict(), sort_keys=True, default=str
     )
+
+
+# R26.2: a read that raised is not a fact about the drive.
+
+
+def _raise_on(
+    monkeypatch: pytest.MonkeyPatch, name: str, when: Any, error: BaseException
+) -> list[Any]:
+    """Make ``tuning_digest.<name>`` raise ``error`` when ``when(args, kwargs)``; log calls."""
+    from src.analysis import tuning_digest
+
+    real = getattr(tuning_digest, name)
+    seen: list[Any] = []
+
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        if when(args, kwargs):
+            seen.append(args)
+            raise error
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(tuning_digest, name, wrapper)
+    return seen
+
+
+def _is_pair_read(args: tuple[Any, ...], kwargs: dict[str, Any]) -> bool:
+    return len(args[1]) > 2
+
+
+def _assert_says_it_could_not_read(digest: Any, cause: str) -> None:
+    assert digest.wot.read_failed is True
+    assert digest.wot.reason is not None
+    assert "could not read" in digest.wot.reason
+    assert cause in digest.wot.reason
+    assert digest.to_dict()["wot"]["read_failed"] is True
+    assert any("a read failed" in note and cause in note for note in digest.notes)
+    # The failed read is not stated as a fact about the drive.
+    assert not any("none carry both" in note for note in digest.notes)
+
+
+def test_a_failed_mode01_pair_read_is_not_reported_as_no_pair(
+    tmp_path: Path, config: CanaryConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = _capture(
+        tmp_path,
+        "_capture-fuel-map-2026-08-05T142720",
+        [(2600, 90, 4, 1.2, 0.83)] * 6 + [(3600, 92, 4, 1.2, 0.82)] * 4,
+    )
+    seen = _raise_on(monkeypatch, "read_aligned", _is_pair_read, ValueError("corrupt chunk 7"))
+
+    digest = compute_tuning_digest(session, config)
+
+    assert digest is not None
+    assert seen, "the pair read was never attempted"
+    assert digest.wot.seconds == 10
+    assert digest.wot.with_afr_pair == 0
+    _assert_says_it_could_not_read(digest, "corrupt chunk 7")
+
+
+def test_a_failed_mode01_pair_read_outside_the_read_failures_propagates(
+    tmp_path: Path, config: CanaryConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = _capture(
+        tmp_path, "_capture-fuel-map-2026-08-05T142720", [(2600, 90, 4, 1.2, 0.83)] * 6
+    )
+    _raise_on(monkeypatch, "read_aligned", _is_pair_read, RuntimeError("a bug, not a bad read"))
+
+    with pytest.raises(RuntimeError, match="a bug"):
+        compute_tuning_digest(session, config)
+
+
+def _infer(session: Path) -> Any:
+    """``_infer_wot`` over the throttle-stop capture, with a measured-AFR spec to read.
+
+    Called directly: through the digest, this profile's measured AFR is refused
+    for want of a baro, so the role is unavailable and the read is never tried.
+    """
+    from src.analysis.tuning_digest import _infer_wot
+    from src.analysis.tuning_frame import WotCriterion
+
+    return _infer_wot(
+        session,
+        criterion=WotCriterion(
+            unit="V",
+            closed_value=0.7,
+            wide_open_value=4.12,
+            threshold_value=3.0,
+            reached_stop_tolerance=0.1,
+            rpm_floor=1500.0,
+        ),
+        rpm_spec="did:ECM_RPM",
+        demand_spec="did:ECM_THROTTLE_POS_SENSOR_1",
+        measured_afr_specs=["did:ECM_AFR_B1"],
+        rpm_bands=(1500.0, 8000.0),
+    )
+
+
+def _inferred_session(tmp_path: Path) -> Path:
+    return _did_capture(
+        tmp_path,
+        "_capture-tuning-did-2026-08-05T142720",
+        tps_volts=[0.7, 0.7, 4.12, 4.12, 4.12, 0.7],
+        rpm=[900, 1200, 3200, 3800, 4600, 1000],
+    )
+
+
+def test_a_failed_inferred_afr_read_is_not_reported_as_no_pair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = _inferred_session(tmp_path)
+    seen = _raise_on(monkeypatch, "read_aligned", _is_pair_read, KeyError("DID_1225"))
+
+    wot = _infer(session)
+
+    assert seen, "the measured-AFR read was never attempted"
+    assert wot.source == "inferred"
+    assert wot.seconds == 3
+    assert wot.read_failed is True
+    assert wot.with_measured_afr == 0
+    assert wot.reason is not None
+    assert "could not read" in wot.reason
+    assert "DID_1225" in wot.reason
+
+
+def test_a_failed_inferred_afr_read_outside_the_read_failures_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = _inferred_session(tmp_path)
+    _raise_on(monkeypatch, "read_aligned", _is_pair_read, TypeError("a bug"))
+
+    with pytest.raises(TypeError, match="a bug"):
+        _infer(session)
+
+
+def _tagged_did_capture(tmp_path: Path) -> Path:
+    session = _did_capture(
+        tmp_path,
+        "_capture-tuning-did-2026-08-05T142720",
+        tps_volts=[0.7, 0.7, 4.12, 4.12, 4.12, 0.7],
+        rpm=[900, 3300, 3200, 3800, 4600, 3100],
+    )
+    (session / "tags.jsonl").write_text(
+        json.dumps({"t": T0.timestamp(), "label": "tuning_pull_start"})
+        + "\n"
+        + json.dumps({"t": (T0 + timedelta(seconds=2)).timestamp(), "label": "tuning_pull_end"})
+        + "\n"
+    )
+    return session
+
+
+def _is_tagged_read(args: tuple[Any, ...], kwargs: dict[str, Any]) -> bool:
+    return bool(kwargs.get("acquired_time")) and len(args[1]) == 1
+
+
+def test_a_failed_tagged_read_says_the_tags_could_not_be_used(
+    tmp_path: Path, config: CanaryConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = _tagged_did_capture(tmp_path)
+    seen = _raise_on(monkeypatch, "read_channels", _is_tagged_read, ValueError("bad rpm chunk"))
+
+    digest = compute_tuning_digest(session, config)
+
+    assert digest is not None
+    assert seen, "the tagged read was never attempted"
+    # It falls back to the throttle stop, and says it did so and why.
+    assert digest.wot.source == "inferred"
+    assert digest.wot.read_failed is True
+    assert digest.wot.reason is not None
+    assert "tagged pulls present" in digest.wot.reason
+    assert "bad rpm chunk" in digest.wot.reason
+    assert any("a read failed" in note and "bad rpm chunk" in note for note in digest.notes)
+
+
+def test_a_failed_tagged_read_outside_the_read_failures_propagates(
+    tmp_path: Path, config: CanaryConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = _tagged_did_capture(tmp_path)
+    _raise_on(monkeypatch, "read_channels", _is_tagged_read, RuntimeError("a bug"))
+
+    with pytest.raises(RuntimeError, match="a bug"):
+        compute_tuning_digest(session, config)

@@ -15,8 +15,9 @@ See ``docs/roadmap/archive/tuning-analysis-toolkit.md`` Phase 5.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -68,6 +69,14 @@ from src.signals.pairing import (
 from src.storage.capture_manifest import read_capture_manifest, read_capture_quality
 from src.vehicle.tune_revisions import resolve_session_revision, session_started_at
 
+log = logging.getLogger(__name__)
+
+#: What a channel read raises for a spec that does not resolve, a corrupt
+#: chunk or a missing column. The set ``workbench._read_optional`` catches.
+#: Anything else is a bug and propagates (to the digest section's own
+#: handler, which reports ``kind: "failed"``).
+_READ_FAILURES = (ChannelSpecError, ValueError, KeyError)
+
 # The WOT load and rpm floors and the rpm band edges are vehicle facts: they
 # come from the profile's ``tuning_providers.yaml`` ``mode01_wot`` (R05.13),
 # never from constants here. A vehicle that declares none gets an
@@ -107,6 +116,10 @@ class WotInventory:
     #: capture; reporting only the pair would hide usable measured data.
     with_measured_afr: int = 0
     criterion: dict[str, Any] | None = None
+    #: A read raised, so a count above is *unknown* rather than zero. ``reason``
+    #: carries the cause. Distinct from "the drive had no such seconds", which
+    #: is an answer about the drive: the two demand opposite responses.
+    read_failed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -117,6 +130,7 @@ class WotInventory:
             "source": self.source,
             "reason": self.reason,
             "criterion": self.criterion,
+            "read_failed": self.read_failed,
         }
 
 
@@ -680,24 +694,23 @@ def _infer_wot(
         )
 
     measured = 0
+    read_error: str | None = None
     if measured_afr_specs:
+        afr_specs = [rpm_spec, demand_spec, *measured_afr_specs]
         try:
-            with_afr = read_aligned(
-                session_dir,
-                [rpm_spec, demand_spec, *measured_afr_specs],
-                grid="1s",
-                require_all=True,
-            )
+            with_afr = read_aligned(session_dir, afr_specs, grid="1s", require_all=True)
+        except _READ_FAILURES as exc:
+            # Unknown, not zero: a read that raised says nothing about whether
+            # the drive carried a measured AFR.
+            read_error = f"could not read {', '.join(afr_specs)}: {exc}"
+            log.warning("WOT measured-AFR read failed for %s: %s", session_dir.name, exc)
+        else:
             measured = int(
                 (
                     (with_afr[demand_spec] >= criterion.threshold_value)
                     & (with_afr[rpm_spec] > criterion.rpm_floor)
                 ).sum()
             )
-        except MemoryError:
-            raise
-        except Exception:  # noqa: BLE001
-            measured = 0
     return WotInventory(
         seconds=int(len(at_wot)),
         # Always 0 on an all-DID capture: a commanded target needs Mode 01,
@@ -706,9 +719,10 @@ def _infer_wot(
         with_afr_pair=0,
         by_band=[] if rpm_bands is None else _bands(at_wot[rpm_spec], rpm_bands),
         source="inferred",
-        reason=None,
+        reason=read_error,
         with_measured_afr=measured,
         criterion=detail,
+        read_failed=read_error is not None,
     )
 
 
@@ -728,13 +742,20 @@ def _wot_inventory(
     measured and a commanded AFR in the same second cannot answer anything,
     and the July corpus had 25 such seconds against 4 usable ones.
     """
-    rpm_bands = None if load_wot is None else load_wot.rpm_bands
     tags = load_tags(session_dir / "tags.jsonl")
     starts = [float(tag["t"]) for tag in tags if is_pull_start(tag)]
     ends = [float(tag["t"]) for tag in tags if is_pull_end(tag)]
+    tag_failure: str | None = None
     if starts and rpm_spec is not None and load_wot is not None:
         try:
             rpm = read_channels(session_dir, [rpm_spec], acquired_time=True)
+        except _READ_FAILURES as exc:
+            # Falls through to inference below, but the result says the tags
+            # could not be used: a tagged capture that reads as "inferred"
+            # with no explanation is a different drive from an untagged one.
+            tag_failure = f"tagged pulls present but {rpm_spec} could not be read: {exc}"
+            log.warning("tagged WOT read failed for %s: %s", session_dir.name, exc)
+        else:
             # Seconds are counted from stored rows (one per second that has
             # one); a change-only broadcast rpm (P02.10) has rows only where
             # it changed, so it would undercount held seconds. Refused by
@@ -762,10 +783,33 @@ def _wot_inventory(
                         by_band=_bands(per_second, load_wot.rpm_bands),
                         source="tagged",
                     )
-        except MemoryError:
-            raise
-        except Exception:  # noqa: BLE001
-            pass
+    inventory = _wot_untagged(
+        session_dir,
+        rpm_spec=rpm_spec,
+        did_continuous=did_continuous,
+        criterion=criterion,
+        demand_spec=demand_spec,
+        measured_afr_specs=measured_afr_specs,
+        load_wot=load_wot,
+    )
+    if tag_failure is None:
+        return inventory
+    reason = tag_failure if not inventory.reason else f"{tag_failure}; {inventory.reason}"
+    return replace(inventory, reason=reason, read_failed=True)
+
+
+def _wot_untagged(
+    session_dir: Path,
+    *,
+    rpm_spec: str | None,
+    did_continuous: bool,
+    criterion: WotCriterion | None,
+    demand_spec: str | None,
+    measured_afr_specs: list[str] | None,
+    load_wot: LoadWotCriterion | None,
+) -> WotInventory:
+    """The inventory when no tagged pull settled it: inferred, or unavailable."""
+    rpm_bands = None if load_wot is None else load_wot.rpm_bands
     # A DID-continuous capture must never borrow Mode 01 to make an empty
     # all-DID report look populated. Tags are the strongest physical-demand
     # evidence for these captures; failing those, the throttle's own measured
@@ -834,20 +878,19 @@ def _wot_inventory(
     rows = _bands(wot["obd:RPM"], load_wot.rpm_bands)
 
     paired = 0
+    read_error: str | None = None
+    pair_specs = ["obd:RPM", "obd:ENGINE_LOAD", "obd:O2_WR_LAMBDA_S1", "obd:COMMANDED_EQUIV_RATIO"]
     try:
-        with_afr = read_aligned(
-            session_dir,
-            ["obd:RPM", "obd:ENGINE_LOAD", "obd:O2_WR_LAMBDA_S1", "obd:COMMANDED_EQUIV_RATIO"],
-            grid="1s",
-            require_all=True,
-        )
+        with_afr = read_aligned(session_dir, pair_specs, grid="1s", require_all=True)
+    except _READ_FAILURES as exc:
+        # Unknown, not zero: a read that raised says nothing about whether any
+        # second carried a measured and a commanded AFR.
+        read_error = f"could not read {', '.join(pair_specs)}: {exc}"
+        log.warning("WOT AFR-pair read failed for %s: %s", session_dir.name, exc)
+    else:
         paired = int(
             ((with_afr["obd:RPM"] > rpm_floor) & (with_afr["obd:ENGINE_LOAD"] > load_floor)).sum()
         )
-    except MemoryError:
-        raise
-    except Exception:  # noqa: BLE001
-        paired = 0
     # The Mode 01 path gates on measured load, not on a tag, so it is inferred
     # too — it just has a better instrument than the throttle-stop criterion.
     return WotInventory(
@@ -855,6 +898,7 @@ def _wot_inventory(
         with_afr_pair=paired,
         by_band=rows,
         source="inferred",
+        reason=read_error,
         with_measured_afr=paired,
         criterion={
             "role": "airflow_or_table_load",
@@ -863,6 +907,7 @@ def _wot_inventory(
             "threshold_value": load_floor,
             "rpm_floor": rpm_floor,
         },
+        read_failed=read_error is not None,
     )
 
 
@@ -1212,9 +1257,13 @@ def _section_wot(inputs: _DigestInputs) -> tuple[WotInventory, list[str]]:
                 "establish what the operator was doing, so do not attribute them to an "
                 "intended manoeuvre."
             )
-        elif wot.reason:
+        elif wot.reason and not wot.read_failed:
             notes.append(f"WOT inventory: {wot.reason}")
-    if wot.seconds and not wot.with_afr_pair:
+    if wot.read_failed:
+        # A read that raised is not a fact about the drive: say so, with the
+        # cause, instead of the "none carry a pair" note below.
+        notes.append(f"WOT inventory is incomplete — a read failed: {wot.reason}")
+    elif wot.seconds and not wot.with_afr_pair:
         notes.append(
             "WOT seconds were captured but none carry both a measured and a commanded AFR "
             "in the same second, so delivery error cannot be computed from this drive."
