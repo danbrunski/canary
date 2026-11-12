@@ -40,6 +40,11 @@ def spawn_pool() -> ProcessPoolExecutor:
     return ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn"))
 
 
+class AddressSpaceCapRefusedError(RuntimeError):
+    """:func:`limit_address_space` was asked to cap a process that is not a
+    disposable ``multiprocessing`` child."""
+
+
 def limit_address_space(nbytes: int) -> tuple[int, int]:
     """Cap this process's address space at ``nbytes`` and return the limit.
 
@@ -52,7 +57,23 @@ def limit_address_space(nbytes: int) -> tuple[int, int]:
     stricter than RSS: pandas/pyarrow map more than they resident, so this
     refuses somewhat before the kernel would have killed anything. Refusing
     early with a named reason is the trade being made.
+
+    The cap is per *process* and permanent, so it may only land on a
+    disposable ``multiprocessing`` child. Anywhere else (the daemon itself, or
+    a test that runs a child's work in a thread) it raises
+    :class:`AddressSpaceCapRefusedError` and changes nothing. On 2026-11-12 a
+    test that handed the digest a thread pool capped its pytest worker; every
+    later thread that worker started died in its bootstrap, and the push gate
+    hung at 99 % for an hour on an unrelated test. A test that runs a child's
+    entry in-process patches the limiter out, as the digest tests do.
     """
+    if multiprocessing.parent_process() is None:
+        raise AddressSpaceCapRefusedError(
+            f"refusing to cap this process's address space at {nbytes} bytes: it is not a "
+            "multiprocessing child, and RLIMIT_AS would stay on it for good (a capped "
+            "process cannot start threads). Run the work in a spawn child, or patch the "
+            "limiter out in a test that runs the child's entry in-process."
+        )
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
     target = nbytes if hard == resource.RLIM_INFINITY else min(nbytes, hard)
     if soft != resource.RLIM_INFINITY:

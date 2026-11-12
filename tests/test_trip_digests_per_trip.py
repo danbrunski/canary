@@ -44,6 +44,15 @@ from src.storage.session_products import (
 from tests.builders import RICH_SESSION_END, digest_config, write_rich_session
 from tests.test_trip_end_digest import _budgeted, _RefusingExecutor
 
+
+@pytest.fixture(autouse=True)
+def _no_cap_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests run the digest child's work in a thread. The real limiter
+    refuses a process that is not a ``multiprocessing`` child (it would cap
+    this pytest worker for good), so record nothing and cap nothing."""
+    monkeypatch.setattr(trip_end, "limit_address_space", lambda n: (n, n))
+
+
 # Two trips, an hour apart (record-time epochs).
 FIRST_START, FIRST_STOP = 1_779_400_000.0, 1_779_400_300.0
 SECOND_START, SECOND_STOP = 1_779_403_600.0, 1_779_403_900.0

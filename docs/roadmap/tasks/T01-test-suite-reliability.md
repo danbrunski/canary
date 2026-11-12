@@ -969,3 +969,45 @@ measurement in hand.
     `src.signals.afr`'s `_load_afr_calibration_cached`,
     `src.decode.engineering` and `src.collection.capture_profiles`. None has
     failed yet. Each one that does has the same fix.
+- [x] **T01.33 The push gate hung at 99 % for an hour: a test capped its own
+  pytest worker's address space (2026-11-12).** The non-slow run for `0ffe917d`
+  sat at 99 % with every worker idle on a futex. SIGABRT to the workers
+  (pytest's faulthandler dumps every thread) showed one worker in
+  `trip_end._in_digest_child` → `run_in_executor` → `Thread.start()`, waiting
+  forever for a thread that had died in its bootstrap.
+  - **Cause.** `compute_digest_off_loop` hands its compute an `RLIMIT_AS`
+    ceiling whatever the executor. A D03.63 test
+    (`test_a_second_trip_ending_while_the_first_digest_runs_is_not_dropped`)
+    ran the digest on a `ThreadPoolExecutor` without patching the limiter out,
+    so the cap landed on the xdist worker for good. Every later thread that
+    worker started then died before it signalled it had started. The other
+    digest test files already patched `trip_end.limit_address_space` (the
+    tuning-refresh fixture's docstring describes exactly this hang); the new
+    file did not. That is a fix every caller had to remember.
+  - **Fix, at the shared function.** `child_pool.limit_address_space` raises
+    `AddressSpaceCapRefusedError` and changes nothing when
+    `multiprocessing.parent_process()` is `None`: the daemon itself, or a test
+    worker running a child's entry in a thread. Spawn children (the digest,
+    capture-quality, brain and workbench children) are unaffected. A missed
+    opt-out now fails loudly in its own test instead of hanging an unrelated
+    one later on the same worker.
+    - `tests/test_trip_end_digest.py`:
+      `test_the_cap_refuses_a_process_that_is_not_a_child` and
+      `test_a_thread_pool_digest_refuses_rather_than_capping_the_caller`;
+      `test_limit_address_space_never_widens_an_existing_hard_limit` now runs
+      in a real child.
+    - `tests/test_trip_digests_per_trip.py` gained the opt-out fixture.
+  - **How to find the next one.** A gate stuck near 100 % with idle workers is
+    a hang, not load. `kill -ABRT` on each `python3` child of the pytest
+    process names the stuck test and its stack in `.prepush-pytest.log`.
+- [ ] **T01.34 `tests/test_sequence_feature_set.py::test_engine_response_over_the_deployed_schema_names_every_column`
+  reads git-ignored local state (2026-11-12).** It loads
+  `models/nissan-xterra-2008/lstm_autoencoder/model.manifest.json`, which is
+  ignored since S03, and pins the 2026-09-20 artifact's 361 columns. The
+  laptop's copy is the 2026-09-24 artifact (254 columns), so a full `pytest` in
+  the main checkout fails it (`assert 254 == 361`). The gate's clean worktree
+  has no `models/` and skips it, so the gate never sees it. Fix: commit the
+  2026-09-20 schema's `feature_columns` as a fixture (the Pi's
+  `/data/canary/models/` or a backup may hold that artifact) and resolve over
+  the fixture, or skip by name unless the local manifest's `model_version` is
+  that artifact's. Not a code regression: nothing in `src/` changed the count.

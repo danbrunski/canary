@@ -48,7 +48,7 @@ from src.analysis.digest import (
 )
 from src.analysis.rolling_circumference import METHOD_VERSION
 from src.config import CanaryConfig
-from src.control import trip_end
+from src.control import child_pool, trip_end
 from src.control.trip_end import (
     TripEndDigestUnavailableError,
     compute_digest_off_loop,
@@ -383,13 +383,51 @@ def test_the_derived_ceiling_is_bounded_and_below_total_ram(tmp_path: Path) -> N
     assert derived < total or total <= 2048 * _MIB
 
 
+def _child_asks_for_more_than_the_hard_limit() -> tuple[int, int]:
+    """Run in a real child: ask for four times the hard limit."""
+    _soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    return limit_address_space(hard * 4 if hard != resource.RLIM_INFINITY else 900 * _MIB)
+
+
 def test_limit_address_space_never_widens_an_existing_hard_limit() -> None:
-    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-    assert (soft, hard) == resource.getrlimit(resource.RLIMIT_AS)
+    _soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    with child_pool.spawn_pool() as pool:
+        got_soft, got_hard = pool.submit(_child_asks_for_more_than_the_hard_limit).result(
+            timeout=120
+        )
     # Asking for more than the current hard limit must clamp, not raise; on a
     # machine with no limit at all there is nothing to clamp against.
+    assert got_hard == hard
     if hard != resource.RLIM_INFINITY:  # pragma: no cover - depends on the host
-        assert limit_address_space(hard * 4)[0] <= hard
+        assert got_soft <= hard
+
+
+def test_the_cap_refuses_a_process_that_is_not_a_child() -> None:
+    """2026-11-12: a test handed the digest a thread pool, the cap landed on
+    its pytest worker, and every later thread that worker started died in its
+    bootstrap -- the push gate hung at 99 % for an hour. The limiter now
+    refuses any process ``multiprocessing`` did not start, and changes
+    nothing."""
+    before = resource.getrlimit(resource.RLIMIT_AS)
+    with pytest.raises(child_pool.AddressSpaceCapRefusedError, match="not a multiprocessing child"):
+        child_pool.limit_address_space(700 * _MIB)
+    assert resource.getrlimit(resource.RLIMIT_AS) == before
+
+
+async def test_a_thread_pool_digest_refuses_rather_than_capping_the_caller(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real limiter, reached through the digest's own entry on a thread
+    pool, refuses instead of capping this process."""
+    monkeypatch.setattr(trip_end, "limit_address_space", child_pool.limit_address_space)
+    before = resource.getrlimit(resource.RLIMIT_AS)
+    session = _session(tmp_path)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with pytest.raises(child_pool.AddressSpaceCapRefusedError):
+            await compute_digest_off_loop(
+                session, digest_config(tmp_path), now=RICH_SESSION_END, executor=pool
+            )
+    assert resource.getrlimit(resource.RLIMIT_AS) == before
 
 
 # --- 4. a child that fails says so, and the parent survives ---------------
