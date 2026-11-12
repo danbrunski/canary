@@ -15,6 +15,7 @@ from src.control.dtc_state import DtcState
 from src.control.monitor_state import MonitorState
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
+from src.control.workbench_jobs import WorkbenchRefusedError, capture_deferral
 from src.daemon.behavior_live import BehaviorLiveState
 from src.daemon.ups import DEFAULT_UPS_STATUS_PATH
 from src.dashboard.identity import identity_payload
@@ -375,6 +376,13 @@ def register_public_routes(
         # they are stored raw on purpose, so binning them as-is works in counts.
         if units not in ("stored", "engineering"):
             raise HTTPException(status_code=400, detail=f"unsupported units: {units!r}")
+        # DuckDB over stored parquet, bounded only by a row limit: not run while
+        # a capture records (AGENTS.md, "No analysis on the Pi while it collects";
+        # R29.1). The 409 is the one the workbench routes answer.
+        try:
+            capture_deferral(config, [session] if session else None)
+        except WorkbenchRefusedError as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
         return binned_analysis_response(
             config,
             value=value,
@@ -416,14 +424,20 @@ def register_public_routes(
         }
 
     @app.get("/sessions/{session_id}/trip-summary")
-    def get_session_trip_summary(session_id: str) -> dict[str, Any]:
+    async def get_session_trip_summary(session_id: str) -> dict[str, Any]:
         # Task 1.5: public read like /obd/dtc — no session-close hook exists
-        # yet (eval-longitudinal-and-dtc.md Phase 5.4), so this computes the
-        # trip_summary.json sidecar (Task 1.4) on first request and serves
-        # the cached copy after.
-        from src.control.trip_summary import get_trip_summary
+        # yet (eval-longitudinal-and-dtc.md Phase 5.4), so the first request
+        # computes the trip_summary.json sidecar (Task 1.4) and every later one
+        # serves the cached copy. The first computation reads the whole session,
+        # so it runs in the workbench's bounded child and answers 409
+        # ``analysis_deferred`` while a capture records (R29.1); a sidecar
+        # already on disk is served directly, capture or not.
+        from src.control.trip_summary import trip_summary_off_loop
 
-        result = get_trip_summary(config, session_id)
+        try:
+            result = await trip_summary_off_loop(config, session_id)
+        except WorkbenchRefusedError as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
         if result is None:
             raise HTTPException(
                 status_code=404, detail=f"no trip summary for session {session_id!r}"

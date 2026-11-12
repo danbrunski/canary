@@ -27,6 +27,7 @@ from pydantic import AnyHttpUrl
 from src.mcp_server import resources as resource_handlers
 from src.mcp_server.audit import MCPAuditLogger
 from src.mcp_server.auth import StaticBearerVerifier
+from src.mcp_server.capture_guard import capture_refusal
 from src.mcp_server.client import DaemonClient
 from src.mcp_server.config import MCPConfig, load_from_env
 from src.mcp_server.tools import (
@@ -448,7 +449,7 @@ def _register_read_tools(
         return service_health_tool.get_service_health(units)
 
     @mcp.tool()
-    def search_anomaly_log(
+    async def search_anomaly_log(
         kind: str = "anomalies",
         since: str | None = None,
         until: str | None = None,
@@ -471,7 +472,12 @@ def _register_read_tools(
         action (e.g. 'mcp.start_capture'), result ('ok'|'error'), actor.
         ``contains`` does a raw-text substring match for fields outside the
         structured filters. Results are newest-first, capped at ``limit``.
+        Refused (``analysis_deferred``) while the daemon is capturing.
         """
+        if refusal := await capture_refusal(
+            client, tool="search_anomaly_log", storage_path=cfg.storage_path
+        ):
+            return refusal
         return search_tool.search_anomaly_log(
             kind=kind,
             anomalies_dir=cfg.anomalies_dir,
@@ -512,7 +518,7 @@ def _register_read_tools(
     if query_runner is not None:
 
         @mcp.tool()
-        def query_telemetry(
+        async def query_telemetry(
             sql: str,
             row_limit: int | None = None,
             session: str | None = None,
@@ -531,7 +537,12 @@ def _register_read_tools(
             current bindings (P02.8: none is stored since 2026-09-26, and an old
             session's stored ones are never shown); a query that asks for them
             carries a note, and an empty_reason when it finds nothing.
+            Refused (``analysis_deferred``) while the daemon is capturing.
             """
+            if refusal := await capture_refusal(
+                client, tool="query_telemetry", storage_path=cfg.storage_path
+            ):
+                return refusal
             return telemetry_tool.query_telemetry(
                 query_runner,
                 sql=sql,
@@ -550,19 +561,24 @@ def _register_read_tools(
         config_path = cfg.config_path
 
         @mcp.tool()
-        def get_behavior_deviations(
+        async def get_behavior_deviations(
             session: str, mode: str | None = None, against: str | None = None
         ) -> dict[str, Any]:
             """Diff a stored session against the learned behavior surfaces (local,
             no daemon HTTP call) — did a mod/retrain/change actually move behavior?
             Pass ``against`` to A/B ``session`` directly against a second session
-            id instead (Task 5.4: before-mod vs. after-mod, session-to-session)."""
+            id instead (Task 5.4: before-mod vs. after-mod, session-to-session).
+            Refused (``analysis_deferred``) while the daemon is capturing."""
+            if refusal := await capture_refusal(
+                client, tool="get_behavior_deviations", storage_path=cfg.storage_path
+            ):
+                return refusal
             return behavior_tool.get_behavior_deviations(
                 config_path, session=session, mode=mode, against=against
             )
 
         @mcp.tool()
-        def get_delivery_error(
+        async def get_delivery_error(
             session: str,
             measured_spec: str = "obd:O2_WR_LAMBDA_S1",
             min_load: float | None = None,
@@ -577,7 +593,12 @@ def _register_read_tools(
             a measured source the vehicle's lambda_delivery.yaml declares: the
             ECM lambda and A/F-voltage paths disagree by ~3.8% at WOT and
             neither is established as truth. ``min_load`` defaults to the
-            vehicle profile's WOT load floor."""
+            vehicle profile's WOT load floor. Refused (``analysis_deferred``)
+            while the daemon is capturing."""
+            if refusal := await capture_refusal(
+                client, tool="get_delivery_error", storage_path=cfg.storage_path
+            ):
+                return refusal
             return tuning_analysis_tool.get_delivery_error(
                 config_path,
                 session=session,
@@ -586,7 +607,7 @@ def _register_read_tools(
             )
 
         @mcp.tool()
-        def compare_tuning_sessions(
+        async def compare_tuning_sessions(
             session: str,
             against: str,
             value: str,
@@ -601,7 +622,12 @@ def _register_read_tools(
             ``floor_channel`` with ``conditions`` (the regime this comparison
             was made under) to quote each delta against the measured same-tune
             noise floor, below which nothing is distinguishable; a floor
-            measured under other conditions is refused, not quoted."""
+            measured under other conditions is refused, not quoted. Refused
+            (``analysis_deferred``) while the daemon is capturing."""
+            if refusal := await capture_refusal(
+                client, tool="compare_tuning_sessions", storage_path=cfg.storage_path
+            ):
+                return refusal
             return tuning_analysis_tool.compare_tuning_sessions(
                 config_path,
                 session=session,

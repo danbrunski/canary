@@ -70,7 +70,7 @@ import asyncio
 import dataclasses
 import functools
 import logging
-from concurrent.futures import BrokenExecutor, Executor
+from concurrent.futures import Executor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -229,54 +229,53 @@ async def _in_digest_child(
     executor: Executor | None,
     timeout: float,
     what: str,
+    slot_wait: float | None = None,
 ) -> Any:
     """Run ``call`` in a single-use ``spawn`` child (or ``executor``), bounded
     by ``timeout``. The digest and its tuning refresh share it, so both
-    fail the same named ways (:class:`TripEndDigestUnavailableError`)."""
-    # One analysis child at a time: a running brain job yields to the digest,
-    # and its process must be gone before this one spawns (bounded by the
-    # reaper's grace; past it the digest goes ahead and says so).
-    if not await child_pool.wait_for_child_exit(
-        child_pool.BRAIN_CHILD, child_pool.CHILD_EXIT_BOUND_SECONDS
-    ):
-        log.warning(
-            "%s for %s starting while a brain child is still exiting after %.0fs",
-            what,
-            session_dir.name,
-            child_pool.CHILD_EXIT_BOUND_SECONDS,
-        )
-    owned = executor is None
-    pool: Executor = _spawn_pool() if executor is None else executor
-    finished = False
+    fail the same named ways (:class:`TripEndDigestUnavailableError`).
+
+    The child is the shared analysis child (:func:`child_pool.run_in_child`):
+    it waits for the slot (a workbench job or a capture-quality recompute
+    holds it for at most its own timeout) and for a yielding brain child to
+    exit. ``slot_wait`` is how long it waits for the slot; the default,
+    ``timeout``, is right for the background trip-end work and means a shutdown
+    deadline passed in as ``timeout`` bounds the wait too. A caller serving an
+    HTTP request passes ``0`` and is refused by name instead of queueing.
+    """
     try:
-        try:
-            future = asyncio.get_running_loop().run_in_executor(pool, call)
-        except Exception as exc:
+        return await child_pool.run_in_child(
+            call,
+            timeout=timeout,
+            holder="digest",
+            executor=executor,
+            slot_wait=timeout if slot_wait is None else slot_wait,
+        )
+    except child_pool.AnalysisSlotBusyError as exc:
+        raise TripEndDigestUnavailableError(
+            REASON_CHILD_FAILED,
+            f"{what} for {session_dir.name} could not start: {exc}",
+        ) from exc
+    except child_pool.ChildFailedError as exc:
+        outcome, cause = exc.outcome, exc.cause
+        if outcome is child_pool.ChildOutcome.OOM:
+            raise cause from None  # MemoryError crosses the boundary unchanged
+        if outcome is child_pool.ChildOutcome.NOT_STARTED:
             raise TripEndDigestUnavailableError(
                 REASON_CHILD_FAILED,
-                f"{what} for {session_dir.name} could not start: {type(exc).__name__}: {exc}",
-            ) from exc
-        try:
-            result = await asyncio.wait_for(future, timeout)
-        except TimeoutError as exc:
+                f"{what} for {session_dir.name} could not start: {type(cause).__name__}: {cause}",
+            ) from cause
+        if outcome is child_pool.ChildOutcome.TIMED_OUT:
             raise TripEndDigestUnavailableError(
                 REASON_CHILD_TIMED_OUT,
                 f"{what} for {session_dir.name} did not finish within {timeout:.0f}s",
-            ) from exc
-        except BrokenExecutor as exc:
-            raise TripEndDigestUnavailableError(
-                REASON_CHILD_FAILED,
-                f"{what} process for {session_dir.name} failed: {type(exc).__name__}: {exc}",
-            ) from exc
-        finished = True
-        return result
-    finally:
-        if owned:
-            _discard_pool(pool, terminate=not finished)
+            ) from cause
+        raise TripEndDigestUnavailableError(
+            REASON_CHILD_FAILED,
+            f"{what} process for {session_dir.name} failed: {type(cause).__name__}: {cause}",
+        ) from cause
 
 
-_spawn_pool = child_pool.spawn_pool
-_discard_pool = child_pool.discard_pool
 #: Defined in :mod:`src.control.child_pool` (the capture-quality child caps itself
 #: the same way); named here for the callers and tests that patch it on this module.
 limit_address_space = child_pool.limit_address_space
@@ -734,8 +733,15 @@ async def refresh_stale_tuning_off_loop(
             address_space_bytes=digest_address_space_bytes(config),
         )
         try:
+            # Serving a request: refused by name (the stored digest and a
+            # ``failed`` note) rather than queued behind another analysis child.
             section = await _in_digest_child(
-                call, session_dir, executor=executor, timeout=timeout, what="tuning refresh"
+                call,
+                session_dir,
+                executor=executor,
+                timeout=timeout,
+                what="tuning refresh",
+                slot_wait=0.0,
             )
         except TripEndDigestUnavailableError as exc:
             return payload, {**note, "status": "failed", "reason": exc.reason, "detail": str(exc)}

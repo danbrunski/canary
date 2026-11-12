@@ -458,14 +458,14 @@ async def test_a_wedged_child_times_out_is_terminated_and_recorded(
     # what is under test here is the spawned child's fate, not the compute.
     session = _session(tmp_path)
     pools: list[ProcessPoolExecutor] = []
-    spawn = trip_end._spawn_pool
+    spawn = child_pool.spawn_pool
 
     def tracked() -> ProcessPoolExecutor:
         pool = spawn()
         pools.append(pool)
         return pool
 
-    monkeypatch.setattr(trip_end, "_spawn_pool", tracked)
+    monkeypatch.setattr(child_pool, "spawn_pool", tracked)
     processes: list[Any] = []
 
     async def watch() -> None:

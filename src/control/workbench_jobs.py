@@ -14,9 +14,10 @@ own (AGENTS.md, "No analysis on the Pi while it collects"):
    which reads part by part (P02.1), is not read; it is reported as
    ``over_budget`` beside the result.
 3. **One child at a time.** The spawn child and ``RLIMIT_AS`` ceiling are the
-   digest's own (:mod:`src.control.trip_end`), and the job waits for neither:
-   an identical request in flight is shared, anything else — including a
-   running digest — is refused as busy rather than queued behind it.
+   digest's own (:func:`src.control.child_pool.run_in_child`), and the job waits
+   for neither: an identical request in flight is shared, anything else —
+   including a running digest or a capture-quality recompute, which hold the
+   same analysis slot — is refused as busy rather than queued behind it.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
-from concurrent.futures import BrokenExecutor, Executor
+from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -50,13 +51,8 @@ from src.analysis.workbench import (
 from src.collection import tuning_profile
 from src.config import CanaryConfig
 from src.control import child_pool
-from src.control.trip_end import (
-    DIGEST_TIMEOUT_SECONDS,
-    _discard_pool,
-    _spawn_pool,
-    any_digest_in_flight,
-    limit_address_space,
-)
+from src.control.child_pool import limit_address_space
+from src.control.trip_end import DIGEST_TIMEOUT_SECONDS, any_digest_in_flight
 from src.session import session_sort_key
 from src.storage.session_files import count_session_rows, session_time_span_seconds
 from src.storage.sessions import is_session_dir_name, resolve_session, session_started_at
@@ -80,6 +76,10 @@ JOB_KINDS = (
     # writes (the classification + fingerprint sidecars); it needs neither
     # the bindings nor the DID catalog.
     "classify",
+    # R29.1: GET /sessions/{id}/trip-summary, the first request for a session.
+    # It computes (and writes) the trip_summary.json sidecar from the whole
+    # session; the route serves an existing sidecar without a job.
+    "trip_summary",
     # W09.2: the ROM Editor's simulate (POST /control/rom/library/{sha}/simulate).
     # It reads a ROM Library image, not a session, and writes nothing.
     "rom_sim",
@@ -87,7 +87,7 @@ JOB_KINDS = (
 
 #: Kinds that compute from the session and ``config`` alone, without the
 #: profile's workbench inputs.
-_CONFIG_ONLY_KINDS = frozenset({"classify", "rom_sim"})
+_CONFIG_ONLY_KINDS = frozenset({"classify", "rom_sim", "trip_summary"})
 
 
 class WorkbenchRefusedError(Exception):
@@ -348,6 +348,12 @@ def run_workbench_job(
         from src.control.classification import classify_and_write
 
         return classify_and_write(config, str(params["session_id"]))
+    if kind == "trip_summary":
+        from src.control.trip_summary import get_trip_summary
+
+        # Wrapped: a session with nothing to summarize is ``None``, which is
+        # an answer, not a missing result.
+        return {"trip_summary": get_trip_summary(config, str(params["session_id"]))}
     if kind == "rom_sim":
         return _run_rom_sim(kind, params, config)
     if bindings_path is None or dids_path is None:
@@ -435,6 +441,22 @@ def run_workbench_job(
 _IN_FLIGHT: dict[str, asyncio.Task[dict[str, Any]]] = {}
 
 
+def _busy_detail(holder: str | None) -> dict[str, Any]:
+    """The 409 body for a request that finds the analysis child taken."""
+    detail: dict[str, Any] = {
+        "error": "analysis_busy",
+        "reason": "child_busy",
+        "message": (
+            "another whole-session analysis or digest is running; one runs at a "
+            "time so it cannot compete with the collector for memory. Retry when "
+            "it finishes."
+        ),
+    }
+    if holder is not None:
+        detail["holder"] = holder
+    return detail
+
+
 def any_workbench_job_in_flight() -> bool:
     """Whether a workbench analysis child is running on this loop. The brain's
     idle-time jobs (:mod:`src.control.brain_jobs`) yield to it."""
@@ -487,19 +509,12 @@ async def run_off_loop(
                 ),
             },
         )
-    if _IN_FLIGHT or any_digest_in_flight():
-        raise WorkbenchRefusedError(
-            409,
-            {
-                "error": "analysis_busy",
-                "reason": "child_busy",
-                "message": (
-                    "another whole-session analysis or digest is running; one runs at a "
-                    "time so it cannot compete with the collector for memory. Retry when "
-                    "it finishes."
-                ),
-            },
-        )
+    # Another workbench job, a digest (including one still waiting for the
+    # slot, which a new request must not jump) or whoever holds the analysis
+    # slot, a capture-quality recompute among them.
+    holder = child_pool.analysis_holder()
+    if _IN_FLIGHT or any_digest_in_flight() or holder is not None:
+        raise WorkbenchRefusedError(409, _busy_detail(holder))
     task = asyncio.ensure_future(
         _compute(
             kind,
@@ -541,14 +556,19 @@ async def _compute(
         dids_path=dids_path,
         address_space_bytes=ceiling,
     )
-    owned = executor is None
-    pool: Executor = _spawn_pool() if executor is None else executor
-    finished = False
     try:
-        future = asyncio.get_running_loop().run_in_executor(pool, call)
-        try:
-            result = await asyncio.wait_for(future, timeout)
-        except TimeoutError as exc:
+        # No slot wait: an interactive route refuses as busy rather than queue
+        # behind a digest or a recompute (the capture stop waits; this does not).
+        return await child_pool.run_in_child(
+            call, timeout=timeout, holder="workbench", executor=executor
+        )
+    except child_pool.AnalysisSlotBusyError as exc:
+        raise WorkbenchRefusedError(409, _busy_detail(exc.holder)) from exc
+    except child_pool.ChildFailedError as exc:
+        outcome, cause = exc.outcome, exc.cause
+        if outcome is child_pool.ChildOutcome.NOT_STARTED:
+            raise cause from None  # a pool that cannot start was never a workbench refusal
+        if outcome is child_pool.ChildOutcome.TIMED_OUT:
             raise WorkbenchRefusedError(
                 503,
                 {
@@ -556,17 +576,8 @@ async def _compute(
                     "reason": "child_timed_out",
                     "message": f"analysis did not finish within {timeout:.0f}s",
                 },
-            ) from exc
-        except BrokenExecutor as exc:
-            raise WorkbenchRefusedError(
-                503,
-                {
-                    "error": "analysis_unavailable",
-                    "reason": "child_failed",
-                    "message": f"analysis process failed: {type(exc).__name__}: {exc}",
-                },
-            ) from exc
-        except MemoryError as exc:
+            ) from cause
+        if outcome is child_pool.ChildOutcome.OOM:
             raise WorkbenchRefusedError(
                 503,
                 {
@@ -577,12 +588,15 @@ async def _compute(
                         "ceiling; analyse on the laptop"
                     ),
                 },
-            ) from exc
-        finished = True
-        return result
-    finally:
-        if owned:
-            _discard_pool(pool, terminate=not finished)
+            ) from cause
+        raise WorkbenchRefusedError(
+            503,
+            {
+                "error": "analysis_unavailable",
+                "reason": "child_failed",
+                "message": f"analysis process failed: {type(cause).__name__}: {cause}",
+            },
+        ) from cause
 
 
 __all__ = [

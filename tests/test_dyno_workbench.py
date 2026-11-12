@@ -33,7 +33,7 @@ from src.analysis.tuning_frame import WotCriterion
 from src.analysis.workbench import WorkbenchInputs
 from src.collection import tuning_profile
 from src.config import CanaryConfig, VehicleParameters
-from src.control import workbench_jobs
+from src.control import child_pool, workbench_jobs
 from src.dashboard.routes import workbench as workbench_routes
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
@@ -548,7 +548,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
         dids_path=Path("data/dids.yaml"),
         resolved_control_token="secret",
     )
-    monkeypatch.setattr(workbench_jobs, "_spawn_pool", lambda: ThreadPoolExecutor(max_workers=1))
+    monkeypatch.setattr(child_pool, "spawn_pool", lambda: ThreadPoolExecutor(max_workers=1))
     monkeypatch.setattr(workbench_jobs, "limit_address_space", lambda nbytes: (nbytes, nbytes))
     with TestClient(app) as test_client:
         test_client.config = config  # type: ignore[attr-defined]
@@ -610,7 +610,7 @@ def test_dyno_route_refuses_a_pool_that_cannot_finish_in_time(
     # the dyno's own check refuses.
     monkeypatch.setattr(workbench_jobs, "digest_row_budget", lambda config: 0)
     spawned: list[Any] = []
-    monkeypatch.setattr(workbench_jobs, "_spawn_pool", lambda: spawned.append(1))
+    monkeypatch.setattr(child_pool, "spawn_pool", lambda: spawned.append(1))
     response = client.get("/analysis/dyno?sessions=2026-09-26T120000", headers=AUTH)
     assert response.status_code == 409
     detail = response.json()["detail"]

@@ -6,6 +6,12 @@ shares the collector's heap. Every path that does not produce a result must
 also end that child: a timed-out or cancelled computation would otherwise keep
 a core and its frames until it finished on its own.
 
+:func:`run_in_child` is the one way to run such a computation: it owns the
+exclusive *analysis child* slot (one whole-session child at a time, R29.2),
+the brain's yield-and-wait protocol, pool creation, the timeout and the
+discard, and reports how a child failed as a :class:`ChildFailedError` the
+caller maps onto its own exception. Nothing else may spawn an analysis child.
+
 SIGTERM alone is not a guarantee. It can land while the child is still
 importing pandas and take seconds to act, or be ignored outright if the
 disposition was inherited as ``SIG_IGN``. So the discard sends SIGTERM and a
@@ -16,13 +22,17 @@ daemon thread; the event loop never waits on a child.
 from __future__ import annotations
 
 import asyncio
+import enum
 import logging
 import multiprocessing
 import resource
 import threading
-from concurrent.futures import Executor, ProcessPoolExecutor
+from collections.abc import Callable
+from concurrent.futures import BrokenExecutor, Executor, ProcessPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
+
+_T = TypeVar("_T")
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +44,13 @@ BRAIN_CHILD = "brain"
 #: Longest a yielded brain child can take to be gone: the reaper's SIGTERM
 #: grace, then SIGKILL and join. The digest waits at most this long for it.
 CHILD_EXIT_BOUND_SECONDS = TERMINATE_GRACE_SECONDS + 1.0
+#: The exclusive slot every whole-session analysis child claims (R29.2): the
+#: trip-end digest and its refreshes, the workbench jobs and the capture-quality
+#: recompute. The Pi's cgroup is 6 GB with swap off, so two of them at once is
+#: the memory contention the "no analysis while it collects" rule exists for.
+ANALYSIS_CHILD = "analysis"
+#: How often a caller waiting for the analysis slot looks at it again.
+SLOT_POLL_SECONDS = 0.05
 
 
 def spawn_pool() -> ProcessPoolExecutor:
@@ -94,16 +111,21 @@ def discard_pool(
     if terminate and isinstance(pool, ProcessPoolExecutor):
         # No public way to reach the workers before 3.14's terminate_workers().
         processes = list((pool._processes or {}).values())
-    pool.shutdown(wait=False, cancel_futures=True)
-    for proc in processes:
-        try:
-            proc.terminate()
-        except Exception:  # noqa: BLE001 — already gone is the goal
-            log.debug("pool child already exited", exc_info=True)
-            continue
-        threading.Thread(
-            target=_reap, args=(proc, grace), name="child-pool-reaper", daemon=True
-        ).start()
+    try:
+        pool.shutdown(wait=False, cancel_futures=True)
+    finally:
+        # A ``shutdown`` that raises must not leave the child it was asked to
+        # discard running: a hung one is attached to the analysis slot, which it
+        # would then hold until the process ended on its own.
+        for proc in processes:
+            try:
+                proc.terminate()
+            except Exception:  # noqa: BLE001 — already gone is the goal
+                log.debug("pool child already exited", exc_info=True)
+                continue
+            threading.Thread(
+                target=_reap, args=(proc, grace), name="child-pool-reaper", daemon=True
+            ).start()
 
 
 def _reap(proc: Any, grace: float) -> None:
@@ -131,6 +153,8 @@ class _Slot:
     running: bool = True
     processes: list[Any] = field(default_factory=list)
     yield_requested: bool = False
+    #: Who claimed it, for the refusal that names the holder.
+    holder: str = ""
 
 
 _SLOTS: dict[str, _Slot] = {}
@@ -163,24 +187,30 @@ def release_child(name: str) -> None:
             slot.yield_requested = False
 
 
+def _alive_locked(name: str) -> _Slot | None:
+    """The slot while ``name``'s child is computing or its process has not
+    exited; ``None`` (and the slot dropped) once neither. Caller holds the lock."""
+    slot = _SLOTS.get(name)
+    if slot is None:
+        return None
+    alive = []
+    for proc in slot.processes:
+        try:
+            if proc.is_alive():
+                alive.append(proc)
+        except Exception:  # noqa: BLE001 - a reaped handle is gone
+            continue
+    slot.processes = alive
+    if not slot.running and not alive:
+        del _SLOTS[name]
+        return None
+    return slot
+
+
 def child_alive(name: str) -> bool:
     """Whether ``name``'s child is computing or its process has not exited yet."""
     with _SLOTS_LOCK:
-        slot = _SLOTS.get(name)
-        if slot is None:
-            return False
-        alive = []
-        for proc in slot.processes:
-            try:
-                if proc.is_alive():
-                    alive.append(proc)
-            except Exception:  # noqa: BLE001 - a reaped handle is gone
-                continue
-        slot.processes = alive
-        if not slot.running and not alive:
-            del _SLOTS[name]
-            return False
-        return True
+        return _alive_locked(name) is not None
 
 
 def request_yield(name: str) -> None:
@@ -211,16 +241,204 @@ async def wait_for_child_exit(name: str, timeout: float = CHILD_EXIT_BOUND_SECON
     return True
 
 
+# -- the analysis child --------------------------------------------------------
+
+
+class ChildOutcome(enum.StrEnum):
+    """How a child that gave no result ended."""
+
+    #: The pool refused the submission (could not start a process).
+    NOT_STARTED = "not_started"
+    #: It did not answer within the timeout.
+    TIMED_OUT = "timed_out"
+    #: The process died or the pool broke under it.
+    BROKEN = "broken"
+    #: It hit its address-space ceiling (``MemoryError`` in the child).
+    OOM = "oom"
+
+
+class ChildFailedError(Exception):
+    """A child produced no result. ``outcome`` says how; ``cause`` is the
+    exception that said so (``TimeoutError``, ``BrokenExecutor``,
+    ``MemoryError`` or whatever the pool raised on submit), so a caller that
+    keeps its own exception type and wording builds it from ``cause``.
+
+    The child's *own* exceptions (a ``ValueError`` its work raised, a
+    refusal) are not this: they cross the boundary unchanged.
+    """
+
+    def __init__(self, outcome: ChildOutcome, message: str) -> None:
+        super().__init__(message)
+        self.outcome = outcome
+
+    @property
+    def cause(self) -> BaseException:
+        cause = self.__cause__
+        assert cause is not None, "ChildFailedError is always raised from its cause"
+        return cause
+
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (type(self), (self.outcome, str(self)), self.__dict__)
+
+
+class AnalysisSlotBusyError(RuntimeError):
+    """Another analysis child holds the slot. ``holder`` names it (``digest``,
+    ``workbench``, ``capture_recompute``)."""
+
+    def __init__(self, holder: str, message: str) -> None:
+        super().__init__(message)
+        self.holder = holder
+
+    def __reduce__(self) -> tuple[object, ...]:
+        return (type(self), (self.holder, str(self)), self.__dict__)
+
+
+def analysis_holder() -> str | None:
+    """Who holds the analysis slot (computing, or its process still exiting),
+    or ``None`` when it is free. In-memory only: safe on the loop."""
+    with _SLOTS_LOCK:
+        slot = _alive_locked(ANALYSIS_CHILD)
+        return None if slot is None else slot.holder
+
+
+def _try_claim_analysis(holder: str) -> str | None:
+    """Claim the slot; ``None`` on success, else who holds it."""
+    with _SLOTS_LOCK:
+        current = _alive_locked(ANALYSIS_CHILD)
+        if current is not None:
+            return current.holder
+        _SLOTS[ANALYSIS_CHILD] = _Slot(holder=holder)
+        return None
+
+
+async def _claim_analysis(holder: str, *, wait: float) -> None:
+    """Claim the analysis slot, waiting up to ``wait`` seconds for it.
+
+    The claim itself is synchronous, so two callers on one loop cannot both
+    win it. Past the wait it raises :class:`AnalysisSlotBusyError` naming the
+    holder. Cancellation while waiting leaves nothing claimed.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0.0, wait)
+    while True:
+        current = _try_claim_analysis(holder)
+        if current is None:
+            return
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            raise AnalysisSlotBusyError(
+                current,
+                f"the analysis child is held by {current}; one whole-session analysis child "
+                f"runs at a time" + (f" (waited {wait:.0f}s)" if wait >= 1 else ""),
+            )
+        await asyncio.sleep(min(SLOT_POLL_SECONDS, remaining))
+
+
+async def run_in_child(
+    call: Callable[[], _T],
+    *,
+    timeout: float,
+    holder: str,
+    executor: Executor | None = None,
+    slot_wait: float = 0.0,
+    in_process_call: Callable[[], _T] | None = None,
+) -> _T:
+    """Run ``call`` in a single-use ``spawn`` child, bounded by ``timeout``.
+
+    The one way to run a whole-session computation off the loop. In order:
+
+    1. claim the analysis slot as ``holder``, waiting up to ``slot_wait``
+       seconds if another analysis child holds it (:class:`AnalysisSlotBusyError`
+       past that, naming the holder);
+    2. ask the brain's idle-time child to yield and wait, bounded, for its
+       process to be gone (past the bound the call goes ahead and says so);
+    3. spawn the pool (or use ``executor``, which tests inject and the caller
+       owns), submit, and wait for the answer.
+
+    Whatever ends it - result, failure, timeout, cancellation - the pool this
+    call made is discarded (the child is terminated unless it finished) and the
+    slot is released, staying held until a *terminated* child's process has gone.
+
+    ``call`` may cap its own address space (``RLIMIT_AS`` is per process and
+    permanent). ``in_process_call``, when given, runs instead whenever the pool
+    is not a process pool (a thread pool a test stands in for the child): the
+    same work without the cap, which would otherwise stay on this process.
+
+    A child that gave no result raises :class:`ChildFailedError` with the
+    outcome. The work's own exceptions propagate unchanged. ``timeout`` bounds
+    the computation only; the wait for the slot is ``slot_wait``.
+    """
+    await _claim_analysis(holder, wait=slot_wait)
+    owned = executor is None
+    pool: Executor | None = None
+    finished = False
+    try:
+        if not await wait_for_child_exit(BRAIN_CHILD, CHILD_EXIT_BOUND_SECONDS):
+            log.warning(
+                "%s analysis child starting while a brain child is still exiting after %.0fs",
+                holder,
+                CHILD_EXIT_BOUND_SECONDS,
+            )
+        pool = spawn_pool() if executor is None else executor
+        if in_process_call is not None and not isinstance(pool, ProcessPoolExecutor):
+            call = in_process_call
+        try:
+            future = asyncio.get_running_loop().run_in_executor(pool, call)
+        except Exception as exc:
+            raise ChildFailedError(
+                ChildOutcome.NOT_STARTED, f"{type(exc).__name__}: {exc}"
+            ) from exc
+        try:
+            result = await asyncio.wait_for(future, timeout)
+        except TimeoutError as exc:
+            raise ChildFailedError(
+                ChildOutcome.TIMED_OUT, f"did not finish within {timeout:.0f}s"
+            ) from exc
+        except BrokenExecutor as exc:
+            raise ChildFailedError(ChildOutcome.BROKEN, f"{type(exc).__name__}: {exc}") from exc
+        except MemoryError as exc:
+            raise ChildFailedError(ChildOutcome.OOM, "out of memory") from exc
+        finished = True
+        return result
+    finally:
+        # The slot is released whatever the cleanup does: a pool whose
+        # ``shutdown`` raises must not leave the slot held for the life of the
+        # process, where every later analysis would be refused naming a holder
+        # that is long gone.
+        try:
+            if pool is not None and owned:
+                if not finished:
+                    # A terminated child still holds its memory until the reaper
+                    # has seen it go, so the slot stays taken until its process
+                    # has exited. A child that answered is idle and about to
+                    # exit; it gave its memory back with the result, so the next
+                    # claim need not wait for the process.
+                    attach_child(ANALYSIS_CHILD, pool)
+                discard_pool(pool, terminate=not finished)
+        finally:
+            release_child(ANALYSIS_CHILD)
+
+
 __all__ = [
+    "ANALYSIS_CHILD",
     "BRAIN_CHILD",
     "CHILD_EXIT_BOUND_SECONDS",
     "TERMINATE_GRACE_SECONDS",
+    "AddressSpaceCapRefusedError",
+    "AnalysisSlotBusyError",
+    "ChildFailedError",
+    "ChildOutcome",
+    "analysis_holder",
     "attach_child",
     "child_alive",
     "claim_child",
     "discard_pool",
+    "limit_address_space",
     "release_child",
     "request_yield",
+    "run_in_child",
     "spawn_pool",
     "wait_for_child_exit",
     "yield_requested",

@@ -22,7 +22,7 @@ Read tools:
 
 | Tool | Wraps |
 |---|---|
-| `get_status` | `GET /status` (incl. derived `vehicle_state.{state, rpm, coolant_temp, run_time, obd_freshness_seconds, can_freshness_seconds, supply_voltage, replay_id}` — check this before concluding anything about detector behavior; states are `engine_running`, `ignition_only`, `engine_off`, `parked` (both buses asleep on a live battery: the HAT's 12 V sense), `bench` (no vehicle on the port: USB-C or UPS power), `no_data`, `replay`, `passive` (CANary not transmitting, so OBD staleness says nothing; `vehicle_state.passive` is also true on any verdict reached under passive), `unknown`. Also `model_provenance` — per-loaded-model `{model_version, created_at, training_data_hash, training_sessions, artifact_format_version}` off each manifest (Task 6.5); `health.can0` — can0's rx overrun/drop/error sysfs counters plus the delta since the daemon started watching, `null`/absent when there's no `can0` interface (Task 6.8, see `scripts/verify_artifacts.py` for the companion deploy-skew check, Task 6.6)) |
+| `get_status` | `GET /status` (incl. derived `vehicle_state.{state, rpm, broadcast_rpm, coolant_temp, run_time, obd_freshness_seconds, can_freshness_seconds, supply_voltage, replay_id}` (`broadcast_rpm` is the ECM's broadcast rpm, 0x1F9, `null` unless CAN is fresh) — check this before concluding anything about detector behavior; states are `engine_running`, `ignition_only`, `engine_off`, `parked` (both buses asleep on a live battery: the HAT's 12 V sense), `bench` (no vehicle on the port: USB-C or UPS power), `no_data`, `replay`, `passive` (CANary not transmitting, so OBD staleness says nothing; `vehicle_state.passive` is also true on any verdict reached under passive), `unknown`. Also `model_provenance` — per-loaded-model `{model_version, created_at, training_data_hash, training_sessions, artifact_format_version}` off each manifest (Task 6.5); `health.can0` — can0's rx overrun/drop/error sysfs counters plus the delta since the daemon started watching, `null`/absent when there's no `can0` interface (Task 6.8, see `scripts/verify_artifacts.py` for the companion deploy-skew check, Task 6.6)) |
 | `get_config` | `GET /config` |
 | `get_power_status` | `GET /control/power` — UPS SoC/cell voltage, the watchdog's conditions as separate fields (`input_lost` PLD line, `discharging` + `discharge_rate_pct_per_hour`, `soc_critical`, `shutdown_state` + `countdown_reason`; the legacy `on_battery` is true only with `input_lost`) with seconds-lost/grace, and any active keep-alive hold (a keep-alive wins over a critical SoC; see [Power / UPS status](headless-api.md#power--ups-status)). Use instead of SSH'ing in to check the `ups-shutdown` watchdog (see [ups_shutdown_watch.py](../scripts/ups_shutdown_watch.py)); `watchdog_running: false` means the systemd unit isn't up, `watchdog_stale: true` means it's up but hung. |
 | `get_recent_anomalies` | `GET /anomalies` (`since`/`source`/`mode`/`limit` forwarded; the daemon skips daily files outside the bound) |
@@ -328,6 +328,43 @@ of its pass and stayed `running: true` — with live input withheld — until
 someone called stop.
 
 ---
+
+## Local analysis tools refuse while a capture records (R29.1)
+
+`query_telemetry`, `get_behavior_deviations`, `search_anomaly_log`,
+`get_delivery_error` and `compare_tuning_sessions` read stored Parquet or the
+anomaly day-files *inside `canary-mcp`*, which on the Pi runs beside the
+collector. They do not go through the daemon, so before each call they ask it
+(`GET /status?view=compact`, `capture_profile.active`, the fact the daemon's own
+`analysis_deferred` refusal reads). While a capture records they return, instead
+of running:
+
+```json
+{"ok": false, "error": "analysis_deferred", "reason": "capture_active",
+ "tool": "query_telemetry", "profile": "tuning", "message": "...", "laptop_path": "..."}
+```
+
+`laptop_path` is the tar-stream command to pull the session and run the tool on
+the laptop (AGENTS.md: never analyse on the Pi while it collects).
+
+When the daemon cannot be asked the answer depends on *how*:
+
+- **The connection cannot be made** (refused, no route, name not resolved, the
+  connect itself timing out): the tool runs. `canary-mcp` also runs on a laptop
+  against a pulled corpus with no daemon, which is where this work is meant to
+  go, and nothing that accepts no connection is collecting. This is fail-open on
+  purpose, and it is the only case that is.
+- **Anything else** (a connection that was made and then did not answer within
+  2 s, an HTTP error, a body that is not JSON, a body without
+  `capture_profile.active`): the tool is refused `capture_state_unknown`
+  (`reason: daemon_status_unreadable`). Something is listening and will not say
+  whether it is recording, which is the case the rule exists for; a daemon that
+  stalls is the busiest one, so a stall is refused, not waved through.
+
+A `canary-mcp` that reads a corpus on one machine but has `CANARY_DAEMON_URL`
+pointed at a daemon on another is refused while *that* daemon captures, even
+though its work would not compete with it. Keep the daemon URL on the machine
+that holds the corpus, or leave no daemon reachable.
 
 ## SQL via `query_telemetry`
 

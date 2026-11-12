@@ -60,7 +60,7 @@ from src.analysis.rom_trace import (
 )
 from src.collection import tuning_profile
 from src.config import CanaryConfig
-from src.control import workbench_jobs
+from src.control import child_pool, workbench_jobs
 from src.dashboard.routes import workbench as workbench_routes
 from src.signals.afr import load_afr_calibration
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
@@ -664,7 +664,7 @@ def _client(config: CanaryConfig, monkeypatch: pytest.MonkeyPatch) -> TestClient
         dids_path=DIDS,
         resolved_control_token="secret",
     )
-    monkeypatch.setattr(workbench_jobs, "_spawn_pool", lambda: ThreadPoolExecutor(max_workers=1))
+    monkeypatch.setattr(child_pool, "spawn_pool", lambda: ThreadPoolExecutor(max_workers=1))
     monkeypatch.setattr(workbench_jobs, "limit_address_space", lambda nbytes: (nbytes, nbytes))
     return TestClient(app)
 

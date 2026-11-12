@@ -156,7 +156,7 @@
     }
   },
   "compare_tuning_sessions": {
-    "description": "A/B two stored sessions on a matched grid (local). Refuses\n            calculated load as an axis \u2014 it is derived from BFS, so it moves\n            when fuelling moves; grid on rpm x MAF or rpm x BFS. Pass\n            ``floor_channel`` with ``conditions`` (the regime this comparison\n            was made under) to quote each delta against the measured same-tune\n            noise floor, below which nothing is distinguishable; a floor\n            measured under other conditions is refused, not quoted.",
+    "description": "A/B two stored sessions on a matched grid (local). Refuses\n            calculated load as an axis \u2014 it is derived from BFS, so it moves\n            when fuelling moves; grid on rpm x MAF or rpm x BFS. Pass\n            ``floor_channel`` with ``conditions`` (the regime this comparison\n            was made under) to quote each delta against the measured same-tune\n            noise floor, below which nothing is distinguishable; a floor\n            measured under other conditions is refused, not quoted. Refused\n            (``analysis_deferred``) while the daemon is capturing.",
     "inputSchema": {
       "properties": {
         "against": {
@@ -343,7 +343,7 @@
     }
   },
   "get_behavior_deviations": {
-    "description": "Diff a stored session against the learned behavior surfaces (local,\n            no daemon HTTP call) \u2014 did a mod/retrain/change actually move behavior?\n            Pass ``against`` to A/B ``session`` directly against a second session\n            id instead (Task 5.4: before-mod vs. after-mod, session-to-session).",
+    "description": "Diff a stored session against the learned behavior surfaces (local,\n            no daemon HTTP call) \u2014 did a mod/retrain/change actually move behavior?\n            Pass ``against`` to A/B ``session`` directly against a second session\n            id instead (Task 5.4: before-mod vs. after-mod, session-to-session).\n            Refused (``analysis_deferred``) while the daemon is capturing.",
     "inputSchema": {
       "properties": {
         "against": {
@@ -658,7 +658,7 @@
     }
   },
   "get_delivery_error": {
-    "description": "Measured-vs-commanded AFR at enrichment for one stored session,\n            with the methodology gates applied and reported (local, no daemon\n            call). Target and measured reads are paired by acquisition time\n            within the vehicle's declared separation, and only steady-target\n            samples count; closed loop, fuel cut and every other exclusion is\n            a named gate, and results are band-averaged over rpm so uneven\n            coverage cannot masquerade as an effect. ``measured_spec`` must be\n            a measured source the vehicle's lambda_delivery.yaml declares: the\n            ECM lambda and A/F-voltage paths disagree by ~3.8% at WOT and\n            neither is established as truth. ``min_load`` defaults to the\n            vehicle profile's WOT load floor.",
+    "description": "Measured-vs-commanded AFR at enrichment for one stored session,\n            with the methodology gates applied and reported (local, no daemon\n            call). Target and measured reads are paired by acquisition time\n            within the vehicle's declared separation, and only steady-target\n            samples count; closed loop, fuel cut and every other exclusion is\n            a named gate, and results are band-averaged over rpm so uneven\n            coverage cannot masquerade as an effect. ``measured_spec`` must be\n            a measured source the vehicle's lambda_delivery.yaml declares: the\n            ECM lambda and A/F-voltage paths disagree by ~3.8% at WOT and\n            neither is established as truth. ``min_load`` defaults to the\n            vehicle profile's WOT load floor. Refused (``analysis_deferred``)\n            while the daemon is capturing.",
     "inputSchema": {
       "properties": {
         "measured_spec": {
@@ -1713,7 +1713,7 @@
     }
   },
   "query_telemetry": {
-    "description": "Run a single SELECT/WITH against the telemetry Parquet view.\n\n            View name is `telemetry` with columns timestamp, source, channel,\n            value_number, value_text, value_bool, unit, payload, metadata_json,\n            and a derived `session` column. Non-SELECT statements are rejected.\n            session/since/until scope which sessions' parquet back the view\n            for this call (cheaper than scanning the whole corpus) \u2014 since/\n            until are ISO-8601 or a bare session id, inclusive both ends.\n            `decoded` rows are decoded on read from the raw CAN frames with the\n            current bindings (P02.8: none is stored since 2026-09-26, and an old\n            session's stored ones are never shown); a query that asks for them\n            carries a note, and an empty_reason when it finds nothing.\n            ",
+    "description": "Run a single SELECT/WITH against the telemetry Parquet view.\n\n            View name is `telemetry` with columns timestamp, source, channel,\n            value_number, value_text, value_bool, unit, payload, metadata_json,\n            and a derived `session` column. Non-SELECT statements are rejected.\n            session/since/until scope which sessions' parquet back the view\n            for this call (cheaper than scanning the whole corpus) \u2014 since/\n            until are ISO-8601 or a bare session id, inclusive both ends.\n            `decoded` rows are decoded on read from the raw CAN frames with the\n            current bindings (P02.8: none is stored since 2026-09-26, and an old\n            session's stored ones are never shown); a query that asks for them\n            carries a note, and an empty_reason when it finds nothing.\n            Refused (``analysis_deferred``) while the daemon is capturing.\n            ",
     "inputSchema": {
       "properties": {
         "row_limit": {
@@ -2167,7 +2167,7 @@
     }
   },
   "search_anomaly_log": {
-    "description": "Search anomaly history (kind='anomalies') or the MCP audit log (kind='audit').\n\n        Anomaly filters: source (isolation_forest|lstm_autoencoder), mode,\n        min_score / max_score, affected_channel, session. Audit filters:\n        action (e.g. 'mcp.start_capture'), result ('ok'|'error'), actor.\n        ``contains`` does a raw-text substring match for fields outside the\n        structured filters. Results are newest-first, capped at ``limit``.\n        ",
+    "description": "Search anomaly history (kind='anomalies') or the MCP audit log (kind='audit').\n\n        Anomaly filters: source (isolation_forest|lstm_autoencoder), mode,\n        min_score / max_score, affected_channel, session. Audit filters:\n        action (e.g. 'mcp.start_capture'), result ('ok'|'error'), actor.\n        ``contains`` does a raw-text substring match for fields outside the\n        structured filters. Results are newest-first, capped at ``limit``.\n        Refused (``analysis_deferred``) while the daemon is capturing.\n        ",
     "inputSchema": {
       "properties": {
         "action": {

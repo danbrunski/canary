@@ -20,7 +20,7 @@ status.
 `src/daemon/health.py` has another session's uncommitted edits. R29.9 touches
 it; go after that work lands.
 
-- [ ] **R29.1 Whole-session analysis still runs in-process on the Pi through
+- [~] **R29.1 Whole-session analysis still runs in-process on the Pi through
   routes and tools the bounded-child rule does not cover.** R03.2 moved
   classify and digest into the workbench's single-flight child, deferred while
   a capture records. Three paths were left outside it:
@@ -41,19 +41,104 @@ it; go after that work lands.
 
   `AGENTS.md`: "No analysis on the Pi while it collects"; the incident cost
   150k records.
-  - [ ] A `trip_summary` job kind in `workbench_jobs.JOB_KINDS`; the route
+  - [x] A `trip_summary` job kind in `workbench_jobs.JOB_KINDS`; the route
     calls `run_off_loop`. Test: the route during a capture answers 409
     `analysis_deferred`.
-  - [ ] MCP `get_delivery_error` and `compare_tuning_sessions` become proxies
+    `trip_summary` added to `JOB_KINDS` and `_CONFIG_ONLY_KINDS`; its child
+    entry returns `{"trip_summary": get_trip_summary(...)}` (an explicit `None`
+    for a session with nothing to summarize). `GET /sessions/{id}/trip-summary`
+    is now `async` and calls `control.trip_summary.trip_summary_off_loop`: a
+    sidecar on disk at `SCHEMA_VERSION` is served directly (read in
+    `asyncio.to_thread`, capture or not), a missing or stale one goes through
+    `capture_deferral` then `run_off_loop`; `WorkbenchRefusedError` becomes the
+    route's 409/503 body. Auth unchanged (public;
+    `tests/test_route_table_snapshot.py` green); `TripSummarySidecar` and
+    `SCHEMA_VERSION` untouched. New `tests/test_trip_summary_route.py` (9 tests):
+    first request computes in the child (`jobs == ["trip_summary"]`) and the
+    second reads the sidecar (no job); an existing sidecar is served during a
+    capture with no job; **the first request during a capture is 409
+    `analysis_deferred` (`reason: capture_active`, `profile`, `laptop_path`
+    naming the session), no job, no sidecar written**; an older-schema sidecar is
+    recomputed; unknown session 404 without a job; no-telemetry session 404 from
+    the child; busy child 409 `analysis_busy`; the child entry's return shape.
+    `test_dashboard_api.py::test_get_session_trip_summary_*` pass (the compute
+    test now uses a thread-pool stand-in for the child). No span/row preflight
+    was added (the item did not ask, and it would be a new refusal on a public
+    route): the child's `RLIMIT_AS` ceiling and 900 s timeout bound it, as 503
+    `analysis_unavailable`.
+  - [~] MCP `get_delivery_error` and `compare_tuning_sessions` become proxies
     of the workbench routes (the `delivery_error` and `pull_comparison` kinds
     exist).
-  - [ ] `query_telemetry`, `get_behavior_deviations` and `search_anomaly_log`
+    **Not done: the tools are not equivalent to the routes, so a proxy would
+    change what they answer.** `get_delivery_error` is the single-session
+    `analysis.tuning.delivery_error` (`pairing`, `eligibility`,
+    `delay_sensitivity`, `capabilities`, `min_load_source`, `engine_version: 2`,
+    documented in `docs/mcp-server.md`); `/analysis/delivery-error` is
+    `workbench.pooled_delivery_error` over a session pool (per-session blocks
+    plus `selection`, no `capabilities`/`min_load_source`). `compare_tuning_sessions`
+    is `analysis.tuning.compare_sessions` (session A vs session B, `axes`,
+    `unsafe_axes`, `conditions` required beside `floor_channel`, `distinguishable`,
+    `floor_refusal`); `/analysis/pull-comparison` is `workbench.pull_comparison`
+    (revision A vs revision B, fixed `rpm` x `airflow`, hard-coded
+    `ALL_CONDITIONS`, "choose two different revisions" 400). `axes`,
+    `unsafe_axes` and `conditions` have no route parameter (mapping `conditions`
+    away would quote a floor against the wrong regime, the R05.2 constraint), a
+    same-revision A/B (the null run the noise floor comes from) is impossible
+    through the route, and the proxy would also lose the laptop path the
+    `analysis_deferred` body points at ("canary MCP tuning tools", on a pulled
+    corpus, no daemon). What the item was for (no whole-session pandas in
+    `canary-mcp` while a capture records) is covered for both tools by the
+    capture guard below. Decision in the report: replace them with
+    pooled-route proxies and a new response contract, make the routes grow the
+    missing parameters, or leave them local behind the guard (recommended).
+  - [x] `query_telemetry`, `get_behavior_deviations` and `search_anomaly_log`
     refuse while a capture is active, and `docs/mcp-server.md` says so.
-  - [ ] `capture_deferral` on `/analysis/binned`.
+    New `src/mcp_server/capture_guard.py::capture_refusal(client, tool=...)`
+    asks the daemon `GET /status?view=compact` (`capture_profile.active`, the
+    same fact `capture_deferral` reads) before each call and returns
+    `{"ok": False, "error": "analysis_deferred", "reason": "capture_active",
+    "tool", "profile", "message", "laptop_path"}`. **Fail open only when the
+    connection cannot be made** (`httpx.ConnectError` / `ConnectTimeout` as the
+    `DaemonError`'s cause: refused, no route, name unresolved; the laptop with a
+    pulled corpus and no daemon must keep working, and nothing that accepts no
+    connection is collecting). **Everything else fails closed**,
+    `capture_state_unknown`: a read timeout (a daemon that connected and then
+    stalled past the 2 s probe is the busiest one, so it is refused, not waved
+    through), an HTTP error, a body that is not JSON (`DaemonClient._request`
+    lets the `JSONDecodeError` escape; caught as `ValueError`), a body without
+    `capture_profile.active`. The five local tools (the three named plus
+    `get_delivery_error` and `compare_tuning_sessions`, which stay local per the
+    item above) are `async` closures in `server.py` that call it first. Tests,
+    `tests/test_mcp_capture_guard.py` (15): active -> named refusal with the
+    laptop path; inactive -> runs; refused port and `ConnectTimeout` -> fail
+    open; read timeout (mock transport) and a real listening socket that never
+    answers (probe timeout patched to 0.2 s) -> `capture_state_unknown`; seven
+    unreadable answers (500, missing field, non-bool, non-object, a 200 with a
+    non-JSON body, a truncated JSON body) -> fail closed; all five tools refused
+    through FastMCP while a capture records; the tools still return rows with no
+    capture and with no daemon. Snapshot regenerated
+    (`CANARY_UPDATE_MCP_SNAPSHOT=1 pytest -n0 tests/test_mcp_tool_snapshot.py`):
+    the diff is the description text of those five tools (one added sentence
+    each), no input schema changed. `docs/mcp-server.md` has the new section
+    "Local analysis tools refuse while a capture records (R29.1)" with both
+    failure policies (fail open only when no connection can be made) and the
+    mixed-config caveat (a `canary-mcp` on a laptop
+    pointed at the Pi's daemon is refused while the Pi captures).
+  - [x] `capture_deferral` on `/analysis/binned`.
+    `routes/public.py::get_binned_analysis` calls `capture_deferral(config,
+    [session] if session else None)` after its 400 input checks and before
+    `binned_analysis_response`, and maps `WorkbenchRefusedError` to
+    `HTTPException(exc.status, exc.detail)`; the route stays public. Test
+    `tests/test_analysis_binned_route.py::test_binned_analysis_is_deferred_while_a_capture_records`:
+    200 with no capture, 409 `analysis_deferred` (profile, `laptop_path` naming
+    the session) while one records, unscoped read too, bad `agg` still 400.
+    `docs/headless-api.md` rows for both public routes updated.
   - Must not change: the sidecar format and `trip_summary.json` schema
-    version.
+    version. Held: `SCHEMA_VERSION` and `TripSummarySidecar` unchanged,
+    `tests/test_trip_summary_sidecar.py` and `tests/test_route_table_snapshot.py`
+    pass.
 
-- [ ] **R29.2 The bounded-child runner exists four times and "one analysis
+- [x] **R29.2 The bounded-child runner exists four times and "one analysis
   child at a time" is enforced three ways and once not at all.**
   `trip_end._in_digest_child`, `capture_finalize._run_recompute`,
   `workbench_jobs._compute` and `BrainScheduler._run` share one skeleton
@@ -66,13 +151,127 @@ it; go after that work lands.
   capture-stop recompute can therefore overlap a trip-end digest or a
   workbench job, which is the memory contention the rule exists to prevent.
   The Pi's cgroup is 6 G with swap off.
-  - [ ] `child_pool.run_in_child(call, *, timeout, executor=None)` returning
+  - [x] `child_pool.run_in_child(call, *, timeout, executor=None)` returning
     an outcome (`TIMED_OUT | BROKEN | OOM`) and owning pool creation and
     discard. Each module keeps its own exception types and messages.
-  - [ ] One exclusive slot in `child_pool` with the existing yield-and-wait
+    `child_pool.run_in_child(call, *, timeout, holder, executor=None,
+    slot_wait=0.0, in_process_call=None)` returns the call's result, or raises
+    `ChildFailedError` whose `outcome` is `ChildOutcome.TIMED_OUT | BROKEN | OOM
+    | NOT_STARTED` (and `.cause` the original exception); the work's own
+    exceptions cross unchanged. It owns pool creation (`spawn_pool`), the
+    timeout, and discard (terminate unless the child answered; the slot stays
+    taken until a terminated child's process has exited). `holder` is required:
+    claiming the slot cannot be left to the caller. `in_process_call` is the
+    uncapped call run when a test hands a thread pool, so `RLIMIT_AS` never
+    lands on the test process (`capture_finalize`'s old per-pool decision,
+    pinned by `test_capture_quality_reads`). Ported:
+    `trip_end._in_digest_child` (the three `TripEndDigestUnavailableError`
+    reasons and messages, `MemoryError` re-raised unchanged),
+    `capture_finalize._run_recompute` (`CaptureQualityUnavailableError`, every
+    message kept) and `workbench_jobs._compute` (the 503 `analysis_unavailable`
+    bodies, `child_timed_out`/`child_failed`/`child_out_of_memory`, kept;
+    a pool that cannot start is still the raw exception). `workbench_jobs` now
+    imports `limit_address_space` from `child_pool` and nothing private from
+    `trip_end`; the `_spawn_pool`/`_discard_pool` aliases are deleted from
+    `trip_end` and `capture_finalize`. **`BrainScheduler._run` is left on its own
+    lifecycle** (it already uses `child_pool.spawn_pool`/`discard_pool` and the
+    registry, no private names): it polls the future every `poll_seconds` for a
+    reason to yield, cancels it and records `deferred`, and times the job on its
+    own clock, and it is the tenant that gives way to the analysis slot, so
+    routing it through the slot-taking `run_in_child` would remove the exclusion
+    it exists to honor. Regrowth guard
+    `tests/test_child_pool.py::test_no_fifth_copy_of_the_bounded_child_runner`:
+    no `src/` module outside `child_pool.py` and `brain_jobs.py` calls
+    `spawn_pool(`, none names `_spawn_pool`/`_discard_pool` (the list may only
+    shrink). `tests/test_child_pool.py` also pins each outcome (not started,
+    broken, OOM, timed out), the work's own `ValueError` crossing unchanged,
+    owned-pool discard (terminate only on failure), and pickling of both new
+    exception classes (`test_exceptions_pickle.py` passes).
+  - [x] One exclusive slot in `child_pool` with the existing yield-and-wait
     protocol, which `capture_finalize` joins.
-  - [ ] Test: a recompute requested during a running digest waits or is
+    `child_pool.ANALYSIS_CHILD` is one slot claimed by the digest (compute,
+    tuning refresh, tire measurement: holder `digest`), every workbench job
+    (`workbench`) and the capture recompute (`capture_recompute`), through
+    `run_in_child`; the claim is synchronous, so two callers on one loop cannot
+    both win it, and a refusal is `AnalysisSlotBusyError` naming the holder.
+    The brain protocol is kept: `run_in_child` asks a running brain child to
+    yield and waits, bounded by `CHILD_EXIT_BOUND_SECONDS`, for its process to
+    be gone (goes ahead and logs past the bound, as the digest did);
+    `run_off_loop` still refuses `brain_child_yielding` before spawning and still
+    shares an identical in-flight request, and its `child_busy` 409 now covers
+    the slot (body gains `holder` when another child, not another workbench job,
+    has it) beside the existing `_IN_FLIGHT` and digest-in-flight checks (a
+    digest queued for the slot is not jumped by a new workbench request).
+    `BrainScheduler.blocked()` and `_yield_reason()` also yield to
+    `analysis_holder()` (reason `<holder>_running`, so `capture_recompute_running`
+    is new; `digest_running` and `workbench_running` unchanged).
+    **Recompute waits, bounded, then is refused by name** (decided from its
+    callers): `finalize_capture` is awaited inside `ProfileCaptureSession.stop`
+    after the boundary, drain and flush, reconciles against the in-memory loss
+    epoch of the capture that is ending, and never raises, so a refusal drops
+    the one verdict that cannot be redone with the same inputs; and the usual
+    holder at that moment is the trip-end digest of the drive that just
+    stopped, so refusing would lose the verdict in the common case. The boot
+    path (`finalize_interrupted_capture`) runs before any other child can exist.
+    The wait is `RECOMPUTE_SLOT_WAIT_SECONDS = 120` (twice the ~60 s a 20-minute
+    capture takes), because a digest can hold the slot for 15 minutes; past it
+    `CaptureQualityUnavailableError` names the holder, which every caller already
+    maps (the stop records no verdict, read as unknown, never a pass; the routes
+    answer 503). The two interactive callers keep the default (live and
+    historic recompute routes). Other callers choose: the tuning refresh, which
+    serves an HTTP request, passes `slot_wait=0` (refused by name, a `failed`
+    note on the stored digest) instead of queueing for up to 900 s; the trip-end
+    digest and tire measurement wait up to their own timeout (a shutdown deadline
+    passed as `timeout` bounds it); the workbench never waits (409). **Shutdown is
+    bounded by the unit's stop deadline** (found by the verifier: the capture
+    stop runs before the trip-end settle, so a stop that found a GPS-edge digest
+    holding the slot waited its own 120 s past `TimeoutStopSec=30`).
+    `recompute_quality_off_loop`, `finalize_capture` and
+    `ProfileCaptureSession.stop` take `deadline` (a `loop.time()` instant);
+    `run_daemon` passes `shutdown_started + TRIP_END_SHUTDOWN_SECONDS`, the one
+    instant the trip-end work is held to. The slot wait becomes
+    `min(slot_wait, remaining)`, and an `asyncio.timeout_at(deadline)` around the
+    whole coordinated recompute also covers what has no bound of its own (the
+    queue behind another recompute, the brain-exit wait, spawn, the compute): past
+    it the child is terminated, the slot released and
+    `CaptureQualityUnavailableError("... did not finish before its deadline; the
+    analysis child is held by digest")` raised. The stop then still stamps the
+    capture (`daemon_shutdown`, real `ended_at`) with no `capture_quality.json`
+    (unknown, never a pass; the rows are intact and a recompute works once the
+    slot is free). Nothing recomputes it automatically at the next boot (see the
+    report: `recover_interrupted_capture` only takes unclosed captures).
+  - [x] Test: a recompute requested during a running digest waits or is
     refused, by name.
+    `tests/test_analysis_child_registry.py`:
+    `test_a_recompute_requested_during_a_digest_is_refused_by_name_past_its_wait`
+    (a digest holds the slot via `_in_digest_child`; the recompute with
+    `slot_wait=0.2` raises `CaptureQualityUnavailableError` matching "held by
+    digest", and the scoring never ran),
+    `test_a_recompute_requested_during_a_digest_waits_for_it_to_finish` (it is
+    pending while the digest runs, runs after it), the reverse
+    (`test_a_digest_waits_for_a_recompute_and_is_refused_by_name_past_its_timeout`),
+    `test_the_workbench_refuses_busy_naming_the_holder_while_a_recompute_runs`,
+    `test_the_brain_yields_to_whoever_holds_the_analysis_slot`,
+    `test_a_request_serving_caller_is_refused_at_once_not_queued`. The existing
+    brain tests (`test_brain_jobs`, the registry file's yield tests) pass.
+    Deadline: `test_a_deadline_ends_the_wait_for_a_digest_however_long_the_slot_wait_is`
+    (default 120 s wait, 0.3 s deadline, digest undisturbed),
+    `test_a_deadline_cancels_a_recompute_that_is_still_computing_and_frees_the_slot`,
+    `test_a_deadline_also_bounds_the_queue_behind_another_recompute`;
+    `tests/test_profile_capture.py::test_a_shutdown_stop_gives_up_on_a_digest_at_its_deadline_and_still_stamps`
+    (capture stamped `daemon_shutdown`, no sidecar, slot free, a later recompute
+    works) and `::test_run_daemon_shutdown_with_a_digest_holding_the_slot_fits_the_unit_stop_deadline`
+    (the whole `run_daemon` shutdown with a digest holding the slot ends inside
+    `UNIT_STOP_TIMEOUT_SECONDS`; the stop itself under 5 s with the budget patched
+    to 1 s; fails with a hang-guard timeout when the stop is not given the
+    deadline, checked); `test_run_daemon_shutdown_stops_through_the_session` now
+    also asserts the stop is handed a deadline. Cleanup: `run_in_child` releases
+    the slot in a `finally` of its own and `discard_pool` terminates the child
+    even when `pool.shutdown` raises (`tests/test_child_pool.py::test_a_pool_whose_cleanup_raises_still_frees_the_slot`
+    both ways, fails against the old shape, checked;
+    `::test_a_shutdown_that_raises_still_terminates_the_child`). The regrowth
+    guard also refuses a `ProcessPoolExecutor(` constructed directly anywhere
+    under `src/control/` outside `child_pool.py`.
 
 - [ ] **R29.3 Four `(status, detail)` exception classes and 38 hand-written
   remaps to `HTTPException`; no app-level handler.**

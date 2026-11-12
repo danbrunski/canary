@@ -298,7 +298,9 @@ class ProfileCaptureSession:
                 ),
             }
 
-    async def stop(self, reason: StopReason = "operator_stop") -> dict[str, Any]:
+    async def stop(
+        self, reason: StopReason = "operator_stop", *, deadline: float | None = None
+    ) -> dict[str, Any]:
         """End the capture: judge it, stamp it, and return to ``default``.
 
         ``operator_stop`` is the full stop the routes and autostart use.
@@ -309,6 +311,13 @@ class ProfileCaptureSession:
         window, the writer and the profile where they are, as shutdown always
         did: the process is exiting, and rotating would leave an empty live
         session behind and move the trip-end target off the capture.
+
+        ``deadline`` (a ``loop.time()`` instant) is what the shutdown path
+        passes so the stop fits ``TimeoutStopSec``: the judge waits for the
+        analysis child (a trip-end digest of the drive that just ended is
+        usually in it) only until then. A judge that gets no answer by it
+        leaves the capture *stamped* all the same, with no
+        ``capture_quality.json`` -- unknown, never a pass -- and its rows intact.
         """
         storage_writer = self._require_writer()
         async with self._lock:
@@ -327,6 +336,7 @@ class ProfileCaptureSession:
                 health=self.health_monitor,
                 writer=storage_writer,
                 start=self._start_epoch,
+                deadline=deadline,
             )
             stamp_capture_end(Path(ended_capture_dir), reason)
             self._start_epoch = None

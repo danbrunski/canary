@@ -483,14 +483,14 @@ async def test_only_a_child_process_is_ever_capped(
     with ThreadPoolExecutor(max_workers=1) as pool:
         await recompute_quality_off_loop(session, executor=pool)
         await recompute_quality_off_loop(session, executor=pool, address_space_bytes=1234 * _MIB)
-    monkeypatch.setattr(capture_finalize, "_spawn_pool", lambda: ThreadPoolExecutor(max_workers=1))
+    monkeypatch.setattr(child_pool, "spawn_pool", lambda: ThreadPoolExecutor(max_workers=1))
     await recompute_quality_off_loop(session)
     await recompute_quality_off_loop(session, address_space_bytes=1234 * _MIB)
     assert given == [None, None, None, None], "a thread pool was handed a cap"
     assert resource.getrlimit(resource.RLIMIT_AS) == before, "this process was capped"
 
     monkeypatch.setattr(capture_finalize, "recompute_under_limit", _report_the_cap)
-    monkeypatch.setattr(capture_finalize, "_spawn_pool", _spawn_pool)
+    monkeypatch.setattr(child_pool, "spawn_pool", _spawn_pool)
     # ``_report_the_cap`` stands in for the score and returns the cap it was handed.
     default_cap: Any = await recompute_quality_off_loop(session)
     asked_cap: Any = await recompute_quality_off_loop(session, address_space_bytes=1234 * _MIB)

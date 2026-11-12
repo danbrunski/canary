@@ -892,6 +892,11 @@ class BrainScheduler:
             return "digest_running"
         if any_workbench_job_in_flight():
             return "workbench_running"
+        holder = child_pool.analysis_holder()
+        if holder is not None:
+            # Whoever holds the analysis slot (a capture-quality recompute, a
+            # digest refresh): one analysis child at a time, and the brain yields.
+            return f"{holder}_running"
         if self.running is None and child_pool.child_alive(child_pool.BRAIN_CHILD):
             return "brain_child_exiting"
         return None
@@ -905,6 +910,9 @@ class BrainScheduler:
             return "digest_running"
         if any_workbench_job_in_flight():
             return "workbench_running"
+        holder = child_pool.analysis_holder()
+        if holder is not None:
+            return f"{holder}_running"
         if child_pool.yield_requested(child_pool.BRAIN_CHILD):
             return "analysis_requested"
         return None
@@ -1018,6 +1026,20 @@ class BrainScheduler:
         )
 
     async def _run(self, job: BrainJob) -> BrainJob:
+        """Run one job in the brain's own child, polling so it can yield.
+
+        Deliberately not :func:`child_pool.run_in_child`: that waits on the
+        child once, under the analysis slot, and the brain is the tenant that
+        gives way to the slot's holders. It polls the future every
+        ``poll_seconds`` for a reason to yield (collection started, a digest or
+        workbench job or recompute holds the analysis slot, an operator
+        request), cancels the future and records ``deferred`` when it does, and
+        times the job against its own clock. Forcing it through
+        ``run_in_child`` would take the analysis slot away from the work it
+        exists to step aside for. It does share the pool lifecycle and the
+        registry (``spawn_pool``, ``discard_pool``, ``claim_child`` under
+        ``BRAIN_CHILD``).
+        """
         child_pool.claim_child(child_pool.BRAIN_CHILD)
         self.running = job.job_id
         owned = self._executor_factory is None

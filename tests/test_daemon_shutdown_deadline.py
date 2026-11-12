@@ -23,7 +23,7 @@ import pytest
 
 from src.analysis.digest import REASON_CHILD_TIMED_OUT, REASON_INTERRUPTED_AT_SHUTDOWN
 from src.config import CanaryConfig
-from src.control import trip_end  # imported warm: the runtime imports it in a thread
+from src.control import child_pool, trip_end  # imported warm: the runtime imports it in a thread
 from src.daemon import build_components, runtime
 from src.daemon.server import DASHBOARD_SHUTDOWN_SECONDS
 from src.storage.parquet_writer import ParquetTelemetryWriter
@@ -48,7 +48,7 @@ class _HangingExecutor(Executor):
 @pytest.fixture
 def hanging_child(monkeypatch: pytest.MonkeyPatch) -> _HangingExecutor:
     pool = _HangingExecutor()
-    monkeypatch.setattr(trip_end, "_spawn_pool", lambda: pool)
+    monkeypatch.setattr(child_pool, "spawn_pool", lambda: pool)
     return pool
 
 

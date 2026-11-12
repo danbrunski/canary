@@ -808,6 +808,10 @@ async def run_daemon(
                     task.result()
         finally:
             shutdown_started = asyncio.get_running_loop().time()
+            # One deadline for the capture's stop and the trip-end work (D03.6):
+            # the stop waits on the same analysis child the digests use, so it
+            # is spent from the same budget.
+            stop_deadline = shutdown_started + TRIP_END_SHUTDOWN_SECONDS
             if live_source_ready is not None and not live_source_ready.done():
                 live_source_ready.set_result(None)
             stop_event.set()
@@ -829,7 +833,7 @@ async def run_daemon(
                 # The same stop the routes use, so the verdict reconciles
                 # against the capture's own start epoch (R03.5); before, this
                 # path passed `start=None` and reported no loss_epoch_start.
-                await components.profile_capture.stop("daemon_shutdown")
+                await components.profile_capture.stop("daemon_shutdown", deadline=stop_deadline)
             # Task 5.4 fallback trip-end trigger: the drive can end because
             # the daemon stopped (Pi shutdown) rather than a clean
             # GPS-detected stop. One deadline, from the start of shutdown
@@ -838,7 +842,7 @@ async def run_daemon(
                 config,
                 components,
                 storage_writer.paths.root,
-                deadline=shutdown_started + TRIP_END_SHUTDOWN_SECONDS,
+                deadline=stop_deadline,
             )
             await _cancel_all(
                 (

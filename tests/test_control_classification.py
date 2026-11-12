@@ -160,7 +160,7 @@ def _route_client(
     is ``test_workbench_analysis``'s real-child test) and records each job."""
     from concurrent.futures import ThreadPoolExecutor
 
-    from src.control import workbench_jobs
+    from src.control import child_pool, workbench_jobs
     from src.dashboard.api import create_app
 
     config = _config_with_alarm_epoch(tmp_path)
@@ -183,7 +183,7 @@ def _route_client(
         return real(kind, *args, **kwargs)
 
     monkeypatch.setattr(workbench_jobs, "run_workbench_job", recording)
-    monkeypatch.setattr(workbench_jobs, "_spawn_pool", lambda: ThreadPoolExecutor(max_workers=1))
+    monkeypatch.setattr(child_pool, "spawn_pool", lambda: ThreadPoolExecutor(max_workers=1))
     # The child caps its own RLIMIT_AS; in a thread it would cap the test process.
     monkeypatch.setattr(workbench_jobs, "limit_address_space", lambda nbytes: (nbytes, nbytes))
     app = create_app(config, anomalies_dir=tmp_path / "anomalies", control_token="secret")

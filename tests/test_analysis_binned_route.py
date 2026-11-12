@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
+from src.collection import tuning_profile
 from src.dashboard.api import create_app
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
@@ -99,3 +101,41 @@ def test_binned_analysis_unavailable_for_missing_channel(tmp_path: Path) -> None
 
     assert response.status_code == 200
     assert response.json()["available"] is False
+
+
+def _capture_recording(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tuning_profile, "is_active", lambda: True)
+    profile = tuning_profile.active_profile().model_copy(update={"name": "tuning"})
+    monkeypatch.setattr(tuning_profile, "active_profile", lambda: profile)
+
+
+def test_binned_analysis_is_deferred_while_a_capture_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R29.1: DuckDB over stored parquet is whole-session analysis. The route is
+    public and keeps its auth; during a capture it answers the workbench's 409."""
+    client, storage = _client_and_storage(tmp_path)
+    _write_session(storage, "2026-05-17T120000")
+    params = {
+        "value": "obd:SHORT_FUEL_TRIM_1",
+        "x": "obd:RPM",
+        "session": "2026-05-17T120000",
+    }
+    assert client.get("/analysis/binned", params=params).status_code == 200
+    _capture_recording(monkeypatch)
+
+    response = client.get("/analysis/binned", params=params)
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["error"] == "analysis_deferred"
+    assert detail["reason"] == "capture_active"
+    assert detail["profile"] == "tuning"
+    assert "2026-05-17T120000" in detail["laptop_path"]
+    # Unscoped too: the corpus-wide read is the larger one.
+    assert (
+        client.get("/analysis/binned", params={"value": "obd:RPM", "x": "obd:RPM"}).status_code
+        == 409
+    )
+    # Bad input is still the caller's 400, answered before any deferral.
+    assert client.get("/analysis/binned", params={**params, "agg": "bogus"}).status_code == 400

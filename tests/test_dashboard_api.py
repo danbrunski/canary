@@ -1159,10 +1159,18 @@ def test_get_obd_monitors_returns_the_cached_sweep_shape(
 
 
 def test_get_session_trip_summary_returns_computed_shape(
-    config: CanaryConfig, anomalies_dir: Path
+    config: CanaryConfig, anomalies_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from src.control import child_pool, workbench_jobs
     from src.storage.parquet_writer import write_records_to_parquet
     from src.telemetry import TelemetryRecord
+
+    # R29.1: the first request computes in the workbench's child; a thread pool
+    # stands in for the spawn child (tests/test_trip_summary_route.py has the rest).
+    monkeypatch.setattr(child_pool, "spawn_pool", lambda: ThreadPoolExecutor(max_workers=1))
+    monkeypatch.setattr(workbench_jobs, "limit_address_space", lambda nbytes: (nbytes, nbytes))
 
     session_id = "2026-07-19T120000"
     session = config.collection.storage_path / session_id

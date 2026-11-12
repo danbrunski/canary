@@ -26,7 +26,7 @@ from typing import Any
 import pytest
 
 from src.analysis import capture_coverage
-from src.control import capture_finalize
+from src.control import capture_finalize, child_pool
 from src.control.capture_finalize import (
     CaptureQualityUnavailableError,
     finalize_capture,
@@ -242,14 +242,14 @@ async def test_a_wedged_child_times_out_and_is_terminated(
 ) -> None:
     session = write_capture_session(tmp_path, capture_rounds(240))
     pools: list[ProcessPoolExecutor] = []
-    spawn = capture_finalize._spawn_pool
+    spawn = child_pool.spawn_pool
 
     def tracked() -> ProcessPoolExecutor:
         pool = spawn()
         pools.append(pool)
         return pool
 
-    monkeypatch.setattr(capture_finalize, "_spawn_pool", tracked)
+    monkeypatch.setattr(child_pool, "spawn_pool", tracked)
     processes: list[Any] = []
 
     async def watch() -> None:

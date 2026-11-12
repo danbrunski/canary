@@ -50,7 +50,7 @@ import threading
 import time
 import weakref
 from collections.abc import Mapping
-from concurrent.futures import BrokenExecutor, Executor, ProcessPoolExecutor
+from concurrent.futures import Executor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -79,6 +79,26 @@ DRAIN_TIMEOUT_SECONDS = 5.0
 #: took ~60 s on the Pi (2026-09-17); this allows captures several times that
 #: long, and exists only so a wedged child cannot hold a stop forever.
 RECOMPUTE_TIMEOUT_SECONDS = 600.0
+
+#: How long a recompute waits for the analysis child when a digest, a workbench
+#: job or another recompute holds it (R29.2). It waits rather than being
+#: refused because the caller that matters most cannot be told to retry: the
+#: stop-time verdict (``finalize_capture``, awaited inside the capture's stop)
+#: reconciles against the in-memory loss epoch of the capture that is ending,
+#: and a trip-end digest of the drive that just stopped is the usual holder, so
+#: refusing would drop the verdict in the common case. It is bounded because a
+#: digest can run for 15 minutes: past this the recompute is refused by name
+#: (:class:`CaptureQualityUnavailableError` naming the holder), which every
+#: caller already maps (the stop records no verdict, which every reader takes
+#: as unknown, never as a pass; the routes answer 503). Twice the ~60 s a
+#: 20-minute capture's recompute takes on the Pi. The daemon's shutdown stop
+#: passes a ``deadline`` (``recompute_quality_off_loop``) that cuts this to what
+#: is left of ``TimeoutStopSec``: a wait longer than the unit's own stop deadline
+#: would be ended by SIGKILL, not by this bound.
+RECOMPUTE_SLOT_WAIT_SECONDS = 120.0
+
+#: The name this module's child goes by in the analysis slot.
+_HOLDER = "capture_recompute"
 
 _MIB = 1024 * 1024
 
@@ -208,6 +228,8 @@ async def recompute_quality_off_loop(  # noqa: PLR0913
     executor: Executor | None = None,
     timeout: float = RECOMPUTE_TIMEOUT_SECONDS,
     address_space_bytes: int | None = None,
+    slot_wait: float = RECOMPUTE_SLOT_WAIT_SECONDS,
+    deadline: float | None = None,
 ) -> CaptureQuality:
     """``recompute_capture_quality`` in a child process, awaited without
     holding the loop — the only way an async caller may score a capture.
@@ -229,7 +251,24 @@ async def recompute_quality_off_loop(  # noqa: PLR0913
     it is capped only when ``address_space_bytes`` is given; an injected
     executor that is not a process pool runs in this process and is never
     capped, whatever is asked, because the limit would stay on this process.
+
+    The child is the shared analysis child (:func:`child_pool.run_in_child`):
+    one whole-session child runs at a time, so a recompute that finds a digest
+    or a workbench job running waits up to ``slot_wait`` seconds for it
+    (:data:`RECOMPUTE_SLOT_WAIT_SECONDS` says why it waits), then raises
+    :class:`CaptureQualityUnavailableError` naming the holder.
+
+    ``deadline`` is a ``loop.time()`` instant the whole call must end by: the
+    wait for the slot is cut to what is left of it, and past it everything
+    still pending -- the queue behind another recompute, the slot, the child --
+    is cancelled (the child terminated, the slot released) and the call raises
+    :class:`CaptureQualityUnavailableError`. It is how the daemon's shutdown
+    keeps the capture's stop inside ``TimeoutStopSec``; every other caller
+    leaves it ``None`` and has only ``slot_wait`` and ``timeout``.
     """
+    if deadline is not None:
+        remaining = max(0.0, deadline - asyncio.get_running_loop().time())
+        slot_wait = min(slot_wait, remaining)
     kwargs: dict[str, Any] = {
         "lifetime": None if lifetime is None else dict(lifetime),
         "losses": None if losses is None else dict(losses),
@@ -247,6 +286,8 @@ async def recompute_quality_off_loop(  # noqa: PLR0913
         id(executor),
         float(timeout),
         address_space_bytes,
+        float(slot_wait),
+        deadline,
     )
     with _recompute_states_lock:
         task = state.in_flight.get(key)
@@ -260,6 +301,8 @@ async def recompute_quality_off_loop(  # noqa: PLR0913
                     executor=executor,
                     timeout=timeout,
                     address_space_bytes=address_space_bytes,
+                    slot_wait=slot_wait,
+                    deadline=deadline,
                 )
             )
             state.in_flight[key] = task
@@ -293,7 +336,7 @@ def _freeze_recompute_value(value: Any) -> Any:
     return repr(value)
 
 
-async def _coordinated_recompute(
+async def _coordinated_recompute(  # noqa: PLR0913
     state: _RecomputeLoopState,
     key: tuple[Any, ...],
     session_dir: Path,
@@ -302,16 +345,30 @@ async def _coordinated_recompute(
     executor: Executor | None,
     timeout: float,
     address_space_bytes: int | None,
+    slot_wait: float,
+    deadline: float | None,
 ) -> CaptureQuality:
     try:
-        async with state.limit:
+        # ``timeout_at(None)`` never fires: only a caller that named a deadline
+        # is cut by it.
+        async with asyncio.timeout_at(deadline) as bound, state.limit:
             return await _run_recompute(
                 session_dir,
                 kwargs=kwargs,
                 executor=executor,
                 timeout=timeout,
                 address_space_bytes=address_space_bytes,
+                slot_wait=slot_wait,
             )
+    except TimeoutError as exc:
+        if not bound.expired():
+            raise
+        holder = child_pool.analysis_holder()
+        held = f"; the analysis child is held by {holder}" if holder not in (None, _HOLDER) else ""
+        raise CaptureQualityUnavailableError(
+            f"capture quality recompute for {session_dir.name} did not finish before its "
+            f"deadline{held}"
+        ) from exc
     finally:
         with _recompute_states_lock:
             current = state.in_flight.get(key)
@@ -342,45 +399,54 @@ def recompute_under_limit(
     return capture_coverage.recompute_capture_quality(session_dir, **kwargs)
 
 
-async def _run_recompute(
+async def _run_recompute(  # noqa: PLR0913
     session_dir: Path,
     *,
     kwargs: dict[str, Any],
     executor: Executor | None,
     timeout: float,
     address_space_bytes: int | None,
+    slot_wait: float,
 ) -> CaptureQuality:
-    owned = executor is None
-    pool: Executor = _spawn_pool() if executor is None else executor
     ceiling = address_space_bytes
-    if ceiling is None and owned:
+    if ceiling is None and executor is None:
         from src.analysis.digest import derived_address_space_bytes
 
         ceiling = derived_address_space_bytes()
-    if not isinstance(pool, ProcessPoolExecutor):
-        # ``RLIMIT_AS`` is per process. A thread pool (a test standing in for
-        # the child) runs in *this* process, and a cap put on it would stay
-        # on the daemon, or the test worker, for good: never capped.
-        ceiling = None
     call = functools.partial(
         recompute_under_limit, session_dir, kwargs, address_space_bytes=ceiling
     )
-    finished = False
+    # ``RLIMIT_AS`` is per process. A thread pool (a test standing in for the
+    # child) runs in *this* process, and a cap put on it would stay on the
+    # daemon, or the test worker, for good: never capped.
+    uncapped = functools.partial(
+        recompute_under_limit, session_dir, kwargs, address_space_bytes=None
+    )
     try:
-        try:
-            future = asyncio.get_running_loop().run_in_executor(pool, call)
-        except Exception as exc:
+        return await child_pool.run_in_child(
+            call,
+            timeout=timeout,
+            holder=_HOLDER,
+            executor=executor,
+            slot_wait=slot_wait,
+            in_process_call=uncapped,
+        )
+    except child_pool.AnalysisSlotBusyError as exc:
+        raise CaptureQualityUnavailableError(
+            f"capture quality recompute for {session_dir.name} could not start: {exc}"
+        ) from exc
+    except child_pool.ChildFailedError as exc:
+        outcome, cause = exc.outcome, exc.cause
+        if outcome is child_pool.ChildOutcome.NOT_STARTED:
             raise CaptureQualityUnavailableError(
-                f"capture quality recompute could not start: {type(exc).__name__}: {exc}"
-            ) from exc
-        try:
-            quality = await asyncio.wait_for(future, timeout)
-        except TimeoutError as exc:
+                f"capture quality recompute could not start: {type(cause).__name__}: {cause}"
+            ) from cause
+        if outcome is child_pool.ChildOutcome.TIMED_OUT:
             raise CaptureQualityUnavailableError(
                 f"capture quality recompute for {session_dir.name} did not finish "
                 f"within {timeout:.0f}s"
-            ) from exc
-        except MemoryError as exc:
+            ) from cause
+        if outcome is child_pool.ChildOutcome.OOM:
             under = (
                 "the address space it was given"
                 if ceiling is None
@@ -389,20 +455,10 @@ async def _run_recompute(
             raise CaptureQualityUnavailableError(
                 f"capture quality recompute for {session_dir.name} ran out of memory under "
                 f"{under} (the rows it scores do not fit; the daemon was not touched)"
-            ) from exc
-        except BrokenExecutor as exc:
-            raise CaptureQualityUnavailableError(
-                f"capture quality recompute process failed: {type(exc).__name__}: {exc}"
-            ) from exc
-        finished = True
-        return quality
-    finally:
-        if owned:
-            _discard_pool(pool, terminate=not finished)
-
-
-_spawn_pool = child_pool.spawn_pool
-_discard_pool = child_pool.discard_pool
+            ) from cause
+        raise CaptureQualityUnavailableError(
+            f"capture quality recompute process failed: {type(cause).__name__}: {cause}"
+        ) from cause
 
 
 async def live_capture_quality(
@@ -446,13 +502,20 @@ async def finalize_capture(
     start: StartEpoch | None,
     drain_timeout: float = DRAIN_TIMEOUT_SECONDS,
     executor: Executor | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any] | None:
     """Boundary, drain, flush, then write the stop-time sidecar.
 
     Never raises: a capture that recorded good data must not fail to stop
     because its report card could not be written. Returns the sidecar payload
-    or ``None`` when nothing could be scored (no health monitor) — which the
-    digest reads as unknown, never as a pass.
+    or ``None`` when nothing could be scored (no health monitor, or the
+    recompute was refused: the analysis child stayed held, it did not finish,
+    or ``deadline`` came) -- which the digest reads as unknown, never as a pass.
+
+    ``deadline`` is a ``loop.time()`` instant by which the recompute must have
+    answered (:func:`recompute_quality_off_loop`); the daemon's shutdown passes
+    one so a stop never outlives ``TimeoutStopSec``. The drain and the flush
+    spend it first.
     """
     boundary = capture_generation.bump("capture-stop")
     if health is None:
@@ -466,6 +529,7 @@ async def finalize_capture(
             boundary=boundary,
             drain_timeout=drain_timeout,
             executor=executor,
+            deadline=deadline,
         )
     except Exception:
         log.exception("failed to finalize capture quality for %s", session_dir)
@@ -481,6 +545,7 @@ async def _finalize(  # noqa: PLR0913
     boundary: int,
     drain_timeout: float,
     executor: Executor | None,
+    deadline: float | None,
 ) -> dict[str, Any]:
     # Lifetime is read before the drain so the interval ends at the boundary,
     # not after however long the queues took.
@@ -513,6 +578,7 @@ async def _finalize(  # noqa: PLR0913
         scope=SCOPE_STOP,
         batching_start=batching_baseline_for(session_dir, start),
         executor=executor,
+        deadline=deadline,
     )
     payload = quality.to_dict()
     write_capture_quality(session_dir, payload)
@@ -564,6 +630,7 @@ async def _flush(writer: _Writer | None) -> str | None:
 
 __all__ = [
     "DRAIN_TIMEOUT_SECONDS",
+    "RECOMPUTE_SLOT_WAIT_SECONDS",
     "RECOMPUTE_TIMEOUT_SECONDS",
     "CaptureQualityUnavailableError",
     "StartEpoch",
