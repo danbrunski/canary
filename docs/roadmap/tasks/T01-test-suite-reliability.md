@@ -1000,7 +1000,7 @@ measurement in hand.
   - **How to find the next one.** A gate stuck near 100 % with idle workers is
     a hang, not load. `kill -ABRT` on each `python3` child of the pytest
     process names the stuck test and its stack in `.prepush-pytest.log`.
-- [ ] **T01.34 `tests/test_sequence_feature_set.py::test_engine_response_over_the_deployed_schema_names_every_column`
+- [x] **T01.34 `tests/test_sequence_feature_set.py::test_engine_response_over_the_deployed_schema_names_every_column`
   reads git-ignored local state (2026-11-12).** It loads
   `models/nissan-xterra-2008/lstm_autoencoder/model.manifest.json`, which is
   ignored since S03, and pins the 2026-09-20 artifact's 361 columns. The
@@ -1011,3 +1011,12 @@ measurement in hand.
   `/data/canary/models/` or a backup may hold that artifact) and resolve over
   the fixture, or skip by name unless the local manifest's `model_version` is
   that artifact's. Not a code regression: nothing in `src/` changed the count.
+  **Done 2026-11-12:** the artifact was still on the dev Pi, at
+  `/data/canary/models/nissan-xterra-2008/_prior/2026-09-24-pre-r2/lstm_autoencoder/`
+  (`lstm_autoencoder_2026-09-20T064628.385918Z`, 361 columns). Its
+  `schema.feature_columns` and `model_version` are committed as
+  `tests/fixtures/sequence_feature_set/lstm_autoencoder_2026-09-20_feature_columns.json`.
+  The test reads that file, asserts its `model_version`, and no longer skips,
+  so the gate's clean worktree now runs it too. `tests/fixtures/deployed_manifests/`
+  holds only the 2026-09-24 LSTM manifest, so it could not serve.
+  `pytest tests/test_sequence_feature_set.py -m ""`: 7 passed.

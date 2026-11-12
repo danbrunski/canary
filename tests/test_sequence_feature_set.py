@@ -20,8 +20,16 @@ from src.yaml_load import load_yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 XTERRA_ROLES = REPO_ROOT / "data" / "nissan-xterra-2008" / "sequence_roles.yaml"
 GROUND_TRUTH = REPO_ROOT / "tests" / "fixtures" / "ground_truth" / "expectations.yaml"
-DEPLOYED_MANIFEST = (
-    REPO_ROOT / "models" / "nissan-xterra-2008" / "lstm_autoencoder" / "model.manifest.json"
+# The 2026-09-20 artifact's schema columns, committed (T01.34). The test used
+# to read the git-ignored local manifest, which pinned whatever artifact the
+# laptop last downloaded: the 2026-09-24 one has 254 columns, so a full run in
+# the main checkout failed while the gate's clean worktree silently skipped.
+DEPLOYED_SCHEMA = (
+    REPO_ROOT
+    / "tests"
+    / "fixtures"
+    / "sequence_feature_set"
+    / "lstm_autoencoder_2026-09-20_feature_columns.json"
 )
 
 
@@ -113,9 +121,9 @@ def test_unknown_feature_set_and_a_set_without_targets_are_refused() -> None:
 def test_engine_response_over_the_deployed_schema_names_every_column() -> None:
     """Resolved over the 2026-09-20 artifact's 361 columns, every column is
     kept or dropped with a reason — the record accounts for all of them."""
-    if not DEPLOYED_MANIFEST.exists():
-        pytest.skip("deployed manifest not present")
-    columns = json.loads(DEPLOYED_MANIFEST.read_text())["schema"]["feature_columns"]
+    schema = json.loads(DEPLOYED_SCHEMA.read_text())
+    assert schema["model_version"] == "lstm_autoencoder_2026-09-20T064628.385918Z"
+    columns = schema["feature_columns"]
     resolved = resolve_feature_set(
         ENGINE_RESPONSE, columns, vehicle_roles=load_vehicle_sequence_roles(XTERRA_ROLES)
     )
