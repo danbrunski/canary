@@ -1,5 +1,17 @@
 # Implementation task index
 
+**Status 2026-11-12: F01, engine functions the firmware has not told us yet.**
+[`F01-firmware-decode-gaps.md`](F01-firmware-decode-gaps.md) lists what a
+listing pass can still explain about the ECM, in the order worth doing:
+seeding the task tables and the scheduler periods first, then closed-loop
+enable and authority, cold-start and warm-up fuelling, the short-pulse
+correction, fuel cut, the rest of the timing chain, the MAF curve, throttle
+area units, idle control, what a flash clears, barometric updates, torque
+limits, and the functions with nothing recorded (the CAN frame builders, the
+misfire monitor, fans, A/C, alternator and VIAS). It was compiled from the
+existing documents, not from a new listing pass, and it separates the gaps
+that need disassembly from those that are decoded and waiting on a truck read.
+
 **Status 2026-11-08: thirteen checklists archived.** Ten task checklists (W10,
 H01, A01, N02, S01, A03, A06, A05, B04 and B03) moved to [`archive/`](archive/),
 and three roadmap documents (`imu-gps-integration.md`, `workbench-workflows.md`
