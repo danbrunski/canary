@@ -187,3 +187,47 @@ comparison does not depend on how the drives differed, but it is one pull.
 and nothing it could have broken shows. Still owed, on any later drive: one
 first-gear pull with the pedal on the floor from ~2,000 rpm (scores 1 and 5,
 and 2 through the last-column target read), and setting cruise once (4).
+
+## Second drive, 2026-11-12 03:42Z: the full-pedal predictions scored
+
+`_capture-tuning-2026-11-12T034249`, 1,240 s, warm (coolant 84–92 °C at the
+pulls), 81–82 kPa. The Pi had powered off while parked (UPS grace after input
+power dropped at 03:13:35Z), so the first ~6 minutes of the drive are not
+recorded. Scripts in `~/canary-data/analysis-scripts/2026-11-12/`:
+`score_first_gear.py`, `first_gear_fullpedal.py`, `upper_gear_pedal.py`.
+
+Four first-gear full-pedal pulls (frozen selection: pedal byte ≥ 250, rpm ÷
+wheel word 0.68–0.90): 699 frames, 1,575–5,569 rpm, rpm rising 1,115–1,314 rpm/s.
+
+| Prediction | Verdict | What the drive shows |
+|---|---|---|
+| 1. Throttle byte ≥ 250 on ≥ 90 % of frames in every 200 rpm band, 2,000–5,600 | **Held in substance; missed to the letter in 2 of 18 bands** | 687 of 699 frames at ≥ 250, median 255 in every band from 1,600 to 5,600 (baseline: 0 % from 2,000 to 5,600). The 12 other frames are the first 0.04 s of a pull (11) or its last frame (1), throttle 219–249. They put 2,200–2,400 at 83 % (18 frames) and 3,400–3,600 at 89.8 % (49 frames); every other band is 97.7–100 %. PID 0x11 reads 87.8–89.4 % in the pulls |
+| 2. Targets are the last column | **Held on 12 of 14 reads, one unexplained** | RAM target at first-gear full pedal: 149 at 2,122 / 2,441 / 2,794 / 3,053 / 3,466 rpm, 152 at 3,737, 153 at 4,069 / 4,094 / 4,372 / 4,622 / 4,716 / 5,281. Exceptions: 139 at 3,509 rpm 0.04 s after tip-in (PID 0x11 68.6 %, still opening), and **160 at 5,172 rpm in the first pull** (lookup 159; throttle byte 255, pedal 255 for another 0.08 s). That one read is the load-indexed cell, with the throttle fully open. The flag channel is not in the profile, so the flag itself was not read |
+| 3. Second to fifth gear unchanged | **Held; the frozen statistic was the wrong one** | At pedal byte 255 in upper gears the throttle byte is ≥ 250 on 99.7 % of 759 frames (98.1–99.4 % in five earlier captures). The band medians dip to 246 and 250 at 3,200 and 3,800 rpm because this drive has 239 frames at pedal 250–254, where the throttle sits 5 counts under the pedal on every drive, before and after. A band median over "pedal ≥ 250" moves with how hard the pedal was held, not with the tune |
+| 4. No new code, cruise works | **Codes held; cruise not reported** | No stored or pending code, MIL off, at 03:52Z and 04:02Z |
+| 5. First-gear AFR follows the last column inside 2.5 % | **Direction held, magnitude just outside** | PID 0x24 × 14.7 at least 0.45 s into a first-gear pull, against the RAM target at that instant: 12.52 / 12.67 / 12.76 / 12.63 / 12.62 at 4,153–5,525 rpm against 12.30 (+1.8, +3.0, +3.7, +2.7, +2.6 %), and 12.98 / 13.02 / 12.97 at 2,509–3,363 rpm against 12.63 (+2.7 to +3.1 %). It was 11.8–12.0 above 4,600 rpm before. Upper gears on the same drive: 12.43–12.63 against 12.30 (+1.1 to +2.7 %) |
+
+**What stands.** The cap was the gear trigger, and moving the threshold removed
+it: first gear at full pedal is a full-throttle regime, reads the last Fuel
+Targets column, and runs about AFR 12.5–12.8 from 4,100 rpm where it ran
+11.8–12.0. Upper gears are unchanged at matched pedal. No code.
+
+**What is open.**
+
+- **One load-indexed read at full throttle** (160 at 5,172 rpm, 0.9 s into a
+  pull that began at 4,190 rpm). The same rpm in the next pull read 153. One
+  read in fourteen; not explained. Logging the flag byte
+  (`mem:ECM_PEDAL_ENRICH_FLAGS`, `0xFFFF2841`) in the `tuning` profile would
+  say whether the flag dropped.
+- **First gear reads 2.6–3.7 % lean of its target, upper gears 1–2.7 %.** rpm
+  rises 1,100–1,300 rpm/s in first, three to five times the upper-gear pulls,
+  so a delivery lag on rising airflow and the sensor's own lag both push the
+  same way. Seven reads over four pulls; not separated. AFR 12.5–13.0 at full
+  load is not a lean condition, but it is leaner than the 12.3 the table asks
+  for, with knock control still in fallback.
+- **Cruise control** has not been reported.
+- **Statistics to freeze next time:** exclude the first 0.05 s after the pedal
+  crosses the threshold, and select on pedal = 255 (or compare at matched pedal
+  byte), not pedal ≥ 250.
+
+**Verdict: keep.**
