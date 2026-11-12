@@ -120,7 +120,7 @@ a fixture per caller proves it.
     `delivery_evidence` and `plant_validation`. M01.14 changes
     `_window_means`' consumer; do the move first.
 
-- [ ] **R24.8 Source-scan guards for rules that are already decided.**
+- [x] **R24.8 Source-scan guards for rules that are already decided.**
   `tests/test_yaml_load.py` refuses a direct `yaml.safe_load` anywhere; the
   same pattern costs a few lines each for:
   - the literal `"telemetry-*.parquet"` outside
@@ -133,8 +133,30 @@ a fixture per caller proves it.
   - `setInterval` outside `hooks/` in the dashboard (R28.3);
   - `from tests.test_` (R30.2); `systemctl restart canary` outside
     `restart_canary.sh` (R30.1).
-  - [ ] One `tests/test_source_rules.py` with a table of (pattern, where it
+  - [x] One `tests/test_source_rules.py` with a table of (pattern, where it
     is allowed, the incident it names), so adding a rule is adding a row.
+    Done 2026-11-12: seven rows, each an allowlist ratchet (per file: hits
+    allowed today and why; more fails, fewer fails "lower the count", zero
+    fails "remove it from the allowlist"). Rows (allowlist files/hits at
+    HEAD): `parquet-glob-literal` 20/30 (the 31st is `session_files.py`
+    itself, exempt), `per-row-dataframe-python` 2/2 (`.iterrows()` only; no
+    `apply(axis=1)` in `src/`), `sessions-ordered-by-directory-name` 10/13,
+    `dashboard-setinterval` 11/11 (`hooks/`, so `useTagQueue`, and test files
+    are exempt by path), `tests-import-other-tests` 58/118 (R30.2 box 1),
+    `tests-redefine-example-yaml` 60/60 and `tests-recompute-repo-root`
+    177/183 (R30.8 box 2). Each row carries a `bad` and a `good` snippet;
+    `test_the_predicate_flags_the_bad_snippet_and_not_the_good_one` and
+    `test_a_violation_in_a_scanned_file_is_reported` (a scratch tree) prove
+    each row bites; `test_the_ratchet_reports_growth_shrinkage_and_stale_entries`
+    proves the three failure modes. Allowlists were built from a
+    `git archive HEAD` copy and every row is clean against it. Row 3 only
+    sees `sorted/max/min` over `.iterdir()` (or `.glob("20…")`) ordered by
+    name; it does not see `.sort()`, `os.listdir` or `sessions[-1]` after an
+    unsorted listing, and some of its allowlisted hits are "iteration only,
+    downstream not reviewed" (named per file). The restart guard
+    (`tests/test_daemon_restart_guard.py`, shell scripts, own comment
+    handling and tests) stays its own file: moving it would not be a pure
+    move.
 
 - [ ] **R24.9 Locked JSONL append.** `_lock_for(path)` with a module-level
   registry is defined three times (`control/brain_jobs.py`,

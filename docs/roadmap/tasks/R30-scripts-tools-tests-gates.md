@@ -50,9 +50,12 @@ they started.
   `test_paired_scenarios`, `test_rom_editor`, `test_evidence_memory`, and
   `test_layering` for `LAYERS`. Each import re-executes the provider module,
   and a rename in `test_target_phi` breaks twelve files.
-  - [ ] First the guard R07.5 lacked: an AST test that fails on
+  - [x] First the guard R07.5 lacked: an AST test that fails on
     `from tests.test_…`, with today's 58 files in an allowlist that may only
-    shrink.
+    shrink. `tests/test_source_rules.py` row `tests-import-other-tests`
+    (AST: `from tests.test_x`, `from tests import test_x`, `import
+    tests.test_x`, function-level included): 58 files / 118 import
+    statements at HEAD, per-file counts, ratchet both ways.
   - [ ] `tests/sim_builders.py`, `tests/target_phi_builders.py`,
     `tests/evidence_builders.py`; `scheduler`, `write_session` and
     `submit_twin` into `tests/builders.py`, under public names. `LAYERS` gets
@@ -150,8 +153,13 @@ they started.
     builders of one shape.
   - [ ] Fixtures `example_config` and `repo_root`;
     `tests/app.py: make_app_client(tmp_path, *, token="secret", **kw)`.
-  - [ ] A shrink-only guard on new `EXAMPLE_YAML =` and `parents[1]`
-    assignments in `tests/`.
+  - [x] A shrink-only guard on new `EXAMPLE_YAML =` and `parents[1]`
+    assignments in `tests/`. `tests/test_source_rules.py` rows
+    `tests-redefine-example-yaml` (module-level, `tests/configs.py` exempt:
+    60 files at HEAD) and `tests-recompute-repo-root`
+    (`Path(__file__)[.resolve()].parents[1]`, multi-line spellings included:
+    177 files / 183 hits at HEAD, `tests/configs.py` among them). Per-file
+    counts, ratchet both ways.
   - Maintenance only: one config load is 4.6 ms.
 
 - [ ] **R30.9 Fakes with a canonical home that tests do not use.**
