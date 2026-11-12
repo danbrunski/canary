@@ -100,6 +100,14 @@ def build_power_snapshot(
     so it reflects the current hold even if the watchdog's own copy (recorded
     at its last poll, up to ~1s old) is slightly behind. Pure — takes already-read
     values so it's trivially unit-testable.
+
+    The watchdog's conditions pass through as separate fields (``input_lost``,
+    ``discharging`` + its rate, ``soc_critical``, ``shutdown_state`` +
+    ``countdown_reason``; D03.67) and ``on_battery`` is kept as a legacy alias
+    that is never true beside ``input_lost: false``. A heartbeat from a watchdog
+    older than D03.67 lacks the new keys, so they read ``None`` and its own
+    ``on_battery`` (which could say "critically low or draining" with input
+    present) is passed through unchanged until the watchdog is redeployed.
     """
     now = time.time() if now is None else now
     if status is None:
@@ -109,6 +117,13 @@ def build_power_snapshot(
             "armed": None,
             "input_lost": None,
             "on_battery": None,
+            "discharging": None,
+            "discharge_rate_pct_per_hour": None,
+            "min_discharge_rate_pct_per_hour": None,
+            "soc_critical": None,
+            "critical_soc_pct": None,
+            "shutdown_state": None,
+            "countdown_reason": None,
             "soc": None,
             "vcell": None,
             "seconds_lost": None,
@@ -124,6 +139,13 @@ def build_power_snapshot(
         "armed": status.get("armed"),
         "input_lost": status.get("input_lost"),
         "on_battery": status.get("on_battery"),
+        "discharging": status.get("discharging"),
+        "discharge_rate_pct_per_hour": status.get("discharge_rate_pct_per_hour"),
+        "min_discharge_rate_pct_per_hour": status.get("min_discharge_rate_pct_per_hour"),
+        "soc_critical": status.get("soc_critical"),
+        "critical_soc_pct": status.get("critical_soc_pct"),
+        "shutdown_state": status.get("shutdown_state"),
+        "countdown_reason": status.get("countdown_reason"),
         "soc": status.get("soc"),
         "vcell": status.get("vcell"),
         "seconds_lost": status.get("seconds_lost"),

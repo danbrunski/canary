@@ -114,3 +114,58 @@ def test_build_power_snapshot_missing_ts_reports_no_age() -> None:
     snap = build_power_snapshot(status, keepalive_remaining_s=0.0, now=1000.0)
     assert snap["status_age_s"] is None
     assert snap["watchdog_stale"] is False
+
+
+def test_build_power_snapshot_passes_conditions_through() -> None:
+    """D03.67: input loss, discharge, critical SoC and the countdown's state
+    reach the payload as separate fields."""
+    status = {
+        "armed": True,
+        "input_lost": False,
+        "on_battery": False,
+        "discharging": True,
+        "discharge_rate_pct_per_hour": -18.5,
+        "min_discharge_rate_pct_per_hour": 6.0,
+        "soc_critical": False,
+        "critical_soc_pct": 15.0,
+        "shutdown_state": "input_present",
+        "countdown_reason": None,
+        "soc": 94.5,
+        "vcell": 4.1,
+        "seconds_lost": 0.0,
+        "grace_s": 300.0,
+        "ts": 995.0,
+    }
+    snap = build_power_snapshot(status, keepalive_remaining_s=0.0, now=1000.0)
+    assert snap["input_lost"] is False
+    assert snap["on_battery"] is False
+    assert snap["discharging"] is True
+    assert snap["discharge_rate_pct_per_hour"] == -18.5
+    assert snap["soc_critical"] is False
+    assert snap["critical_soc_pct"] == 15.0
+    assert snap["shutdown_state"] == "input_present"
+    assert snap["countdown_reason"] is None
+
+
+def test_build_power_snapshot_from_an_older_watchdog_has_null_conditions() -> None:
+    """A heartbeat from before D03.67 lacks the new keys: they read null."""
+    status = {"armed": True, "input_lost": False, "on_battery": True, "soc": 12.9, "ts": 999.0}
+    snap = build_power_snapshot(status, keepalive_remaining_s=0.0, now=1000.0)
+    assert snap["discharging"] is None
+    assert snap["soc_critical"] is None
+    assert snap["shutdown_state"] is None
+    assert snap["countdown_reason"] is None
+
+
+def test_build_power_snapshot_without_watchdog_has_every_condition_key() -> None:
+    snap = build_power_snapshot(None, keepalive_remaining_s=0.0, now=1000.0)
+    for key in (
+        "discharging",
+        "discharge_rate_pct_per_hour",
+        "min_discharge_rate_pct_per_hour",
+        "soc_critical",
+        "critical_soc_pct",
+        "shutdown_state",
+        "countdown_reason",
+    ):
+        assert snap[key] is None

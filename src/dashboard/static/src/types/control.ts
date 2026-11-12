@@ -705,17 +705,37 @@ export interface ControlEvent {
   job?: JobRecord;
 }
 
+/** What the watchdog's shutdown countdown is doing (D03.67). A countdown that
+ *  would run but is overridden by a keep-alive hold is `held_keepalive` — the
+ *  hold wins even at a critical SoC. */
+export type PowerShutdownState =
+  "disarmed" | "input_present" | "held_external_power" | "counting_down" | "held_keepalive";
+
+/** Why the countdown runs (or would, under a hold). */
+export type PowerCountdownReason =
+  "input_lost_discharging" | "input_lost_soc_critical" | "input_lost_unconfirmed";
+
 /** `GET /control/power` — UPS (X1202) watchdog state, read from the
  *  watchdog's own heartbeat file (see scripts/ups_shutdown_watch.py). All
  *  fields but `keepalive_remaining_s` are `null` when the watchdog isn't
  *  running (`watchdog_running: false`) or hasn't written its first
- *  heartbeat yet. */
+ *  heartbeat yet. `input_lost` (PLD line), `discharging` (measured SoC fall)
+ *  and `soc_critical` are independent measurements; `on_battery` is a legacy
+ *  alias (true only with `input_lost`). A watchdog older than D03.67 sends
+ *  `null` for every field from `discharging` through `countdown_reason`. */
 export interface PowerSnapshot {
   watchdog_running: boolean;
   watchdog_stale: boolean | null;
   armed: boolean | null;
   input_lost: boolean | null;
   on_battery: boolean | null;
+  discharging: boolean | null;
+  discharge_rate_pct_per_hour: number | null;
+  min_discharge_rate_pct_per_hour: number | null;
+  soc_critical: boolean | null;
+  critical_soc_pct: number | null;
+  shutdown_state: PowerShutdownState | null;
+  countdown_reason: PowerCountdownReason | null;
   soc: number | null;
   vcell: number | null;
   seconds_lost: number | null;

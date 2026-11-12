@@ -2125,7 +2125,7 @@ that closed its task checklist.
   both widths; a test pins the exact bytes on the wire for `21 1F` to 0x745.
   The endpoint keeps no service allowlist (AGENTS.md), and nothing here
   changes which services it will send.
-- [ ] **D03.67 `GET /control/power` says `on_battery: true` with input
+- [~] **D03.67 `GET /control/power` says `on_battery: true` with input
   present.** *Seen 2026-11-10 17:00Z (SoC 12.9 %, charging, input present)
   and 2026-11-12 04:07Z (SoC 94.5 %, input present at 11.5 V, key on, engine
   off).* `scripts/ups_shutdown_watch.py` `on_battery()` is true when the SoC
@@ -2145,6 +2145,40 @@ that closed its task checklist.
   rule is stated in the watchdog's docstring and `docs/headless-api.md` and
   pinned by a test. Deploying the watchdog is a Pi step (it runs on the
   system interpreter under its own unit).
+  *Done 2026-11-12 (laptop):* the heartbeat and payload now carry `input_lost`
+  (PLD only), `discharging` + `discharge_rate_pct_per_hour` (measured slope),
+  `soc_critical` (+ the two thresholds), `shutdown_state`
+  (`disarmed`/`input_present`/`held_external_power`/`counting_down`/
+  `held_keepalive`) and `countdown_reason`; `on_battery` stays as a legacy
+  alias that is never true beside `input_lost: false`. Readers swept
+  (`grep -rn on_battery`: only the dashboard panel, its types/tests/e2e fixture
+  and the MCP docstring read it; no Python consumer); the panel now shows Input
+  power, Battery (with the rate) and SoC-critical separately and the countdown's
+  reason, falling back to `on_battery` for a pre-D03.67 heartbeat. MCP tool
+  description, `docs/headless-api.md` ("Power / UPS status") and
+  `docs/mcp-server.md` updated. **Keep-alive vs critical SoC (the standing
+  rule, unchanged):** the loop checks the hold before the debouncer and resets
+  the clock, so a keep-alive wins at any SoC; stated in the watchdog docstring
+  and headless-api, pinned by `test_keepalive_beats_critical_soc_in_the_main_loop`
+  (drives `main()` with a fake GPIO/gauge/clock) beside
+  `test_critical_soc_without_keepalive_powers_off_in_the_main_loop` and
+  `test_critical_soc_with_input_present_never_counts_in_the_main_loop`.
+  Evidence: `pytest tests/test_ups_shutdown.py tests/test_dashboard_ups.py
+  tests/test_control_power.py tests/test_mcp_tools.py
+  tests/test_mcp_tool_snapshot.py` green; `pnpm typecheck`, `pnpm lint`,
+  vitest `PowerPanel.test.ts` (11) green.
+  **Owed (Pi):** deploy the watchdog (it runs on the system interpreter under
+  its own unit): `install_pi.sh`, or copy the script and restart `ups-shutdown`
+  under sudo. Until then the Pi's heartbeat has none of the new fields and the
+  daemon passes the old `on_battery` through. Not done on the laptop by design.
+  **Operator decision (not taken):** should a critical-SoC floor override a
+  keep-alive hold to protect the cells? Today it does not (an armed hold keeps
+  the Pi up at 5 % SoC with input lost until the cells cut out). Options: (a)
+  keep as is (the operator asked for the hold, in those words); (b) a hard
+  floor, e.g. `UPS_CRITICAL_HARD_SOC` (~5 %), below which input loss powers off
+  regardless of a hold; (c) cap the hold's length instead. Recommendation: (b)
+  with the floor well under 15 %, since a deep discharge is the one outcome the
+  hold cannot undo. Behaviour left unchanged pending a decision.
 - [~] **D03.68 Broadcast `ECM_COOLANT_TEMP` once read 94/118 °C beside PID
   0x05's 49/78 °C (2026-11-10 drive log, "Loose ends").** *Checked
   2026-11-12 on the laptop.* The stored decode is right: on both 2026-11-12

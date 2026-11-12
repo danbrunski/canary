@@ -53,6 +53,20 @@ Design notes:
     operator sets "keep alive N min" from the dashboard/MCP, which writes an
     expiry epoch to ``UPS_KEEPALIVE_FILE``; while unexpired the watchdog holds
     regardless of power. This is also the backstop if the gauge can't be read.
+  * **Keep-alive vs critical SoC: the keep-alive wins.** The main loop checks
+    the hold before it feeds the debouncer and resets the countdown clock while
+    the hold is active, so ``UPS_CRITICAL_SOC`` does *not* override it: an armed
+    hold keeps the Pi up at 5 % SoC with input lost. The floor only decides
+    whether input loss counts (``on_battery`` below) when no hold is active.
+    The hold expires on its own and the countdown then starts from zero. (If a
+    floor that overrides the hold is wanted, that is an operator decision —
+    D03.67.) Pinned by ``tests/test_ups_shutdown.py``.
+  * **Status heartbeat reports conditions, not one flag.** ``input_lost`` (PLD),
+    ``discharging`` (measured SoC slope, with its rate), ``soc_critical`` and
+    the countdown's ``shutdown_state`` / ``countdown_reason`` are written as
+    separate fields (``build_status_record``). ``on_battery()`` is the shutdown
+    gate's combination "discharging or critical" — it is true at SoC 12.9 %
+    while charging with input present — so it is no longer published as such.
 
 Configuration is via environment variables (set in the systemd unit):
   UPS_PLD_GPIO=6            BCM pin for power-loss detect
@@ -163,6 +177,29 @@ class DischargeEstimator:
         return (s1 - s0) / dt * 3600.0
 
 
+def discharging(rate_pct_per_hour: float | None, *, min_discharge_rate: float) -> bool | None:
+    """Is the SoC falling faster than ``min_discharge_rate`` %/hr?
+
+    ``None`` until the estimator has enough history. This is a *measurement*
+    of the cell and says nothing about the PLD input line: a sagging input
+    (key-on, engine off, 11.5 V) can show a falling SoC with input present.
+    """
+    if rate_pct_per_hour is None:
+        return None
+    return rate_pct_per_hour <= -abs(min_discharge_rate)
+
+
+def soc_critical(soc: float | None, *, critical_soc: float) -> bool | None:
+    """Is the SoC at or below ``critical_soc``? ``None`` without a reading.
+
+    Also a measurement, true whether the cell is draining or charging (a pack
+    recovering from empty reads critical on the way up).
+    """
+    if soc is None:
+        return None
+    return soc <= critical_soc
+
+
 def on_battery(
     rate_pct_per_hour: float | None,
     soc: float | None,
@@ -170,7 +207,7 @@ def on_battery(
     min_discharge_rate: float,
     critical_soc: float,
 ) -> bool | None:
-    """Decide whether the Pi is genuinely running down the UPS battery.
+    """The *shutdown gate's* view of the battery: discharging **or** critical.
 
     Returns:
       * ``True``  — discharging faster than ``min_discharge_rate`` %/hr, or SoC
@@ -180,12 +217,15 @@ def on_battery(
         so input-loss is *not* actionable.
       * ``None``  — not enough gauge data yet to tell (caller decides how to
         fail; default is to hold).
+
+    This is an input to ``power_truly_lost`` only. It is *not* "running on the
+    battery": it is true at SoC 12.9 % while charging with input present. The
+    status heartbeat reports ``discharging`` and ``soc_critical`` separately
+    for that reason (D03.67).
     """
-    if soc is not None and soc <= critical_soc:
+    if soc_critical(soc, critical_soc=critical_soc):
         return True
-    if rate_pct_per_hour is None:
-        return None
-    return rate_pct_per_hour <= -abs(min_discharge_rate)
+    return discharging(rate_pct_per_hour, min_discharge_rate=min_discharge_rate)
 
 
 def power_truly_lost(
@@ -255,11 +295,62 @@ def read_keepalive(path: str) -> str | None:
         return None
 
 
+def shutdown_state(
+    *,
+    armed: bool,
+    input_is_lost: bool,
+    battery_state: bool | None,
+    discharging_now: bool | None,
+    critical_now: bool | None,
+    require_discharge: bool,
+    keepalive_remaining_s: float,
+) -> tuple[str, str | None]:
+    """The shutdown countdown's own state and, when one applies, its reason.
+
+    Returns ``(state, reason)``. ``state`` is one of:
+
+      * ``disarmed``            — no fuel gauge answered; the watchdog does nothing.
+      * ``input_present``       — PLD reads power OK. Nothing counts, whatever the
+        SoC or discharge rate say (those are reported on their own).
+      * ``held_external_power`` — PLD reads lost but the battery is confirmed not
+        draining and not critical (bench USB-C): holding.
+      * ``counting_down``       — input lost and not confirmed external:
+        ``seconds_lost`` counts toward ``grace_s`` and powers off.
+      * ``held_keepalive``      — it would be counting down (``reason`` says why)
+        but an operator keep-alive hold is active. **The hold wins over a
+        critical SoC**: the main loop checks the hold first and resets the
+        clock, so a keep-alive never lets the critical floor power the Pi off.
+
+    ``reason`` is set exactly for the two counting states: ``input_lost_discharging``,
+    ``input_lost_soc_critical`` (the cells are at/below the floor), or
+    ``input_lost_unconfirmed`` (gauge has no verdict yet, or the discharge gate is
+    off: PLD alone). Mirrors ``power_truly_lost`` so the report cannot drift from
+    what the loop does.
+    """
+    if not armed:
+        return "disarmed", None
+    if not power_truly_lost(input_is_lost, battery_state, require_discharge=require_discharge):
+        return ("held_external_power" if input_is_lost else "input_present"), None
+    if discharging_now:
+        reason = "input_lost_discharging"
+    elif critical_now:
+        reason = "input_lost_soc_critical"
+    else:
+        reason = "input_lost_unconfirmed"
+    return ("held_keepalive" if keepalive_remaining_s > 0 else "counting_down"), reason
+
+
 def build_status_record(
     *,
     armed: bool,
     input_is_lost: bool,
-    on_battery: bool | None,
+    battery_state: bool | None,
+    discharging_now: bool | None,
+    discharge_rate: float | None,
+    critical_now: bool | None,
+    critical_soc_pct: float,
+    min_discharge_rate: float,
+    require_discharge: bool,
     soc: float | None,
     vcell: float | None,
     seconds_lost: float,
@@ -273,11 +364,49 @@ def build_status_record(
     Consumed by the daemon's power reader (``src/daemon/ups.py``) so the
     dashboard/MCP can show live UPS state without talking to GPIO/I2C directly
     (those require root; the daemon runs as ``canary``).
+
+    The fields are independent measurements plus one derived verdict, so none
+    can contradict another (D03.67):
+
+      * ``input_lost``    — the PLD line only.
+      * ``discharging``   — SoC falling faster than ``min_discharge_rate_pct_per_hour``
+        (``discharge_rate_pct_per_hour`` is the measured slope), whatever the input.
+      * ``soc_critical``  — SoC at/below ``critical_soc_pct``, draining or charging.
+      * ``shutdown_state`` / ``countdown_reason`` — what the shutdown logic is doing
+        and why (see ``shutdown_state``).
+      * ``on_battery``    — legacy alias, kept for old readers. True only when
+        ``input_lost`` and the battery is draining or critical; False when input
+        is present or the battery is confirmed flat; None when input is lost and
+        the gauge has no verdict. It can no longer be true beside
+        ``input_lost: false``.
     """
+    state, reason = shutdown_state(
+        armed=armed,
+        input_is_lost=input_is_lost,
+        battery_state=battery_state,
+        discharging_now=discharging_now,
+        critical_now=critical_now,
+        require_discharge=require_discharge,
+        keepalive_remaining_s=keepalive_remaining_s,
+    )
+    legacy_on_battery: bool | None
+    if not armed:
+        legacy_on_battery = None
+    elif not input_is_lost:
+        legacy_on_battery = False
+    else:
+        legacy_on_battery = battery_state
     return {
         "armed": armed,
         "input_lost": input_is_lost,
-        "on_battery": on_battery,
+        "on_battery": legacy_on_battery,
+        "discharging": discharging_now,
+        "discharge_rate_pct_per_hour": None if discharge_rate is None else round(discharge_rate, 2),
+        "min_discharge_rate_pct_per_hour": min_discharge_rate,
+        "soc_critical": critical_now,
+        "critical_soc_pct": critical_soc_pct,
+        "shutdown_state": state,
+        "countdown_reason": reason,
         "soc": soc,
         "vcell": vcell,
         "seconds_lost": round(seconds_lost, 1),
@@ -451,7 +580,13 @@ def main() -> int:
             build_status_record(
                 armed=False,
                 input_is_lost=False,
-                on_battery=None,
+                battery_state=None,
+                discharging_now=None,
+                discharge_rate=None,
+                critical_now=None,
+                critical_soc_pct=critical_soc,
+                min_discharge_rate=min_discharge_rate,
+                require_discharge=require_discharge,
                 soc=None,
                 vcell=None,
                 seconds_lost=0.0,
@@ -530,7 +665,13 @@ def main() -> int:
                 build_status_record(
                     armed=True,
                     input_is_lost=input_is_lost,
-                    on_battery=battery_state,
+                    battery_state=battery_state,
+                    discharging_now=discharging(rate, min_discharge_rate=min_discharge_rate),
+                    discharge_rate=rate,
+                    critical_now=soc_critical(soc, critical_soc=critical_soc),
+                    critical_soc_pct=critical_soc,
+                    min_discharge_rate=min_discharge_rate,
+                    require_discharge=require_discharge,
                     soc=soc,
                     vcell=vcell,
                     seconds_lost=decider.seconds_lost(now),

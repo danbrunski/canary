@@ -227,7 +227,7 @@ Control endpoints:
 | `PATCH /control/profiles/{slug}` / `POST /control/profiles/{slug}/revert` | edit a profile's `name`, `make`, `model`, `year`, `vin` and partial `parameters` / put `fields` (or every override) back to the tracked registry's values — see [Vehicle profile editing](#vehicle-profile-editing) |
 | `DELETE /control/profiles/{slug}` / `POST /control/profiles/{slug}/restore` | remove a profile from this machine's registry (a tracked one is hidden here by a tombstone and stays in git; recorded data is kept and `data_left` names where) / bring a hidden tracked profile back — see [Vehicle profile editing](#vehicle-profile-editing) |
 | `POST /control/vin/read` | read the connected vehicle's VIN (Mode 09 0x02) through the running OBD collector; returned for confirmation, never saved — see [Vehicle profile editing](#vehicle-profile-editing) |
-| `GET /control/power` / `POST /control/power/keepalive` | UPS watchdog status / set or cancel the keep-alive hold |
+| `GET /control/power` / `POST /control/power/keepalive` | UPS watchdog status / set or cancel the keep-alive hold — see [Power / UPS status](#power--ups-status) |
 | `GET /control/update` | software update: `installed` (`version`, `sha`), `status` (the root runner's `/run/canary/update_status`: `state` `idle`/`checking`/`updating`/`done`/`failed`/`refused`, or `lost` when its heartbeat is over 3 min old; `phase`, `phases`, `before`/`after`/`target`, `exit_code` with `exit_meaning`, `outcome`, `message`, `summary`, `log_tail`), `last_check` (`current`, `upstream`, `behind`, `commits` with subjects, `dirty`, or `ok: false` with `reason` `no_internet`/`remote_refused`/`no_upstream`), `pending_request`, `trigger_installed`, `internet.default_route` and `blocked_by` (what an update would end) — see [docs/pi-setup.md](pi-setup.md#updating-from-the-dashboard) |
 | `POST /control/update` | `{action: "check"\|"update", full?}` files a request for the root `canary-update.path` (202). 409 before filing when a capture is recording or an ECU backup runs (update only), when a check or update is already running or waiting, or when the Pi has no default route (`no internet: …`); 503 when `canary-update.path` is not installed or `/run/canary` is not writable |
 | `POST /pair/request` / `GET` / `DELETE /pair/request/{id}` | **no token**: ask to pair this device (`{name}` → `{id, secret}`), poll it with header `X-Pairing-Secret` (`status` `waiting` with `step` `set_acc`/`turn_on`/`back_to_acc`/`unavailable`, then `approved` with this device's `token` exactly once, or `conflict`/`expired`), or cancel it. The person in the car approves by turning the key ACC → ON → ACC — see [docs/ble-provisioning.md](ble-provisioning.md#pairing-by-key-cycle) |
@@ -318,6 +318,41 @@ comparison workflow.
 Job state is append-only in `daemon.jobs_dir/jobs.jsonl`, so recent job history
 survives daemon restarts. Control mutations are appended to
 `daemon.audit_log` as JSONL audit events and are also broadcast live.
+
+## Power / UPS status
+
+`GET /control/power` returns `{power: {...}}` from the `ups-shutdown` watchdog's
+heartbeat (`/run/canary/ups_status`; `scripts/ups_shutdown_watch.py`), plus the
+keep-alive hold read fresh from its own file. The watchdog reports **conditions,
+not one flag** (D03.67). They are independent measurements, so `input_lost:
+false` beside a falling or critical SoC is a normal reading, not a contradiction:
+
+| Field | Meaning |
+|---|---|
+| `watchdog_running`, `watchdog_stale`, `status_age_s` | no heartbeat at all / heartbeat older than 10 s (hung) / its age. Every other field is `null` when not running. |
+| `armed` | false when no fuel gauge answers on I2C (bench, no UPS): the watchdog does nothing. |
+| `input_lost` | the PLD line only (GPIO6 low). |
+| `discharging`, `discharge_rate_pct_per_hour`, `min_discharge_rate_pct_per_hour` | SoC falling faster than the floor (default 6 %/h) over the 120 s window, with the measured slope (negative = discharging, positive = charging). `null` until 40 s of history. True with input present on a sagging supply (key-on, engine off at 11.5 V). |
+| `soc_critical`, `critical_soc_pct` | SoC at or below the floor (default 15 %), whether the cell is draining or charging. |
+| `shutdown_state` | what the countdown is doing: `disarmed`; `input_present` (nothing counts, whatever the SoC says); `held_external_power` (input lost but the battery is confirmed flat: bench USB-C); `counting_down` (`seconds_lost` toward `grace_s`, then power off); `held_keepalive` (a countdown that would run is overridden by a hold). |
+| `countdown_reason` | why it counts (set for `counting_down` and `held_keepalive` only): `input_lost_discharging`, `input_lost_soc_critical`, `input_lost_unconfirmed` (no gauge verdict yet, or `UPS_REQUIRE_DISCHARGE=0`: PLD alone). |
+| `on_battery` | **legacy alias**, kept for old readers. True only when `input_lost` and the battery is draining or critical; false when input is present or the battery is confirmed flat; `null` when input is lost and the gauge has no verdict yet. It is never true beside `input_lost: false`. New code reads the fields above. |
+| `soc`, `vcell`, `seconds_lost`, `grace_s`, `keepalive_remaining_s` | gauge reading, cell volts, seconds of the running countdown, grace window, hold left. |
+
+**Keep-alive vs critical SoC: the keep-alive wins.** The watchdog's loop checks
+the hold before it counts: while a hold is active it resets the countdown, so the
+critical floor (`UPS_CRITICAL_SOC`) does not override it, and an armed hold keeps
+the Pi up at 5 % SoC with input lost (`shutdown_state: held_keepalive`,
+`countdown_reason: input_lost_soc_critical`). Without a hold, input loss at a
+critical SoC counts down at once even if the gauge shows no discharge, and with
+input present nothing counts at any SoC. The hold expires on its own and the
+countdown then starts from zero. Pinned by
+`tests/test_ups_shutdown.py::test_keepalive_beats_critical_soc_in_the_main_loop`.
+
+A watchdog older than D03.67 sends none of the new fields: they read `null` and
+its own `on_battery` (draining or critically low, input or not) passes through
+unchanged until the watchdog is redeployed (`install_pi.sh`, or restart
+`ups-shutdown` under sudo on the Pi).
 
 ## Companion mode (a laptop linked to a Pi)
 
