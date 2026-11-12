@@ -600,6 +600,7 @@ def test_flash_precision_comes_from_the_revision_never_silently_instant(tmp_path
         "ZS44A-20261004": "instant",
         "ZS44A-20261110": "approximate",
         "ZS44A-20261111": "instant",
+        "ZS44A-20261111-2": "instant",
     }
     k106 = next(i for i in intervention_history(registry, []) if i.source_ref == "ZS44A-k106")
     ledger = _ledger(tmp_path)

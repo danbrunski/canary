@@ -13331,7 +13331,7 @@
    "wrote <RUN>/report.json and <RUN>/report.md",
    "3 held-out drive(s) scored, 6 skipped; 128 injection outcome(s)",
    "score cache: 0 of 224 lookups read back",
-   "[74 log line(s), digest ecc1dc5ece8d938e]"
+   "[74 log line(s), digest 2b6f9195df75ac14]"
   ]
  },
  "plan": {

@@ -82,6 +82,13 @@ program:
     - sha256: 2b42c6effb795edff69d49284f5a86d78de9340b9d1e7256fc4676f82d9ab412
       revision: ZS44A-20261111
       role: program_checked
+    # Checked 2026-11-11 on the decoded ZS44A-Tuned-20261111-2.OsirisROM: the
+    # program sha256 above and check_image pass (the build changed
+    # main-calibration word 0x9308 and the checksum words, all inside
+    # 0x8000-0x1FFFF, outside the hashed spans; no node here reads 0x9308).
+    - sha256: 108bb32b0156e52c7c4ae6c2fe551bdc995a44302ce1a091a7a27ba8e4e2f1ba
+      revision: ZS44A-20261111-2
+      role: program_checked
     - sha256: e01cc0cb45d5beb879f82931be3054c79b7be3955220b3d93045deaabd23f18e
       revision: ZS44A-k106
       role: program_checked

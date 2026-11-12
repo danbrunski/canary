@@ -140,6 +140,32 @@ revisions:
       range CRC response. Write-up: docs/skunkworks/uprev-flash-procedure.md.
       Predictions frozen before the flash:
       data/analyses/2026-11-11-wot-target-lean-prediction.md.
+  - revision: ZS44A-20261111-2
+    calibration_id: 1ZS44A00000
+    flashed_at: 2026-11-12T01:02:19.999390Z
+    flashed_at_precision: exact
+    k: 1.06
+    rom_file: ZS44A-Tuned-20261111-2.OsirisROM
+    rom_sha256: 3a01904fbd579860889c46465dd75d25d230c1cad8a8e4e412c39e240cdd79e7
+    image_sha256: 108bb32b0156e52c7c4ae6c2fe551bdc995a44302ce1a091a7a27ba8e4e2f1ba
+    notes: >
+      First-gear torque cap switched off: main-calibration word 0x9308 (the
+      gear-ratio threshold that arms the cap) 3,584 -> 32,767, above the
+      ratio estimate's clamp, so the ratio test can no longer set the flag.
+      The cap value (0x8EBC) and the output-shaft constant (0x91F8) are
+      unchanged. Built by CANary from 20261111; every map slot, K, timing and
+      the axes unchanged. The first edit to the main calibration (sector 8,
+      the page that also holds the checksum words). Named for its build date
+      (the second file built on 2026-11-11 local); the flash boundary is
+      2026-11-12 UTC. The flash capture
+      (/data/canary/flash-captures/flash-20261112T010129Z.candump.log, sha256
+      916066c684f6fc5a6bc868303ad846371fac0c3888697f22f6555360ad3cf462) shows
+      16/16 range CRCs before programming matching 20261111, only sectors 15
+      and 8 erased, all 8 uploaded pages equal to this image (only page
+      0x8000 differs from the old one), and 16/16 range CRCs after
+      programming matching it. Boundary = the last post-program range CRC
+      response. Predictions frozen before the flash:
+      data/analyses/2026-11-11-first-gear-cap-off-prediction.md.
 # Known images that were never flashed as-is (W08.2). Not revisions: they have
 # no flash boundary, so sessions are never assigned to them.
 reference_images:
