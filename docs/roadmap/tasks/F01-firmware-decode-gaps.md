@@ -67,6 +67,20 @@ Same conventions as the other task files: task-level truth is the checkboxes,
     the periods are stated with the timer registers that set them; one
     `0xFFFF84B9`-paced counter is timed against acquisition time on the truck
     (the 1.024 ms tick).
+  - [~] 2026-11-12, desk part done; truck reads owed. 24 functions seeded
+    (2,532 → 2,556, backup `~/ecu-re/backup/XterraECM-20261112-pre-F01.1.tar.gz`),
+    listing regenerated; all 254 entries of the eight task tables
+    (`0x021818`–`0x021BE8`) resolve to functions, including the three that did
+    not (`0x0726DC`, `0x05152C`, `0x051F48`). Group periods, the main-cycle
+    trigger and the `84BB` → `84C3` snapshot chain are in the firmware doc,
+    "Scheduler and task tables"; `enrichment_tick_rate` is narrowed. Not
+    decodable at the desk: no writer of `0xFFFF84BB` (references, opcode scan,
+    emulation of 1,200 ticks), and the clock of the ATU counter `0xFFFFF430`.
+    Owed on the truck: repeated window reads of `0xFFFF84B9`–`0xFFFF84C4` at
+    KOEO and idle, two timed reads of `0xFFFFF430`, and the run-time words.
+    Side finding: `~/ecu-re` SeedCode.java's prologue mask `0xF0FF` can never
+    match `mov.l Rn,@-r15` (needs `0xFF0F`), and it skipped GBR-saving
+    prologues.
 
 ## Fuel control
 
@@ -106,8 +120,22 @@ Same conventions as the other task files: task-level truth is the checkboxes,
   after DID `0x1206` is taken, undecoded (`short_pulse_undecoded`).
   - *Answers:* idle and light-load delivery with 700 cc injectors, where the
     pulse is shortest and this term is largest.
-  - **Accept:** the formula is in the firmware doc and the pulse-chain known
-    answer (`tools.fuel_plant_check chain`) includes it on idle reads.
+  - **Accept:** the formula is in the firmware doc and `rom_map.yaml`, and a
+    same-window read of `0xFFFF279C` (x) and `0xFFFF27A8` (y) at hot idle
+    matches it. (Amended 2026-11-12: DID `0x1206` is x, taken before this
+    stage, so the pulse-chain known answer cannot include it.)
+  - [~] 2026-11-12, decoded; truck read owed. `INJ_short_pulse_linearize`
+    `0x05B8B0`: `y = max(x, a, b)`, a/b = `min(0xFFFF, (x·gain + 100·offset)
+    >> 14)`, cal 16358/15846/74/959, identical in every ZS44A image. At most
+    +50 µs and zero above 1.78 ms. On 700 cc injectors more of idle and
+    light load falls below 1.78 ms, so it acts on more cells; whether the cal
+    should change with them is a supercharger-build question (the values
+    describe the injector, not the engine). In the firmware doc, `rom_map.yaml`
+    (`short_pulse_gain_a/b`, `short_pulse_offset_a/b`) and
+    `src.analysis.injector_pulse.short_pulse_linearize` with tests. Follow-on
+    (Deep): the simulator still refuses short pulses as
+    `short_pulse_undecoded` (`paired_scenarios.py`); applying y in the plant and
+    renaming that reason is an E07 modelling change.
 
 - [ ] **F01.5 Fuel cut.** The rev limiter (`0x04F768`) and the stationary
   high-load cut (`0x04F6A4`) are traced. Open (`uncovered: fuel_cut_paths`):

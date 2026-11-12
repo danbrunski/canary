@@ -40,6 +40,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from src.analysis.ecu_state_models import byte_curve16
+from src.analysis.rom_map import DTYPE_BYTES, RomMap
 
 #: 1.0 in the trim words (0x6400).
 TRIM_UNITY = 0x6400
@@ -87,6 +88,71 @@ class PulseChainCalibration:
 
 def _ints(values: ArrayLike) -> Int:
     return np.asarray(np.rint(np.asarray(values, dtype=float)), dtype=np.int64)
+
+
+#: The rom_map ids of the short-pulse words, in ShortPulseCalibration order.
+SHORT_PULSE_TABLES: tuple[str, ...] = (
+    "short_pulse_gain_a",
+    "short_pulse_gain_b",
+    "short_pulse_offset_a",
+    "short_pulse_offset_b",
+)
+
+
+@dataclass(frozen=True)
+class ShortPulseCalibration:
+    """The short-pulse linearisation words (cal ``0x9120``-``0x9126``)."""
+
+    gain_a: int
+    gain_b: int
+    offset_a: int
+    offset_b: int
+
+    def __post_init__(self) -> None:
+        for name in ("gain_a", "gain_b", "offset_a", "offset_b"):
+            if not 0 <= getattr(self, name) <= 0xFFFF:
+                raise ValueError(f"{name} must be a u16 word, got {getattr(self, name)!r}")
+
+
+def short_pulse_from_image(image: bytes, rom_map: RomMap) -> ShortPulseCalibration:
+    """The four words from ``image``, each by its rom_map id (never a copied offset).
+
+    Refuses a mapping that is not a single absolute word, so a map that moved
+    or reshaped one cannot be read as a different number."""
+    words = []
+    for table_id in SHORT_PULSE_TABLES:
+        table = rom_map.table(table_id)
+        if table.offset is None or (table.rows, table.cols) != (1, 1) or table.dtype != "be16":
+            raise ValueError(f"{table_id} must be one absolute be16 word in the rom map")
+        width = DTYPE_BYTES[table.dtype]
+        words.append(int.from_bytes(image[table.offset : table.offset + width], "big"))
+    return ShortPulseCalibration(*words)
+
+
+def short_pulse_linearize(pulse_counts: ArrayLike, cal: ShortPulseCalibration) -> Int:
+    """The ECM's final per-cylinder pulse from its pulse word ``x`` (10 us counts).
+
+    ``INJ_short_pulse_linearize`` (``0x05B8B0``), every step from the listing::
+
+        a = min(0xFFFF, (x * gain_a + 100 * offset_a) >> 14)
+        b = min(0xFFFF, (x * gain_b + 100 * offset_b) >> 14)
+        y = max(x, a, b)
+
+    Each line has a gain just under 1.0 (Q14) and a positive intercept, so it
+    lengthens short pulses only: on ZS44A, term B below 1.78 ms (up to 5
+    counts at zero) and term A below 2.84 ms (under half a count, so it never
+    survives the truncation). ``x`` is the word after the per-cylinder terms,
+    the one DID ``0x1206``/``0x1207`` reports; the min-pulse floor ``0x2770``
+    comes after this. The result is what the ECM *commands*: it compensates
+    the injector's short-pulse nonlinearity, and whether delivered fuel
+    follows ``x`` or ``y`` is the plant's question, not answered here."""
+    x = _ints(pulse_counts)
+    if np.any((x < 0) | (x > 0xFFFF)):
+        raise ValueError("pulse words are u16")
+    a = np.minimum(0xFFFF, (x * cal.gain_a + 100 * cal.offset_a) >> 14)
+    b = np.minimum(0xFFFF, (x * cal.gain_b + 100 * cal.offset_b) >> 14)
+    out: Int = np.maximum(x, np.maximum(a, b))
+    return out
 
 
 def dead_time_counts(vb_counts: ArrayLike, *, base: int, slope: int, vref: int) -> Int:

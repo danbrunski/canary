@@ -24,14 +24,19 @@ from src.analysis.fuel_plant_eval import (
     without_pressure_correction,
 )
 from src.analysis.injector_pulse import (
+    SHORT_PULSE_TABLES,
     TRIM_UNITY,
     PulseChainCalibration,
+    ShortPulseCalibration,
     dead_time_counts,
     predict_pulse,
     pressure_correction_word,
+    short_pulse_from_image,
+    short_pulse_linearize,
     trim_word,
     vb_counts_from_volts,
 )
+from src.analysis.rom_map import load_rom_map
 from tests.rom_fixtures import operator_image
 
 PROFILE = Path("data/nissan-xterra-2008")
@@ -168,3 +173,61 @@ def test_removing_the_pressure_correction_fails_the_known_answer() -> None:
     assert control["n"] == real["n"]
     assert not 0.98 <= control["median"] <= 1.04
     assert control["median"] < 0.96
+
+
+# -- F01.4: the short-pulse linearisation (INJ_short_pulse_linearize 0x05B8B0) --
+
+#: The ZS44A words (cal 0x9120-0x9126), equal on every image on the laptop.
+SHORT = ShortPulseCalibration(gain_a=16358, gain_b=15846, offset_a=74, offset_b=959)
+
+
+@pytest.mark.parametrize(
+    ("x", "y"),
+    [
+        # Worked by hand: a = (x*16358 + 7400) >> 14, b = (x*15846 + 95900) >> 14.
+        (0, 5),  # b = 95900 >> 14 = 5 (5.85 truncated); a = 0
+        (100, 102),  # a = 1643200 >> 14 = 100, b = 1680500 >> 14 = 102
+        (140, 141),  # b = 2314340 >> 14 = 141
+        (150, 150),  # b = 2472800 >> 14 = 150: the lift has truncated away
+        (177, 177),  # b = 2900642 >> 14 = 177, a = 2902766 >> 14 = 177
+        (300, 300),  # both lines below x
+        (0xFFFF, 0xFFFF),  # both below x; x itself is the max
+    ],
+)
+def test_short_pulse_lifts_only_short_pulses(x: int, y: int) -> None:
+    assert int(short_pulse_linearize([x], SHORT)[0]) == y
+
+
+def test_short_pulse_never_shortens_and_caps_each_line_at_a_u16() -> None:
+    x = np.arange(0, 0x10000)
+    out = short_pulse_linearize(x, SHORT)
+    assert np.all(out >= x)
+    assert out.max() == 0xFFFF
+    # The lift is confined below 1.78 ms (term B's crossing) and is at most 5.
+    lift = out - x
+    assert lift.max() == 5
+    assert not np.any(lift[178:])
+    # A steeper gain would exceed 0xFFFF: the cap holds the line at the word.
+    steep = ShortPulseCalibration(gain_a=0xFFFF, gain_b=0, offset_a=0xFFFF, offset_b=0)
+    assert int(short_pulse_linearize([0xFFFF], steep)[0]) == 0xFFFF
+
+
+def test_short_pulse_refuses_a_word_outside_u16() -> None:
+    with pytest.raises(ValueError, match="u16"):
+        short_pulse_linearize([0x10000], SHORT)
+    with pytest.raises(ValueError, match="gain_a"):
+        ShortPulseCalibration(gain_a=-1, gain_b=0, offset_a=0, offset_b=0)
+
+
+def test_short_pulse_words_are_read_by_rom_map_id() -> None:
+    rom_map = load_rom_map(PROFILE)
+    image = bytearray(rom_map.image_size)
+    for table_id, value in zip(SHORT_PULSE_TABLES, (16358, 15846, 74, 959), strict=True):
+        offset = rom_map.table(table_id).offset
+        assert offset is not None
+        image[offset : offset + 2] = value.to_bytes(2, "big")
+    assert short_pulse_from_image(bytes(image), rom_map) == SHORT
+
+
+def test_short_pulse_words_on_the_operator_image() -> None:
+    assert short_pulse_from_image(_image(), load_rom_map(PROFILE)) == SHORT

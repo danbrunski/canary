@@ -230,8 +230,10 @@ steady:
   min_maf_reads: 3
   min_pulse_reads: 2
   min_coolant_c: 70.0
-  # The short-pulse correction (cal 0x9120-0x9126) acts after the DID and is
-  # not decoded; pulses with < 1 ms effective open time are excluded.
+  # The short-pulse correction (cal 0x9120-0x9126) acts after the DID. It is
+  # decoded (F01.4, injector_pulse.short_pulse_linearize: at most +50 us, zero
+  # above 1.78 ms) but this plant does not apply it, so pulses with < 1 ms
+  # effective open time stay excluded.
   min_effective_pulse_ms: 1.0
   lambda_rail: 1.9
   fuel_cut_margin_counts: 2

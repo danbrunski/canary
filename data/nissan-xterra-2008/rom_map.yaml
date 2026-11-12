@@ -1184,6 +1184,63 @@ tables:
       1.0600 matches the registry's K 1.06 for k106, and UpRev wrote the K
       edit to every slot. Raw only: K is relative to an injector the ECM
       does not name, so no scale is declared.
+  # -- The short-pulse linearisation (F01.4): INJ_short_pulse_linearize
+  # 0x05B8B0 makes each cylinder's final pulse y = max(x, a, b) from its pulse
+  # word x (10 us counts, after the per-cylinder terms), with
+  # a = min(0xFFFF, (x * gain_a + 100 * offset_a) >> 14) and the same for b.
+  # src/analysis/injector_pulse.py short_pulse_linearize reads these by id.
+  - id: short_pulse_gain_a
+    name: Short-pulse linearisation gain A (cal 0x9120)
+    group: fuel
+    short_name: Short-pulse gain A
+    offset: 0x9120
+    rows: 1
+    cols: 1
+    dtype: be16
+    confidence: verified
+    evidence: >-
+      0x05B8BA reads it through GBR 0x9120 (mov.w @(0,gbr)) and multiplies it
+      into x with mul.l; the product plus 100 x cal 0x9124 is shifted right 14
+      (shlr8 + 3 x shlr2) and capped at 0xFFFF. 16,358 on every ZS44A image
+      on the laptop (base, 20260920 through 20261111-2).
+  - id: short_pulse_gain_b
+    name: Short-pulse linearisation gain B (cal 0x9122)
+    group: fuel
+    short_name: Short-pulse gain B
+    offset: 0x9122
+    rows: 1
+    cols: 1
+    dtype: be16
+    confidence: verified
+    evidence: >-
+      0x05B8F8 reads it (mov.w @(2,gbr)); same form as gain A with cal
+      0x9126 as the offset. 15,846 on every ZS44A image on the laptop.
+  - id: short_pulse_offset_a
+    name: Short-pulse linearisation offset A (cal 0x9124)
+    group: fuel
+    short_name: Short-pulse offset A
+    offset: 0x9124
+    rows: 1
+    cols: 1
+    dtype: be16
+    confidence: verified
+    evidence: >-
+      0x05B8C2 reads it (mov.w @(4,gbr)) and multiplies it by the immediate
+      100 (0x05B8BE mov #0x64). 74 on every ZS44A image on the laptop: term A
+      lengthens pulses shorter than 2.84 ms, by under half a count.
+  - id: short_pulse_offset_b
+    name: Short-pulse linearisation offset B (cal 0x9126)
+    group: fuel
+    short_name: Short-pulse offset B
+    offset: 0x9126
+    rows: 1
+    cols: 1
+    dtype: be16
+    confidence: verified
+    evidence: >-
+      0x05B8FE reads it (mov.w @(6,gbr)), times 100. 959 on every ZS44A image
+      on the laptop: term B lengthens pulses shorter than 1.78 ms, by up to
+      5 counts (58.5 us before truncation) at zero.
   # -- The Fuel Comp load input 0xFFFF118A (N02.1). Everything the sole writer
   # FUN_0003c3a4 reads from the image, so the byte can be rebuilt from logged
   # throttle and rpm (src/decode/fuel_comp_load.py; docs/ecu-firmware-analysis.md,

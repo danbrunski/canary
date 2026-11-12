@@ -1112,7 +1112,8 @@ subsystems:
       time_resolution: engine_cycle
       evidence: >-
         Warm, steady, naturally aspirated, effective pulse >= 1 ms (the
-        short-pulse correction is undecoded); scored by fuel_plant_eval, whose
+        short-pulse correction is decoded but not applied by the plant); scored
+        by fuel_plant_eval, whose
         held-out verdicts are this stage's validation record.
     references:
       - id: lambda_pid

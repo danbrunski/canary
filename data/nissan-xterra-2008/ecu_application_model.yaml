@@ -2532,9 +2532,22 @@ uncovered:
       0xFFFF1A58 in one window set (0x23) at hot idle and at a steady cruise,
       and check timing_term_27c6_chain against each read (E05.4 (c)).
   - id: enrichment_tick_rate
-    where: '0xFFFF84C3 bit 7 (the tick every enrichment timer steps on) and the 0x020EF2 cycle period'
+    where: >-
+      0xFFFF84C3 bit 7 (the tick every enrichment timer steps on) and the
+      0x020EF2 cycle period. Narrowed by F01.1 (2026-11-12): 84C3 is the main
+      cycle's one-cycle-delayed copy of the event-flag byte 0xFFFF84BB
+      (84C3 <- 84C4 <- 84BB at 0x20F26-0x20F36); the cycle is nominally
+      10.24 ms but not caught up when late. No writer of 84BB was found by
+      reference, opcode scan or emulation, so its set rate is not decodable
+      at the desk.
     blocks: 'predicting enrichment transition timing (E05.3); a measured requirement, never fitted'
-    next_evidence: 'Same-window reads of 0xFFFF1742..0xFFFF1749 and 0xFFFF14C4/0xFFFF14C5 while a request is held.'
+    next_evidence: >-
+      Vehicle: sample 0xFFFF84B9..0xFFFF84C4 repeatedly in one window at KOEO
+      and at idle (how often 84BB/84C3 bit 7 is set), two host-timestamped
+      reads of the ATU counter 0xFFFFF430, and the run-time words (0xFFFF2380
+      and the peak-holds listed in docs/ecu-firmware-analysis.md "Scheduler
+      and task tables") for the real cycle period. Also same-window reads of
+      0xFFFF1742..0xFFFF1749 and 0xFFFF14C4/0xFFFF14C5 while a request is held.
   - id: slot_0x260_map
     where: 'slot +0x260 (RAM 0xFFFFB2A0), >= 21 readers through 0x026B14'
     blocks: 'any output it feeds; not identified'

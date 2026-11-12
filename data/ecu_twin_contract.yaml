@@ -358,7 +358,8 @@ inventory:
       min(0xFFFF, ((base * alpha / 0x6400 + wallfilm) * w1800) >> 14)); k =
       STFT + LTFT + w2E8C - 0xC800 (u16 words, 0x6400 = 1.0); Ti = ((G * k) >>
       16) + Ts, u32 intermediates, u16 pulse in 10 us counts, before the
-      short-pulse correction (0x9120-0x9126, not decoded) and min pulse.
+      short-pulse correction (0x9120-0x9126, decoded in
+      injector_pulse.short_pulse_linearize, not applied here) and min pulse.
       Purge alpha and wall film are taken neutral (steady state); per-sample
       known answer median 1.0084 (E07.3), no vectors.
   - python: src.analysis.twin_command_change

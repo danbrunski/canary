@@ -904,8 +904,8 @@ ratio of (DID − Ts) to the predicted pulse has median 1.006, p10–p90
   5. the per-cylinder stages.
 
   `0x21A30`, quoted here earlier as a separate table, is the address of entry
-  24. The 10.24 ms period once given for it is not verified: the loop's
-  period is still undecoded (application model, `enrichment_tick_rate`).
+  24. The loop's *nominal* period is 10.24 ms, but a late cycle is not caught
+  up, so the real period is a measurement ("Scheduler and task tables", below).
   Crank-segment code loads the ATU-II channel-8 one-shot counters (`0xFFFFF640 + 2c`).
 - **Formula (verified; u16 words, u32 intermediates):**
 
@@ -977,6 +977,27 @@ ratio of (DID − Ts) to the predicted pulse has median 1.006, p10–p90
     correction.
   - It is taken **before** the short-pulse correction and the min-pulse floor.
   - Unit 10 µs. In fuel cut both read Ts.
+- **Short-pulse linearisation (verified, F01.4).** `INJ_short_pulse_linearize`
+  `0x05B8B0` maps the per-cylinder pulse x (`0xFFFF279C[c]`, the DID 0x1206
+  word) to the output y (`0xFFFF27A8[c]`):
+
+      a = min(0xFFFF, (x·w9120 + 100·w9124) >> 14)
+      b = min(0xFFFF, (x·w9122 + 100·w9126) >> 14)
+      y = max(x, a, b)
+
+  - Calibration 16358, 15846, 74, 959 (u16 at `0x9120`–`0x9126`), identical
+    in every ZS44A image read (the ecuread, Tuned 20260920, 1004, 1110, 1111,
+    1111-2, and ZS44A-Tuned). In `rom_map.yaml` as `short_pulse_gain_a/b` and
+    `short_pulse_offset_a/b`; `src.analysis.injector_pulse.short_pulse_linearize`
+    implements it.
+  - Term b lifts pulses below about 1.78 ms (+5 counts, 50 µs, at x = 0; +2 at
+    1.0 ms); term a reaches x only below about 2.84 ms, by under one count. So
+    y − x is at most 50 µs and is zero above 1.78 ms.
+  - Because DID 0x1206 is x, the pulse-chain known answer is unaffected by
+    this stage. Whether the plant fuels on y is the plant model's choice
+    (`short_pulse_undecoded` in the simulator still refuses short pulses).
+  - Live check: one window reading `0xFFFF279C` and `0xFFFF27A8` (both six
+    u16s) at hot idle, where x is shortest.
 - **PID `0x44` is not φ in general (verified).** `PID 0x44 = 0x26BE ×
   0x46AC / 3675`, and `46AC` copies the A/F feedback target `46B2`. So it
   equals φ only while that target is 7350 (14.7). 2,437 idle reads of 0.871
@@ -1011,6 +1032,76 @@ ratio of (DID − Ts) to the predicted pulse has median 1.006, p10–p90
   - Limp cut at 2,800 rpm on diagnostic item `0x30`.
   - No BFS- or airflow-based cut while moving.
 
+### Scheduler and task tables (F01.1, 2026-11-12)
+
+The application's vector base is VBR = `0x20004` (vector v at
+`0x20004 + 4v`); the bootloader's table at `0x0` is a different one.
+
+- **Tick.** Vector 120 (`0x2040C`) adds 320 to GR3A each tick at φ′/32:
+  1.024 ms at the inferred Pφ 20 MHz. It sets bits in `0xFFFF84B9`:
+  - `0x80` every tick, and `0x02` if `0x80` was still set (an overrun flag);
+  - `0x40` every 2 ticks, `0x20` every 4, `0x14` every 10;
+  - `0x08` while the dispatcher runs (set `0x20A82`, cleared `0x20EA0`).
+- **Groups.** The dispatcher `0x020A3C` walks these task tables (the block
+  `0x02180C`–`0x021C0C`). All 254 entries resolve to functions since the
+  seeding below.
+
+  | Table | Entries | Runs |
+  |---|---|---|
+  | `0x021818` | 9 | every tick (1.024 ms) |
+  | `0x02183C` | 14 | every 2 ticks |
+  | `0x021874` | 10 | every 4 ticks (the BFS group) |
+  | `0x02189C` | 67 | every 10 ticks |
+  | `0x0219A8` | 7 | after a crank segment (`0xFFFF84BA` bit 7) |
+  | `0x0219C4` | 3 | every 3rd crank segment (`0xFFFF84BA` bit 6) |
+  | `0x0219D0` | 134 | the main cycle `0x020EF2` |
+  | `0x021BE8` | 10 | the crank-segment dispatcher `0x02092E` itself |
+
+  `0x02092E` sets `84BA` bit 7 on every segment and bit 6 on every third
+  (`0x20962`/`0x20972`). The dispatcher clears each after running its group
+  (`0x20C6A`, `0x20E7C`). The background state jump table `0x022668` is
+  indexed by `0xFFFF84A8`.
+- **Main cycle.** The background loop `0x0290D0` waits for `84B9` bit `0x04`,
+  then calls `0x020EF2`, which clears the bit at its start (`0x20F24`). A
+  cycle that overruns is not caught up: the period is 10.24 ms nominal and
+  longer under load, so it must be measured, never assumed.
+- **The event-flag byte `0xFFFF84BB` and its snapshots.** Each group copies
+  `84BB` to its own snapshot after running: `84BD` (1 ms group), `84BE`
+  (2 ms), `84BF` (4 ms, `0x20BF6`), `84C0` (10 ms, `0x20CEA`), `84C1`
+  (`84BA`.7 group), `84C2` (`84BA`.6 group). The main cycle starts with
+  `84C3 ← 84C4`, `84C4 ← 84BB` (`0x20F26`–`0x20F36`), so during cycle k,
+  `84C3` holds `84BB` as of the start of cycle k−1. Readers of `84C3` test
+  bit 7 (77 sites), bit 6 (48), bit 5 (13) and bit 4 (1); every enrichment
+  timer steps on bit 7, and the VTC start delay counts 30 of them.
+  - **No writer of `0xFFFF84BB` was found**: not by Ghidra references, an
+    opcode scan of every `0xFFFF84B8`-word access, data words, the GBR bases
+    of the seeded functions, nor emulation of startup plus 1,200 ticks and 120
+    main cycles (with and without crank segments every 3 ticks). Emulation
+    writes it only in the RAM test (`0x08ED32`–`0x08ED6A`). The writer is
+    either a computed address or a path the emulator's peripheral model never
+    reaches. So the rate of `84C3` bit 7 (application model
+    `enrichment_tick_rate`) is a vehicle read: sample `0xFFFF84B9`–`0xFFFF84C4`
+    repeatedly in one window at KOEO and at idle.
+- **Run-time words.** The dispatcher times each group with the free-running
+  ATU counter `0xFFFFF430`: `0xFFFF2380` (background/main), `0xFFFF204C`,
+  `0xFFFF2060`, `0xFFFF20E8` (4 ms group), `0xFFFF224C`, `0xFFFF2250`,
+  `0xFFFF2414`-indexed (segment group), `0xFFFF26B0`; peak-holds at
+  `0xFFFF3DE0`, `0xFFFF3EE4`, `0xFFFF4044`, `0xFFFF4424`, `0xFFFF4428`,
+  `0xFFFF4608`, `0xFFFF465C`. The counter's clock is not decoded (channel 0's
+  set-up, `0x027916`, writes `0xFFFFF42A` = 2 and `F42C`/`F42E` = 1, and the
+  register meanings were not checked against the manual), so read
+  `0xFFFFF430` twice a few seconds apart with host timestamps to get it.
+  Together these give the real main-cycle period and the CPU headroom.
+- **Seeding.** Twenty-four functions were added to the project (2,532 →
+  2,556), among them the three task targets that were missing: `0x0726DC`
+  (main entry 20), `0x05152C` (main entry 82) and `0x051F48` (`0x0219C4`
+  entry 2). Code-like bytes outside any function fell from 8.7 KB in 35 gaps
+  to about 2 KB. Eight prologue-less regions remain (`0x4F6F8`, `0x4AC0E`,
+  `0x4B014`, `0x3B8DA`, `0x2EE92`, `0x26452`, `0xCF968`, `0x3D738`, about
+  0.9 KB) with no branch, call or pointer to them: dead code, or reached only
+  by a computed jump. A "no store found" search now covers every task-table
+  routine.
+
 ## Open
 
 - **Catalog:** the Mode 22 corrections and the 2026-10-05 audit are applied
@@ -1036,6 +1127,13 @@ ratio of (DID − Ts) to the predicted pulse has median 1.006, p10–p90
   the state byte `0xFFFF2208` were traced on 2026-11-12, "What else the
   output-shaft constant `0x91F8` moves". The drive-torque stage whose speed
   word was owed here does not run on this calibration.)
-- **Disassembly gaps:** `0x0726DC` was found only by an opcode scan. Functions
-  reached through task tables are not all in the listing, so "no store found"
-  is not evidence until the gaps are seeded.
+- **Disassembly gaps:** seeded 2026-11-12 (F01.1): every task-table entry is
+  now a function, and about 0.9 KB of unreferenced code remains ("Scheduler
+  and task tables"). A "no store found" search is evidence for anything a
+  task table reaches; it is still not evidence for a computed address, which
+  is how `0xFFFF84BB` escapes it.
+- **Scheduler timing (vehicle):** the `0xFFFF84B9`–`0xFFFF84C4` flag reads,
+  two timed reads of `0xFFFFF430`, and the run-time words, to give the real
+  main-cycle period and the `84C3` bit-7 rate.
+- **Short-pulse stage (vehicle):** `0xFFFF279C` against `0xFFFF27A8` at hot
+  idle.
