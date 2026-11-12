@@ -1279,6 +1279,89 @@ table:
   Above 8.6 % throttle the table stops rising. So a truck with a failed MAF
   makes little more than light-throttle power, up to the 2,400 rpm cut.
 
+### Idle air: the throttle-area correction and its learning (F01.10, 2026-11-12)
+
+What the ECM learns as "idle air" is not an idle-speed controller. It is a
+throttle-area correction. The loop matches the area the throttle model
+reads from the throttle position to the area the measured air implies, at
+steady points. All routines below run from main entry 78 (`0x0545E8`) in
+the order `0x054606`, `0x0549BE`, `0x054C24`, `0x054D6E`.
+
+- **The two areas.** The air model (`0x03C4D0`) computes both:
+  - `0xFFFF2C30`: the throttle model's area, curve `0xEE6A` at the
+    throttle position, less the correction below.
+  - `0xFFFF2CC4`: the area the measured air needs. It starts from
+    `0xFFFF46FE` (the cycle copy of `0xFFFF475E` =
+    (`0xFFFF3B78` × BFS) >> 5, written by `0x054958`), passes through the
+    curve pair `0xEEDA`/`0xEDCA` (or `0xEF1A`/`0xEE0A` from 0xFC00), and is
+    multiplied by the rpm word and by 158 (cal `0x8D25`).
+
+  The cycle copy carries them to `0xFFFF2B48` and `0xFFFF2BDC`.
+- **Integrator** `0xFFFF3CB2` (`0x0549BE`).
+  - While `0xFFFF480B` bit 4 is set and |`2B48` − `2BDC`| > 2, it steps by
+    (`2B48` − `2BDC`) × 5 / 256. The gain is 10 / 256 during Idle Air Volume
+    Learning.
+  - It is clamped to −80..1,184, so it converges where the two areas agree.
+  - With the bit clear, two decays apply:
+    - a one-shot −254 (floor 127) on a closed-throttle condition set;
+    - −10 per 20 calls (floor 20) while `0xFFFF1274` = `0xFFFF1934`.
+- **Learned term** `0xFFFF5EA6` (`0x054D6E`).
+  - It steps ±1 toward the integrator's sign when the integrator is at
+    least 2 or at most −2.
+  - It is clamped to −1,216..1,024.
+  - It steps once per arming of `0xFFFF47D9` bit 0, and not while
+    `0xFFFF4785` bit 7 is set.
+  - On each step the integrator is saved to `0xFFFF5EA0`, with its
+    complement at `0xFFFF52CE`.
+- **Correction** `0xFFFF6560` = min(1,185, integrator + learned)
+  (`0x054E3E`, `0x054E72`). It goes to two places:
+  - The electronic throttle adds it to its target area (`0x070736`), so
+    the throttle opens to supply the extra air.
+  - The cycle copy carries it to `0xFFFF63FC`, which the air model
+    subtracts (`0x03C5AA`).
+- **What survives a key cycle.**
+  - At start-up `0x05455C` reads non-volatile records 0x71/0x72 into
+    `0xFFFF5EA0`, keeping them only if they are complements. Otherwise it
+    uses 0.
+  - The power-up init `0x0591B8` (reached from `0x028E14`, inferred to be
+    the start-up path) sets the integrator from `0xFFFF5EA0` and zeroes the
+    learned term.
+  - So the integrator is what persists. The learned term restarts each
+    power-up.
+- **Feedback enable** `0xFFFF480B` bit 4 (`0x054606`). All of these must
+  hold:
+  - no fault on the MAF item `0x114` or three other items, whose ids the
+    decompiler lost;
+  - coolant 70–100 °C (bytes 120 and 150, hysteresis 3);
+  - flags: `0xFFFF4785` bit 7 and `0xFFFF479E` bit 1 set, `0xFFFF6955`
+    bit 7 set, `0xFFFF2838` bit 7 clear, `0xFFFF47B4` bit 4 clear and
+    `0xFFFF4782` bit 3 clear;
+  - `0xFFFF27D0` < 0x255;
+  - `0xFFFF283E` bit 6 set;
+  - steady over the last four cycles: BFS within 126, `0xFFFF11D2`
+    within 40, and `0xFFFF2B08` within 2;
+  - either IAVL is active or `0xFFFF1274` ≠ `0xFFFF1934`;
+  - all of the above held for a 25-call timer (`0xFFFF4952`).
+- **Idle Air Volume Learning** (`0x054C24`, the FSM's work-support
+  procedure), requested by `0xFFFF47DF` bit 2.
+  1. While feedback is enabled, it zeroes the learned term and runs the
+     integrator at double gain.
+  2. After 700 calls it sets `0xFFFF47D9` bit 1 (done) and `0xFFFF47CA`
+     bit 0, and clears the request.
+  3. The result is the integrator, which is then saved as above.
+- **After the throttle-body swap.** A larger bore passes more air at the
+  same position. The integrator absorbs that as a negative area
+  correction, down to −80 (plus −1,216 learned). That is what IAVL should
+  re-learn after the swap.
+- **RAM catalog:** `mem:ECM_IDLE_AIR_INTEGRATOR`, `_STORED`, `_LEARNED`
+  and `_CORRECTION` (hypothesized, in no profile).
+- **Not decoded:**
+  - the idle *speed* controller: the target rpm, its coolant, A/C and
+    load steps, and the torque or air demand it sets;
+  - idle spark feedback;
+  - the four flags named above;
+  - the three lost fault item ids.
+
 ### Throttle area units: not settleable at the desk (F01.9, 2026-11-12)
 
 **Why the desk can't settle them.**

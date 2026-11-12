@@ -6186,3 +6186,94 @@ memory:
       LTFT learning gate study (D03 trim relation, 2026-10-27). Raw counts: flags
       and words are read as bits offline from the stored payload. No known answer
       expressible.
+  # Idle air (F01.10, 2026-11-12). Code-derived, not yet read live, so in no
+  # capture profile. docs/ecu-firmware-analysis.md "Idle air: the throttle-area
+  # correction and its learning (F01.10)".
+  - name: ECM_IDLE_AIR_INTEGRATOR
+    address: 0xFFFF3CB2
+    length: 2
+    byte_length: 2
+    byte_order: big
+    signed: true
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: idle_air_integrator
+    evidence:
+      - session: firmware-ZS44A-20260920 (F01.10, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          s16 throttle-area counts: the integrator of 0x0549BE (main entry 78
+          via 0x0545E8). While 0xFFFF480B bit 4 is set and the gap between the
+          area the measured air implies (0xFFFF2BDC, the cycle copy of
+          0xFFFF2CC4) and the throttle model's area (0xFFFF2B48, the copy of
+          0xFFFF2C30) exceeds 2 counts, it steps by (2B48 - 2BDC) x 5 / 256,
+          or x 10 during Idle Air Volume Learning (0xFFFF47DF bit 2). It is
+          clamped to -80..1,184. It is stored to non-volatile records
+          0x71/0x72 (through 0xFFFF5EA0) and restored from them at power-up.
+    notes: 'No known answer expressible: the area unit is relative (F01.9).'
+  - name: ECM_IDLE_AIR_STORED
+    address: 0xFFFF5EA0
+    length: 2
+    byte_length: 2
+    byte_order: big
+    signed: true
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: idle_air_learned
+    evidence:
+      - session: firmware-ZS44A-20260920 (F01.10, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          s16: the integrator's saved copy. 0x054D6E copies 0xFFFF3CB2 here
+          (complement at 0xFFFF52CE) when it takes a learning step. 0x05455C
+          reads it back from non-volatile records 0x71/0x72 at start-up,
+          keeping it only if the two are complements. The power-up init
+          0x0591B8 loads the integrator from it.
+    notes: 'Shares the window idle_air_learned with 0xFFFF5EA6, so one read spans 0xFFFF5EA0-5EA7.'
+  - name: ECM_IDLE_AIR_LEARNED
+    address: 0xFFFF5EA6
+    length: 2
+    byte_length: 2
+    byte_order: big
+    signed: true
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: idle_air_learned
+    evidence:
+      - session: firmware-ZS44A-20260920 (F01.10, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          s16 throttle-area counts: the learned idle-air term. 0x054D6E steps
+          it +1 when the integrator is at least 2, and -1 when it is -2 or
+          less, clamped to -1,216..1,024. That is one step per arming of
+          0xFFFF47D9 bit 0, and not while 0xFFFF4785 bit 7 is set. Idle Air
+          Volume Learning (0x054C24) zeroes it. The init 0x0591B8 zeroes it
+          too, so it restarts at 0 each power-up (inferred: 0x0591B8 is
+          reached from 0x028E14).
+    notes: 'No known answer expressible.'
+  - name: ECM_IDLE_AIR_CORRECTION
+    address: 0xFFFF6560
+    length: 2
+    byte_length: 2
+    byte_order: big
+    signed: true
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: idle_air_correction
+    evidence:
+      - session: firmware-ZS44A-20260920 (F01.10, Ghidra headless -readOnly)
+        method: disassembly
+        finding: >
+          s16 throttle-area counts: min(1,185, 0xFFFF3CB2 + 0xFFFF5EA6) (0x054E3E
+          via 0xFFFF1CC0, then 0x054E72). The electronic throttle adds it to
+          its target area (0x070736). The cycle copy 0xFFFF6418 -> 0xFFFF62B4
+          carries it to 0xFFFF63FC, which the air model subtracts from the
+          throttle area (0x03C5AA).
+    notes: >
+      Known answer, not declared as a relation: equals
+      min(1185, ECM_IDLE_AIR_INTEGRATOR + ECM_IDLE_AIR_LEARNED) read in the
+      same cycle.

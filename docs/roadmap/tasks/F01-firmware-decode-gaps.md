@@ -307,6 +307,19 @@ Same conventions as the other task files: task-level truth is the checkboxes,
     throttle body swap, and what an idle that hunts afterward is doing.
   - **Accept:** target, feedback and learning conditions listed with
     addresses; the learned word is a catalogued RAM channel.
+  - [~] 2026-11-12: the idle-air half is done. Firmware doc: "Idle air: the
+    throttle-area correction and its learning".
+    - **What `w63FC` is.** The integrator `0xFFFF3CB2` plus the learned
+      `0xFFFF5EA6` form a throttle-area correction. It matches the throttle
+      model's area to the area the measured air implies. It is not an rpm
+      loop.
+    - **Decoded:** the feedback law, its enable conditions (`0xFFFF480B`
+      bit 4), the learning step, the IAVL procedure (700 calls at double
+      gain), and non-volatile persistence (records 0x71/0x72). Only the
+      integrator persists; the learned term restarts each power-up.
+    - **Catalogued:** `mem:ECM_IDLE_AIR_*` (four channels, hypothesized).
+    - **Not done:** the idle speed controller (target rpm and its steps) and
+      idle spark feedback.
 
 - [ ] **F01.11 What a flash or a battery disconnect clears.** LTFT is known
   to reset on both. Whether throttle closed-position and idle air learning
