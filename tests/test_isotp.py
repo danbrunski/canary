@@ -8,10 +8,15 @@ no-frame timeout.
 
 from __future__ import annotations
 
+import pytest
+
 from src.collection.isotp import (
     PERMANENT_REFUSAL_NRCS,
     RESPONSE_PENDING_NRC,
     IsoTpResponseAssembler,
+    await_response,
+    build_body_request_payload,
+    build_request_payload,
     is_negative_response,
     negative_response_code,
     nrc_name,
@@ -117,3 +122,61 @@ def test_assembler_positive_response_has_no_negative_response_code() -> None:
     assert result.negative_response is False
     assert result.negative_response_code is None
     assert result.response is not None
+
+
+# --- D03.66: flow control target and the explicit-bytes request -------------
+
+
+class _Frame:
+    def __init__(self, arbitration_id: int, data: bytes) -> None:
+        self.arbitration_id = arbitration_id
+        self.data = data
+
+
+def _flow_control_target(*, request_id: int, responder: int, window: tuple[int, int]) -> int:
+    """Run one multi-frame exchange through ``await_response`` and return the
+    id its flow control went to."""
+    frames = iter(
+        [
+            _Frame(responder, bytes([0x10, 0x09, 0x61, 0x1F, 1, 2, 3, 4])),
+            _Frame(responder, bytes([0x21, 5, 6, 7, 0, 0, 0, 0])),
+        ]
+    )
+    sent: list[int] = []
+    now = [0.0]
+
+    def recv(_timeout: float) -> _Frame | None:
+        now[0] += 0.001
+        return next(frames, None)
+
+    exchange = await_response(
+        recv,
+        sent.append,
+        IsoTpResponseAssembler(service=0x21, identifier=0x1F),
+        request_id,
+        1.0,
+        clock=lambda: now[0],
+        response_ids=window,
+    )
+    assert exchange.response is not None
+    assert exchange.response.payload == bytes([1, 2, 3, 4, 5, 6, 7])
+    return sent[0]
+
+
+def test_flow_control_goes_to_the_declared_physical_request_id() -> None:
+    """The BCM answers 0x745 on 0x765; ``responder - 8`` (0x75D) is nobody."""
+    assert _flow_control_target(request_id=0x745, responder=0x765, window=(0x765, 0x765)) == 0x745
+
+
+def test_flow_control_is_unchanged_where_the_pairing_is_plus_eight() -> None:
+    assert _flow_control_target(request_id=0x7E0, responder=0x7E8, window=(0x7E8, 0x7E8)) == 0x7E0
+    # Functional request: the responder's tester id has to be inferred.
+    assert _flow_control_target(request_id=0x7DF, responder=0x7E9, window=(0x7E8, 0x7EF)) == 0x7E1
+
+
+def test_body_request_payload_pads_like_the_inferred_form() -> None:
+    assert build_body_request_payload(0x21, b"\x1f") == build_request_payload(0x21, 0x1F)
+    assert build_body_request_payload(0x22, b"\x00\x05") == bytes([3, 0x22, 0, 5, 0, 0, 0, 0])
+    assert build_body_request_payload(0x3E, b"") == build_request_payload(0x3E, None)
+    with pytest.raises(ValueError, match="at most 6"):
+        build_body_request_payload(0x23, bytes(7))

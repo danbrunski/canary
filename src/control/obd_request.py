@@ -34,11 +34,18 @@ import can
 from src.collection.can_collector import bus_factory
 from src.collection.can_obd_client import (
     DEFAULT_REQUEST_ID,
+    DEFAULT_RESPONSE_ID_MAX,
+    DEFAULT_RESPONSE_ID_MIN,
     PID_DECODERS,
     CanObdClient,
     parse_dtc_payload,
 )
-from src.collection.isotp import nrc_name
+from src.collection.isotp import (
+    MAX_SINGLE_FRAME_REQUEST_BODY,
+    build_body_request_payload,
+    build_request_payload,
+    nrc_name,
+)
 from src.config import CanBusConfig
 from src.decode.dids import apply_scaling, decode_did_raw, did_entries_by_hex, load_repo_did_map
 
@@ -54,9 +61,79 @@ MAX_TIMEOUT_SECONDS = 10.0
 #: wire format `parse_dtc_payload` decodes.
 _DTC_SERVICES = frozenset({0x03, 0x07, 0x0A})
 
+#: Widths an explicit identifier may take on the wire: one byte (a KWP
+#: ReadDataByLocalIdentifier ``21 <lid>``, a Mode 01 PID) or two (a Mode 22
+#: DID, including one below 0x100 such as ``22 00 05``).
+IDENTIFIER_WIDTHS: tuple[int, ...] = (1, 2)
+
 
 class AdHocRequestBusError(RuntimeError):
     """The bus couldn't be opened (port already exclusively held, etc.)."""
+
+
+def parse_data_hex(data_hex: str | None) -> bytes | None:
+    """``data_hex`` (``"1f"``, ``"FF 00"``) as bytes; ``None`` stays ``None``.
+
+    Raises ``ValueError`` naming the field when it is not whole hex bytes.
+    """
+    if data_hex is None:
+        return None
+    try:
+        return bytes.fromhex(data_hex)
+    except ValueError as exc:
+        raise ValueError(
+            f"data_hex {data_hex!r} is not whole hex bytes (e.g. '1f' or 'ff 00')"
+        ) from exc
+
+
+def encode_request_body(
+    *,
+    identifier: int | None,
+    identifier_bytes: int | None,
+    data: bytes | None,
+) -> bytes | None:
+    """The exact bytes after the service byte, or ``None`` for the inferred form.
+
+    ``None`` (neither ``identifier_bytes`` nor ``data`` given) is the request
+    as it has always been encoded: the identifier's width follows its value
+    (one byte up to 0xFF, two above), so every existing caller sends the same
+    bytes as before. ``identifier_bytes`` fixes the width; ``data`` is the
+    whole argument for a service that takes no identifier (or an arbitrary
+    one). An identifier that does not fit its width is refused, never
+    truncated. Raises ``ValueError``; the HTTP schema calls this, so a bad
+    combination is a 422 naming the field rather than a malformed frame.
+    """
+    if data is not None:
+        if identifier is not None or identifier_bytes is not None:
+            raise ValueError(
+                "data_hex is the whole request after the service byte; it cannot be "
+                "combined with identifier or identifier_bytes"
+            )
+        if not data:
+            raise ValueError(
+                "data_hex is empty; omit it (and identifier) to send the service byte alone"
+            )
+        if len(data) > MAX_SINGLE_FRAME_REQUEST_BODY:
+            raise ValueError(
+                f"data_hex is {len(data)} bytes; a single-frame request carries at most "
+                f"{MAX_SINGLE_FRAME_REQUEST_BODY} after the service byte"
+            )
+        return data
+    if identifier_bytes is None:
+        return None
+    if identifier_bytes not in IDENTIFIER_WIDTHS:
+        raise ValueError(
+            f"identifier_bytes must be one of {IDENTIFIER_WIDTHS}, got {identifier_bytes}"
+        )
+    if identifier is None:
+        raise ValueError("identifier_bytes needs an identifier to encode")
+    limit = (1 << (8 * identifier_bytes)) - 1
+    if not 0 <= identifier <= limit:
+        raise ValueError(
+            f"identifier 0x{identifier:X} does not fit identifier_bytes={identifier_bytes} "
+            f"(at most 0x{limit:X}); it is refused, not truncated"
+        )
+    return identifier.to_bytes(identifier_bytes, "big")
 
 
 @dataclass(frozen=True)
@@ -83,6 +160,21 @@ class AdHocRequestResult:
     decoded: dict[str, Any] | None = None
     #: Set when the ECU refused: the NRC byte. ``responded`` is ``True``.
     negative_response_code: int | None = None
+    #: The explicit identifier width the caller asked for; ``None`` when the
+    #: width was inferred from the value (the original encoding).
+    identifier_bytes: int | None = None
+    #: The request as sent, hex: the service byte and everything after it,
+    #: without the ISO-TP length byte or the padding (``"211f"``).
+    request_hex: str = ""
+    #: The reply id the caller declared (``response_id``); ``None`` when the
+    #: default response window applied.
+    response_id: int | None = None
+    #: Explicit-identifier form only: whether the positive reply echoed the
+    #: identifier sent. ``True`` — ``raw_hex`` follows the echo; ``False`` —
+    #: ``raw_hex`` is everything after the positive service byte and nothing
+    #: is decoded. ``None`` when no echo was checked (the inferred form, which
+    #: matches it while receiving; ``data_hex``; no positive reply).
+    identifier_echoed: bool | None = None
 
     @property
     def refused(self) -> bool:
@@ -90,10 +182,17 @@ class AdHocRequestResult:
 
     def to_dict(self) -> dict[str, Any]:
         nrc = self.negative_response_code
+        digits = 4 if self.identifier_bytes is None else 2 * self.identifier_bytes
         return {
             "service": f"0x{self.service:02X}",
-            "identifier": f"0x{self.identifier:04X}" if self.identifier is not None else None,
+            "identifier": (
+                f"0x{self.identifier:0{digits}X}" if self.identifier is not None else None
+            ),
+            "identifier_bytes": self.identifier_bytes,
+            "request_hex": self.request_hex,
             "request_id": f"0x{self.request_id:03X}",
+            "response_id": (f"0x{self.response_id:03X}" if self.response_id is not None else None),
+            "identifier_echoed": self.identifier_echoed,
             "responded": self.responded,
             "responder_id": (
                 f"0x{self.responder_id:03X}" if self.responder_id is not None else None
@@ -112,17 +211,36 @@ def execute_ad_hoc_request(
     identifier: int | None,
     request_id: int | None = None,
     timeout_seconds: float | None = None,
+    identifier_bytes: int | None = None,
+    data: bytes | None = None,
+    response_id: int | None = None,
 ) -> AdHocRequestResult:
     """Send one OBD/UDS request and return whatever came back.
 
     ``service`` is passed through unfiltered — read, write and actuation
     services alike. Raises :class:`AdHocRequestBusError` when the bus can't
-    be opened at all.
+    be opened at all, and ``ValueError`` (from :func:`encode_request_body`)
+    for an identifier that does not fit ``identifier_bytes`` or a ``data``
+    combined with an identifier.
+
+    With neither ``identifier_bytes`` nor ``data`` the request is encoded as
+    it always was (width inferred from the identifier's value). ``response_id``
+    pins the reply to one arbitration id — needed for a module whose pairing
+    is not ``request + 8`` (the BCM, 0x745 -> 0x765), whose reply is otherwise
+    outside the default 0x7E8-0x7EF window and never heard; flow control for
+    its multi-frame reply then goes to ``request_id``.
     """
+    body = encode_request_body(identifier=identifier, identifier_bytes=identifier_bytes, data=data)
     effective_timeout = min(
         MAX_TIMEOUT_SECONDS,
         DEFAULT_TIMEOUT_SECONDS if timeout_seconds is None else max(0.1, timeout_seconds),
     )
+    wire = (
+        build_request_payload(service, identifier)
+        if body is None
+        else build_body_request_payload(service, body)
+    )
+    request_hex = wire[1 : 1 + wire[0]].hex()
     try:
         bus = bus_factory(can_config)
     except (OSError, can.CanError) as exc:
@@ -130,39 +248,65 @@ def execute_ad_hoc_request(
             f"couldn't open {can_config.interface}:{can_config.channel} — {exc}"
         ) from exc
     effective_request_id = DEFAULT_REQUEST_ID if request_id is None else request_id
+    # A declared reply id is a window of one, which also pins the responder
+    # (``isotp.expected_responder``); otherwise the client's default window.
+    lo, hi = (
+        (DEFAULT_RESPONSE_ID_MIN, DEFAULT_RESPONSE_ID_MAX)
+        if response_id is None
+        else (response_id, response_id)
+    )
     try:
-        client = CanObdClient(bus, timeout_seconds=effective_timeout)
-        response, nrc = client.query_or_nrc(
-            service=service, identifier=identifier, request_id=request_id
+        client = CanObdClient(
+            bus, timeout_seconds=effective_timeout, response_id_min=lo, response_id_max=hi
         )
+        if body is None:
+            response, nrc = client.query_or_nrc(
+                service=service, identifier=identifier, request_id=request_id
+            )
+        else:
+            response, nrc = client.query_body_or_nrc(
+                service=service, body=body, request_id=request_id
+            )
     finally:
         bus.shutdown()
 
+    common: dict[str, Any] = {
+        "service": service,
+        "identifier": identifier,
+        "request_id": effective_request_id,
+        "identifier_bytes": identifier_bytes,
+        "request_hex": request_hex,
+        "response_id": response_id,
+    }
     if response is None and nrc is not None:
         # Refused, not silent: the reply was ``7F <service> <nrc>``.
         return AdHocRequestResult(
-            service=service,
-            identifier=identifier,
-            request_id=effective_request_id,
+            **common,
             responded=True,
             raw_hex=bytes([0x7F, service & 0xFF, nrc]).hex(),
             negative_response_code=nrc,
         )
     if response is None:
-        return AdHocRequestResult(
-            service=service,
-            identifier=identifier,
-            request_id=effective_request_id,
-            responded=False,
-        )
+        return AdHocRequestResult(**common, responded=False)
+    payload = bytes(response.payload)
+    echoed: bool | None = None
+    decoded: dict[str, Any] | None = None
+    if body is None:
+        decoded = _decode(service, identifier, payload)
+    elif identifier_bytes is not None:
+        # The explicit-width form sends no echo to the assembler (its echo
+        # matching infers the width from the value); check it here instead.
+        echoed = payload.startswith(body)
+        if echoed:
+            payload = payload[len(body) :]
+            decoded = _decode(service, identifier, payload)
     return AdHocRequestResult(
-        service=service,
-        identifier=identifier,
-        request_id=effective_request_id,
+        **common,
         responded=True,
         responder_id=response.responder_id,
-        raw_hex=response.payload.hex(),
-        decoded=_decode(service, identifier, response.payload),
+        raw_hex=payload.hex(),
+        decoded=decoded,
+        identifier_echoed=echoed,
     )
 
 
@@ -216,8 +360,11 @@ def _try_ascii(payload: bytes) -> str | None:
 
 __all__ = [
     "DEFAULT_TIMEOUT_SECONDS",
+    "IDENTIFIER_WIDTHS",
     "MAX_TIMEOUT_SECONDS",
     "AdHocRequestBusError",
     "AdHocRequestResult",
+    "encode_request_body",
     "execute_ad_hoc_request",
+    "parse_data_hex",
 ]

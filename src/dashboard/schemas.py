@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.collection.capture_profiles import MAX_TARGET_RATE_HZ, CaptureProfile
+from src.control.obd_request import encode_request_body, parse_data_hex
 from src.provisioning.gate import MAX_WINDOW_MINUTES
 from src.vehicle.vehicle_ledger import PhysicalInterventionKind, TireRecord
 
@@ -266,12 +267,39 @@ class ObdRequestRequest(_ControlRequest):
     nothing filters it here or in ``CanObdClient.query()``. ``header``
     overrides the default functional request id (``0x7DF``) for a
     physically-addressed request (e.g. ``0x7E0`` for the engine ECM, or
-    another module's tester address)."""
+    another module's tester address).
+
+    What follows the service byte (D03.66): by default the identifier's width
+    follows its value (one byte up to 0xFF, two above) — the original
+    encoding, unchanged. ``identifier_bytes`` (1 or 2) fixes it: ``21 1F`` to
+    a KWP module, ``22 00 05`` for a DID below 0x100. ``data_hex`` is the
+    whole argument instead, for a service that takes no identifier or an
+    arbitrary one. ``response_id`` declares the reply id for a module whose
+    pairing is not ``header + 8`` (the BCM: 0x745 -> 0x765). An identifier
+    that does not fit its width, or ``data_hex`` beside an identifier, is a
+    422 naming the field — never truncated. None of this filters services."""
 
     service: int = Field(..., ge=0, le=0xFF)
     identifier: int | None = Field(default=None, ge=0, le=0xFFFF)
+    identifier_bytes: Literal[1, 2] | None = None
+    data_hex: str | None = Field(default=None, max_length=32)
     header: int | None = Field(default=None, ge=0, le=0x7FF)
+    response_id: int | None = Field(default=None, ge=0, le=0x7FF)
     timeout_seconds: float | None = Field(default=None, gt=0.0, le=10.0)
+
+    @model_validator(mode="after")
+    def _body_fits(self) -> ObdRequestRequest:
+        # The same check execute_ad_hoc_request runs, so the route refuses by
+        # name before opening the bus.
+        encode_request_body(
+            identifier=self.identifier,
+            identifier_bytes=self.identifier_bytes,
+            data=parse_data_hex(self.data_hex),
+        )
+        return self
+
+    def data_bytes(self) -> bytes | None:
+        return parse_data_hex(self.data_hex)
 
 
 class ClearCodesRequest(_ControlRequest):

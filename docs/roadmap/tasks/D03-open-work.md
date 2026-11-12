@@ -2111,7 +2111,7 @@ that closed its task checklist.
     digest of log lines, and one warning lists the recorded revisions (one
     digest changed in the fixture; a full `--write` also rewrites 89 floats by
     up to 3e-14, which was left out). A flash record has to run these too.
-- [ ] **D03.66 `POST /control/obd_request` cannot address a one-byte local
+- [~] **D03.66 `POST /control/obd_request` cannot address a one-byte local
   identifier.** *Found 2026-11-11 reading the BCM's TPMS registration
   (`data/analyses/2026-11-11-tpms-bcm-read.md`).* The endpoint always encodes a
   two-byte identifier after the service byte, so a KWP-style
@@ -2125,6 +2125,62 @@ that closed its task checklist.
   both widths; a test pins the exact bytes on the wire for `21 1F` to 0x745.
   The endpoint keeps no service allowlist (AGENTS.md), and nothing here
   changes which services it will send.
+  - **Diagnosis corrected (2026-11-11, laptop).** The encoding was never
+    always two bytes: `isotp.build_request_payload` infers the width from the
+    value (one byte up to 0xFF, two above), so `21 1F` already went out as
+    `02 21 1F` (W02.1 sent `21 10` this way). What actually blocked the BCM
+    was the reply: the client's window is 0x7E8–0x7EF and a physical header
+    is answered only by `header + 8` (0x74D), so 0x765 was dropped as
+    silence, and flow control for a multi-frame reply went to
+    `responder − 8` (0x75D). The inferred width also could not send a
+    two-byte DID below 0x100 (`22 05`, never `22 00 05`).
+  - **Done.** New body fields, through the route, `ObdRequestRequest` and the
+    MCP tool: `identifier_bytes` (1/2, fixes the width and checks the echo,
+    `identifier_echoed` in the reply), `data_hex` (exact bytes after the
+    service byte, ≤ 6), `response_id` (declared reply id; a window of one).
+    `request_hex` reports what went on the wire. With none of them the request
+    is the old inferred encoding, byte for byte — the "default stays two-byte"
+    wording above would have changed `01 0C` to `01 00 0C`, so the default is
+    the *existing* encoding. Validation is `control.obd_request.encode_request_body`,
+    called by the schema's validator: too-wide identifier, width without
+    identifier, `data_hex` beside an identifier, bad hex, > 6 bytes are 422s
+    naming the problem, never truncated. `isotp.await_response` sends flow
+    control to the request id when the caller declared a single reply id
+    (identical wherever the pairing is `+8`). No service filter added or
+    changed. Docs: `docs/headless-api.md` "Ad-hoc OBD/UDS requests" and the
+    control table row, `docs/mcp-server.md` `obd_request` row.
+  - **Evidence.** `tests/test_control_obd_request.py`:
+    `test_kwp_local_identifier_to_the_bcm_puts_the_exact_bytes_on_the_wire`
+    (request on 0x745 is exactly `02 21 1F 00 00 00 00 00` = the inferred
+    path's bytes; FC on 0x745, none on 0x75D; 17-byte multi-frame reply from
+    0x765 reassembled, echo stripped),
+    `test_a_two_byte_did_below_0x100_is_sent_as_two_bytes` (`03 22 00 05`),
+    `test_data_hex_is_the_whole_argument_after_the_service_byte`
+    (`03 17 FF 00`), `test_the_default_encoding_is_unchanged` (4 cases:
+    `01 0C`, `22 11 01`, `21 10`, `03`),
+    `test_a_body_that_does_not_fit_is_refused_by_name` (10 cases),
+    `test_encode_request_body_refuses_rather_than_truncates`,
+    `test_without_response_id_a_reply_on_0x765_is_never_heard`, and the
+    original seven tests unchanged; `tests/test_isotp.py`
+    `test_flow_control_goes_to_the_declared_physical_request_id`,
+    `test_flow_control_is_unchanged_where_the_pairing_is_plus_eight`,
+    `test_body_request_payload_pads_like_the_inferred_form`. Run with
+    `test_can_obd_client.py`, `test_isotp_continuation_timeout.py`,
+    `test_decode_isotp.py`, `test_write_tool_schema_contract.py`,
+    `test_route_table_snapshot.py`, `test_memory_window_burst.py`: 176 passed
+    (the one red, `test_mcp_tool_snapshot`, was another session's
+    `get_session_digest` description; `obd_request`'s entry matches).
+  - **Owed (truck, key on):** the live BCM read through the endpoint —
+    `10 C0`, then `21 1F` with `identifier_bytes: 1`, `header: 0x745`,
+    `response_id: 0x765`, then `10 81` — and its ids compared with the
+    2026-11-11 `cansend` read. Each step is its own HTTP request on a fresh
+    bus handle with no TesterPresent between them, so the same read also
+    shows whether the BCM's 0xC0 session survives the gaps (if not, a
+    multi-step form is owed).
+  - **Owed (laptop, small):** `tools/_bus_tool.response_window` still assumes
+    reply = request + 8 for a physical header, so `--header 745` listens on
+    0x74D and misses the BCM's 0x765 the same way the endpoint did. Give the
+    bus tools a `--response-id` like the endpoint's.
 - [~] **D03.67 `GET /control/power` says `on_battery: true` with input
   present.** *Seen 2026-11-10 17:00Z (SoC 12.9 %, charging, input present)
   and 2026-11-12 04:07Z (SoC 94.5 %, input present at 11.5 V, key on, engine

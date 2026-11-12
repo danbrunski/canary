@@ -1355,9 +1355,21 @@
     }
   },
   "obd_request": {
-    "description": "One-shot OBD/UDS request against the live ECU(s).\n\n    ``service`` takes any service byte \u2014 read, write and actuation alike.\n    Nothing filters it, so a Mode 04 or a UDS 0x2E/0x2F goes out exactly as\n    asked; the caller decides what is appropriate to send. For the ordinary\n    read services this just lets you ask for one specific service/identifier\n    combination immediately instead of waiting for the poll scheduler's\n    cadence (Mode 06 and DTC sit on a 5-minute tier).\n\n    ``identifier`` is the PID/DID/MID/InfoType byte(s) \u2014 omit it for the\n    no-identifier services (Mode 03/07/0A). ``header`` overrides the default\n    functional request id (``0x7DF``) for a physically-addressed request,\n    e.g. ``0x7E0`` for the engine ECM, or another module's tester address \u2014\n    set it to reach a module standard Mode 01 polling never does (ABS,\n    TCM, ...).\n\n    Returns ``responded: false`` (not an error) when nothing answers in\n    time \u2014 a real \"unsupported\" for this ECU is indistinguishable on the\n    wire from a request that simply timed out. When another tool owns a\n    diagnostic session with a module, arm ``set_passive_mode`` first so this\n    request's own transmit can't contend with it.\n    ",
+    "description": "One-shot OBD/UDS request against the live ECU(s).\n\n    ``service`` takes any service byte \u2014 read, write and actuation alike.\n    Nothing filters it, so a Mode 04 or a UDS 0x2E/0x2F goes out exactly as\n    asked; the caller decides what is appropriate to send. For the ordinary\n    read services this just lets you ask for one specific service/identifier\n    combination immediately instead of waiting for the poll scheduler's\n    cadence (Mode 06 and DTC sit on a 5-minute tier).\n\n    ``identifier`` is the PID/DID/MID/InfoType byte(s) \u2014 omit it for the\n    no-identifier services (Mode 03/07/0A). ``header`` overrides the default\n    functional request id (``0x7DF``) for a physically-addressed request,\n    e.g. ``0x7E0`` for the engine ECM, or another module's tester address \u2014\n    set it to reach a module standard Mode 01 polling never does (ABS,\n    TCM, ...).\n\n    By default the identifier's width follows its value (one byte up to\n    0xFF, two above). ``identifier_bytes`` (1 or 2) fixes it: ``1`` for a\n    KWP ReadDataByLocalIdentifier (``service=0x21, identifier=0x1F``), ``2``\n    for a DID below 0x100 (``22 00 05``). ``data_hex`` replaces the\n    identifier with the exact bytes after the service byte (up to 6), for a\n    service that takes no identifier or an arbitrary argument. A module\n    whose reply id is not ``header + 8`` needs ``response_id`` (the BCM:\n    ``header=0x745, response_id=0x765``), or its reply is never heard. An\n    identifier too wide for ``identifier_bytes`` is refused, not truncated.\n    ``request_hex`` in the result is what went on the wire.\n\n    Returns ``responded: false`` (not an error) when nothing answers in\n    time \u2014 a real \"unsupported\" for this ECU is indistinguishable on the\n    wire from a request that simply timed out. When another tool owns a\n    diagnostic session with a module, arm ``set_passive_mode`` first so this\n    request's own transmit can't contend with it.\n    ",
     "inputSchema": {
       "properties": {
+        "data_hex": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data Hex"
+        },
         "header": {
           "anyOf": [
             {
@@ -1381,6 +1393,30 @@
           ],
           "default": null,
           "title": "Identifier"
+        },
+        "identifier_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Identifier Bytes"
+        },
+        "response_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Response Id"
         },
         "service": {
           "title": "Service",

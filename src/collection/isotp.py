@@ -69,6 +69,32 @@ def build_request_payload(service: int, identifier: int | None) -> bytes:
     return body + bytes(8 - len(body))
 
 
+#: Bytes a single-frame request can carry after its service byte (7 data
+#: bytes behind the one-byte PCI, minus the service).
+MAX_SINGLE_FRAME_REQUEST_BODY = 6
+
+
+def build_body_request_payload(service: int, body: bytes) -> bytes:
+    """Single-frame ``<service> <body…>``, padded to 8 bytes with 0x00.
+
+    The explicit-bytes form of :func:`build_request_payload`: the caller says
+    exactly what follows the service byte (a one-byte KWP local identifier, a
+    two-byte DID below 0x100, or no identifier at all), instead of the width
+    being inferred from the identifier's value. Padding matches
+    :func:`build_request_payload`, so ``(0x21, b"\\x1f")`` and
+    ``build_request_payload(0x21, 0x1F)`` are the same eight bytes.
+    """
+    if not 0 <= service <= 0xFF:
+        raise ValueError(f"service must be a byte, got 0x{service:X}")
+    if len(body) > MAX_SINGLE_FRAME_REQUEST_BODY:
+        raise ValueError(
+            f"a single-frame request carries at most {MAX_SINGLE_FRAME_REQUEST_BODY} bytes "
+            f"after the service byte; got {len(body)}"
+        )
+    frame = bytes([1 + len(body), service]) + body
+    return frame + bytes(8 - len(frame))
+
+
 #: ReadMemoryByAddress. A read: it cannot alter the ECU. Its write
 #: counterpart (0x3D, WriteMemoryByAddress) is deliberately absent from this
 #: module -- the no-reflash line is about non-volatile memory, and a memory
@@ -653,10 +679,17 @@ def await_response(
         if result.flow_control_id is not None:
             # Multi-frame response: the FIRST frame's arrival is the
             # acquisition instant. Flow control goes to the responder's
-            # tester address (responder - 8, e.g. 0x7E8 -> 0x7E0).
+            # tester address: the physical request id when the caller declared
+            # the pairing (a BCM answering 0x745 -> 0x765 is not ``+8``, and
+            # its FC on 0x75D would never reach it), else responder - 8
+            # (0x7E8 -> 0x7E0), which a functional request has to infer.
             first_frame = frame
-            flow_control_id = result.flow_control_id
-            send_flow_control(result.flow_control_id)
+            flow_control_id = (
+                request_id
+                if lo == hi and request_id != DEFAULT_REQUEST_ID
+                else result.flow_control_id
+            )
+            send_flow_control(flow_control_id)
             if consecutive_frame_timeout is not None:
                 cf_deadline = clock() + consecutive_frame_timeout
             continue
@@ -700,7 +733,9 @@ __all__ = [
     "ObdResponse",
     "IsoTpResponseAssembler",
     "build_batched_request_payload",
+    "build_body_request_payload",
     "build_request_payload",
+    "MAX_SINGLE_FRAME_REQUEST_BODY",
     "extract_service_payload",
     "handle_single_frame",
     "is_negative_response",

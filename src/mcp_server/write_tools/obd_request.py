@@ -22,6 +22,9 @@ async def obd_request(
     identifier: int | None = None,
     header: int | None = None,
     timeout_seconds: float | None = None,
+    identifier_bytes: int | None = None,
+    data_hex: str | None = None,
+    response_id: int | None = None,
 ) -> dict[str, Any]:
     """One-shot OBD/UDS request against the live ECU(s).
 
@@ -39,6 +42,17 @@ async def obd_request(
     set it to reach a module standard Mode 01 polling never does (ABS,
     TCM, ...).
 
+    By default the identifier's width follows its value (one byte up to
+    0xFF, two above). ``identifier_bytes`` (1 or 2) fixes it: ``1`` for a
+    KWP ReadDataByLocalIdentifier (``service=0x21, identifier=0x1F``), ``2``
+    for a DID below 0x100 (``22 00 05``). ``data_hex`` replaces the
+    identifier with the exact bytes after the service byte (up to 6), for a
+    service that takes no identifier or an arbitrary argument. A module
+    whose reply id is not ``header + 8`` needs ``response_id`` (the BCM:
+    ``header=0x745, response_id=0x765``), or its reply is never heard. An
+    identifier too wide for ``identifier_bytes`` is refused, not truncated.
+    ``request_hex`` in the result is what went on the wire.
+
     Returns ``responded: false`` (not an error) when nothing answers in
     time — a real "unsupported" for this ECU is indistinguishable on the
     wire from a request that simply timed out. When another tool owns a
@@ -48,8 +62,14 @@ async def obd_request(
     body: dict[str, Any] = {"service": service}
     if identifier is not None:
         body["identifier"] = identifier
+    if identifier_bytes is not None:
+        body["identifier_bytes"] = identifier_bytes
+    if data_hex is not None:
+        body["data_hex"] = data_hex
     if header is not None:
         body["header"] = header
+    if response_id is not None:
+        body["response_id"] = response_id
     if timeout_seconds is not None:
         body["timeout_seconds"] = timeout_seconds
     timeout = None if timeout_seconds is None else timeout_seconds + _HTTP_TIMEOUT_MARGIN_SECONDS

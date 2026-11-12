@@ -280,7 +280,7 @@ The frame, every `/analysis/*` route in this table (W04) and the ROM Editor's `s
 tags each from its `capture_profile.json` sidecar; the default listing remains
 normal drive sessions only.
 | `GET /control/diagnostics/functions` / `POST /control/diagnostics/read_codes` / `POST /control/diagnostics/clear_codes` | diagnostic functions the vehicle profile records; read or clear one K-line module's stored codes — `{module}` (see [Diagnostic functions](#diagnostic-functions)) |
-| `POST /control/obd_request` | one-shot OBD/UDS request — `{service, identifier?, header?, timeout_seconds?}`; `service` accepts any byte, including state-changing and actuation services. CANary must never use it to write ECU non-volatile memory or reflash a module |
+| `POST /control/obd_request` | one-shot OBD/UDS request — `{service, identifier?, identifier_bytes?, data_hex?, header?, response_id?, timeout_seconds?}`; `service` accepts any byte, including state-changing and actuation services. CANary must never use it to write ECU non-volatile memory or reflash a module |
 | `GET /control/tuning-mode` / `POST /control/tuning-mode` | inspect / arm the focused high-rate tuning poll profile (narrows Mode 01 to a tuning channel set, suspends DID windows) |
 | `GET /control/feedback` / `POST /control/feedback` | read / record anomaly-feedback verdicts |
 | `GET /control/training-runs` | training-run ledger |
@@ -1355,18 +1355,66 @@ curl -sX POST http://canary.local:8000/control/obd_request \
   -d '{"service": 34, "identifier": 4353, "header": 2016}'
 ```
 
+**What follows the service byte (D03.66).** By default the identifier's width
+follows its value: one byte up to `0xFF`, two above (`01 0C`, `22 11 01`,
+`21 10`). That default is unchanged; two fields override it:
+
+- `identifier_bytes` (`1` or `2`) fixes the width. `1` for a KWP
+  ReadDataByLocalIdentifier, `2` for a DID below `0x100` (`22 00 05`; the
+  default would send `22 05`). The positive reply's echo of the identifier is
+  checked and stripped; `identifier_echoed` says whether it matched (when it
+  did not, `raw_hex` is everything after the positive service byte and nothing
+  is decoded).
+- `data_hex` is the whole argument instead of an identifier, up to 6 bytes
+  (`"ff 00"`), for a service that takes no identifier or an arbitrary one. No
+  echo is assumed: `raw_hex` is everything after the positive service byte.
+
+`response_id` declares the module's reply id. A physical `header` is otherwise
+answered only by `header + 8` inside the default `0x7E8`–`0x7EF` window, so a
+module paired differently (the Xterra BCM: `0x745` → `0x765`) is never heard
+without it. With it, flow control for a multi-frame reply goes to `header`.
+
+An identifier that does not fit `identifier_bytes`, `identifier_bytes` without
+an identifier, `data_hex` beside either, odd or non-hex `data_hex`, or more than
+6 bytes is a `422` naming the problem; nothing is truncated. None of these
+fields changes which services the endpoint sends.
+
+```bash
+# BCM registered TPMS sensor ids: 21 1F to 0x745, reply on 0x765. The BCM
+# wants its extended session first (10 C0) and closed after (10 81), each its
+# own request with the same header/response_id.
+curl -sX POST http://canary.local:8000/control/obd_request \
+  -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"service": 33, "identifier": 31, "identifier_bytes": 1,
+       "header": 1861, "response_id": 1893}'
+
+# BCM stored codes: 17 FF 00, an argument that is not an identifier
+curl -sX POST http://canary.local:8000/control/obd_request \
+  -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"service": 23, "data_hex": "ff00", "header": 1861, "response_id": 1893}'
+```
+
 Response shape:
 
 ```json
 {
   "obd_request": {
-    "service": "0x09", "identifier": "0x0004", "request_id": "0x7DF",
+    "service": "0x09", "identifier": "0x0004", "identifier_bytes": null,
+    "request_hex": "0904", "request_id": "0x7DF", "response_id": null,
+    "identifier_echoed": null,
     "responded": true, "responder_id": "0x7E8",
     "raw_hex": "...", "decoded": {"ascii": "..."},
     "negative_response_code": null, "negative_response": null
   }
 }
 ```
+
+`request_hex` is what went on the wire: the service byte and everything after
+it, without the ISO-TP length byte or the zero padding. `identifier` prints with
+two hex digits per byte when `identifier_bytes` is set (`"0x1F"`), four
+otherwise.
 
 `responded: false` means no answer arrived within `timeout_seconds`
 (default 2 s, capped at 10 s) — silence, which on the wire is the same as
@@ -1379,7 +1427,7 @@ steps, so they are reported differently (since 2026-09-22). `decoded` is
 populated when a Mode 01/02 PID, Mode 03/07/0A DTC list, Mode 09 ASCII
 payload, or catalogued (`data/dids.yaml`) Mode 22 DID matches; otherwise only
 `raw_hex` is set. MCP equivalent: `obd_request(service, identifier, header,
-timeout_seconds)`.
+timeout_seconds, identifier_bytes, data_hex, response_id)`.
 
 This transmits like any other OBD request, so the same [passive
 mode](#passive-mode) caveat applies: arm it first if another tool currently

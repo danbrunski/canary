@@ -81,6 +81,9 @@ def build_router(ctx: ControlContext) -> APIRouter:
                 identifier=request.identifier,
                 request_id=request.header,
                 timeout_seconds=request.timeout_seconds,
+                identifier_bytes=request.identifier_bytes,
+                data=request.data_bytes(),
+                response_id=request.response_id,
             )
         except AdHocRequestBusError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc

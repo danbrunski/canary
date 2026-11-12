@@ -86,6 +86,7 @@ from src.collection.isotp import (
     await_response,
     build_batched_did_request_payload,
     build_batched_request_payload,
+    build_body_request_payload,
     build_request_payload,
     handle_single_frame,
     is_negative_response,
@@ -505,6 +506,45 @@ class CanObdClient:
             pid=identifier,
             expect_pid_echo=identifier is not None,
             request_id=request_id,
+        )
+
+    def query_body_or_nrc(
+        self,
+        *,
+        service: int,
+        body: bytes,
+        request_id: int | None = None,
+    ) -> tuple[ObdResponse | None, int | None]:
+        """:meth:`query_or_nrc` with the bytes after the service byte given exactly.
+
+        :meth:`query_or_nrc` infers an identifier's width from its value (one
+        byte up to 0xFF, two above), so it cannot send a two-byte DID below
+        0x100, and a service whose argument is not an identifier at all has
+        no form there. Here ``body`` goes on the wire as given (at most
+        :data:`~src.collection.isotp.MAX_SINGLE_FRAME_REQUEST_BODY` bytes),
+        and ``service`` is unfiltered like :meth:`query` — this is not
+        :meth:`query_raw`, whose probe allowlist belongs to the probe tools.
+
+        No echo is matched: the payload is everything after the positive
+        service byte, from the pinned responder (see
+        :func:`~src.collection.isotp.expected_responder`); the caller checks
+        the echo of what it sent.
+        """
+        message = can.Message(
+            arbitration_id=self._request_id if request_id is None else request_id,
+            data=build_body_request_payload(service, body),
+            is_extended_id=False,
+        )
+        try:
+            if not tx_gate.send(
+                self._bus, message, what=f"request service=0x{service:02X}", holder=self._tx_holder
+            ):
+                return None, None
+        except can.CanError:
+            log.warning("CAN send failed", extra={"service": service, "body": body.hex()})
+            return None, None
+        return self._collect_response_or_nrc(
+            service=service, pid_echo=None, request_id=message.arbitration_id
         )
 
     def enter_diagnostic_session(self, subfunction: int, *, request_id: int | None = None) -> bool:
