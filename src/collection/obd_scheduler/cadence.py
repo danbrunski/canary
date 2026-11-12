@@ -13,7 +13,7 @@ from collections.abc import Container, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from src.collection import tuning_profile
+from src.collection import capture_lifetime, tuning_profile
 from src.collection.obd_registry import PollTier
 from src.collection.obd_scheduler.requests import (
     PollRequest,
@@ -24,6 +24,7 @@ from src.collection.obd_scheduler.spec import (
     CanObdSpec,
     _bus_budget_requests_per_second,
 )
+from src.decode.dids import MEMORY_SOURCE
 from src.operating import ENGINE_RUNNING_MIN_RPM
 
 if TYPE_CHECKING:
@@ -83,8 +84,10 @@ def _update_response_state(
     now: float,
     priority: bool,
     focused_capture: bool = False,
-) -> None:
+) -> float:
     """Record one attempt's outcome; a miss sets the back-off.
+
+    Returns the back-off the miss set, in seconds (0 for an answered attempt).
 
     ``priority`` is required, not defaulted: whether the request is in the
     priority lane decides its back-off (``PRIORITY_MISS_BACKOFF_SECONDS``),
@@ -94,13 +97,92 @@ def _update_response_state(
         state.missed_responses = 0
         state.suppressed_until = 0.0
         state.missed_at = None
-        return
+        return 0.0
     state.missed_responses += 1
     state.missed_at = now
-    state.suppressed_until = now + _miss_backoff_seconds(
-        state, focused_capture=focused_capture, priority=priority
-    )
+    backoff = _miss_backoff_seconds(state, focused_capture=focused_capture, priority=priority)
+    state.suppressed_until = now + backoff
     state.backoffs += 1
+    return backoff
+
+
+def _ledger_members(request: PollRequest) -> tuple[str, ...]:
+    """The decoded channels one answer to ``request`` yields, when that is not
+    just the request's own channel: a memory window's ``mem:<NAME>`` readings."""
+    if request.memory_read is None:
+        return ()
+    return tuple(f"{MEMORY_SOURCE}:{channel.name}" for channel in request.memory_read.channels)
+
+
+def note_attempt(index: int, request: PollRequest, state: PollRequestState, now: float) -> None:
+    """One send of ``request``: the scheduler's counters and the capture ledger.
+
+    The only place a request state's ``requests_sent`` moves, so the capture
+    ledger cannot miss a send (D03.70; ``tests/test_capture_request_ledger.py``
+    refuses a bare increment anywhere in the loop).
+    """
+    state.last_requested_at = now
+    state.requests_sent += 1
+    if capture_lifetime.is_active() and tuning_profile.request_eligible(index, request):
+        capture_lifetime.attempt(
+            request.channel, now, kind=request.kind, members=_ledger_members(request)
+        )
+
+
+def note_miss(  # noqa: PLR0913
+    index: int,
+    request: PollRequest,
+    state: PollRequestState,
+    *,
+    now: float,
+    kind: str,
+    nrc: int | None = None,
+    back_off: bool = True,
+) -> None:
+    """One send of ``request`` that did not become an observation.
+
+    The only place a request state's ``timeouts``, ``negative_responses`` or
+    ``batch_failures`` moves, and where the miss back-off is set, so the
+    scheduler's counters, the back-off and the capture ledger (D03.70) all
+    describe the same event. ``kind`` is a ``capture_lifetime.MISS_*``:
+
+    * ``timeout`` and ``negative_response`` are evidence about this request
+      and set the back-off (unless ``back_off`` is False: a silent liveness
+      probe is the ECU still asleep, not evidence about this channel);
+    * ``batch_failure`` and ``batch_unparsed`` are sends a batch swallowed;
+      nobody is credited or penalised, so no back-off is set.
+    """
+    if kind == capture_lifetime.MISS_TIMEOUT:
+        state.timeouts += 1
+    elif kind == capture_lifetime.MISS_NEGATIVE_RESPONSE:
+        state.negative_responses += 1
+    elif kind in (capture_lifetime.MISS_BATCH_FAILURE, capture_lifetime.MISS_BATCH_UNPARSED):
+        state.batch_failures += 1
+        back_off = False
+    else:
+        raise ValueError(f"unknown miss kind {kind!r}")
+    if nrc is not None:
+        state.last_negative_response_code = nrc
+    backoff = 0.0
+    selected = tuning_profile.request_eligible(index, request)
+    if back_off:
+        backoff = _update_response_state(
+            state,
+            emitted=False,
+            now=now,
+            priority=request_is_priority(request),
+            focused_capture=tuning_profile.is_active() and selected,
+        )
+    if selected:
+        capture_lifetime.miss(
+            request.channel,
+            now,
+            kind=kind,
+            nrc=nrc,
+            backoff_s=backoff,
+            request_kind=request.kind,
+            members=_ledger_members(request),
+        )
 
 
 def request_is_priority(request: PollRequest) -> bool:

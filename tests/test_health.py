@@ -524,6 +524,30 @@ def test_snapshot_carries_the_capture_lifetime_beside_the_trailing_scheduler() -
         capture_lifetime._reset_for_tests()
 
 
+def test_status_carries_request_counts_but_not_the_miss_lists() -> None:
+    """`/status` is polled every second; the per-miss events belong to the stop-time
+    sidecar (D03.70), the live view keeps only the counts."""
+    from src.collection import capture_lifetime
+
+    capture_lifetime._reset_for_tests()
+    try:
+        mon = HealthMonitor()
+        capture_lifetime.begin(0.0, profile="tuning", generation=2)
+        capture_lifetime.attempt("mem:fuel_target", 1.0, kind="memory")
+        capture_lifetime.miss(
+            "mem:fuel_target", 1.5, kind="timeout", backoff_s=1.0, request_kind="memory"
+        )
+        status = mon.snapshot(now_epoch=0.0)["capture_lifetime"]["requests"]["mem:fuel_target"]
+        assert (status["attempts"], status["misses"], status["events_recorded"]) == (1, 1, 1)
+        assert "events" not in status
+        # The sidecar's inputs keep them.
+        inputs = mon.capture_quality_inputs(now=10.0)
+        assert inputs.lifetime is not None
+        assert inputs.lifetime["requests"]["mem:fuel_target"]["events"][0]["kind"] == "timeout"
+    finally:
+        capture_lifetime._reset_for_tests()
+
+
 async def test_sink_queue_high_water_survives_the_drain_that_empties_it() -> None:
     """A queue that filled and drained must still say how deep it got (C10.5).
 

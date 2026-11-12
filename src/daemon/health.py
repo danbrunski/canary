@@ -792,7 +792,7 @@ class HealthMonitor:
         if lifetime is not None:
             # Arm-to-now statistics for the active capture (C03.2), beside —
             # never inside — the scheduler's trailing 60 s numbers.
-            snap["capture_lifetime"] = lifetime.to_dict()
+            snap["capture_lifetime"] = lifetime.to_dict(events=False)
         if self._telemetry_sinks:
             snap["telemetry_sinks"] = {
                 name: dict(state) for name, state in sorted(self._telemetry_sinks.items())

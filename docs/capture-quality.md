@@ -35,6 +35,51 @@ Per capture member, from arm to stop (never a trailing window):
   from the rows on disk (`tuples.complete`). The slowest member's cadence is
   reported as `tuple_rate_bound_hz` and is *only ever* a bound.
 
+### Why a channel went quiet: the request ledger (D03.70)
+
+A long gap says *that* a channel went silent, not whether its request was
+sent. The capture's ledger (`capture_lifetime`) also counts, per
+capture-selected request (keyed by `PollRequest.channel`: a Mode 01 name,
+`DID_xxxx`, or `mem:<window>` for a memory window, with the decoded channels
+in `members`), its sends (`attempts`) and its misses (`misses`,
+`misses_by_kind`: `timeout`, `negative_response`, `batch_failure`,
+`batch_unparsed`; `last_nrc`). The first 64 misses are kept with their
+capture-clock time, NRC and the back-off each set (`events`); past that
+`events_dropped` counts the rest and `events_complete_until_s` is how far the
+list can be trusted. The request's *send timeline* is kept the way a channel's
+observations are, as long gaps only: `attempt_long_gaps` (`[[start, end], …]`,
+stretches of at least 2 s between two sends, the largest 64) and
+`attempt_gaps_dropped` (the overflow); never a timestamp per send. It lands
+in the sidecar as top-level `request_ledger` (`source`: `live`, `carried` into
+a rebuild from rows, or `unavailable`) and each long gap in
+`channels[].coverage.long_gaps` has a same-order entry in
+`coverage.long_gap_causes`:
+
+* `sent_and_missed` — a miss fell inside the gap (listed by kind and NRC);
+* `not_sent` — a gap in the request's send timeline covers it: nothing was
+  sent, so look at scheduling, budget or a window that did not open. The
+  send that ends a gap precedes its answer by a response turnaround, so the
+  stretch may end up to 0.25 s before the gap does; a send cannot precede
+  the observation that opens the gap, so there is no slack at that edge;
+* `sent_no_result` — sends continued through the gap with no miss and no
+  answer recorded. In the loop that is a send that raised on the bus
+  (`bus_errors`), a window that answered but left a member undecoded, or a
+  decode that raised after the send. A stop event or a deadline is not one of
+  them: it returns an empty exchange, which is counted as a timeout miss. In a
+  rebuild from rows, rows the writer lost read this way too;
+* `unknown` — a sidecar from before the ledger, a K-line channel, or a miss
+  list or send timeline that overflowed before the gap (with the reason).
+
+Two cautions. A rebuild from rows (`source: carried`) scores gaps on the
+rows' clock, so rows the writer lost read as `sent_no_result` rather than as
+a collection fault. And a gap that overlaps a pause window reads `not_sent`,
+because the daemon sends nothing while paused: read `interval.pause_windows`
+beside it.
+
+The daemon also logs one WARNING per request that misses: the first miss, then
+at most one per 30 s with the count since. It is logged after the ledger's lock
+is released.
+
 ### Pause accounting
 
 `interval` carries `elapsed_s`, `intended_active_s`, `paused_s` and

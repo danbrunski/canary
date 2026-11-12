@@ -148,6 +148,40 @@ KLINE_SESSION_PAUSE = "ecm-session-kline"
 #: from it rather than being reported as never answered.
 ROWS_LIFETIME_SOURCE = "persisted_rows"
 
+#: What explains one long gap in a channel (D03.70), in ``long_gap_causes``.
+#: ``sent_and_missed``: the channel's request was sent inside the gap and
+#: missed (a timeout, an NRC), so the miss back-off and the wait for the next
+#: window are the candidates. ``not_sent``: the request's send timeline has a
+#: gap covering this one, i.e. nothing was sent: scheduling, budget or a window
+#: that did not open. ``sent_no_result``: sends continued through the gap with
+#: no miss and no answer recorded: the send raised on the bus (the one send the
+#: loop counts without deciding an outcome), the window answered but left a
+#: member undecoded, or, in a rebuild from rows, the writer lost the rows.
+#: ``unknown``: the request ledger cannot say (a sidecar from before it, a
+#: K-line channel, or a miss list or send timeline that overflowed). A pause
+#: window is no exception: the daemon sends nothing while paused, so a gap
+#: overlapping one reads ``not_sent``.
+GAP_SENT_AND_MISSED = "sent_and_missed"
+GAP_NOT_SENT = "not_sent"
+GAP_SENT_NO_RESULT = "sent_no_result"
+GAP_UNKNOWN = "unknown"
+#: How far before a gap's end the send that closes it may fall: the answer that
+#: ends a gap arrives one response turnaround (about 10-30 ms) after its send,
+#: so the send is just before the observation. Well above that, well below the
+#: 2 s gap floor. Only the closing edge needs it: the send that produced the
+#: gap's first observation is at or before that observation.
+ATTEMPT_EDGE_SLACK_S = 0.25
+#: Misses listed per gap (the count and kinds cover them all).
+GAP_CAUSE_MISSES_LISTED = 8
+#: A ledger rebuilt against rows (a recompute after the daemon's ledger is
+#: gone) puts a gap's edges on the rows' wall clock and a miss on the
+#: monotonic one; a miss this close outside a gap still belongs to it.
+ROWS_CLOCK_SLACK_S = 0.25
+#: ``request_ledger["source"]``.
+LEDGER_LIVE = "live"
+LEDGER_CARRIED = "carried"
+LEDGER_UNAVAILABLE = "unavailable"
+
 Windows = list[tuple[float, float]]
 
 
@@ -206,6 +240,12 @@ class CaptureQuality:
     tuple_rate_bound_hz: float | None = None
     batching: dict[str, Any] | None = None
     notes: list[str] = field(default_factory=list)
+    #: Per capture-selected request: sends, misses (by kind, with NRC) and the
+    #: bounded miss list, from the capture's ledger (D03.70). ``source`` says
+    #: whether it is the live ledger, one carried over from the stop-time
+    #: sidecar into a rebuild, or unavailable. ``None`` on a report built
+    #: before it existed.
+    request_ledger: dict[str, Any] | None = None
 
     @property
     def passed(self) -> bool:
@@ -228,6 +268,7 @@ class CaptureQuality:
             "trailing": dict(self.trailing),
             "batching": self.batching,
             "notes": list(self.notes),
+            "request_ledger": self.request_ledger,
         }
 
 
@@ -736,6 +777,155 @@ def _lifetime_row(
     return row or {}
 
 
+def _request_ledger_block(
+    lifetime: Mapping[str, Any] | None,
+) -> tuple[Mapping[str, Mapping[str, Any]] | None, dict[str, Any]]:
+    """The lifetime's per-request ledger and the block the report persists.
+
+    ``(None, unavailable)`` when the lifetime carries none: an older sidecar's
+    rebuild, or a scorer handed no ledger. Every gap is then ``unknown``,
+    never ``not_sent``.
+    """
+    raw = (lifetime or {}).get("requests")
+    if not isinstance(raw, Mapping):
+        return None, {
+            "source": LEDGER_UNAVAILABLE,
+            "event_capacity": None,
+            "requests": {},
+            "reason": "no request ledger was recorded for this capture",
+        }
+    return raw, {
+        "source": str((lifetime or {}).get("requests_source") or LEDGER_LIVE),
+        "event_capacity": (lifetime or {}).get("request_event_capacity"),
+        "requests": {str(name): dict(row) for name, row in sorted(raw.items())},
+    }
+
+
+def _request_row(
+    ledger: Mapping[str, Mapping[str, Any]], request: Mapping[str, Any], channel: str
+) -> Mapping[str, Any] | None:
+    """The request ledger's row for ``request`` (found through the plan), else
+    the row whose decoded ``members`` name ``channel``."""
+    row = ledger.get(str(request.get("channel") or ""))
+    if row is not None:
+        return row
+    wanted = channel.upper()
+    for candidate in ledger.values():
+        if wanted in {str(name).upper() for name in candidate.get("members") or ()}:
+            return candidate
+    return None
+
+
+def attribute_gap(
+    start: float,
+    end: float,
+    *,
+    ledger: Mapping[str, Mapping[str, Any]] | None,
+    row: Mapping[str, Any] | None,
+    kind: Any = None,
+    slack_s: float = 0.0,
+) -> dict[str, Any]:
+    """Which kind of silence one long gap ``[start, end]`` was (D03.70).
+
+    ``ledger`` is the capture's per-request ledger (``None``: none was
+    recorded) and ``row`` this channel's request in it (``None``: the request
+    was never sent). Never a guess: a miss inside the gap is
+    ``sent_and_missed`` (listed by kind and NRC); no miss and a send timeline
+    with a gap covering it is ``not_sent``; no miss but sends continuing
+    through it is ``sent_no_result``; anything the ledger cannot cover is
+    ``unknown`` with the reason.
+    """
+    out: dict[str, Any] = {"start": round(start, 3), "end": round(end, 3)}
+    if kind == KLINE_KIND:
+        return {
+            **out,
+            "cause": GAP_UNKNOWN,
+            "reason": "K-line channels are not requests of the OBD scheduler's ledger",
+        }
+    if ledger is None:
+        return {
+            **out,
+            "cause": GAP_UNKNOWN,
+            "reason": "no request ledger was recorded for this capture "
+            "(a sidecar from before D03.70, or a verdict rebuilt from rows)",
+        }
+    if row is None:
+        return {
+            **out,
+            "cause": GAP_NOT_SENT,
+            "reason": "no send of this channel's request was recorded in the whole capture",
+        }
+    inside = [
+        event
+        for event in row.get("events") or ()
+        if start - slack_s <= float(event["at_s"]) <= end + slack_s
+    ]
+    if inside:
+        by_kind: dict[str, int] = {}
+        for event in inside:
+            by_kind[str(event["kind"])] = by_kind.get(str(event["kind"]), 0) + 1
+        return {
+            **out,
+            "cause": GAP_SENT_AND_MISSED,
+            "request": row.get("channel"),
+            "misses_total": len(inside),
+            "misses_by_kind": dict(sorted(by_kind.items())),
+            "misses": [dict(event) for event in inside[:GAP_CAUSE_MISSES_LISTED]],
+        }
+    complete_until = row.get("events_complete_until_s")
+    if row.get("events_dropped") and (complete_until is None or end > float(complete_until)):
+        return {
+            **out,
+            "cause": GAP_UNKNOWN,
+            "request": row.get("channel"),
+            "reason": f"the request's miss list overflowed ({row.get('events_dropped')} "
+            f"dropped after {complete_until}s) before this gap ended",
+        }
+    if "attempt_long_gaps" not in row:
+        return {
+            **out,
+            "cause": GAP_UNKNOWN,
+            "request": row.get("channel"),
+            "reason": "the request ledger recorded no send timeline (an older ledger)",
+        }
+    # No miss in the gap. Whether the request was sent is the send timeline's
+    # answer, not an inference from the missing miss: a send that left no miss
+    # and no observation is still a send. A send precedes the observation it
+    # produces, so the stretch with no sends opens at or before the gap's start
+    # (the clock slack only: 0 live) and ends within one response turnaround
+    # before its end (``ATTEMPT_EDGE_SLACK_S``, or the clock slack if larger).
+    closing = max(slack_s, ATTEMPT_EDGE_SLACK_S)
+    covering = [
+        (float(a), float(b))
+        for a, b in row.get("attempt_long_gaps") or ()
+        if float(a) <= start + slack_s and float(b) >= end - closing
+    ]
+    if covering:
+        (sent_from, sent_again) = covering[0]
+        return {
+            **out,
+            "cause": GAP_NOT_SENT,
+            "request": row.get("channel"),
+            "reason": f"no send of the request between {sent_from:.3f}s and {sent_again:.3f}s",
+        }
+    dropped = int(row.get("attempt_gaps_dropped") or 0)
+    if dropped:
+        return {
+            **out,
+            "cause": GAP_UNKNOWN,
+            "request": row.get("channel"),
+            "reason": f"the request's send timeline overflowed ({dropped} long gaps dropped); "
+            "none kept covers this gap",
+        }
+    return {
+        **out,
+        "cause": GAP_SENT_NO_RESULT,
+        "request": row.get("channel"),
+        "reason": "the request was sent inside the gap but no miss and no answer was recorded "
+        "(a send that raised on the bus, a window left undecoded, or rows the writer lost)",
+    }
+
+
 def _build_channels(  # noqa: PLR0913
     requests: list[Mapping[str, Any]],
     *,
@@ -749,6 +939,8 @@ def _build_channels(  # noqa: PLR0913
     trailing_hz: Mapping[str, Any],
     kline_windows: Windows | None = None,
     memory_selection: tuple[str, ...] = (),
+    request_ledger: Mapping[str, Mapping[str, Any]] | None = None,
+    gap_slack_s: float = 0.0,
 ) -> list[ChannelQuality]:
     channels: list[ChannelQuality] = []
     seen: set[str] = set()
@@ -777,6 +969,20 @@ def _build_channels(  # noqa: PLR0913
                 pause_windows=kline_paused if is_kline else windows,
                 threshold_s=gap_threshold_s(requested, cadence.get("median_interarrival_s")),
             )
+            ledger_row = (
+                None if request_ledger is None else _request_row(request_ledger, request, channel)
+            )
+            coverage["long_gap_causes"] = [
+                attribute_gap(
+                    float(a),
+                    float(b),
+                    ledger=request_ledger,
+                    row=ledger_row,
+                    kind=request.get("kind"),
+                    slack_s=gap_slack_s,
+                )
+                for a, b, _s in coverage["long_gaps"]
+            ]
             channels.append(
                 ChannelQuality(
                     # Reported under the profile's name, not the transport's:
@@ -850,6 +1056,7 @@ def _channel_failures(channels: list[ChannelQuality], floor: float | None) -> li
                         "missing_initial_s": row.coverage.get("missing_initial_s"),
                         "missing_final_s": row.coverage.get("missing_final_s"),
                         "long_gaps": row.coverage.get("long_gaps"),
+                        "long_gap_causes": row.coverage.get("long_gap_causes"),
                         "coverage_fraction": row.coverage.get("fraction"),
                     }
                     for row in gapped
@@ -1180,6 +1387,10 @@ def evaluate_capture_quality(  # noqa: PLR0913
             "not a pause."
         )
     listed = {str(row.get("channel") or "").upper() for row in base_requests}
+    request_ledger_rows, request_ledger = _request_ledger_block(lifetime)
+    # A ledger carried into a rebuild from rows is on the monotonic clock while
+    # the rows' gaps are on the wall clock.
+    rows_clock = (lifetime or {}).get("source") == ROWS_LIFETIME_SOURCE
     channels = _build_channels(
         base_requests + [row for row in kline_rows if row["channel"].upper() not in listed],
         lifetime_channels=lifetime_channels,
@@ -1192,6 +1403,8 @@ def evaluate_capture_quality(  # noqa: PLR0913
         trailing_hz=trailing_hz,
         kline_windows=kline_pause_windows(lifetime, elapsed),
         memory_selection=tuple(str(name) for name in profile.get("memory") or ()),
+        request_ledger=request_ledger_rows,
+        gap_slack_s=ROWS_CLOCK_SLACK_S if rows_clock else 0.0,
     )
     cadence_by_profile = {
         row.channel.upper(): (None if row.status == "missing" else row.cadence.get("hz"))
@@ -1274,6 +1487,7 @@ def evaluate_capture_quality(  # noqa: PLR0913
         tuple_rate_bound_hz=bound,
         batching=batching,
         notes=notes,
+        request_ledger=request_ledger,
     )
 
 
@@ -1282,7 +1496,14 @@ __all__ = [
     "BATCHING_COUNTERS",
     "BATCHING_SCOPE_CAPTURE",
     "DEFAULT_MAX_TUPLE_SKEW_S",
+    "GAP_NOT_SENT",
+    "GAP_SENT_AND_MISSED",
+    "GAP_SENT_NO_RESULT",
+    "GAP_UNKNOWN",
     "HARD_CLAUSES",
+    "LEDGER_CARRIED",
+    "LEDGER_LIVE",
+    "LEDGER_UNAVAILABLE",
     "MIN_STALL_SECONDS",
     "MIN_VERIFY_SECONDS",
     "MODE22_BATCHING_COUNTERS",
@@ -1297,6 +1518,7 @@ __all__ = [
     "UNKNOWN_LOSS_COUNTERS",
     "CaptureQuality",
     "ChannelQuality",
+    "attribute_gap",
     "batching_baseline",
     "cadence_from_lifetime",
     "coverage_from_lifetime",

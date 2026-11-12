@@ -43,6 +43,12 @@ from src.collection.can_obd_io import (
     _send_session_control,
     _should_stop,
 )
+from src.collection.capture_lifetime import (
+    MISS_BATCH_FAILURE,
+    MISS_BATCH_UNPARSED,
+    MISS_NEGATIVE_RESPONSE,
+    MISS_TIMEOUT,
+)
 from src.collection.discovery import (
     DiscoveryItem,
     DiscoveryState,
@@ -88,6 +94,8 @@ from src.collection.obd_scheduler import (
     is_batchable,
     mode06_requests,
     narrow_memory_reads,
+    note_attempt,
+    note_miss,
     rearm_on_engine_start,
     replan_for_generation,
     request_is_priority,
@@ -1135,8 +1143,7 @@ class _CanObdLoop:
         if request.auto_probe and (request.fast_probe or request_state.missed_responses > 0):
             timeout_seconds = min(timeout_seconds, AUTO_PROBE_TIMEOUT_SECONDS)
         request_started = time.monotonic()
-        request_state.last_requested_at = request_started
-        request_state.requests_sent += 1
+        note_attempt(request_index, request, request_state, request_started)
         try:
             result = _query_with_tap(
                 self.bus,
@@ -1198,20 +1205,35 @@ class _CanObdLoop:
         elif result.negative_response_code is not None:
             # Formal ECU refusal, not a true timeout — counted separately
             # (see `QueryResult`) so it doesn't masquerade as bus silence.
-            request_state.negative_responses += 1
-            request_state.last_negative_response_code = result.negative_response_code
             stats.negative_responses += 1
+            note_miss(
+                request_index,
+                request,
+                request_state,
+                now=time.monotonic(),
+                kind=MISS_NEGATIVE_RESPONSE,
+                nrc=result.negative_response_code,
+                # A silent liveness probe is the ECU still asleep, like the
+                # batch before it: no evidence about this channel, so no miss
+                # backoff. Otherwise a key-off boot would back every channel
+                # off (doubling to 15 minutes for never-answered ones) one
+                # probe at a time.
+                back_off=not silent_probe,
+            )
         else:
-            request_state.timeouts += 1
             stats.request_timeouts += 1
-        if not silent_probe:
-            # A silent liveness probe is the ECU still asleep, like the batch
-            # before it: no evidence about this channel, so no miss backoff.
-            # Otherwise a key-off boot would back every channel off (doubling
-            # to 15 minutes for never-answered ones) one probe at a time.
+            note_miss(
+                request_index,
+                request,
+                request_state,
+                now=time.monotonic(),
+                kind=MISS_TIMEOUT,
+                back_off=not silent_probe,
+            )
+        if emitted and not silent_probe:
             _update_response_state(
                 request_state,
-                emitted=emitted,
+                emitted=True,
                 now=time.monotonic(),
                 priority=request_is_priority(request),
                 focused_capture=(
@@ -1878,8 +1900,7 @@ def _issue_batched_request(
     leader = requests[indices[0]]
     started = time.monotonic()
     for index in indices:
-        states[index].last_requested_at = started
-        states[index].requests_sent += 1
+        note_attempt(index, requests[index], states[index], started)
 
     try:
         result = _query_batched_with_tap(
@@ -1909,12 +1930,17 @@ def _issue_batched_request(
         # credit or penalise them, by design. Name where those sends went so
         # `requests_sent == responses + timeouts + batch_failures` holds and
         # the remainder is never an unexplained bucket (D02.1).
-        for index in indices:
-            states[index].batch_failures += 1
         if result.negative_response_code is not None:
             stats.negative_responses += 1
-            for index in indices:
-                states[index].last_negative_response_code = result.negative_response_code
+        for index in indices:
+            note_miss(
+                index,
+                requests[index],
+                states[index],
+                now=time.monotonic(),
+                kind=MISS_BATCH_FAILURE,
+                nrc=result.negative_response_code,
+            )
         return BatchOutcome(answered=False, negative_response_code=result.negative_response_code)
     # Mode 01 members the desynced walk never reached (or the blamed PID,
     # whose slice is suspect). They were not answered-and-missing — the walk
@@ -1953,7 +1979,7 @@ def _issue_batched_request(
         if request.identifier in unparsed:
             # Same accounting as a whole-batch failure: the send is named, no
             # response state moves (C02/D02.1 invariant holds).
-            state.batch_failures += 1
+            note_miss(index, request, state, now=now, kind=MISS_BATCH_UNPARSED)
             continue
         payload = result.readings.get(request.identifier)
         emitted = False
@@ -1983,16 +2009,16 @@ def _issue_batched_request(
         if emitted:
             state.responses += 1
             state.last_response_at = now
+            _update_response_state(
+                state,
+                emitted=True,
+                now=now,
+                priority=request_is_priority(request),
+                focused_capture=(
+                    tuning_profile.is_active() and tuning_profile.request_eligible(index, request)
+                ),
+            )
         else:
-            state.timeouts += 1
             stats.request_timeouts += 1
-        _update_response_state(
-            state,
-            emitted=emitted,
-            now=now,
-            priority=request_is_priority(request),
-            focused_capture=(
-                tuning_profile.is_active() and tuning_profile.request_eligible(index, request)
-            ),
-        )
+            note_miss(index, request, state, now=now, kind=MISS_TIMEOUT)
     return BatchOutcome(answered=True, observed=observed, acquired_at=arrival.at)

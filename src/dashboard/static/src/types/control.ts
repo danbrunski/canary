@@ -325,6 +325,18 @@ export interface CaptureChannelCadence {
   samples: number;
 }
 
+/** What explains one long gap: the channel's request was sent and missed, never sent, or the ledger cannot say. */
+export interface CaptureGapCause {
+  start: number;
+  end: number;
+  cause: "sent_and_missed" | "not_sent" | "sent_no_result" | "unknown";
+  request?: string;
+  reason?: string;
+  misses_total?: number;
+  misses_by_kind?: Record<string, number>;
+  misses?: { at_s: number; kind: string; nrc: number | null; backoff_s: number }[];
+}
+
 /** Coverage for one channel: observed versus eligible duration, pauses excluded. */
 export interface CaptureChannelCoverage {
   observations: number;
@@ -335,6 +347,8 @@ export interface CaptureChannelCoverage {
   max_gap_s: number;
   /** `[start_s, end_s, uncovered_s]` on the capture clock. */
   long_gaps: number[][];
+  /** Same order as `long_gaps`: which kind of silence each was (D03.70). Absent on older sidecars. */
+  long_gap_causes?: CaptureGapCause[];
   gap_threshold_s: number;
   uncovered_s: number;
   eligible_s: number;

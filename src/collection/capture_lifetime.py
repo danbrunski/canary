@@ -31,10 +31,14 @@ frozen and report offsets from the capture start ("the capture clock").
 
 from __future__ import annotations
 
+import logging
 import random
 import threading
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 #: Prefix of a decoded memory reading's channel: ``mem:<NAME>``.
 #: Suffix of the state channel a memory sentinel decodes to instead of a value.
@@ -56,6 +60,29 @@ LONG_GAP_SECONDS = 2.0
 #: Individually recorded long gaps per channel. Beyond this the largest are
 #: kept and the overflow is counted — the sum stays exact either way.
 LONG_GAP_CAPACITY = 64
+#: Individually recorded misses per request. Beyond this the *first* events
+#: are kept, the overflow is counted and ``events_complete_until_s`` says how
+#: far the list can be trusted, so a gap after it is "unknown" rather than
+#: "nothing missed" (D03.70).
+MISS_EVENT_CAPACITY = 64
+#: A capture-selected request that keeps missing logs one WARNING per this
+#: many seconds, carrying the count since the last line (D03.70).
+MISS_LOG_INTERVAL_S = 30.0
+
+#: Why a request's attempt did not become an observation. ``timeout`` is no
+#: answer (or an answer that decoded to nothing); ``negative_response`` is a
+#: formal ECU refusal and carries its code; the two ``batch`` kinds are sends a
+#: batch swallowed (no per-channel evidence, so no back-off was set).
+MISS_TIMEOUT = "timeout"
+MISS_NEGATIVE_RESPONSE = "negative_response"
+MISS_BATCH_FAILURE = "batch_failure"
+MISS_BATCH_UNPARSED = "batch_unparsed"
+MISS_KINDS: tuple[str, ...] = (
+    MISS_TIMEOUT,
+    MISS_NEGATIVE_RESPONSE,
+    MISS_BATCH_FAILURE,
+    MISS_BATCH_UNPARSED,
+)
 
 
 def observed_channels(channel: str) -> tuple[str, ...]:
@@ -193,6 +220,148 @@ class ChannelLifetime:
         }
 
 
+@dataclass(frozen=True)
+class MissEvent:
+    """One send of a request that did not become an observation."""
+
+    at_s: float
+    kind: str
+    nrc: int | None
+    #: Seconds the miss back-off held the request off (0 when it set none:
+    #: a batch failure, or a silent liveness probe).
+    backoff_s: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "at_s": round(self.at_s, 3),
+            "kind": self.kind,
+            "nrc": self.nrc,
+            "backoff_s": round(self.backoff_s, 3),
+        }
+
+
+@dataclass(frozen=True)
+class RequestLifetime:
+    """One capture-selected request's sends and misses, arm to now.
+
+    Keyed by the request's own channel as the scheduler knows it
+    (``PollRequest.channel``: a Mode 01 name, ``DID_xxxx``, or for a memory
+    window ``mem:<window>``); ``members`` are the decoded channels one answer
+    yields (a window's ``mem:<NAME>`` readings), so a gap in a decoded channel
+    maps to its request through the plan or, failing that, through here.
+    """
+
+    channel: str
+    kind: str
+    members: tuple[str, ...]
+    attempts: int
+    misses: int
+    misses_by_kind: dict[str, int]
+    last_nrc: int | None
+    first_attempt_at: float | None
+    last_attempt_at: float | None
+    #: The first ``MISS_EVENT_CAPACITY`` misses, in order.
+    events: tuple[MissEvent, ...]
+    events_dropped: int
+    #: Stretches of at least ``LONG_GAP_SECONDS`` between two consecutive
+    #: *sends* of the request (``[start, end]``, the largest
+    #: ``LONG_GAP_CAPACITY`` of them), tracked the way a channel's
+    #: observations are: it is what tells "never sent" from "sent, no result".
+    attempt_long_gaps: tuple[tuple[float, float], ...] = ()
+    #: Every such stretch, kept or not.
+    attempt_long_gap_count: int = 0
+
+    @property
+    def attempt_gaps_dropped(self) -> int:
+        """Long inter-attempt gaps the capacity pushed out of ``attempt_long_gaps``."""
+        return self.attempt_long_gap_count - len(self.attempt_long_gaps)
+
+    @property
+    def events_complete_until_s(self) -> float | None:
+        """Capture-clock time up to which ``events`` lists every miss; ``None``
+        when nothing was dropped (the list is complete for the whole capture)."""
+        if not self.events_dropped:
+            return None
+        return self.events[-1].at_s if self.events else 0.0
+
+    def to_dict(self, *, events: bool = True) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "channel": self.channel,
+            "kind": self.kind,
+            "members": list(self.members),
+            "attempts": self.attempts,
+            "misses": self.misses,
+            "misses_by_kind": dict(sorted(self.misses_by_kind.items())),
+            "last_nrc": self.last_nrc,
+            "first_attempt_at": _round(self.first_attempt_at),
+            "last_attempt_at": _round(self.last_attempt_at),
+            "events_recorded": len(self.events),
+            "events_dropped": self.events_dropped,
+            "events_complete_until_s": _round(self.events_complete_until_s),
+            "attempt_long_gaps": [[round(a, 3), round(b, 3)] for a, b in self.attempt_long_gaps],
+            "attempt_gaps_dropped": self.attempt_gaps_dropped,
+        }
+        if events:
+            out["events"] = [event.to_dict() for event in self.events]
+        return out
+
+
+class RequestAccumulator:
+    """Mutable per-request state behind :class:`RequestLifetime`."""
+
+    def __init__(self, channel: str, kind: str, members: tuple[str, ...]) -> None:
+        self.channel = channel
+        self.kind = kind
+        self.members = members
+        self.attempts = 0
+        self.misses = 0
+        self.misses_by_kind: dict[str, int] = {}
+        self.last_nrc: int | None = None
+        self.first_attempt: float | None = None
+        self.last_attempt: float | None = None
+        self.events: list[MissEvent] = []
+        self.events_dropped = 0
+        #: The send timeline: long gaps only, never a timestamp per send.
+        self._sends = ChannelAccumulator(channel)
+        #: Rate-limit state for the WARNING (:meth:`CaptureLedger.miss`).
+        self.last_logged_at: float | None = None
+        self.misses_since_log = 0
+
+    def attempt(self, offset: float) -> None:
+        self.attempts += 1
+        if self.first_attempt is None:
+            self.first_attempt = offset
+        self.last_attempt = offset
+        self._sends.observe(offset)
+
+    def miss(self, event: MissEvent) -> None:
+        self.misses += 1
+        self.misses_by_kind[event.kind] = self.misses_by_kind.get(event.kind, 0) + 1
+        if event.nrc is not None:
+            self.last_nrc = event.nrc
+        if len(self.events) < MISS_EVENT_CAPACITY:
+            self.events.append(event)
+        else:
+            self.events_dropped += 1
+
+    def snapshot(self) -> RequestLifetime:
+        return RequestLifetime(
+            channel=self.channel,
+            kind=self.kind,
+            members=self.members,
+            attempts=self.attempts,
+            misses=self.misses,
+            misses_by_kind=dict(self.misses_by_kind),
+            last_nrc=self.last_nrc,
+            first_attempt_at=self.first_attempt,
+            last_attempt_at=self.last_attempt,
+            events=tuple(self.events),
+            events_dropped=self.events_dropped,
+            attempt_long_gaps=self._sends.long_gap_windows(),
+            attempt_long_gap_count=self._sends.long_gap_count,
+        )
+
+
 class ChannelAccumulator:
     """Mutable per-channel state behind :class:`ChannelLifetime`.
 
@@ -236,6 +405,10 @@ class ChannelAccumulator:
             if len(self._long_gaps) > LONG_GAP_CAPACITY:
                 self._long_gaps.sort(key=lambda window: window[1] - window[0], reverse=True)
                 del self._long_gaps[LONG_GAP_CAPACITY:]
+
+    def long_gap_windows(self) -> tuple[tuple[float, float], ...]:
+        """The recorded long gaps, in time order."""
+        return tuple(sorted(self._long_gaps))
 
     def snapshot(self, elapsed: float) -> ChannelLifetime:
         first, last = self.first, self.last
@@ -289,6 +462,8 @@ class CaptureLifetime:
     pause_windows: tuple[PauseWindow, ...]
     channels: dict[str, ChannelLifetime] = field(default_factory=dict)
     source: str = "live"
+    #: Per capture-selected request: sends and misses (D03.70).
+    requests: dict[str, RequestLifetime] = field(default_factory=dict)
 
     @property
     def paused_s(self) -> float:
@@ -301,7 +476,9 @@ class CaptureLifetime:
     def intended_active_s(self) -> float:
         return max(0.0, self.elapsed_s - self.paused_s)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, events: bool = True) -> dict[str, Any]:
+        """``events=False`` leaves each request's miss list out (counts stay):
+        the live status polls this every second and has no use for the list."""
         return {
             "source": self.source,
             "profile": self.profile,
@@ -317,6 +494,10 @@ class CaptureLifetime:
             ],
             "pause_reasons": [w.to_dict() for w in self.pause_windows],
             "channels": {name: row.to_dict() for name, row in sorted(self.channels.items())},
+            "requests": {
+                name: row.to_dict(events=events) for name, row in sorted(self.requests.items())
+            },
+            "request_event_capacity": MISS_EVENT_CAPACITY,
         }
 
 
@@ -330,6 +511,7 @@ class CaptureLedger:
         self._started: float | None = None
         self._started_wall = 0.0
         self._channels: dict[str, ChannelAccumulator] = {}
+        self._requests: dict[str, RequestAccumulator] = {}
         self._closed_pauses: list[PauseWindow] = []
         self._open_pause_start: float | None = None
         self._pause_reasons: set[str] = set()
@@ -354,6 +536,7 @@ class CaptureLedger:
             self._started = started_monotonic
             self._started_wall = started_wall
             self._channels = {}
+            self._requests = {}
             self._closed_pauses = []
             self._pause_reasons = set(paused_reasons)
             self._open_pause_start = 0.0 if self._pause_reasons else None
@@ -364,6 +547,7 @@ class CaptureLedger:
             self._profile = None
             self._started = None
             self._channels = {}
+            self._requests = {}
             self._closed_pauses = []
             self._open_pause_start = None
             self._pause_reasons = set()
@@ -389,6 +573,81 @@ class CaptureLedger:
                     accumulator = ChannelAccumulator(name, seed=_seed_for(name))
                     self._channels[name] = accumulator
                 accumulator.observe(now - started)
+
+    def attempt(
+        self, channel: str, now: float, *, kind: str = "", members: Iterable[str] = ()
+    ) -> None:
+        """One send of the capture-selected request ``channel`` at monotonic ``now``."""
+        with self._lock:
+            started = self._started
+            if started is None or now < started:
+                return
+            self._request(channel, kind, members).attempt(now - started)
+
+    def miss(  # noqa: PLR0913
+        self,
+        channel: str,
+        now: float,
+        *,
+        kind: str,
+        nrc: int | None = None,
+        backoff_s: float = 0.0,
+        request_kind: str = "",
+        members: Iterable[str] = (),
+    ) -> None:
+        """One send of ``channel`` that did not become an observation.
+
+        Logs one WARNING per request, rate-limited: the first miss, then at
+        most one line per ``MISS_LOG_INTERVAL_S`` carrying the count since the
+        last (D03.70: the daemon logged nothing for a missed window read, so a
+        2.5-4.5 s hole in a memory window left no trace in the journal).
+        """
+        if kind not in MISS_KINDS:
+            raise ValueError(f"unknown miss kind {kind!r}; one of {MISS_KINDS}")
+        report: tuple[int, int, str] | None = None
+        with self._lock:
+            started = self._started
+            if started is None or now < started:
+                return
+            accumulator = self._request(channel, request_kind, members)
+            accumulator.miss(MissEvent(now - started, kind, nrc, max(0.0, backoff_s)))
+            accumulator.misses_since_log += 1
+            last = accumulator.last_logged_at
+            if last is None or now - last >= MISS_LOG_INTERVAL_S:
+                report = (accumulator.misses_since_log, accumulator.misses, self._profile or "")
+                accumulator.last_logged_at = now
+                accumulator.misses_since_log = 0
+        if report is not None:
+            since, total, profile = report
+            log.warning(
+                "capture request %s missed (%s%s), back-off %.1fs; %d miss(es) since the last "
+                "report, %d this capture (%s)",
+                channel,
+                kind,
+                "" if nrc is None else f" NRC 0x{nrc:02X}",
+                max(0.0, backoff_s),
+                since,
+                total,
+                profile,
+                extra={
+                    "request_channel": channel,
+                    "miss_kind": kind,
+                    "miss_nrc": nrc,
+                    "misses_since_report": since,
+                    "capture_profile": profile,
+                },
+            )
+
+    def _request(self, channel: str, kind: str, members: Iterable[str]) -> RequestAccumulator:
+        """The accumulator for ``channel``; the caller holds the lock."""
+        accumulator = self._requests.get(channel)
+        if accumulator is None:
+            accumulator = RequestAccumulator(channel, kind, tuple(members))
+            self._requests[channel] = accumulator
+        elif members:
+            # A profile switch narrows a window; the newest read's members win.
+            accumulator.members = tuple(members)
+        return accumulator
 
     def mark_paused(self, paused: bool, *, reason: str, now: float) -> None:
         """Open or close a pause window; several reasons may overlap."""
@@ -440,6 +699,7 @@ class CaptureLedger:
                 elapsed_s=elapsed,
                 pause_windows=tuple(windows),
                 channels={name: acc.snapshot(elapsed) for name, acc in self._channels.items()},
+                requests={name: acc.snapshot() for name, acc in self._requests.items()},
             )
 
 
@@ -507,6 +767,31 @@ def observe(channel: str, now: float) -> None:
     _ledger.observe(channel, now)
 
 
+def attempt(channel: str, now: float, *, kind: str = "", members: Iterable[str] = ()) -> None:
+    _ledger.attempt(channel, now, kind=kind, members=members)
+
+
+def miss(  # noqa: PLR0913
+    channel: str,
+    now: float,
+    *,
+    kind: str,
+    nrc: int | None = None,
+    backoff_s: float = 0.0,
+    request_kind: str = "",
+    members: Iterable[str] = (),
+) -> None:
+    _ledger.miss(
+        channel,
+        now,
+        kind=kind,
+        nrc=nrc,
+        backoff_s=backoff_s,
+        request_kind=request_kind,
+        members=members,
+    )
+
+
 def mark_paused(paused: bool, *, reason: str, now: float) -> None:
     _ledger.mark_paused(paused, reason=reason, now=now)
 
@@ -525,17 +810,29 @@ __all__ = [
     "LONG_GAP_SECONDS",
     "MEMORY_READING_PREFIX",
     "MEMORY_SENTINEL_SUFFIX",
+    "MISS_BATCH_FAILURE",
+    "MISS_BATCH_UNPARSED",
+    "MISS_EVENT_CAPACITY",
+    "MISS_KINDS",
+    "MISS_LOG_INTERVAL_S",
+    "MISS_NEGATIVE_RESPONSE",
+    "MISS_TIMEOUT",
     "RESERVOIR_CAPACITY",
     "CaptureLedger",
     "CaptureLifetime",
     "ChannelAccumulator",
     "ChannelLifetime",
     "InterarrivalReservoir",
+    "MissEvent",
     "PauseWindow",
+    "RequestAccumulator",
+    "RequestLifetime",
+    "attempt",
     "begin",
     "end",
     "is_active",
     "mark_paused",
+    "miss",
     "observe",
     "observed_channels",
     "row_channels_observing",

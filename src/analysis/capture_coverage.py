@@ -38,6 +38,8 @@ from src.analysis.channels import (
 )
 from src.collection.capture_lifetime import ChannelAccumulator, row_channels_observing
 from src.collection.capture_quality import (
+    LEDGER_CARRIED,
+    LEDGER_UNAVAILABLE,
     TUPLE_CHANNEL,
     CaptureQuality,
     effective_max_tuple_skew_s,
@@ -557,6 +559,24 @@ def _lifetime_for(
         "pause_reasons": list(interval.get("pause_reasons") or []),
         "generation_at_start": interval.get("generation_at_start"),
         "channels": dict(inputs["lifetime_channels"]),
+        # The daemon's request ledger is gone by now; the stop-time sidecar's is
+        # the only record of which sends missed, so it rides into the rebuild.
+        **_carried_request_ledger(previous_v2),
+    }
+
+
+def _carried_request_ledger(previous_v2: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The previous sidecar's request ledger as lifetime keys; empty when it
+    recorded none (a sidecar from before D03.70, or one that had none live)."""
+    ledger = (previous_v2 or {}).get("request_ledger") or {}
+    if ledger.get("source") in (None, LEDGER_UNAVAILABLE) or not isinstance(
+        ledger.get("requests"), Mapping
+    ):
+        return {}
+    return {
+        "requests": dict(ledger["requests"]),
+        "requests_source": LEDGER_CARRIED,
+        "request_event_capacity": ledger.get("event_capacity"),
     }
 
 

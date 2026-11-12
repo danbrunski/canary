@@ -2614,7 +2614,7 @@ that closed its task checklist.
       loops over `observed_channels` too.
       `tests/test_tuning_profile.py::test_achieved_hz_counts_a_memory_sentinel_read_for_its_value_channel`
       fails against the old `metrics.py`.
-- [ ] **D03.70 The `fuel_target` memory window misses 2.5–4 s at a time, about
+- [~] **D03.70 The `fuel_target` memory window misses 2.5–4 s at a time, about
   three times per 20 minutes.** From the item above: `ECM_TARGET_EQUIV_RATIO`
   and `ECM_ENGINE_PERIOD` drop together with no sentinel read while the spark
   window keeps reading. 10 such gaps on four captures (the D03.69 re-score;
@@ -2638,6 +2638,106 @@ that closed its task checklist.
   - Possibly related, unmeasured: throughout that drive a laptop client polled
     `GET /control/rom/backup` every ~6 s and `/models/behavior/live` every
     ~3 s. Check whether either handler does blocking work on the loop.
+  - **Instrumentation done 2026-11-12; diagnosis owed to a drive with it
+    deployed.** The capture's lifetime ledger (`src/collection/capture_lifetime.py`)
+    now keeps, per capture-selected request, its sends and misses. Fed from one
+    funnel, `obd_scheduler.cadence.note_attempt` / `note_miss`: the single path
+    (timeout, NRC, silent liveness probe) and the batch path (whole-batch
+    failure with its NRC, desynced-unparsed members, per-member timeout) both
+    call it. Memory windows go through the single path; the ledger key is
+    `PollRequest.channel` (`mem:<window>`, e.g. `mem:fuel_target`) and `members`
+    are its decoded channels (`mem:ECM_TARGET_EQUIV_RATIO`,
+    `mem:ECM_ENGINE_PERIOD`).
+  - **What is enforced.** `tests/test_capture_request_ledger.py::test_no_code_in_the_collection_package_moves_a_request_counter_but_the_funnel`
+    walks the AST of every module under `src/collection` and fails on any
+    assignment, augmented or annotated assignment, tuple unpack or
+    `setattr(..., "<name>", ...)` to `requests_sent`, `timeouts`,
+    `negative_responses`, `batch_failures`, `last_negative_response_code` or
+    `last_requested_at` outside `note_attempt` / `note_miss`. The one exemption
+    is the receiver `stats` / `self.stats` (`CanObdLoopStats`, the daemon-wide
+    counters, which share three of those names; the test checks they are
+    `CanObdLoopStats` fields). An alias (`rs = request_state; rs.requests_sent
+    += 1`) is caught; a request state bound to a variable literally named
+    `stats` is not. The guard's own cases are tested
+    (`test_the_funnel_guard_catches_what_it_claims`). Not enforced: that a new
+    send path counts its sends at all; one that bypasses `requests_sent` is
+    invisible to `/status` and to the ledger alike.
+  - **What the next tuning capture's `capture_quality.json` shows.** Top-level
+    `request_ledger`: `{source: live|carried|unavailable, event_capacity: 64,
+    requests: {<request channel>: {kind, members, attempts, misses,
+    misses_by_kind{timeout|negative_response|batch_failure|batch_unparsed},
+    last_nrc, first_attempt_at, last_attempt_at, events_recorded,
+    events_dropped, events_complete_until_s, events: [{at_s, kind, nrc,
+    backoff_s}], attempt_long_gaps: [[start, end], ...], attempt_gaps_dropped}}}`
+    (capture clock, seconds). `attempt_long_gaps` are the stretches of 2 s or
+    more between two sends of the request (largest 64, never a timestamp per
+    send). Per channel, `channels[].coverage.long_gap_causes` runs parallel to
+    `long_gaps`: each `{start, end, cause, ...}` with `cause` one of
+    - `sent_and_missed` (adds `misses_total`, `misses_by_kind`, up to 8 `misses`
+      inside the gap);
+    - `not_sent`: a stretch of the send timeline with no sends covers the gap
+      (opening at or before its start, ending at most 0.25 s before its end);
+    - `sent_no_result`: sends continued through the gap with no miss and no
+      answer. In the loop that is a send that raised on the bus
+      (`bus_errors`), a window that answered but left a member undecoded, or a
+      decode that raised after the send. A stop event or deadline is not one
+      of them: it returns an empty exchange, which is a timeout miss. In a
+      rebuild from rows, rows the writer lost read this way too;
+    - `unknown` (+ `reason`): a sidecar from before this field, a K-line
+      channel, or an overflowed miss list or send timeline.
+
+    The same list sits in the `acquisition_gap` failure's evidence
+    (`long_gap_causes`). A gap overlapping a pause window reads `not_sent` (the
+    daemon sends nothing while paused). Read it on the 10-gap pattern:
+    `sent_and_missed` with a `timeout` or NRC and `backoff_s` of 1-2 means a
+    lost or refused read plus the miss back-off; `not_sent` means the scheduler
+    never asked, so look at starvation/budget/window opening;
+    `sent_no_result` means it asked and nothing was recorded either way, so
+    look at the send/receive path. `/status` `capture_lifetime.requests`
+    carries the counts live (no `events`; `tests/test_health.py`). A rebuild
+    from rows carries the stop-time ledger forward (`source: carried`, miss
+    window widened by 0.25 s for the clock difference); a pre-D03.70 sidecar
+    scores every gap `unknown`.
+  - **Journal:** the daemon now logs one WARNING per capture-selected request
+    that misses (`capture request mem:fuel_target missed (timeout), back-off
+    1.0s; N miss(es) since the last report, M this capture (<profile>)`), the
+    first miss and then at most one per 30 s per request, logged after the
+    ledger's lock is released.
+  - **What one lost read reproduces on the fake clock, and what it does not.**
+    The tracked Xterra `tuning` profile at its 90 req/s, 1 s request timeout as
+    on the Pi, 60 s run, exactly one `fuel_target` 0x23 read faulted
+    (`test_one_lost_fuel_target_read_holes_the_window_by_timeout_backoff_and_wait`,
+    `test_one_refused_fuel_target_read_holes_the_window_by_about_two_seconds`,
+    `test_a_send_that_raises_leaves_a_gap_attributed_sent_no_result`):
+    - **Timeout (read lost before the ECM):** `mem:ECM_TARGET_EQUIV_RATIO` and
+      `ECM_ENGINE_PERIOD` (same read) go silent for **3.10 s or 4.05-4.07 s**,
+      discrete sizes set by where the read falls against the 0.5 s window cycle
+      (14 loss phases scanned): the 1 s timeout, the 1 s capture miss back-off
+      (`CAPTURE_MISS_BACKOFF_SECONDS`, first miss), then the wait for the next
+      window slot. Longest interarrival with nothing lost: 0.515 s.
+    - **NRC (refused at once):** about **2.0 s** (2.001, 1.989, 2.001 s at three
+      phases; one falls under the 2 s long-gap floor), the back-off plus the
+      slot wait, with no timeout to wait out.
+    - **The truck's ten gaps** are 2.531, 2.545, 2.551, 2.559, 2.570, 2.579,
+      3.064, 4.000, 4.057 and 4.520 s. Only the 3.064, 4.000 and 4.057 s gaps
+      lie within 0.05 s of a size the model gives (3.10, 4.05-4.07 s): the same
+      size, not evidence of the same cause. **Not explained by one lost read:** the
+      tight **2.53-2.58 s cluster** (six of ten; a timeout gives 3.10 s or more,
+      an NRC about 2.0 s) and the **4.52 s** gap (above the model's maximum).
+      They need a different or compound cause (two misses, a longer wait for
+      the window slot, a different timeout or back-off in force on the truck).
+      A range match (2.5-4.5 s) is not evidence and is not claimed.
+    - Neither run says *why* a read would be lost on the truck.
+  - **Checked at the desk, neither blocks the loop:** the laptop's polling of
+    `GET /control/rom/backup` (`get_rom_backup`, `src/dashboard/routes/rom_library.py`,
+    `run_in_threadpool(job.state)`) and `/models/behavior/live`
+    (`get_behavior_live`, `src/dashboard/routes/public.py`, a sync `def`, which
+    FastAPI runs in its thread pool). Not a candidate cause.
+  - **Still owed: a tuning drive on this build, then reading the sidecar's
+    `long_gap_causes` on the `ECM_ENGINE_PERIOD` / `ECM_TARGET_EQUIV_RATIO`
+    gaps.** The open question that drive should answer is the 2.53-2.58 s
+    cluster: is there a miss in it (`sent_and_missed`, with which kind, NRC and
+    back-off), none (`not_sent`) or nothing recorded (`sent_no_result`)?
 - [x] **D03.71 The dashboard's control token is written to the daemon's
   access log.** `useControlStream.ts` opens `/ws/control?token=…`, and
   uvicorn's access log records the full path, so the token sits in
