@@ -19,13 +19,13 @@
       "id": 1,
       "name": "ltft-zero-after-flash",
       "prompt": "Since the flash on Saturday both LONG_FUEL_TRIM_1 and _2 read exactly 0.00 in every session, and warm idle STFT is sitting around -6%. Before the flash LTFT was moving around a few percent. Is the decode broken or did the flash kill something?",
-      "expected_output": "Neither. Every UpRev flash (and every battery disconnect) resets the learned trim on this ECM; 0.00 is the neutral value (raw 0x80 on the PID 0x07 scale), not a decode bug. Relearn has been slow on this truck (weeks after the 2026-06-28 disconnect), so trim analysis is STFT-only until it moves; when it does, use total trim (1+STFT)(1+LTFT)-1. Negative idle STFT with LTFT at zero was also seen after the 09-20 flash. Points at labelled_events.yaml and the CAN learned-trim DIDs 0x1125/0x1126 (0x1102 is road speed on CAN).",
+      "expected_output": "Neither. Every UpRev flash (and every battery disconnect) resets the learned trim on this ECM; 0.00 is the neutral value (raw 0x80 on the PID 0x07 scale), not a decode bug. Learning is not slow and the tune does not disable it: it is gated on purge. The canister clean-out accumulator has to cross its threshold within ONE engine start (about 43 min into the first start of 2026-11-08, 32-35 min of steady purging cruise at that day's fill rate) and restarts at every engine start, a stall-restart with the key on included, so a run of short town drives never opens the gate and 0.00 on both banks means the gate has not opened since the reset. Until it moves, trim analysis is STFT-only; once it does, total trim ADDS (k = 1 + STFT + LTFT, derived:TOTAL_TRIM_B1/B2 is the sum, not the product) and trims are split by purge state (DID 0x1110 / PID 0x2E), because the near-idle cells were learned with purge duty 6-30 % and most likely carry the ECM's purge-compensation error, and the warm-idle cell has never learned. Negative idle STFT with LTFT at zero was also seen after the 09-20 flash. Points at labelled_events.yaml and the CAN learned-trim DIDs 0x1125/0x1126 (0x1102 is road speed on CAN), and data/analyses/2026-11-08-ltft-learning.md for the gate.",
       "assertions": [
         "States that the flash reset the learned long-term trim and that 0.00 is the neutral value, not a decode fault",
-        "Notes that relearn on this truck has taken weeks, so LTFT may stay at zero for a long time",
-        "Says trim analysis is STFT-only while LTFT is zero, and to use total trim (1+STFT)(1+LTFT)-1 once it moves",
+        "Explains that relearning is gated on purge within a single engine start (it restarts at every engine start), so a zero spell is a driving-pattern effect, and does not say the tune disabled learning or that relearning is simply slow",
+        "Says trim analysis is STFT-only while LTFT is zero, and that once it moves total trim is the SUM 1 + STFT + LTFT (not the product (1+STFT)(1+LTFT)-1), read split by purge state",
         "Does not diagnose a failed A/F sensor or ECM fault from the zero LTFT alone",
-        "Mentions a way to confirm (e.g. labelled_events.yaml history, or the Mode 22 learned-trim DIDs 0x1125/0x1126)"
+        "Mentions a way to confirm (e.g. labelled_events.yaml history, the Mode 22 learned-trim DIDs 0x1125/0x1126, or the ltft-gate capture's visit counts)"
       ],
       "files": []
     },
@@ -47,12 +47,53 @@
       "id": 3,
       "name": "wot-maf-plateau-altitude",
       "prompt": "WOT log from the Xterra at home: MAF flattens out around 145 g/s from about 5000 to 5800 rpm. A stock VQ40 should be pulling way more than that at redline. Is my intake or cat restricted? I'm about to order a cone intake anyway.",
-      "expected_output": "Not a restriction: home ambient is ~80 kPa (measured, PID 0x33), so peak airflow is ~21 % below a sea-level figure. Computing VE against measured baro gives ~85–93 %, a healthy NA curve; against an assumed 101.3 kPa it would falsely read 67–73 %. Advises reading baro per session (trips go to 63 kPa). Notes a cone intake changes the MAF transfer function and needs a MAF rescale, and that the build boundary invalidates baselines.",
+      "expected_output": "Not a restriction: home ambient is ~80 kPa (measured, PID 0x33), so peak airflow is ~21 % below a sea-level figure. Stored WOT pulls (2026-11-10..12) peak at 145-147 g/s near 5,500-5,750 rpm and are still rising from ~140 g/s at 5,000, so the plateau is narrower than the user says; VE against the measured baro runs about 0.90 at 4,000-4,500 rpm, 0.86-0.87 at 5,000 and 0.80-0.83 at 5,500+ (VE falls as 1/rpm once airflow is flat), approximate because manifold pressure is taken as baro at WOT and density comes from the session's median baro and IAT, and plausible for an NA engine, not a restriction; against an assumed 101.3 kPa it would falsely read about 65-73 %. Advises reading baro per session (trips go to 63 kPa). Notes a cone intake changes the MAF transfer function and needs a MAF rescale, and that the build boundary invalidates baselines.",
       "assertions": [
         "Attributes the lower airflow to altitude (~80 kPa ambient) rather than to a restriction",
-        "Computes or cites VE of roughly 85–93 % using measured baro, and/or shows how assuming 101.3 kPa produces a false ~70 % VE",
+        "Computes or cites VE of roughly 80-90 % using measured baro (falling with rpm across the pull), and/or shows how assuming 101.3 kPa produces a false ~65-73 % VE",
         "Recommends reading barometric pressure (PID 0x33) per session instead of assuming a fixed value",
         "Notes that a cone intake changes the MAF housing/flow and so the MAF calibration, requiring a rescale"
+      ],
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "first-gear-full-pedal-by-revision",
+      "prompt": "Two first-gear full-pedal pulls from the Xterra. The one from the 2026-11-11 daytime drive shows PID 0x11 throttle sitting near 40 % and the ECM target reading mid-table load-indexed cells. The one from the 03:42Z drive on 2026-11-12 shows throttle 88 % and the last Fuel Targets column, with measured AFR 12.5-12.9 above 4,100 rpm. My notes say first gear never trips WOT enrichment. Is one of these logs wrong?",
+      "expected_output": "Neither is wrong; the answer depends on the calibration each session ran. Resolve each session's revision from tune_revisions.yaml by flash time (resolve_session_revision) first. Through ZS44A-20261111 a calibrated first-gear torque cap (cal 0x8EBC = 3,138, armed when the ratio estimate is at or above cal 0x9308 = 3,584) holds first-gear full pedal to about 40 % throttle, so enrichment is fueled from the load-indexed cells. ZS44A-20261111-2 (flashed 2026-11-12T01:02Z) set 0x9308 to 32,767, so the gear test never passes: first-gear full pedal is full throttle and reads the last column (AFR 12.5-12.9 from ~4,100 rpm, was 11.8-12.0, and ~3 % lean of its target while rpm climbs fast). The old note is true of the cap, not of the truck. Keep sorting full-pedal data by gear (rpm / wheel speed). If the truck were down on power in every gear with no codes, 0xFFFF4856 bit 3 (a cap on all gears) is the first read.",
+      "assertions": [
+        "Does not declare either log wrong, and resolves the calibration revision for each session before comparing",
+        "Attributes the 40 % throttle / load-indexed targets to the first-gear torque cap that exists through ZS44A-20261111, and the 88 % / last-column behavior to ZS44A-20261111-2 (cal 0x9308 raised to 32,767, flashed 2026-11-12)",
+        "Says the note that first gear never trips WOT enrichment is a fact of the older calibration, not of the truck",
+        "Keeps the advice to sort full-pedal data by gear (rpm divided by wheel speed)",
+        "Mentions the every-gear cap trigger (0xFFFF4856 bit 3) as the first read when the truck is down on power in all gears with no codes, or the 3 % lean of first gear against its target"
+      ],
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "pulse-chain-0.93-while-purging",
+      "prompt": "I'm scoring the decoded injector pulse chain (BFS x phi x trims, plus dead time) against DID 0x1206 on the 2026-10-27 tuning captures. The median ratio is 1.006 at warm idle with purge off, but on a steady 2,800 rpm cruise it reads 0.93. I think the injector model is off at higher flow. Should I refit the injector constant?",
+      "expected_output": "No. The ECM's pulse includes an EVAP purge factor alpha (0xFFFF4698/469A) that cuts the pulse while purge flows; the chain as written has no purge term, so it only holds with purge off. On the four post-pump captures it reads 1.006 with purge off and 0.90-0.95 while purging (settled 0.904-0.944 by drive, falling over ~30 s after DID 0x1110 turns on and returning within 2 s of purge ending). Split by purge state (DID 0x1110 / PID 0x2E) first; score the chain on purge-off reads until alpha is read live (it never has been), and never run a plant evaluation on a purging read without it. The 0.93 is not an injector error and K or the flow scaler should not be refit from it.",
+      "assertions": [
+        "Identifies the purge factor (EVAP purge alpha, 0xFFFF4698/469A) as the cause, not the injector model",
+        "Says to split by purge state (DID 0x1110 or PID 0x2E) before scoring, and to score the chain on purge-off reads",
+        "States that purging reads sit around 0.90-0.95 while the purge-off known answer is about 1.006",
+        "Advises against refitting the injector constant, K or the flow scaler from the purging reads",
+        "Notes that alpha has not been read live, so a plant evaluation should not use purging reads without it"
+      ],
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "rail-pressure-across-the-pump-swap",
+      "prompt": "I'm charting warm-idle fuel rail pressure from the AEM channel: 50.8 psi on the 2026-10-04 drive and 53.8 psi on 2026-10-27. Can I call that the same fuel system drifting up 3 psi, and does the AEM reading disagree with the gauge face by 1.8 psi so I should subtract that?",
+      "expected_output": "Not the same system. The Aeromotive 340 pump assembly replaced the stock in-tank module between 2026-10-10 and 2026-10-26, so these two numbers straddle a hardware change; the session must be placed against the pump as well as the flash, and labelled_events.yaml has no entry for it, so nothing stops pooling. On the same analog instrument the new pump reads +3 psi at 0-10 g/s falling to +1.3 psi at 60-100 g/s, about +2.5-3 % injector flow (sqrt of delta-P), which is the right way to say it. The +1.8 psi analog versus gauge-face offset is unresolved (the vent check is still owed), so compare ratios on the one instrument rather than correcting absolute readings. The channel is the AEM 30-0301 analog output through the USB ADC; average at least 0.5 s for a pressure, nothing above ~88 Hz is rail pressure, and it mostly sees bank 2.",
+      "assertions": [
+        "Identifies the Aeromotive pump replacement (between 2026-10-10 and 2026-10-26) as a hardware boundary between the two readings, not drift",
+        "Converts the pressure change to an injector flow change (about +2.5-3 %, via square root of delta-P) rather than treating psi as the effect",
+        "Says the +1.8 psi analog-versus-face offset is unresolved and recommends comparing ratios on the one instrument instead of subtracting it",
+        "Notes the channel is the analog output through the USB ADC and that pressure needs averaging over at least 0.5 s (nothing above ~88 Hz is rail pressure)"
       ],
       "files": []
     }

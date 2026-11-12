@@ -11,7 +11,7 @@ description: >-
   (MAF-only with no MAP sensor, 63–82 kPa ambient, no TCM, an IAT that reads
   engine-bay air at idle) that change how its data must be read. Load it
   alongside `ecu-reverse-engineering` (generic decode method) or
-  `engine-management` (generic engine behaviour). Those two stay
+  `engine-management` (generic engine behavior). Those two stay
   vehicle-agnostic on purpose, and this file is where the Xterra-isms live.
   Do NOT apply anything here to another vehicle.
 ---
@@ -38,36 +38,21 @@ general, put it there instead.
    learned fuel trim (below). Whether it also clears throttle and idle learning
    is unknown; if idle is off after a flash, run the FSM relearns
    (`references/engine-and-ecu.md`).
-2. **Hardware.** A supercharger build lands from late 2026-09: Z1 Level 2
-   (Harrop HTV1900), Aeromotive 340 pump assembly, Bosch 700 cc injectors,
-   75 mm throttle body, cone intake. Every NA-learned quantity is invalidated
-   by it: the MAF transfer function, K and dead time, idle and throttle
-   learning, behaviour surfaces, and the trained detectors. NA baselines, open
-   questions and the first-start plan are in `docs/roadmap/supercharger-build.md`.
-   The build should be recorded as an `intervention` with
-   `corpus_boundary: true` in `labelled_events.yaml`. What it will look like in
-   this truck's data (generic mechanics are in `engine-management` →
-   `air-load-and-boost.md`):
-   - The HTV1900 is a positive-displacement roots blower, so it holds pressure
-     *ratio*. Expect about 21 % less gauge boost at home than a sea-level figure
-     (7 psi → ~5.5 psi), and less again on mountain drives (~4.4 psi at 63 kPa).
-     That is not belt slip.
-   - The ECM measures no boost. With returnless fuel and no MAP input, injector
-     ΔP falls by the boost pressure: a ~5–7 % WOT flow deficit that moves with
-     baro and that the trims never see (WOT is open loop). Unless the fuel
-     system gets a boost-referenced regulator, the TMAP and AEM data CANary
-     collects can only reach the ECM as Fuel Targets (rpm × BFS) numbers. That
-     table can't see baro or charge temperature. The ROM's commanded φ will also
-     read richer than what is delivered, by design. See
-     `supercharger-build.md` → "Boosted fuelling without a pressure input" and P5.
-   - Z1's other kit (2022+ Frontier, VQ38, same blower) moves the MAF into a new
-     tube and routes the ECU's IAT signal to a post-intercooler sensor through
-     the MAF connector. If this kit does the same, `INTAKE_TEMP` stops being
-     engine-bay air and becomes charge temperature. Check before reusing any IAT
-     trap from this file.
-   - Z1's figures on 93 octane: Level 1 309 whp / 307 wtq, Level 2 350 / 343,
-     Level 3 443 / 441 (snippets of Z1's own pages; the Level 2 boost and pulley
-     are still unpublished).
+2. **Hardware.** The build arrives in parts. **Fitted:** the Aeromotive 340
+   pump assembly, between 2026-10-10 and 2026-10-26 (a window; nothing records
+   hardware): warm-idle rail pressure 50.79 → 53.78 psi on the same instrument,
+   about +2.5–3 % injector flow. **Still to come:** Z1 Level 2 (Harrop
+   HTV1900), Bosch 700 cc injectors, 75 mm throttle body, cone intake. Those
+   invalidate every NA-learned quantity: the MAF transfer function, K and dead
+   time, idle and throttle learning, behavior surfaces, the trained detectors.
+   Place a session against the pump as well as the flash. `labelled_events.yaml`
+   has no entry for the pump, so nothing stops a fuel comparison from pooling
+   across it (whether it is a `corpus_boundary` is the operator's call); record
+   the rest of the build as an `intervention` with `corpus_boundary: true`.
+   What the build will look like in this truck's data (blower pressure ratio,
+   the ~10 % boosted fuel deficit, IAT, 91 octane against Z1's 93-octane
+   figures) and the fuel-pressure channel: `references/engine-and-ecu.md`. Plan
+   and open questions: `docs/roadmap/supercharger-build.md`.
 3. **Altitude.** Home is **79–82 kPa** (Colorado Springs, ~2070 m), but drives
    reach **63–73 kPa** (2,900–3,900 m). Read `BAROMETRIC_PRESSURE` (PID `0x33`)
    per session. Never assume sea level, and never assume 80 kPa either. The
@@ -93,6 +78,7 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
 | Flash history, which calibration was running | `tune_revisions.yaml` |
 | Trim resets, altitude trips, other non-fault events | `labelled_events.yaml` |
 | Run-to-run noise floor (by condition) | `noise_floor.yaml` |
+| Speed channels' ratio to GPS, tire circumference | `dyno.yaml`; `profiles.yaml` (repo root) |
 | K-line addresses, wake-up, modules (ECM, ABS) | `kline.yaml` |
 | ROM tables, axes, verified extraction | `rom_viewer.yaml`, `docs/uprev-rom-table-verification.md` |
 | Flash image layout, map slots, candidate tables | `rom_map.yaml` (W08), `docs/uprev-rom-table-verification.md` |
@@ -107,9 +93,13 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
   dithers 0.9796 / 1.0204, not a flat 1.000.
   And `0x44` is φ only while the ECM's A/F feedback target is 14.7 (firmware):
   it reads 0.871 at idle with φ = 1.0. Use `mem:ECM_TARGET_EQUIV_RATIO`.
-- **UpRev's AFR is not an independent instrument.** It is the A/F voltage
-  through the ECM's table *without* the ECM's barometric gain, so it reads lean
-  at altitude. PID `0x24`/`0x28` is the corrected value.
+- **UpRev's AFR is not an independent instrument, and neither are three
+  channels from one sensor.** PID `0x24`, the voltage DIDs `0x1225`/`0x1226` and
+  UpRev's AFR are one sensor per bank. UpRev's skips the ECM's barometric gain
+  (1.5–4.5 % lean at altitude); CANary's route applies it since `e023c740`
+  (2026-10-07). Short-term trim controls on that word, so closed-loop agreement
+  with target proves nothing about the sensor, and an independent λ needs an
+  external wideband (none on this truck). Detail: `references/engine-and-ecu.md`.
 - **No MAP sensor, and no boost, fuel pressure, or torque from the ECM.** PID
   `0x0B` is unsupported (the VQ40DE is MAF-metered), and so are `0x0A`, `0x22`,
   `0x23`, `0x59`, `0x43` and `0x61`–`0x63`. A "manifold pressure" label on any
@@ -124,15 +114,16 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
   (verified 2026-10-02; the ms channel is `derived:BASE_FUEL_SCHEDULE`), not
   injector pulse width, so never derive fuel mass or φ from it. Read a DID's
   `description` and evidence in `data/dids.yaml` before trusting its name.
-- **Long-term fuel trim resets on every flash and every battery disconnect, and
-  relearns slowly.** After the 2026-06-28 disconnect it read exactly 0.00 % on
-  both banks until sometime between 09-10 and 09-18. The 09-20 flash reset it
-  again, and it was still 0.00 on 09-23. That 0.00 is the neutral value (raw
-  `0x80` on the PID `0x07` scale), not a decode bug or a fault. While it sits
-  there, trim analysis is STFT-only. Once it is active, use total trim
-  `(1+STFT)(1+LTFT)−1`. Over Mode 22 on CAN, learned trim is DID `0x1125`
-  (B1) and `0x1126` (B2), and short-term trim is `0x1123`/`0x1124`. These are
-  the same RAM words PIDs `0x06`–`0x09` read (firmware, 2026-10-04).
+- **Long-term fuel trim resets on every flash and every battery disconnect,
+  and relearns only when a purge gate opens.** Exactly 0.00 % on both banks is
+  the neutral value (raw `0x80` on the PID `0x07` scale), not a decode bug or a
+  fault: the gate has not opened since the last reset, which is a driving
+  pattern. Total trim **adds**, `1 + STFT + LTFT` (`derived:TOTAL_TRIM_B1/B2` is
+  the sum, not the product); split trim by purge (DID `0x1110`). Over Mode 22 on
+  CAN, learned trim is DID `0x1125` (B1) and `0x1126` (B2), short-term trim
+  `0x1123`/`0x1124`, the same RAM words as PIDs `0x06`–`0x09`. The gate, its
+  timing and the learned cells: `references/engine-and-ecu.md` → "Learned fuel
+  trim".
 - **DID `0x1102` is vehicle speed, not learned trim.** The catalog named it
   `ECM_LONG_FUEL_TRIM_B1` from UpRev's *K-line* stream labels. It is the speed
   byte (one byte, km/h = raw × 2) on both transports: the firmware's K-line
@@ -165,24 +156,30 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
   `FUEL_STATUS` is the firmware's own report of every gate (4 = open by
   condition). Details: `docs/ecu-firmware-analysis.md`, "Closed-loop enable and
   trim authority".
-- **Full-throttle enrichment is a switch on target throttle, and first gear
-  never trips it.** The ECM uses the Fuel Targets map's **last load column**
-  while its own target throttle opening is ≥ 78 % on PID `0x11`'s scale (fully
-  open reads 88.6 %), at every rpm. No load threshold and no timer are involved.
-  In the data that first found it (1,600–3,600 rpm, not split by gear) that was
-  broadcast pedal ≥ ~227/255 (20 errors in 27,415 rows; evidence on DID `0x1134`
-  in `data/dids.yaml`). **In first gear the ECM
-  holds the throttle at about 40 % with the pedal on the floor** (2,000–4,500
-  rpm, opening fully only below ~1,800 and from ~5,600 rpm), so first-gear full
-  pedal is fuelled from the load-indexed cells, not the last column. The cause is
-  a calibrated torque cap that applies while rpm ÷ vehicle speed says first gear
-  (`docs/ecu-firmware-analysis.md`, "What limits first gear"). It is not a
-  fault, not traction control, and not a restriction. To change WOT fuelling in
-  second gear and up, edit the last column. Sort full-pedal data by gear
-  (rpm ÷ wheel speed) before reading it.
+- **Full-throttle enrichment is a switch on target throttle (≥ 78 % on PID
+  `0x11`) into the Fuel Targets map's last load column, and on some revisions
+  first gear never trips it.** Resolve the session's revision first. Through
+  `ZS44A-20261111` a torque cap holds first-gear full pedal to ~40 % throttle
+  (load-indexed cells); from `ZS44A-20261111-2` (flashed 2026-11-12T01:02Z, cal
+  `0x9308` 3,584 → 32,767) first-gear full pedal is full throttle and reads the
+  last column. Keep sorting full-pedal data by gear. Gear bands, the every-gear
+  trigger (`0xFFFF4856` bit 3) and the `rom_map.yaml` entries:
+  `references/engine-and-ecu.md`.
 - **The factory A/F sensors floor at 10.0 AFR** in UpRev logs, so samples there
   are censored. They are good to roughly ±5 % at WOT. Don't chase a smaller WOT
   error with them.
+- **Warm-idle lean follows heat, so a lean idle trim is not yet a leak.** With
+  purge off, total trim at idle was 0.0 / −1.6 % on a cool morning (IAT
+  19–28 °C) and +7–10 / +4–8 % on a hot afternoon (IAT 41–65 °C); a fixed idle
+  correction sized from the hot drive was withdrawn
+  (`data/analyses/2026-11-08-tuning-proposals.md`, "Corrected 2026-11-10").
+  Compare idle trims at matched IAT and rail pressure first.
+- **Polled rows in a `tuning` capture carry the round's scheduled start as
+  `timestamp`**; the wire time is `metadata_json.acquired_at` (RAM reads sit a
+  median 164 ms after their stamp). Join polled rows to broadcast frames on it
+  (`read_channels(…, acquired_time=True)`; `compare_channels` does). A hand join
+  produced a withdrawn "stray read" on 2026-11-12
+  (`data/analyses/2026-11-11-first-gear-cap-off-prediction.md`, "Clock").
 - **A flash can change two things at once.** On 2026-08-03 the operator raised
   fuel compensation *and* the AFR target in one flash. An error-versus-target
   metric credited the target move to delivery. Get the edit list from the
@@ -190,11 +187,20 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
 
 ## Air, fuel and altitude numbers worth knowing
 
-- WOT airflow at home plateaus near **145 g/s from ~5,000–5,850 rpm**. Against
-  the measured 80 kPa that is 85–93 % VE, a healthy NA curve. Against an assumed
-  101.3 kPa the same data computes to 67–73 % and looks like a restriction that
-  isn't there. The sea-level equivalent (~184 g/s) is consistent with the
-  rating.
+- WOT airflow at home peaks near **145–147 g/s at 5,500–5,750 rpm**, still
+  rising from ~140 g/s at 5,000, so VE falls as 1/rpm. Against the measured
+  baro (81–82 kPa), four stored pulls (2026-11-10..12, throttle ≥ 80 %) read VE
+  ≈ 0.90 at 4,000–4,500 rpm, 0.86–0.87 at 5,000 and 0.80–0.83 at 5,500–5,750.
+  **Approximate:** manifold pressure is taken as baro at WOT and ρ comes from the
+  session's median baro and IAT. That is plausible for an NA engine here, and
+  nothing in these data says it is healthy beyond that. Against an assumed
+  101.3 kPa the same data computes to 65–73 % and looks like a restriction that
+  isn't there. The sea-level equivalent of the peak is ~180 g/s. The pulls stop
+  at ~5,750 rpm.
+- **Fuel is standard pump gasoline, usually E10** (operator, 2026-11-12), and
+  the blend varies. Fuel-mass arithmetic uses a stoich of about 14.1, with 14.7
+  (E0) as the bound; the ECM's own AFR numbers stay λ × 14.7 whatever is in the
+  tank. With the supercharger the truck moves to 91 octane.
 - The Mode 22 MAF DID (`ECM_MAF_GPS`) agrees 1:1 with PID `0x10` (median ratio
   1.000 ± 0.007, 3–134 g/s) once gated to |dMAF/dt| ≤ 5 %/s. An apparent 5 %
   shortfall at high flow was acquisition skew.
@@ -203,11 +209,13 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
   "unobtainable over Mode 01" conclusion came from never reaching real WOT.
 - The ECM's final commanded φ is also in RAM (`mem:ECM_TARGET_EQUIV_RATIO`),
   which `lambda_delivery.yaml` prefers as the commanded source.
-- After the build, boost and post-intercooler temperature come from the kit's
-  Bosch TMAP read by the CANary-HAT, and fuel pressure from an AEM CAN gauge
-  (`sensor:FUEL_PRESSURE`), not from the ECM (`supercharger-build.md` → P2).
-  The fuel system is returnless, so injector ΔP = rail − (MAP − baro) falls
-  under boost. That derived channel is why the two sensors matter together.
+- Fuel pressure is `sensor:FUEL_PRESSURE`, the AEM 30-0301's *analog* output
+  through a USB ADC (live since 2026-10-04), not the ECM; how to read it is in
+  `references/engine-and-ecu.md` → "Fuel pressure". Boost and post-intercooler
+  temperature will come from the kit's Bosch TMAP (`supercharger-build.md` →
+  P2). The fuel system is returnless, so injector ΔP = rail − (MAP − baro)
+  falls under boost; that derived channel is why the two sensors matter
+  together.
 
 - **The FSM's reference values are sea-level, stock-calibration figures.** Its
   spec check is defined only at 98.3–104.3 kPa barometric pressure, so a healthy
@@ -220,11 +228,24 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
 
 Engine specifications, factory reference values, the Nissan fuel equation as
 this ECM implements it (base fuel schedule, K, which tables K moves), spark and
-knock behaviour, the relearn procedures, and known failure modes are in
+knock behavior, the relearn procedures, and known failure modes are in
 `references/engine-and-ecu.md`.
 
 ## Physical and environmental facts
 
+- **Driveline and speed: the truck is on 4.08 axles.** ECM vehicle speed (PID
+  `0x0D`, DID `0x1102`) reads about **0.92 × GPS**, so
+  distance, economy and acceleration from OBD speed are ~8 % low unless
+  corrected. `dyno.yaml` holds the ratio per speed channel: 0.9203 for
+  `obd:SPEED` (PID `0x0D`) and `WHEEL_SPEED_6F7_A` (the committee relation), and
+  0.932 for `VEHICLE_SPEED_2D1` (`0x2D1`), which was measured separately (H07.3,
+  0.9314–0.9348) and does **not** share 0.9203. Rolling circumference is **2.559 m
+  since 2026-10-03**, 2.609 m before (H07.11): a boundary for anything derived
+  from wheel speed. The ECM's gear-ratio estimate (`0xFFFF27D2`) reads 10–12 %
+  high in every gear because cal `0x91F8` still holds the stock axle; leave
+  that word alone. Sources: `docs/ecu-firmware-analysis.md` ("The 4.08 regear
+  makes every gear read about 10–12 % short"), `dyno.yaml`, a comment in
+  `src/preprocessing/segmenter.py`.
 - **A/C cannot run with the blower off**, by design. The reachable states are
   both-off, blower-only, and blower+A/C, which is still enough to separate
   blower bits from A/C bits by nesting.
@@ -240,6 +261,9 @@ knock behaviour, the relearn procedures, and known failure modes are in
   capture's request mix.
 - `references/engine-and-ecu.md`: VQ40DE specifications and FSM reference
   values, the fuel equation (Tp/base fuel schedule, K, α) and ROM tables,
-  cam timing and variable intake, relearn procedures, and common VQ40DE faults.
+  cam timing and variable intake, learned fuel trim (when it learns, why it
+  reads 0.00), fuel pressure (the pump and the AEM channel), the supercharger
+  build as it will show in the data, relearn procedures, and common VQ40DE
+  faults.
   Read it for "is this reading normal?", before advising on a table edit, and
   after any flash or throttle-body change.

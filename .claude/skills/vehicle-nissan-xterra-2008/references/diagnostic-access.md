@@ -110,8 +110,18 @@ site.
     ignition timing (110 − raw, the `0x110A` byte), not A/F heater duty; the
     heater duties are `0x114E`/`0x114F` (0.4 %). `0x123F` is a monitor run
     counter, not IAT; IAT is `0x1106` (raw − 50). `0x1117` is ×100/255.
-    `0x1129` is baro inside a Mode 22 session. `0x120B` returns the first
-    flagged DTC and reads P0328 while driving.
+    `0x1129` is baro inside a Mode 22 session.
+  - **`0x120B` is a read with a write in it.** It returns the first flagged
+    DTC (P0328 while driving), and each answer clears status bit 0 on every
+    diagnostic item, which drops the knock fallback for about one pass
+    (firmware; `side_effect` in `data/dids.yaml`). DID sweeps skip it and the
+    poll plan refuses it. Read the item status bytes (`0xFFFF677A`–`6785`) or
+    CAN service `0x17` instead.
+  - **Knock codes:** P0328 has been confirmed (not just pending) since
+    2026-10-10, and the fallback holds for the whole key cycle. Mode 04 clears
+    the code, not the fault: a fault still present re-sets as first-trip after
+    about one pass. See `engine-and-ecu.md` and `docs/ecu-firmware-analysis.md`,
+    "Knock monitoring".
   - The firmware's DID → RAM pointer tables are at `0x024988`, `0x024B84` and
     `0x024D00` for CAN, and at `0x022738`, `0x022938` and `0x022AB4` for
     K-line.
@@ -157,6 +167,15 @@ site.
   unidentified) are in `data/nissan-xterra-2008/bcm-active-tests.yaml`. They
   are volatile and reversible, and each one is a known physical action for
   binding body frames. Confirmation is open as D03.33.
+- **Its local identifiers are one byte**, so `POST /control/obd_request` needs
+  `identifier_bytes: 1` with `header` 0x745 and `response_id` 0x765 (or
+  `data_hex` for exact bytes).
+- **Frame `0x385` carries the tire pressures:** bytes 2–5 × 0.25 psi, byte 6
+  high nibble = sensors received (`F0` all four, `00` none). `bindings.yaml`
+  holds bytes 2–5 only as `hypothesized` (corner order unverified) and has
+  nothing for byte 6's nibble or byte 1's low-pressure flags. TPMS sensor registration writes the BCM's non-volatile
+  memory, so it falls under the `AGENTS.md` conditions
+  (`data/analyses/2026-11-11-tpms-bcm-read.md`).
 
 ## Broadcast bus
 
@@ -186,6 +205,14 @@ UpRev RPM, with scale stability 0.9985–1.0011 across 750–3700 rpm.
   only: it ignored `10 C0` on CAN 0x752. The scan tool clears its codes with
   a bare `14`, which gets about 350 ms of `7F 14 78` and then `54`
   (`data/analyses/2026-10-04-srs-kline-scan-tool.md`).
+- **SRS reads (module `0x58`): the reverse of the ECM.** Only the standard
+  25 ms / 25 ms fast init is answered; the ECM's long-low wake-up never is.
+  Request bytes must be spaced **15 ms apart** (ISO P4,
+  `kline.yaml` → `request_timing.p4_ms`), or they are ignored: back-to-back
+  bytes went unanswered on every init shape. Reads are `A2 00` (current) and
+  `A2 01` (past), answered `E2 n [hi lo]×n` with SAE J2012 code words (`0x9023`
+  = B1023). The current/past mapping is inferred from one observation
+  (`data/analyses/2026-10-08-srs-kline-code-read.md`).
 - **Tester address `0xFC`, not the ISO 14230-4 default `0xF1`.** A
   StartCommunication from `0xF1` (or to `0x33`/`0x11`/`0x01`/`0x12`) gets
   silence, which reads exactly like dead hardware.

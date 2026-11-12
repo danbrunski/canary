@@ -12,6 +12,9 @@ one. Figures measured on this truck override the manual's typical values for
 - Engine and hardware
 - Factory reference values (data monitor)
 - The fuel equation as this ECM implements it
+- Learned fuel trim: why it reads 0.00 and when it learns
+- The supercharger build in this truck's data
+- Fuel pressure: the pump and the AEM channel
 - ROM tables and what an edit moves
 - Relearn procedures
 - Common VQ40DE faults and how they look in a log
@@ -26,9 +29,9 @@ one. Figures measured on this truck override the manual's typical values for
 | Firing order | **1-2-3-4-5-6** (online "1-4-2-5-3-6" is wrong) | EC-34 |
 | Bank 1 | cylinders 1-3-5, **RH / passenger side**. The Bank 2 A/F connector is by the brake booster | EM-17, EC-25 |
 | Rating | 261 hp @ 5,600 rpm, 281 lb-ft @ 4,000 rpm (sea level) | Nissan 2008 press kit |
-| Upstream sensor | **A/F sensor 1**: planar, limiting-current, wide-range, heated ~800 °C, ahead of each manifold catalyst. Reported as λ on PIDs `0x24`/`0x28` (λ + voltage); `0x34`–`0x3B` are not supported. **One sensor per bank behind every λ number:** PID `0x24`/`0x28` λ is the ECM's own computation from the A/F voltage DIDs `0x1225`/`0x1226`. It applies a **barometric gain** (k table `0xD00F`: 112 at 80 kPa, 94 at 63 kPa) before the AFR table `0xE644`. UpRev's AFR and CANary's voltage curve skip the gain and read ~1.5–4.5 % lean on the rich side at this truck's altitudes (firmware, 2026-10-05) | EC-141, EC-32, `pid-probe-2026-07-22.md` |
+| Upstream sensor | **A/F sensor 1**: planar, limiting-current, wide-range, heated ~800 °C, ahead of each manifold catalyst. Reported as λ on PIDs `0x24`/`0x28` (λ + voltage); `0x34`–`0x3B` are not supported. **One sensor per bank behind every λ number:** PID `0x24`/`0x28` λ is the ECM's own computation from the A/F voltage DIDs `0x1225`/`0x1226`. It applies a **barometric gain** (k table `0xD00F`: 112 at 80 kPa, 94 at 63 kPa) before the AFR table `0xE644`. UpRev's AFR skips the gain and reads ~1.5–4.5 % lean on the rich side at this truck's altitudes (firmware, 2026-10-05). CANary's voltage route skipped it too until `e023c740` (B06.7, 2026-10-07), which applies the gain through the ECM's own AFR table (`tests/test_af_baro_gain.py`); the bias remains in UpRev's AFR and in CANary analyses made before that commit. Two consequences: short-term trim controls on this same word, so closed-loop agreement between λ and target says nothing about the sensor; and an independent λ needs an external wideband, which this truck does not have (the AEM gauge is fuel pressure) | EC-141, EC-32, `pid-probe-2026-07-22.md` |
 | Downstream sensor | narrowband heated O2 sensor 2, swings 0–0.3 ↔ 0.6–1.0 V | EC-431 |
-| Fuel system | **returnless** ("N50 models do not have fuel return system"), ≈ 350 kPa (51 psi), regulator in the in-tank module. The pressure is fixed against atmosphere, not manifold (inferred from the in-tank location) | EC-494, EC-499 |
+| Fuel system | **returnless** ("N50 models do not have fuel return system"). Stock: ≈ 350 kPa (51 psi), regulator in the in-tank module, fixed against atmosphere, not manifold (inferred from the in-tank location). **That module is no longer fitted:** the Aeromotive 340 pump assembly replaced it between 2026-10-10 and 2026-10-26 (see "Fuel pressure" below). The ECM still assumes 350 kPa (`0x8A89`) | EC-494, EC-499; `supercharger-build.md` |
 | Injectors | Bosch EV14 `0280158007` (Nissan 16600-7S000), ~296 cc/min at 3 bar (≈ 320 cc/min at 350 kPa), 11.1–14.5 Ω | EC-500; vendor data |
 | Cam timing | continuously variable, oil-pressure driven, **intake cams only**. Base intake opening is 4° ATDC with the phaser off. Maximum phaser travel is not in the FSM | EC-43, EM-134 |
 | Variable intake (VIAS) | one solenoid and one power-valve actuator. The solenoid is **ON (valve closed, long path) at 2,200–3,300 rpm warm**, OFF (open) below and above. Expect VE/torque steps near those two speeds; they are changeovers, not sensor faults | EC-44, EC-432 |
@@ -56,7 +59,7 @@ no load.
 | INT/V SOL (B1/B2) | 0–2 % | ≈ 0–50 % at 2,000 rpm |
 | PURG VOL C/V | 0 % | |
 | A/F SEN1 (B1/B2) | fluctuates around **≈ 2.2 V** warm at 2,000 rpm (the "1.5 V at stoich" quoted online belongs to other Nissan sensors) | EC-431 |
-| Fuel pressure | ≈ 350 kPa at idle | |
+| Fuel pressure | ≈ 350 kPa at idle (stock module) | |
 
 These are sea-level, stock-calibration figures:
 
@@ -105,9 +108,10 @@ Ti = (Tp + transient corr.) × target φ × (α + αm − 1) + Ts
 **As decoded from this ECM (firmware, 2026-10-05; data-checked, median 1.006 over 5,039 samples):**
 - **Trims add, they do not multiply:** `k = 1 + STFT + LTFT`.
 - **`Ts` is linear in battery voltage, not a table:** 0.47 ms at 14.0 V plus 0.090 ms per volt below that (`0x8C41`, `0x84F2`).
+- **An EVAP purge factor `α_purge`** (`0xFFFF4698`/`469A`, "EVAP purge factor α" in the firmware doc; not the feedback α of the patent form above) cuts the pulse while purge flows: `G_b = BFS·φ·α_purge + wall film`, reset to 1.0 when purge is inactive, clamped to [0.5, 1.0]. The pulse-chain known answer (median 1.006) **holds only with purge off**: on the four post-pump tuning captures of 2026-10-26/27 the same chain reads 1.006 with purge off (n 1,659) and **0.90–0.95 while purging** (settled 0.904–0.944 by drive; D03 measured 0.898 at idle and 0.950 off idle), returning within 2 s of purge ending (E07.3, E09.11). Score the chain on purge-off reads (DID `0x1110` = 0) until α is read live (it never has been), and never run a plant evaluation on a purging read without it.
 - **A fuel-pressure factor** `≈ √(350/(350 + vacuum))` multiplies the pulse. The vacuum is *estimated* from load and rpm, never below about 0.2·baro, so the factor cannot see boost.
 - **Fuel Comp is applied inside BFS**, before the manifold filter, so a Fuel Comp edit also moves the Target AFR and timing load axes.
-- **An injector-flow scaler `0x9254`** multiplies every pulse after BFS without moving any load axis. K moves BFS and every load axis. Rescale injectors with `0x9254`.
+- **An injector-flow scaler `0x9254`** multiplies every pulse after BFS without moving any load axis. K moves BFS and every load axis. The project's plan for the 700 cc injectors is `0x9254` plus new dead-time and short-pulse constants, with K left alone (`docs/roadmap/supercharger-build.md`, "Injector rescale"); UpRev's own K-first procedure is under "ROM tables" below.
 - **DIDs `0x1206`/`0x1207` include `Ts`.** That plus the pressure factor is why they are convex in air charge.
 - **PID `0x44` equals φ only while the A/F feedback target is 14.7:** `PID 0x44 = 0x26BE × 0x46AC / 3675`. This is why it dithers in closed loop and reads 0.871 at idle with φ = 1.0. Use `mem:ECM_TARGET_EQUIV_RATIO` for φ.
 - **Load axes saturate before the BFS ceiling:** Target AFR and timing top out at BFS 44,019 (`0x9416`). The ceiling `D8B3` is 65,280.
@@ -172,16 +176,24 @@ this truck:
 - **Fix MAF error in the MAF table, not in Fuel Comp.** They sit on different
   axes, and tuner reports tie MAF error hidden in Fuel Comp to timing retard and
   idle bounce (medium confidence).
-- **The WOT fuel error is airflow-dependent, not a flat supply offset.** WOT
-  ran +2–4 % lean on three instruments while part-throttle trims ran rich. K
-  scales fuel by one factor everywhere, so cutting it for light load would lean
-  out WOT further. **Don't propose a K change for this**; the tables do the
-  work, and K changes anyway with the 700 cc injectors
+- **WOT fuel has been edited by two flashes since the "+3 % lean" finding, so
+  read the revision.** The old claim ("WOT ran +2–4 % lean on three
+  instruments") rested on one A/F sensor per bank read three ways, and the +3 %
+  was in-sample: the held-out pulls were inside the 2.5 % noise floor.
+  `ZS44A-20261110` cut Fuel Comp at 4,000–6,400 rpm and load byte ≥ 192 (35
+  cells, 2.2–5.1 %), taking the error against target at 4,400–5,600 rpm from
+  −4.2 / −7.1 / −6.8 % to +1.2 / +0.6 / +0.4 % (negative = rich;
+  `data/analyses/2026-11-10-fuel-comp-wot-cut-prediction.md`). `ZS44A-20261111`
+  then set the last Fuel Targets column to AFR 12.3 at 4,400 rpm and above
+  (`2026-11-11-wot-target-lean-prediction.md`). Delivery above 4,400 rpm is
+  within about 1 % of target, and first gear on `-20261111-2` runs ~3 % lean of
+  its target while rpm rises 1,100–1,300 rpm/s (not separated from delivery lag
+  on rising airflow). K scales fuel by one factor everywhere, so cutting it for
+  light load would lean out WOT. **Don't propose a K change for this**; the
+  tables do the work
   (`docs/roadmap/tasks/N01-na-rom-response-experiments.md` → "Not now").
 - **WOT enrichment is a switch on the ECM's target throttle opening** (≥ 78 % on
-  PID `0x11`'s scale; ≥ ~227/255 broadcast pedal where it was first measured, never
-  in first gear from ~1,800 to ~5,600 rpm, where a calibrated first-gear torque cap
-  holds full pedal to about 40 % throttle) into
+  PID `0x11`'s scale; ≥ ~227/255 broadcast pedal where it was first measured) into
   the Target AFR table's last BFS column, overriding the column the BFS lookup
   would pick. `0x1134` holds that active rich target (raw/64 as φ). The code
   confirms it (`docs/ecu-firmware-analysis.md`): the target function at
@@ -192,6 +204,34 @@ this truck:
     broadcast pedal 4.29–4.58 V, and never at or below 3.80 V;
   - while it was set, commanded φ read exactly 1.1640625, the last-column
     value, even though BFS sat mid-table.
+  **First gear depends on the revision.** Through `ZS44A-20261111` a calibrated
+  torque cap (cal `0x8EBC` = 3,138, armed while the ECM's ratio estimate
+  `0xFFFF27D2` is at or above cal `0x9308` = 3,584, i.e. 3.50) holds first-gear
+  full pedal to about 40 % throttle from ~1,800 to ~5,600 rpm, so first gear is
+  fueled from the load-indexed cells. `ZS44A-20261111-2` (flashed
+  2026-11-12T01:02Z) sets `0x9308` to 32,767, above the estimate's clamp (4,696),
+  so the gear test never passes: first-gear full pedal is full throttle, reads
+  the last column on 14 of 14 gated lookups, and measured AFR runs 12.5–12.9
+  from ~4,100 rpm where it was 11.8–12.0
+  (`data/analyses/2026-11-11-first-gear-cap-off-prediction.md`,
+  `2026-11-12-ratio-estimate-and-full-pedal-lean.md`). Resolve the session's
+  revision before reading first-gear full-pedal data. The cap is not a fault,
+  not traction control and not a restriction: it is a calibrated gear test with
+  no load threshold and no timer, and it holds at every rpm in its band.
+  - **Sort full-pedal data by gear** (rpm ÷ wheel speed). On the 0x284 speed
+    word that analysis used (0.005865 km/h of ECM speed per count) the bands are
+    0.13 (6th), 0.17 (5th), 0.22 (4th), 0.30 (3rd), 0.43 (2nd) and 0.74–0.77
+    (1st), rpm per count.
+  - **A third trigger caps every gear:** bit 3 of `0xFFFF4856`, set when
+    bit 7 of `0xFFFF4785` is set and a per-message counter kept by the CAN
+    receive layer reaches 11 (inferred: a received-message timeout; not set in
+    normal driving). It is the first read when the truck is down on power in
+    all gears with no codes (`docs/ecu-firmware-analysis.md`, "What limits first
+    gear"). The other trigger, `0xFFFF2208`, cannot fire on this calibration.
+  - The cap value, its threshold and the output-shaft constant `0x91F8` are
+    editable entries in `rom_map.yaml` (`first_gear_torque_cap`,
+    `first_gear_ratio_threshold`, `output_shaft_speed_constant`). Leave `0x91F8`
+    alone: the one consumer that wants it corrected is the disabled cap test.
 - **Fuel Compensation** is the second fuel table: 16 × 16 at slot `+0x660`.
   **UpRev's editor labels its axes the wrong way round**; this is verified from
   the code (2026-10-04, `docs/ecu-firmware-analysis.md`):
@@ -201,9 +241,11 @@ this truck:
 
   The k105 "rpm axis 800–12,750 → 800–7,200" edit therefore compressed the
   **load** axis to 16–144. Load above 144 (25 % of a 2026-10-04 drive) now
-  reads the last column. That flattens the base table's +5–8 % high-load,
-  high-rpm enrichment to about +2 %, a plausible contributor to the WOT lean.
-  Plan any Fuel Comp edit by the code's axes, not UpRev's labels.
+  reads the last column. That flattened the base table's +5–8 % high-load,
+  high-rpm enrichment to about +2 %. `ZS44A-20261004` restored the axis and the
+  cells to UpRev's base, so the supposed link to a "WOT lean" is moot: the
+  later WOT error was rich, and the 2026-11-10 flash cut Fuel Comp there (see
+  the WOT bullet above). Plan any Fuel Comp edit by the code's axes, not UpRev's labels.
   **Reading UpRev's Fuel Comp view (operator check, 2026-10-04):**
   - **The cells are right.** UpRev's 16 × 16 grid matched memory row for row,
     256/256, with rows = rpm and columns = load.
@@ -264,6 +306,94 @@ this truck:
   does not operate under normal driving. Treat any sustained Knock Strength
   activity as a finding.
 
+## Learned fuel trim: why it reads 0.00 and when it learns
+
+Every flash and every battery disconnect resets learned trim. A reading of
+exactly 0.00 % on both banks is the neutral value (raw `0x80` on the PID `0x07`
+scale), not a decode bug or a fault. Learning is not slow and the tune does not
+disable it (every learning constant is identical in the UpRev base, k106 and
+`ZS44A-20261004`). It is gated on purge
+(`data/analyses/2026-11-08-ltft-learning.md`, firmware trace in
+`docs/ecu-firmware-analysis.md`):
+
+- **The gate.** The purge accumulator has to cross its threshold within **one
+  engine start**: the gate opened about 43 min into the first start of
+  2026-11-08, and at that day's steady-cruise fill rate it needs about 32–35 min
+  of purging cruise. The accumulator restarts at every engine start, a
+  stall-restart with the key on included, so a run of short town drives never
+  opens it. A zero spell is a driving pattern, not a fault. (An earlier
+  estimate of 20–30 min is superseded by the 11-08 measurement.)
+- **Cells.** The warm-idle cell (r0c1) has never learned: purge flow closes the
+  idle path on bank 1 and a 30-update cap closes it on bank 2. The near-idle
+  cells r0c0 and r1c0 (< 6 g/s) were learned with purge duty 6–30 %, and
+  section 7 of the analysis says they most likely carry the ECM's purge
+  compensation error rather than a fuel-delivery one.
+- **Analysis.** Total trim **adds**: `k = 1 + STFT + LTFT` (firmware;
+  `derived:TOTAL_TRIM_B1/B2` is the sum). While LTFT is zero, analysis is
+  STFT-only. Split trim by purge state (DID `0x1110`, the PID `0x2E` byte), not
+  total trim alone. Visit counts (B1 `0xFFFF5335`, B2 `0xFFFF52F5`) are the
+  only observable proof the learner ran.
+
+## The supercharger build in this truck's data
+
+What the build (see `SKILL.md`, boundary 2, for what is fitted) will look like
+here. Generic mechanics are in `engine-management` → `air-load-and-boost.md`.
+
+- The HTV1900 is a positive-displacement roots blower, so it holds pressure
+  *ratio*. Expect about 21 % less gauge boost at home than a sea-level figure
+  (7 psi → ~5.5 psi), and less again on mountain drives (~4.4 psi at 63 kPa).
+  That is not belt slip.
+- The ECM measures no boost. With returnless fuel and no MAP input, injector
+  ΔP falls by the boost pressure and the trims never see it (WOT is open
+  loop). The build doc puts it at roughly **10 % lean at 50 kPa of boost** on
+  a fixed rail, about 2 % with a 1:1 boost-referenced regulator. It has two
+  parts: the √ΔP flow loss alone (5–7 % at 5.5–7 psi, moving with baro) and
+  the ECM's pressure factor, which assumes at least 0.2 × baro of vacuum
+  that boost removes. Unless the fuel
+  system gets a boost-referenced regulator, the TMAP and AEM data CANary
+  collects can only reach the ECM as Fuel Targets (rpm × BFS) numbers. That
+  table can't see baro or charge temperature. The ROM's commanded φ will also
+  read richer than what is delivered, by design. See
+  `supercharger-build.md` → "Boosted fuelling without a pressure input" and P5.
+- Z1's other kit (2022+ Frontier, VQ38, same blower) moves the MAF into a new
+  tube and routes the ECU's IAT signal to a post-intercooler sensor through
+  the MAF connector. If this kit does the same, `INTAKE_TEMP` stops being
+  engine-bay air and becomes charge temperature. Check before reusing any IAT
+  trap from this file.
+- Z1's figures on 93 octane: Level 1 309 whp / 307 wtq, Level 2 350 / 343,
+  Level 3 443 / 441 (snippets of Z1's own pages; the Level 2 boost and pulley
+  are still unpublished). This truck will run 91 octane, so those figures
+  and any timing borrowed from a 93-octane tune are an upper bound, not a
+  target.
+
+## Fuel pressure: the pump and the AEM channel
+
+- **The stock in-tank module is gone.** The Aeromotive 340 pump assembly went
+  in between 2026-10-10 and 2026-10-26. On the same analog instrument, warm-idle
+  rail pressure reads 53.78 psi against 50.79 stock (2026-10-04), +3.0 psi at
+  0–10 g/s falling to +1.3 psi at 60–100 g/s (n = 14 at the top band): about
+  +2.5–3 % injector flow, not the +7–8 % a gauge-face 48 → 56 psi would imply
+  (`docs/roadmap/supercharger-build.md`, F0; `data/analyses/2026-10-27-drive-log.md`).
+  The ECM still assumes a fixed 350 kPa. Place a session against the pump as
+  well as the flash; the rail also drifts within a drive (55.0 psi falling to
+  50.5 over two hours on 2026-11-08, cause not identified).
+- **The channel is `sensor:FUEL_PRESSURE`**: the AEM 30-0301's *analog* output
+  (psig = 25.00 × V − 12.50) through a USB ADC (`hardware.usb_adc`,
+  `data/usb_adc_sensors.yaml`, `docs/aem-fuel-pressure-analog-input.md`), live
+  since 2026-10-04. It is not a CAN gauge and not the ECM.
+- **Rate.** The v2 firmware (flashed 2026-10-04) streams 503.9 Hz; stored rows
+  are the mean of each 5 samples (100 Hz) unless the capture profile sets
+  `analog_full_rate` (the `fuel-pulsation` starter does). Before v2 it was a
+  plain 100 Hz mean.
+- **Bandwidth.** The gauge regenerates its output in steps at ~176 Hz, so
+  nothing above ~88 Hz is rail pressure. Average at least 0.5 s for a pressure.
+- **Offset.** A +1.8 psi analog-versus-gauge-face disagreement is unresolved
+  (the vent check, F0, is still owed), so compare ratios on this one instrument,
+  never its absolute reading against another gauge.
+- **Which bank.** The fuel line enters on the driver side (bank 2) and loops
+  round to bank 1, so the sensor mostly hears bank 2. Don't compare banks
+  against it (`data/analyses/2026-10-08-fuel-pulsation-capture.md`).
+
 ## ROM tables and what an edit moves
 
 - The calibration is an UpRev tune (`1ZS44A`, stock was `1ZS04C`), kept as
@@ -308,12 +438,16 @@ this truck:
   and read through two shared routines. Their names come from the variables
   each call passes (`docs/ecu-firmware-analysis.md`).
 - Every flash, even the single-byte 2026-09-20 edit, reset LTFT to 0.00 %.
-- **The injector swap needs more than K.** For the 700 cc injectors, UpRev's
-  procedure is: lower K (first cut K × old/new flow), enter the new latency
-  line, and retune Cranking Enrichment Initial ("the main table when larger or
-  smaller injectors are installed") and Injector Minimum. Then set the **Load
-  Point Scaler** to the expected WOT BFS. Smaller pulse widths compress the
-  BFS axis, and the scaler re-spreads it; don't hand-edit axis values. A larger
+- **Injector swap: UpRev's procedure, and the project's plan.** UpRev's
+  documented procedure for larger injectors is K-first: lower K (first cut
+  K × old/new flow), enter the new latency line, and retune Cranking Enrichment
+  Initial ("the main table when larger or smaller injectors are installed") and
+  Injector Minimum. Then set the **Load Point Scaler** to the expected WOT BFS,
+  because smaller pulse widths compress the BFS axis and the scaler re-spreads
+  it (don't hand-edit axis values). **This project plans the other route:** the
+  flow scaler `0x9254` with new dead-time (`0x8C41`/`0x84F2`) and short-pulse
+  (`0x9120`–`0x9126`) constants, so K and every BFS-indexed table stay where
+  they are (`docs/roadmap/supercharger-build.md`, "Injector rescale"). A larger
   MAF tube or cone intake goes the other way: raise K, then rework the MAF
   curve under load against a flat "AFR test" target table.
 - UpRev-only log channels: Target AFR, Knock Strength, High Det Flag, Injector
