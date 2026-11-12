@@ -2543,35 +2543,41 @@ uncovered:
     next_evidence: 'Vehicle: read 0xFFFF289C, 0xFFFF4786, 0xFFFF2C91 and 0xFFFF283B..0xFFFF283C with BFS at key-on and crank, and time 0xFFFF84B9-paced counters against acquisition time to confirm the 1.024 ms tick.'
   - id: timing_final_chain
     where: >-
-      Ignition terms the chain reads whose values no node computes (the chain
-      nodes take each as a required argument, E09.7). 0xFFFF27C6 and
-      0xFFFF279A are no longer among them: 27C6 is computed (nodes
-      coolant_rescale .. timing_term_27c6) and 279A's inputs are identified
-      (timing_term_279a; 0 on a warm engine). Still unidentified:
-      0xFFFF11CB: its source 0xFFFF2BD0 is now known (the cycle copy of the
-      intake temperature byte 0xFFFF2CB8, IAT + 50 [inferred]), but no node
-      writes 11CB, 0xFFFF27C4 or 0xFFFF1203, the 0x04E5B0 slew (+/-5 per
-      segment) is unmodelled, and 0xFFFF1766's gating flags (0xFFFF287A bit 7,
-      0xFFFF2887 bit 2, 0xFFFF2876 bit 4, 0xFFFF4806 bit 1, fault item 0x11A)
-      are unidentified;
-      inside 27C6, 0xFFFF26E8 and the 0xFFFF175C / 0xFFFF1736 corrections in
+      Narrowed by F01.6 (2026-11-12; docs/ecu-firmware-analysis.md "Ignition
+      timing chain: the remaining terms"). Every former argument now has a
+      writer: 0xFFFF11CB is the intake-temperature retard (0x04D8FC ->
+      0xFFFF27C4, cycle copy 0xFFFF2738, slew 0x04E5B0 -> 0xFFFF1203, snapshot
+      -> 11CB; 0 below IAT 46 C, up to 7 at 94 C); 0xFFFF1D3E is 0x40 on this
+      calibration below coolant 120 C (0x04DA02); 0xFFFF1344 and 0xFFFF2334 are
+      0 (map 0xAEF4 and curve 0xE584 all zero on every image); 0xFFFF272A is
+      the copy of the post-decel retard 0xFFFF27B6 (0x04D2B8, 0..-20);
+      0xFFFF1215 = max(0xFFFF2798, 0xFFFF27BE) >> 8 (0x0637C2: torque-reduction
+      retard 0x064854 and the decel fuel-cut retard state 0x063960), not
+      knock; 0xFFFF62B4 is the copy of the +/-2 scan-tool timing adjust
+      0xFFFF6418 (0x04B8C8; stored copy 0xFFFF2E0C); 0xFFFF9932 is the
+      service-0x30 active-test retard. Not modelled as nodes yet. Still open:
+      the knock controller's 0x04A8B6 branch (F01.7); the enable flags
+      0xFFFF287A bit 7, 0xFFFF2887 bit 2, 0xFFFF2876 bit 4, 0xFFFF2860 bit 3,
+      0xFFFF484B & 0x60; the requester of 0xFFFF1A92 (F01.13); inside 27C6,
+      0xFFFF26E8 (0x055386) and the 0xFFFF175C / 0xFFFF1736 corrections in
       0xFFFF26F6, and how 0xFFFF26C0 depends on the Target AFR column (so
-      0xFFFF1B24 is read, not predicted, off phi 1); the 279A ramps 0xFFFF1300
-      and 0xFFFF15E5 and its 0xFFFF17FA input (w1760/w1762); 0xFFFF174A,
-      0xFFFF1D3E, 0xFFFF1344, 0xFFFF2334, 0xFFFF272A, 0xFFFF62B4, 0xFFFF1215,
-      0xFFFF9932; the flags 0xFFFF2833 bit 4, 0xFFFF4785 bit 6, 0xFFFF28B4
-      bit 1, 0xFFFF28B1 bit 5, 0xFFFF4858 bit 5 and the 0x08E498 fault test;
-      the knock control's 0x04A8B6 branch. 0xFFFF134A is settled: 0 on every
-      listed image (curves 0xCC63/0xCC73). The 27C6/279A nodes are on
-      ignition_timing's path (E09.7 part B): the simulator computes 27C6 per
-      ROM with 0xFFFF1B24 swept over a band, and holds 279A only where it is
-      not provably 0.
+      0xFFFF1B24 is read, not predicted, off phi 1); the 279A ramps
+      0xFFFF1300 and 0xFFFF15E5 and its 0xFFFF17FA input (w1760/w1762); the
+      flags 0xFFFF2833 bit 4, 0xFFFF4785 bit 6, 0xFFFF28B4 bit 1, 0xFFFF28B1
+      bit 5, 0xFFFF4858 bit 5 and the 0x08E498 fault test. 0xFFFF134A is
+      settled: 0 on every listed image (curves 0xCC63/0xCC73). The 27C6/279A
+      nodes are on ignition_timing's path (E09.7 part B): the simulator
+      computes 27C6 per ROM with 0xFFFF1B24 swept over a band, and holds 279A
+      only where it is not provably 0.
     blocks: 'the absolute ignition_timing (E05.4); a trim edit''s change is computed with these held equal (E09.7); an X change''s base-term part is now computable from the nodes, the rest is not'
     next_evidence: >-
-      The firmware part is done. Vehicle: read 0xFFFF15DA..0xFFFF15DE,
+      Vehicle (E05.4 (c)): in one window set (0x23) read 0xFFFF11CB,
+      0xFFFF1203, 0xFFFF1D3E, 0xFFFF1344, 0xFFFF1215 and 0xFFFF62B4 with IAT,
+      at hot idle, pulling away after it, and at a steady cruise; expect 11CB
+      = 0 below IAT 46 C and the 0x04D8FC formula above, 1D3E = 0x40, 1344 =
+      0, 1215 = 0 and 62B4 = 0 in steady running. Also 0xFFFF15DA..0xFFFF15DE,
       0xFFFF17C6, 0xFFFF19CB, 0xFFFF1B24 and 0xFFFF10EB with 0xFFFF27C6 and
-      0xFFFF1A58 in one window set (0x23) at hot idle and at a steady cruise,
-      and check timing_term_27c6_chain against each read (E05.4 (c)).
+      0xFFFF1A58, checking timing_term_27c6_chain against each read.
   - id: enrichment_tick_rate
     where: >-
       Decoded at the desk by F01.1 (2026-11-12): 0xFFFF84C3 bit 7 is set when

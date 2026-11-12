@@ -4742,6 +4742,16 @@ memory:
           knock control is inactive, else min(0xFFFF26D2, -this byte). Its
           meaning is inferred; it is one of the unidentified terms the chain
           takes as a required argument (uncovered timing_final_chain).
+      - session: firmware-ZS44A-20260920 (F01.6)
+        method: disassembly
+        finding: >
+          Not knock. 0x0637C2 writes min(127, max(0xFFFF270C, 0xFFFF2732) >>
+          8), the cycle copies of 0xFFFF2798 (0x064854, the retard that meets
+          the torque reduction 0xFFFF1A92 through the timing-to-torque curve
+          0xC784/0xCB01) and 0xFFFF27BE (0x063960, the decel fuel-cut retard
+          state: 17 degrees while the mask is 0x3F, ramped back on re-entry,
+          decayed after). With 0xFFFF28B3 bit 4 a variant adds 0xFFFF2372;
+          0 while 0xFFFF484B & 0x60. Expect 0 in steady running.
     notes: >
       Known answer: the cross-read ordering declared on
       mem:ECM_KNOCK_RETARD_APPLIED (0xFFFF2332 <= -this byte), which checks
@@ -4774,6 +4784,17 @@ memory:
           Its source 0xFFFF2BD0 is the cycle copy of the intake temperature
           byte 0xFFFF2CB8 (IAT + 50, inferred; firmware notes 2026-10-17);
           the 0xFFFF1766 gating flags and the slew stay unmodelled.
+      - session: firmware-ZS44A-20260920 (F01.6)
+        method: disassembly
+        finding: >
+          The intake temperature retard. 0x04D8FC: 0xFFFF27C4 = min(7,
+          max(0, 0xFFFF2BD0 - 80) x 0xFFFF1766 / 640), 0xFFFF1766 = 70 when
+          enabled and rpm >= 800, else 0. Enabled by 0xFFFF4806 bit 1 (byte
+          >= 96, cleared below 94: IAT 46 C with the inferred +50 offset), no
+          fault on item 0x11A, and (0xFFFF287A bit 7 and 0xFFFF2887 bit 2) or
+          0xFFFF2876 bit 4. So 0 below IAT 46 C, about 0.11 per degree above
+          30 C, 7 from 94 C. The cycle copy carries it to 0xFFFF2738, which
+          0x04E5B0 slews 0xFFFF1203 toward.
       - session: _capture-ram-study-2026-10-04T204557
         method: window_byte_constant
         finding: >
@@ -4800,7 +4821,16 @@ memory:
           u8, added to the base timing sum 0xFFFF1A58; 0 unless 0xFFFF47A6
           bit 6 and a speed condition hold. Writer not identified (uncovered
           timing_final_chain).
-    notes: 'No known answer: no relation the firmware guarantees.'
+      - session: firmware-ZS44A-20260920 (F01.6)
+        method: disassembly
+        finding: >
+          Corrects the entry above. The writer is the base sum 0x04CB9E itself:
+          0 unless 0xFFFF47A6 bit 6 is set and the smaller bank target AFR word
+          is at least 0x1CB6 (14.7 x 500), the condition being a target, not a
+          speed. Then min(255, coolant curve 0xCCB7 x map 0xAEF4 x 0xFFFF1B7C /
+          500,000). Map 0xAEF4 is all zero on all seven images, so this byte
+          is 0 on this calibration.
+    notes: 'Known answer on this calibration: 0 (map 0xAEF4 all zero). A nonzero read means a different program or calibration.'
   - name: ECM_TIMING_PRELIMIT
     address: 0xFFFF1346
     length: 1
@@ -5029,7 +5059,18 @@ memory:
           u8, the valve-timing term of the base timing sum (0x04DA02): 0x40
           (neutral) on most branches, else 0xFFFF1ED4 + 0xFFFF1DFB - 0x40
           clamped 0..255.
-    notes: 'No known answer expressible; 0x40 on the neutral branches.'
+      - session: firmware-ZS44A-20260920 (F01.6)
+        method: disassembly
+        finding: >
+          The branches, from the decompile. It is 0x40 (cal 0x8D60/0x8D61) when
+          any VTC diagnostic item 0x137-0x13E is faulted, and when coolant is
+          below 120 C (0xFFFF2890 bit 0) with the warm cam-target cell not
+          the 0x80 sentinel. Otherwise it is 0xFFFF1ED4 + 0xFFFF1DFB - 0x40,
+          where 0xFFFF1ED4 is flat 0x40 on this calibration and 0xFFFF1DFB is
+          curve 0xDA8F on the larger cam-phase error. 0xFFFF1DFB is 0x40 below
+          the load floor curve 0xDAFB[rpm], so the term can take off up to 8.
+          Identical on all seven images.
+    notes: 'Expected 0x40 in normal running below coolant 120 C; not a guaranteed relation, so no known answer is declared.'
   - name: ECM_TIMING_TRIM_TERM
     address: 0xFFFF2793
     length: 1

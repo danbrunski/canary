@@ -219,6 +219,28 @@ Same conventions as the other task files: task-level truth is the checkboxes,
     spark after the build.
   - **Accept:** `ignition_chain_unmodelled` names nothing but the knock term;
     the chain reproduces DID `0x1107` at hot idle and steady cruise.
+  - [~] 2026-11-12: every former argument now has a writer. Only the knock
+    branch (F01.7) is left. Firmware doc: "Ignition timing chain: the
+    remaining terms".
+    - **Intake temperature** (`11CB`, `0x04D8FC`): 0 below IAT 46 °C,
+      +0.11°/°C above 30 °C, capped at 7° from 94 °C, off idle only. It comes
+      off the trim term.
+    - **Zero or constant on this calibration:** `1D3E` = 0x40 (cam error
+      term, neutral below 120 °C coolant); `1344` and `2334` = 0 (map
+      `0xAEF4` and curve `0xE584` all zero).
+    - **Transient:** `272A`, a post-coast retard (−20 floor).
+    - **`1215` is not knock.** It is the larger of the torque-reduction retard
+      `2798` and the decel fuel-cut retard `27BE`.
+    - **Scan tool:** `62B4` is the ±2° stored adjustment (record 0x74), and
+      `9932` the service-0x30 active-test retard.
+    - **RAM catalog:** `1344`, `1215`, `11CB` and `1D3E` corrected.
+    - **Not done:**
+      - the twin nodes for these terms, so `ignition_chain_unmodelled` still
+        lists the chain;
+      - the `0x1107` comparison, which needs one truck window set (listed in
+        the model's `next_evidence`);
+      - `26E8`/`175C`/`1736` inside `27C6`, the `279A` ramps and the enable
+        flags.
 
 - [ ] **F01.7 Knock control's response (operator decision first).** The
   knock work so far is observation only by choice: sensors, levels, the fault

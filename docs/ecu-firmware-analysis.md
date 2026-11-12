@@ -1211,6 +1211,156 @@ Both routines run in the main cycle (task `0x0219D0` entries 56 and 57).
   opcode scan does not resolve them), and the vehicle check, a cold-start
   capture that reproduces `mem:ECM_TARGET_EQUIV_RATIO`.
 
+### Ignition timing chain: the remaining terms (F01.6, 2026-11-12)
+
+E09.7 decoded the chain's spine: `0xFFFF27C6`, `0xFFFF279A`, the trim term,
+the base sum, the combine, the rate limit and the final byte. It left about a
+dozen words as arguments with no known writer. With every task table seeded
+(F01.1), all of them now have one, except the knock controller's branch,
+which stays observation only (F01.7). Calibration values below are identical
+on all seven images. One count is one degree at the final byte: the chain
+from `0xFFFF1A58` to `0xFFFF232E` only adds, and `0xFFFF11FF` =
+110 − `0xFFFF232E` matches PID `0x0E`.
+
+**Where they run.**
+
+- The base-timing task `0x04DE4C` (main entry 74) calls, in order:
+  - `0x04B8C8` → `6418`
+  - `0x04D8FC` → `27C4`
+  - `0x04D2B8` → `27B6`
+  - `0x04C9D8` → `174A`
+  - `0x04DA02` → `1D3E`
+  - the base sum `0x04CB9E` → `1A58`
+- The per-segment chain `0x04E6AE` calls the slew `0x04E5B0`, then the
+  combine `0x04DF38`, then the rate limit `0x04E0E0`.
+- After the task loop, the cycle copies move the block `0xFFFF2792`–`281D` to
+  `0xFFFF2706`–`2791`, and move `0xFFFF6418` (0x164 bytes) to `0xFFFF62B4`.
+  So the combine reads `27B6` as `272A`, `27C4` as `2738`, `2798` as `270C`,
+  `27BE` as `2732` and `27DC` as `2750`.
+
+**Intake temperature retard, `0xFFFF11CB`.**
+
+- `0x04D8FC` computes `0xFFFF27C4` =
+  min(cal `0x8B05` = 7, max(0, `0xFFFF2BD0` − cal `0x8B02` = 80) ×
+  `0xFFFF1766` / 640).
+  - `0xFFFF2BD0` is the cycle copy of the intake temperature byte, IAT + 50
+    (offset inferred).
+  - `0xFFFF1766` is cal `0x87BD` = 70 when the term is enabled and rpm is at
+    least 800 (cal `0x88C8` = 16 on rpm/50). Otherwise it is cal `0x87BC` = 0.
+- **Enable.** All of the following hold:
+  - IAT ≥ 46 °C: `0xFFFF4806` bit 1, set at byte ≥ 96 and cleared below 94.
+  - Diagnostic item `0x11A` is not faulted.
+  - (`0xFFFF287A` bit 7 and `0xFFFF2887` bit 2) or `0xFFFF2876` bit 4. These
+    flags are not identified.
+- **Size.** About 0.11° per °C above 30 °C, truncated, so the retard is 1° at
+  46 °C, rises with IAT, and reaches 7° at 94 °C.
+- **Path to the trim term.**
+  1. The cycle copy moves `27C4` to `0xFFFF2738`.
+  2. `0x04E5B0` slews `0xFFFF1203` toward it by at most 5 per segment, so it
+     lags by about one segment.
+  3. The 0x38-byte snapshot copies `1203` to `11CB`.
+  4. The trim term is `0xFFFF2793` = max(0, trim − `11CB`). Trim cells are
+     43–68 counts on this calibration, so the floor never binds and the full
+     retard comes off.
+- **Off idle only.** On the idle path (`0xFFFF2833` bit 4) the base sum uses
+  `0xFFFF27C3` and no trim term. So the retard reaches the spark off idle
+  only, for example when pulling away after heat-soaked idling, where this
+  truck's IAT reads high.
+- **Data.** The only read of `11CB` (2026-10-04 RAM study, 180 reads) was 0
+  throughout, with IAT 27–42 °C, below the enable. That is consistent but
+  proves nothing, since the value never changed.
+- **After the supercharger build.** If the kit moves the ECM's IAT input
+  post-intercooler, this is the only path from charge temperature to spark:
+  at most 7° for a charge above 94 °C, and none below 46 °C.
+
+**Constant on this calibration:**
+
+- `0xFFFF1D3E`, the cam-phase error term from `0x04DA02`, is neutral at
+  0x40 (cal `0x8D60`/`0x8D61`).
+  - It departs from 0x40 only at coolant ≥ 120 °C, or when a cam-target cell
+    holds the 0x80 sentinel. Then it becomes
+    `0xFFFF1ED4` + `0xFFFF1DFB` − 0x40.
+  - The two cam-error curves on that path are flat 0x40.
+  - Curve `0xDA8F` takes off up to 8° for a large cam error above a load
+    floor (curve `0xDAFB` on rpm).
+  - Any of diagnostic items `0x137`–`0x13E` (VTC) forces 0x40.
+  - The base sum's `+ 0x1D3E − 0x80` is therefore −0x40 in practice.
+- `0xFFFF1344`, a lean-target advance written by the base sum itself, needs
+  `0xFFFF47A6` bit 6 and the smaller bank target AFR ≥ 14.7 (word ≥ 0x1CB6).
+  Its value is coolant curve `0xCCB7` × map `0xAEF4` × `0xFFFF1B7C` /
+  500,000, capped at 255. Map `0xAEF4` is all zero on every image, so it is 0.
+- `0xFFFF2334`, the combine's subtrahend, is curve `0xE584` (axis `0xE0A2`)
+  at `0xFFFF2750` (the copy of `0xFFFF27DC`, F01.3's storage-estimator
+  term), × cal `0x89E2`/`0x89E3` (100) / 100. The curve is all zero, so it
+  is 0.
+
+**Transient and torque-management retards** (zero in steady running):
+
+- `0xFFFF272A` (from `0x04D2B8` via `27B6`) is a retard after a closed-throttle
+  coast, floored at −20.
+  - **Arms when all of these hold:**
+    - coolant 70–109 °C;
+    - rpm 550–2,950;
+    - off idle, with `0xFFFF11C5` < 20;
+    - `0xFFFF2860` bit 3;
+    - `0xFFFF2855` bit 0, which the decel flag `0xFFFF2835` bit 4 sets
+      through a 10-step timer.
+  - **Size.** It starts at 9–12 counts from tables `0xD8E3`–`0xD8F3`, indexed
+    on `0xFFFF1075` − `0xFFFF1111`. The table variant depends on whether the
+    fuel cut mask was `0x3F`. It ramps out over 30 steps (cal `0x87AD`).
+  - An rpm-rate damping term exists, but its gain curves `0xD0D7`/`0xD0DF`
+    are zero, so only the ramp acts.
+- `0xFFFF1215` (`0x0637C2`) is not knock. It is min(127, max(`2798`,
+  `27BE`) >> 8). A variant adds `0xFFFF2372` when `0xFFFF28B3` bit 4 is set.
+  It is 0 while `0xFFFF484B` & 0x60.
+  - `0xFFFF2798` (`0x064854`): a torque-reduction retard. It inverts a
+    timing-to-torque efficiency curve (`0xC784` against `0xCB01`) to find the
+    retard that delivers the reduction `0xFFFF1A92` asks for. Who asks is
+    F01.13.
+  - `0xFFFF27BE` (`0x063960`): a state machine around decel fuel cut, with
+    states in `0xFFFF1415`.
+    - It holds 17° (0x1100 / 256) while the idle flag is set and the mask is
+      `0x3F`.
+    - It ramps back in at 0x36/256 per call during re-entry (warm only).
+    - It decays by `0xFFFF11DC` per call afterwards.
+    - When the throttle opens from a decel, it holds the difference between
+      the off-idle and idle base timing, so spark does not jump.
+- **Scan-tool terms** (zero unless a tool sets them):
+  - `0xFFFF62B4`, the copy of `0xFFFF6418` (`0x04B8C8`), is a ±2° timing
+    adjustment. Its source is one of:
+    - the IOControl buffer `0xFFFF99E8` while `0xFFFF4853` bit 5 is set;
+    - an analog-stepped value from `0xFFFF10EA` while bit 6 is set;
+    - otherwise the stored `0xFFFF2E0C`. That is non-volatile record 0x74,
+      saved through the queue at `0x069220` and read back at init by
+      `0x069884`.
+
+    The rate limit adds it only when warm (coolant byte ≥ 110), below about
+    6,200 rpm, and with `0xFFFF104E` < 252.
+  - `0xFFFF9932` is the service-0x30 (InputOutputControl) buffer's timing
+    retard, applied while `0xFFFF99D0` bit 2 is set and clamped to −10..0.
+    `0x031A64` answers 0x30 with NRC 0x12/0x22. Active tests require
+    stationary and warm (`0x02F2DA`).
+
+**Still open:**
+
+- the knock controller's `0x04A8B6` branch (F01.7);
+- the enable flags `0xFFFF287A`.7, `2887`.2, `2876`.4 and `4806` (IAT,
+  above);
+- `0xFFFF2860`.3;
+- `0xFFFF484B` & 0x60;
+- who writes `0xFFFF1A92` (F01.13);
+- the meaning of `0xFFFF1075` − `0xFFFF1111`;
+- the inside of `0xFFFF27C6` (`26E8`, written by `0x055386` from coolant,
+  rpm and the warm-up terms; `175C`/`1736`);
+- the `279A` ramps.
+
+**To check on the truck (one 0x23 window set):**
+
+1. At hot idle, then pulling away: `11CB`, `1203` and IAT. Expect 0 below
+   46 °C and the formula above it.
+2. In steady cruise: `1D3E` = 0x40, `1344` = 0 and `1215` = 0.
+3. `62B4`, to confirm no stored adjustment.
+
 ### Scheduler and task tables (F01.1, 2026-11-12)
 
 The application's vector base is VBR = `0x20004` (vector v at
