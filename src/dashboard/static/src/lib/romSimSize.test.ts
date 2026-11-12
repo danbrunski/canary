@@ -123,15 +123,15 @@ describe("whether a run is coarse", () => {
 });
 
 describe("the cost model", () => {
-  it("is fitted from the W09.6 laptop timings only, and says how far off it is", () => {
-    // The nine rows of W09.6's re-measured table (fuel-mv-2).
-    expect(LAPTOP_TIMINGS).toHaveLength(9);
-    expect(LAPTOP_TIMINGS).toContainEqual({ points: 224, draws: 1000, seconds: 5.7 });
-    expect(LAPTOP_TIMINGS).toContainEqual({ points: 1024, draws: 2000, seconds: 34.2 });
-    expect(COST_FIT.overheadS).toBeGreaterThan(2.4);
-    expect(COST_FIT.overheadS).toBeLessThan(3.1);
-    expect(COST_FIT.secondsPerPointDraw).toBeGreaterThan(1.4e-5);
-    expect(COST_FIT.secondsPerPointDraw).toBeLessThan(1.8e-5);
+  it("is fitted from the W09.13 laptop timings only, and says how far off it is", () => {
+    // The ten rows of W09.13's re-measured table (fuel-mv-2).
+    expect(LAPTOP_TIMINGS).toHaveLength(10);
+    expect(LAPTOP_TIMINGS).toContainEqual({ points: 224, draws: 1000, seconds: 7.7 });
+    expect(LAPTOP_TIMINGS).toContainEqual({ points: 1024, draws: 2000, seconds: 42.1 });
+    expect(COST_FIT.overheadS).toBeGreaterThan(2.6);
+    expect(COST_FIT.overheadS).toBeLessThan(3.4);
+    expect(COST_FIT.secondsPerPointDraw).toBeGreaterThan(1.8e-5);
+    expect(COST_FIT.secondsPerPointDraw).toBeLessThan(2.3e-5);
     // The stated error is the real worst residual against its own rows.
     for (const row of LAPTOP_TIMINGS) {
       const error = (laptopSeconds(row.points, row.draws) - row.seconds) / row.seconds;
@@ -154,10 +154,10 @@ describe("the cost model", () => {
   });
 
   it("names the nearest measured row as a labelled reference, not a prediction", () => {
-    expect(nearestTiming(224, 1000)).toEqual({ points: 224, draws: 1000, seconds: 5.7 });
+    expect(nearestTiming(224, 1000)).toEqual({ points: 224, draws: 1000, seconds: 7.7 });
     const line = referenceLine(224, 1000);
     expect(line).toContain("Reference, not a prediction");
-    expect(line).toContain("the dev laptop took 5.7 s for 224 points × 1,000 draws (W09.6)");
+    expect(line).toContain("the dev laptop took 7.7 s for 224 points × 1,000 draws (W09.13)");
   });
 });
 
@@ -235,7 +235,7 @@ describe("this server's own timings", () => {
       { points: 224, draws: 1000, seconds: 11 },
     ];
     const estimate = estimateCost(224, 1000, runs);
-    // 11 s against the fit's ~5.8 s at this size: about twice the fit.
+    // 11 s against the fit's ~7.5 s at this size: about 1.5 times the fit.
     expect(estimate.measured?.seconds).toBeCloseTo(11, 9);
     const text = costText(estimate);
     expect(text.headline).toContain("About 11 s from your last 2 runs on this server");
@@ -246,26 +246,26 @@ describe("this server's own timings", () => {
   it("do not let a coarse run distort a fine estimate beyond the stated model error", () => {
     // The server is the dev laptop, and only a coarse run (a 200-draw row) has
     // been timed. The fine estimate must stay within the fit's own stated error
-    // of what the laptop measured for the fine run (5.7 s).
-    const coarseOnly = [{ points: 224, draws: 200, seconds: 3.3 }];
+    // of what the laptop measured for the fine run (7.7 s).
+    const coarseOnly = [{ points: 224, draws: 200, seconds: 4.1 }];
     const estimate = estimateCost(224, 1000, coarseOnly);
-    const measured = 5.7;
+    const measured = 7.7;
     const off = Math.abs((estimate.measured?.seconds ?? 0) - measured) / measured;
     expect(off).toBeLessThanOrEqual(COST_FIT.worstOver - COST_FIT.worstUnder);
     // And the other way round: a fine run does not distort the coarse estimate.
-    const fineOnly = [{ points: 224, draws: 1000, seconds: 5.7 }];
+    const fineOnly = [{ points: 224, draws: 1000, seconds: 7.7 }];
     const coarse = estimateCost(224, 200, fineOnly);
-    const offCoarse = Math.abs((coarse.measured?.seconds ?? 0) - 3.3) / 3.3;
+    const offCoarse = Math.abs((coarse.measured?.seconds ?? 0) - 4.1) / 4.1;
     expect(offCoarse).toBeLessThanOrEqual(COST_FIT.worstOver - COST_FIT.worstUnder);
     // A ratio, not a rate: a seconds-per-point-draw taken from the coarse run
-    // alone (3.3 s / 44,800) would put 224 x 1,000 at 16.5 s, three times the measured 5.7 s.
+    // alone (4.1 s / 44,800) would put 224 x 1,000 at 20.5 s, 2.7 times the measured 7.7 s.
     expect(estimate.measured?.seconds).toBeLessThan(10);
   });
 
   it("the median shrugs off one odd run", () => {
-    const base = { points: 224, draws: 1000, seconds: 5.7 };
+    const base = { points: 224, draws: 1000, seconds: 7.7 };
     const runs = [base, base, base, { ...base, seconds: 80 }];
-    expect(hostScale(runs)).toBeCloseTo(5.7 / laptopSeconds(224, 1000), 9);
+    expect(hostScale(runs)).toBeCloseTo(7.7 / laptopSeconds(224, 1000), 9);
   });
 });
 

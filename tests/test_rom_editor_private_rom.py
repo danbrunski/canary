@@ -53,7 +53,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from src.analysis import fuel_plant, rom_editor, sim_montecarlo
+from src.analysis import fuel_plant, rom_editor, sim_cells, sim_montecarlo
 from src.analysis.paired_scenarios import (
     LearnedState,
     OperatingPoint,
@@ -1150,3 +1150,46 @@ def test_a_trim_edit_without_the_latch_state_is_refused_by_name() -> None:
     for name in ("high_det", "knock_control"):
         with pytest.raises(ValidationError, match=name):
             rom_editor.SimRequest.model_validate({k: v for k, v in body.items() if k != name})
+
+
+# -- W09.13: the timing points' memo, on the real image -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("label", "draws"),
+    [("fuel_comp_spec", 300), ("k_plus_5", 200)],
+)
+def test_the_timing_points_equal_the_per_pair_path_on_the_real_image_with_varying_points(
+    real: Real, label: str, draws: int
+) -> None:
+    """W09.13: ``sim_cells.ignition_timing_points`` shares ``ignition_timing_at`` between the
+    pairs of a point that give it the same inputs. At 200+ draws on ZS44A-20261004 some points
+    carry two or more outcomes (measured: 26-40 of 201 at 300 draws), so a memo key that merges
+    pairs which differ cannot pass: the rows must be ``==`` the one-call-per-pair path's
+    (the pre-W09.13 loop, ``tests.test_rom_editor._timing_points_per_pair``), and the premise,
+    a point with two outcomes, is asserted too."""
+    from tests.test_rom_editor import _timing_points_per_pair
+
+    if label == "fuel_comp_spec":
+        edits = [
+            e.model_dump(mode="json", exclude_none=True) for e in load_edit_spec(FIXTURE_SPEC).edits
+        ]
+    else:
+        edits = [K_PLUS_5]
+    seen: dict[str, Any] = {}
+    real_points = sim_cells.ignition_timing_points
+
+    def spy(*args: Any, **kw: Any) -> Any:
+        seen["args"], seen["kw"] = args, kw
+        seen["rows"] = real_points(*args, **kw)
+        return seen["rows"]
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(rom_editor, "ignition_timing_points", spy)
+        simulate(real, request(edits, draws=draws))
+    rows = seen["rows"]
+    reference = _timing_points_per_pair(seen["args"][0], *seen["args"][1:], **seen["kw"])
+    assert sum(1 for r in rows if len(r["outcomes"]) >= 2) >= 5
+    assert all(sum(o["draws"] for o in r["outcomes"]) == draws for r in rows)
+    assert rows == reference
+    assert json.dumps(rows, sort_keys=True) == json.dumps(reference, sort_keys=True)

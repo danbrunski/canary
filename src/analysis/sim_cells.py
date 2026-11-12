@@ -1432,51 +1432,69 @@ def ignition_timing_points(
         pedal = bool((p.pedal_flag >> bit) & 1)
         outcomes: Counter[str] = Counter()
         detail: dict[str, dict[str, Any]] = {}
+        # ``ignition_timing_at`` is a pure function of the point's own rpm word,
+        # coolant and pedal flag and of what each pair gives it (the two X, the
+        # two moved flags, the two lookup bytes), and X is a quantized byte, so
+        # the draws of one point repeat those inputs. Each distinct input is
+        # computed once; the point's outcome (the dict and its JSON key) is
+        # shared by every pair that gave it. Per point, never across points, so
+        # no two rows hold the same dict or list.
+        memo: dict[tuple[int, int, bool, bool, int | None, int | None], tuple[str, dict[str, Any]]]
+        memo = {}
+        not_computed: tuple[str, dict[str, Any]] | None = None
         for k in range(result.draws):
             words = (bfs[0][i, k], bfs[1][i, k])
             if not all(math.isfinite(w) for w in words):
-                at: dict[str, Any] = {
-                    "status": "unevaluable",
-                    "delta": None,
-                    "delta_min": None,
-                    "delta_max": None,
-                    "trim_term_delta": None,
-                    "term_27c6_delta": None,
-                    "term_279a": None,
-                    "charge_word_routes": None,
-                    "reasons": [X_NOT_COMPUTED],
-                    "x_base": None,
-                    "x_candidate": None,
-                }
+                if not_computed is None:
+                    at: dict[str, Any] = {
+                        "status": "unevaluable",
+                        "delta": None,
+                        "delta_min": None,
+                        "delta_max": None,
+                        "trim_term_delta": None,
+                        "term_27c6_delta": None,
+                        "term_279a": None,
+                        "charge_word_routes": None,
+                        "reasons": [X_NOT_COMPUTED],
+                        "x_base": None,
+                        "x_candidate": None,
+                    }
+                    not_computed = (json.dumps(at, sort_keys=True), at)
+                key, at = not_computed
             else:
                 xb = x_from_bfs(int(words[0]), lps[0], kit.twin)
                 xc = x_from_bfs(int(words[1]), lps[1], kit.twin)
                 pb, pc = float(phi[0][i, k]), float(phi[1][i, k])
                 moved = math.isfinite(pb) != math.isfinite(pc) or (math.isfinite(pb) and pb != pc)
-                full = ignition_timing_at(
-                    tb,
-                    tc,
-                    state,
-                    rpm_word=word,
-                    x_base=xb,
-                    x_candidate=xc,
-                    coolant_c=p.coolant_c,
-                    pedal_flag=pedal,
-                    phi_moved=moved,
-                    bfs_moved=int(words[0]) != int(words[1]),
-                    lookup_bytes=(_lookup_byte(kit, pb), _lookup_byte(kit, pc)),
-                )
-                at = {key: full[key] for key in _POINT_KEYS}
-                at.update(x_base=xb, x_candidate=xc)
-                if reach:
-                    at.update(
-                        status="unevaluable",
-                        delta=None,
-                        delta_min=None,
-                        delta_max=None,
-                        reasons=list(dict.fromkeys([*at["reasons"], *reach])),
+                bfs_moved = int(words[0]) != int(words[1])
+                lookup = (_lookup_byte(kit, pb), _lookup_byte(kit, pc))
+                inputs = (xb, xc, moved, bfs_moved, *lookup)
+                if inputs not in memo:
+                    full = ignition_timing_at(
+                        tb,
+                        tc,
+                        state,
+                        rpm_word=word,
+                        x_base=xb,
+                        x_candidate=xc,
+                        coolant_c=p.coolant_c,
+                        pedal_flag=pedal,
+                        phi_moved=moved,
+                        bfs_moved=bfs_moved,
+                        lookup_bytes=lookup,
                     )
-            key = json.dumps(at, sort_keys=True)
+                    at = {key: full[key] for key in _POINT_KEYS}
+                    at.update(x_base=xb, x_candidate=xc)
+                    if reach:
+                        at.update(
+                            status="unevaluable",
+                            delta=None,
+                            delta_min=None,
+                            delta_max=None,
+                            reasons=list(dict.fromkeys([*at["reasons"], *reach])),
+                        )
+                    memo[inputs] = (json.dumps(at, sort_keys=True), at)
+                key, at = memo[inputs]
             outcomes[key] += 1
             detail[key] = at
         rows.append(

@@ -32,12 +32,13 @@ from pydantic import ValidationError
 from src.analysis import rom_editor, sim_montecarlo
 from src.analysis.ecu_application import ApplicationModelRefusalError
 from src.analysis.fuel_plant import FuelPlantRefusalError, plant_qualification
-from src.analysis.paired_scenarios import OUTPUTS, SimKit
+from src.analysis.paired_scenarios import OUTPUTS, SimKit, timing_tables
 from src.analysis.paired_steady import TRIM_AUTHORITY_UNDECODED
 from src.analysis.rom_edit_spec import build_candidate, load_edit_spec, parse_edit_spec
 from src.analysis.rom_effects import RomEffectRefusalError, compare_roms
 from src.analysis.rom_image import ImageFormatError, revision_match, sha256_hex
 from src.analysis.rom_levers import classify_edit
+from src.analysis.sim_cells import ignition_timing_points
 from src.analysis.sim_contract import SimulationRefusalError
 from src.analysis.sim_montecarlo import DESIGN_ASSUMPTION_PREFIX, MonteCarloResult
 from src.vehicle.tune_revisions import ReferenceImage, TuneRevision, TuneRevisionRegistry
@@ -1569,3 +1570,344 @@ def test_the_kinds_the_loader_accepts_are_the_two_the_page_draws() -> None:
             "placeholder",
         )
     )
+
+
+# -- W09.13: the timing points are the per-pair path, memoized ------------------------------
+
+
+def _timing_points_per_pair(
+    kit: SimKit,
+    result: Any,
+    design: Any,
+    base_image: bytes,
+    candidate_image: bytes,
+    state: Any,
+    *,
+    slot: int,
+) -> list[dict[str, Any]]:
+    """The reference: ``sim_cells.ignition_timing_points`` as it was before W09.13, one
+    ``ignition_timing_at`` call per (point, draw) pair and nothing shared between pairs. The
+    memoized function must return exactly these rows."""
+    import math as _math
+
+    from src.analysis import sim_cells
+    from src.analysis.paired_scenarios import ignition_timing_at, rpm_word, timing_tables
+    from src.analysis.target_phi import x_from_bfs
+
+    reach = [
+        r
+        for r in sim_cells.timing_reach_reasons(kit, base_image, candidate_image, slot=slot)
+        if not (
+            r.startswith(f"{sim_cells.TIMING_INPUT_CHANGED}:")
+            and sim_cells._carried_by_points(kit, r.split(":", 1)[1])
+        )
+    ]
+    tb = timing_tables(base_image, kit.rom_map, slot=slot)
+    tc = timing_tables(candidate_image, kit.rom_map, slot=slot)
+    lps = (
+        sim_cells._load_point_scaler(kit, base_image, slot=slot),
+        sim_cells._load_point_scaler(kit, candidate_image, slot=slot),
+    )
+    bit = kit.twin.inputs.forced_column_flag.bit
+    bfs = (result.base["base_fuel_schedule"], result.candidate["base_fuel_schedule"])
+    phi = (result.base["target_phi"], result.candidate["target_phi"])
+    rows: list[dict[str, Any]] = []
+    for i, p in enumerate(design.points):
+        word = rpm_word(p.rpm, kit.contract)
+        pedal = bool((p.pedal_flag >> bit) & 1)
+        outcomes: Counter[str] = Counter()
+        detail: dict[str, dict[str, Any]] = {}
+        for k in range(result.draws):
+            words = (bfs[0][i, k], bfs[1][i, k])
+            if not all(_math.isfinite(w) for w in words):
+                at: dict[str, Any] = {
+                    "status": "unevaluable",
+                    "delta": None,
+                    "delta_min": None,
+                    "delta_max": None,
+                    "trim_term_delta": None,
+                    "term_27c6_delta": None,
+                    "term_279a": None,
+                    "charge_word_routes": None,
+                    "reasons": [sim_cells.X_NOT_COMPUTED],
+                    "x_base": None,
+                    "x_candidate": None,
+                }
+            else:
+                xb = x_from_bfs(int(words[0]), lps[0], kit.twin)
+                xc = x_from_bfs(int(words[1]), lps[1], kit.twin)
+                pb, pc = float(phi[0][i, k]), float(phi[1][i, k])
+                moved = _math.isfinite(pb) != _math.isfinite(pc) or (
+                    _math.isfinite(pb) and pb != pc
+                )
+                full = ignition_timing_at(
+                    tb,
+                    tc,
+                    state,
+                    rpm_word=word,
+                    x_base=xb,
+                    x_candidate=xc,
+                    coolant_c=p.coolant_c,
+                    pedal_flag=pedal,
+                    phi_moved=moved,
+                    bfs_moved=int(words[0]) != int(words[1]),
+                    lookup_bytes=(
+                        sim_cells._lookup_byte(kit, pb),
+                        sim_cells._lookup_byte(kit, pc),
+                    ),
+                )
+                at = {key: full[key] for key in sim_cells._POINT_KEYS}
+                at.update(x_base=xb, x_candidate=xc)
+                if reach:
+                    at.update(
+                        status="unevaluable",
+                        delta=None,
+                        delta_min=None,
+                        delta_max=None,
+                        reasons=list(dict.fromkeys([*at["reasons"], *reach])),
+                    )
+            key = json.dumps(at, sort_keys=True)
+            outcomes[key] += 1
+            detail[key] = at
+        rows.append(
+            {
+                "point": i,
+                "rpm": p.rpm,
+                "rpm_word": word,
+                "coolant_c": p.coolant_c,
+                "pedal_flag": pedal,
+                "outcomes": [{**detail[key], "draws": n} for key, n in sorted(outcomes.items())],
+            }
+        )
+    return rows
+
+
+def _timing_points_case(
+    monkeypatch: pytest.MonkeyPatch,
+    kit: SimKit,
+    image: bytes,
+    match: dict[str, Any],
+    registry: TuneRevisionRegistry,
+    **over: Any,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, int]:
+    """Run a simulate, capture what ``ignition_timing_points`` was handed, and return its
+    rows, the per-pair reference's rows on the same arguments, the number of
+    ``ignition_timing_at`` calls the real one made and the number of pairs."""
+    from src.analysis import sim_cells
+    from src.analysis.paired_scenarios import ignition_timing_at
+
+    seen: dict[str, Any] = {}
+    real_points = sim_cells.ignition_timing_points
+    real_at = ignition_timing_at
+    calls = [0]
+
+    def spy_at(*args: Any, **kw: Any) -> Any:
+        calls[0] += 1
+        return real_at(*args, **kw)
+
+    def spy_points(*args: Any, **kw: Any) -> Any:
+        seen["args"], seen["kw"] = args, kw
+        monkeypatch.setattr(sim_cells, "ignition_timing_at", spy_at)
+        try:
+            seen["rows"] = real_points(*args, **kw)
+        finally:
+            monkeypatch.setattr(sim_cells, "ignition_timing_at", real_at)
+        return seen["rows"]
+
+    monkeypatch.setattr(rom_editor, "ignition_timing_points", spy_points)
+    req = rom_editor.SimRequest.model_validate(request(**over))
+    rom_editor.simulate_edits(image, match, req, PROFILE, kit=kit, registry=registry)
+    reference = _timing_points_per_pair(kit, *seen["args"][1:], **seen["kw"])
+    result = seen["args"][1]
+    return seen["rows"], reference, calls[0], len(seen["args"][2].points) * result.draws
+
+
+def test_the_timing_points_equal_the_per_pair_path_exactly_on_a_fuel_comp_edit(
+    monkeypatch: pytest.MonkeyPatch,
+    kit_and_image: tuple[SimKit, bytes],
+    matched: dict[str, Any],
+    registry: TuneRevisionRegistry,
+) -> None:
+    """W09.13: the rows are ``==`` the one-call-per-pair path's on a simulated Fuel Comp edit,
+    the pair count is conserved, and ``ignition_timing_at`` is called far fewer times than
+    there are pairs (so a return to one call per pair fails). It does NOT pin the memo key:
+    on this image every design point has a single outcome (draws never vary within a point),
+    so a key that merged pairs which differ would pass here.
+    ``test_the_timing_points_share_only_pairs_that_give_the_same_inputs`` pins the key."""
+    kit, image = kit_and_image
+    rows, reference, calls, pairs = _timing_points_case(
+        monkeypatch, kit, image, matched, registry, edits=[FC_EDIT], draws=200
+    )
+    assert rows == reference
+    assert json.dumps(rows, sort_keys=True) == json.dumps(reference, sort_keys=True)
+    assert sum(o["draws"] for r in rows for o in r["outcomes"]) == pairs
+    assert 0 < calls < pairs / 4, f"{calls} calls for {pairs} pairs: draws are not being shared"
+
+
+def test_the_timing_points_equal_the_per_pair_path_on_a_k_edit(
+    monkeypatch: pytest.MonkeyPatch,
+    kit_and_image: tuple[SimKit, bytes],
+    matched: dict[str, Any],
+    registry: TuneRevisionRegistry,
+) -> None:
+    """A K edit reaches timing outside the trims (E09.7), so the rows carry its reasons; still
+    ``==`` the per-pair path. One outcome per point here too: the memo key is pinned by
+    ``test_the_timing_points_share_only_pairs_that_give_the_same_inputs``, not by this."""
+    kit, image = kit_and_image
+    rows, reference, _, _ = _timing_points_case(
+        monkeypatch, kit, image, matched, registry, edits=[K_EDIT], draws=60
+    )
+    assert rows == reference
+
+
+def test_the_timing_points_equal_the_per_pair_path_on_a_trim_edit(
+    monkeypatch: pytest.MonkeyPatch,
+    trim_world: tuple[SimKit, bytes, dict[str, Any], TuneRevisionRegistry],
+) -> None:
+    """A trim edit on a monotonic-axis image with the latch clear: the rows ``==`` the
+    per-pair path's, and no row's dict or list is shared with another outcome's. (One outcome
+    per point; the memo key is pinned by
+    ``test_the_timing_points_share_only_pairs_that_give_the_same_inputs``.)"""
+    kit, image, match, registry = trim_world
+    edits = [{"table": "timing_trim_a", "slot": 1, "cells": [[3, 3], [4, 9]], "add_raw": -3}]
+    rows, reference, _, _ = _timing_points_case(
+        monkeypatch,
+        kit,
+        image,
+        match,
+        registry,
+        edits=edits,
+        draws=40,
+        high_det="clear",
+        knock_control="active",
+    )
+    assert rows == reference
+    ids = [id(o) for r in rows for o in r["outcomes"]]
+    assert len(ids) == len(set(ids))
+    lists = [id(v) for r in rows for o in r["outcomes"] for v in o.values() if isinstance(v, list)]
+    assert len(lists) == len(set(lists))
+
+
+def _points_args(
+    monkeypatch: pytest.MonkeyPatch,
+    kit: SimKit,
+    image: bytes,
+    match: dict[str, Any],
+    registry: TuneRevisionRegistry,
+    **over: Any,
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """What a simulate hands ``ignition_timing_points``: its positional and keyword arguments."""
+    seen: dict[str, Any] = {}
+    real = ignition_timing_points
+
+    def spy(*args: Any, **kw: Any) -> Any:
+        seen["args"], seen["kw"] = args, kw
+        return real(*args, **kw)
+
+    monkeypatch.setattr(rom_editor, "ignition_timing_points", spy)
+    req = rom_editor.SimRequest.model_validate(request(**over))
+    rom_editor.simulate_edits(image, match, req, PROFILE, kit=kit, registry=registry)
+    return seen["args"], seen["kw"]
+
+
+def test_the_timing_points_share_only_pairs_that_give_the_same_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+    kit_and_image: tuple[SimKit, bytes],
+) -> None:
+    """W09.13: the memo key is every input a pair gives ``ignition_timing_at`` (each ROM's X,
+    ``phi_moved``, ``bfs_moved``, each ROM's gated Target AFR byte). The simulated design's own
+    draws never vary within a point on this image (every point has one outcome), so this hands
+    the function a result built by hand whose draws within ONE point cross every combination:
+    BFS on each side equal, moved, moving X either way, and not computed; phi on each side
+    equal or moved, across the enrichment retard's threshold, off a whole byte, and not known.
+    The rows must be ``==`` the one-call-per-pair path's, and a point must carry several
+    outcomes, so that a key that drops any one input (the mutations W09.13 was verified
+    against: no ``phi_moved``, no lookup bytes, no ``bfs_moved``, no candidate X, X only, a
+    constant) merges pairs that differ and turns this red."""
+    kit, base = kit_and_image
+    rom_map = kit.rom_map
+    image = bytearray(base)
+    # The below-threshold enrichment gain is 0 on this image's flash, as on the real one's
+    # cold row: the retard may then be nonzero only at or above the threshold byte, so the
+    # lookup byte decides an outcome (otherwise a nonzero seeded gain makes every byte "may
+    # retard" and the lookup byte could never matter).
+    for table_id in ("enrichment_retard_below_gain", "enrichment_retard_below_gain_high_det"):
+        table = rom_map.table(table_id)
+        image[rom_map.table_address(table, None)] = 0
+    plain = bytes(image)
+    registry = TuneRevisionRegistry(
+        revisions=[
+            TuneRevision(
+                revision=REVISION,
+                flashed_at=datetime(2026, 10, 1, tzinfo=UTC),
+                image_sha256=sha256_hex(plain),
+            )
+        ]
+    )
+    match = revision_match(sha256_hex(plain), registry)
+    args, kw = _points_args(
+        monkeypatch, kit, plain, match, registry, edits=[FC_EDIT], draws=2, high_det="set"
+    )
+    _, result, design, base_image, candidate_image, state = args
+    threshold = timing_tables(candidate_image, rom_map, slot=1).base_term.enrichment.threshold_set
+    scale = 1 << (kit.twin.reference.q_bits - kit.twin.table.cell_to_word_shift)
+    low, high = (threshold - 100) / scale, (threshold + 20) / scale  # whole bytes either side
+    odd_a, odd_b = 1.0001, 1.0002  # not a whole byte: unknown to the lookup
+    nan = float("nan")
+    bfs_pairs = [
+        (40000.0, 40000.0),  # equal: nothing moved
+        (40000.0, 40040.0),  # BFS moved, and (the test below asserts) X maybe not
+        (36000.0, 40000.0),  # X moved up
+        (40000.0, 36000.0),  # X moved down
+        (36000.0, 36000.0),
+        (nan, 40000.0),  # not computed on the base side
+        (40000.0, nan),  # and on the candidate side
+    ]
+    phi_pairs = [
+        (low, low),
+        (high, high),
+        (low, high),
+        (high, low),
+        (odd_a, odd_a),  # unknown byte, phi held
+        (odd_a, odd_b),  # unknown byte, phi moved
+        (nan, nan),
+        (nan, low),
+    ]
+    pairs = [(b, p) for b in bfs_pairs for p in phi_pairs]
+    n = result.n_points
+    shape = (n, len(pairs))
+
+    def grid(column: int, which: int) -> Any:
+        return np.tile(np.array([pair[column][which] for pair in pairs]), (n, 1))
+
+    hand = dataclasses.replace(
+        result,
+        fill_bytes=np.zeros(shape, dtype=np.int64),
+        base={
+            **result.base,
+            "base_fuel_schedule": grid(0, 0),
+            "target_phi": grid(1, 0),
+        },
+        candidate={
+            **result.candidate,
+            "base_fuel_schedule": grid(0, 1),
+            "target_phi": grid(1, 1),
+        },
+    )
+    assert hand.draws == len(pairs) == 56
+    rows = ignition_timing_points(kit, hand, design, base_image, candidate_image, state, slot=1)
+    reference = _timing_points_per_pair(
+        kit, hand, design, base_image, candidate_image, state, slot=1
+    )
+    assert rows == reference
+    assert json.dumps(rows, sort_keys=True) == json.dumps(reference, sort_keys=True)
+    assert all(sum(o["draws"] for o in r["outcomes"]) == len(pairs) for r in rows)
+    # The premise: pairs that differ in one input land in one point and stay distinct.
+    assert max(len(r["outcomes"]) for r in rows) >= 8
+    outcomes = [o for r in rows for o in r["outcomes"]]
+    assert {o["x_base"] for o in outcomes} > {None} and len({o["x_base"] for o in outcomes}) >= 3
+    assert {tuple(o["charge_word_routes"] or ()) for o in outcomes} >= {
+        (),
+        ("0xFFFF26C0 via the Target AFR lookup",),
+    }
+    assert "enrichment_retard_unmodelled" in {r for o in outcomes for r in o["reasons"]}

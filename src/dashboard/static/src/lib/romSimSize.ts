@@ -34,12 +34,12 @@ export type SimPreset = "coarse" | "fine";
  *  Fuel-Comp-restore entry records that "three draws give only a coarse
  *  per-cell spread, so cell quantiles should be read from" the 200-draw run,
  *  and the E08.5/E08.7 real-image runs and W09.6's low row all use 200. At
- *  224 points W09.6 measured 3.3 s for 200 draws against 5.7 s for 1,000: the
+ *  224 points W09.13 measured 4.1 s for 200 draws against 7.7 s for 1,000: the
  *  child's start-up, not the draws, dominates a small run, so fewer than 200
  *  would save almost nothing.
  *
  *  Fine 1,000: E08.3's stated speed target (1,000 draws) and the draw count
- *  W09.6 measured as its reference row (224 points x 1,000 draws, 5.7 s on
+ *  W09.13 measured as its reference row (224 points x 1,000 draws, 7.7 s on
  *  the dev laptop). 2,000 is `MAX_DRAWS`, the cap, not a recommendation. */
 export const PRESET_DRAWS: Record<SimPreset, number> = { coarse: 200, fine: 1000 };
 
@@ -162,27 +162,33 @@ export interface TimedRun {
   seconds: number;
 }
 
-/** W09.6's re-measured table (2026-10-17, plant fuel-mv-2): the real `spawn`
+/** W09.13's re-measured table (2026-11-11, plant fuel-mv-2, the same grids
+ *  and light-load Fuel Comp edit as W09.6's 2026-10-17 table): the real `spawn`
  *  child (start-up included) on the dev laptop (Intel Core Ultra 9 185H,
- *  WSL2, 1-minute load 0.6-1.6), the mean of two or three runs per row. The
- *  size is the grid's nominal cell count, which is what the form can state
- *  before a run; the design that actually runs is smaller (201 of 224, 231 of
- *  256, 945 of 1,024, 53 of 56), because points outside the identified fit
- *  are not placed. The rows: a Coarse-preset grid (8 x 7), the form's Fuel
- *  Comp grid (16 x 14) and the 16 x 16 and 32 x 32 ones. The only timings the
- *  reference line may quote. The fuel-mv-1 table (8.5 s at the form grid and
- *  1,000 draws, 51 s at the cap) was taken at the plant's 0.7 working
+ *  WSL2, 1-minute load 1.1-1.8), the mean of two runs per row. The size is the
+ *  grid's nominal cell count, which is what the form can state before a run;
+ *  the design that actually runs is smaller (201 of 224, 231 of 256, 945 of
+ *  1,024, 53 of 56), because points outside the identified fit are not
+ *  placed. The rows: a Coarse-preset grid (8 x 7), the form's Fuel Comp grid
+ *  (16 x 14) and the 16 x 16 and 32 x 32 ones. The only timings the reference
+ *  line may quote. It replaces the 2026-10-17 table (5.7 s at the form grid
+ *  and 1,000 draws, 34.2 s at 1,024 x 2,000) because E09.7's ignition-timing
+ *  block had made a run 6-15x slower than that table until W09.13 shared
+ *  its per-pair work (the table now runs ~10-25 % over the 2026-10-17 one: the
+ *  response grew ~20 % in between). The fuel-mv-1 table (8.5 s at the form
+ *  grid and 1,000 draws, 51 s at the cap) was taken at the plant's 0.7 working
  *  volumetric efficiency and is gone. */
 export const LAPTOP_TIMINGS: readonly TimedRun[] = [
-  { points: 56, draws: 200, seconds: 2.8 },
-  { points: 56, draws: 1000, seconds: 3.9 },
-  { points: 224, draws: 200, seconds: 3.3 },
-  { points: 224, draws: 1000, seconds: 5.7 },
-  { points: 224, draws: 2000, seconds: 9.6 },
-  { points: 256, draws: 200, seconds: 3.9 },
-  { points: 256, draws: 1000, seconds: 7.6 },
-  { points: 1024, draws: 1000, seconds: 21.9 },
-  { points: 1024, draws: 2000, seconds: 34.2 },
+  { points: 56, draws: 200, seconds: 2.9 },
+  { points: 56, draws: 1000, seconds: 4.6 },
+  { points: 224, draws: 200, seconds: 4.1 },
+  { points: 224, draws: 1000, seconds: 7.7 },
+  { points: 224, draws: 2000, seconds: 12.1 },
+  { points: 256, draws: 200, seconds: 4.1 },
+  { points: 256, draws: 1000, seconds: 8.2 },
+  { points: 256, draws: 2000, seconds: 12.4 },
+  { points: 1024, draws: 1000, seconds: 26.6 },
+  { points: 1024, draws: 2000, seconds: 42.1 },
 ];
 
 export interface CostFit {
@@ -236,7 +242,7 @@ export function laptopSeconds(points: number, draws: number, fit: CostFit = COST
 /** The fit, as the page states it. */
 export function describeFit(fit: CostFit = COST_FIT): string {
   const pct = (value: number) => `${value > 0 ? "+" : ""}${Math.round(value * 100)} %`;
-  return `${fit.overheadS.toFixed(1)} s + ${fit.secondsPerPointDraw.toExponential(1)} s × points × draws, fitted to the ${LAPTOP_TIMINGS.length} dev-laptop timings in W09.6 (least squares on relative error; against those rows it is off by ${pct(fit.worstUnder)} to ${pct(fit.worstOver)}, and no run under 56 points was timed)`;
+  return `${fit.overheadS.toFixed(1)} s + ${fit.secondsPerPointDraw.toExponential(1)} s × points × draws, fitted to the ${LAPTOP_TIMINGS.length} dev-laptop timings in W09.13 (least squares on relative error; against those rows it is off by ${pct(fit.worstUnder)} to ${pct(fit.worstOver)}, and no run under 56 points was timed)`;
 }
 
 /** The measured row closest to this size in points x draws (on a log scale). */
@@ -268,7 +274,7 @@ export function formatCount(count: number): string {
 /** The laptop reference sentence: a measured row, labelled as a reference. */
 export function referenceLine(points: number, draws: number): string {
   const row = nearestTiming(points, draws);
-  return `Reference, not a prediction: the dev laptop took ${row.seconds} s for ${formatCount(row.points)} points × ${formatCount(row.draws)} draws (W09.6); its fit gives about ${formatDuration(laptopSeconds(points, draws))} for ${formatCount(points)} × ${formatCount(draws)}.`;
+  return `Reference, not a prediction: the dev laptop took ${row.seconds} s for ${formatCount(row.points)} points × ${formatCount(row.draws)} draws (W09.13); its fit gives about ${formatDuration(laptopSeconds(points, draws))} for ${formatCount(points)} × ${formatCount(draws)}.`;
 }
 
 // -- this browser's own timings -------------------------------------------------------------

@@ -1813,7 +1813,7 @@ W09.6 is the orchestrator's own, on the ROM machine.
     like `/tables` and `/trace`, not a real image's payload. A look at the
     heat colouring on a real image in both themes belongs with W09.6.
 
-- [ ] **W09.13 — Simulate's timing block costs 0.4 ms per (point, draw), and the
+- [x] **W09.13 — Simulate's timing block costs 0.4 ms per (point, draw), and the
   page's time estimate is 4-15x under (found by W09.6's re-run, 2026-11-11).**
   `sim_cells.ignition_timing_points` calls `paired_scenarios.ignition_timing_at`
   once per (design point, draw) pair. Each call re-reads trim bytes from the image
@@ -1835,6 +1835,88 @@ W09.6 is the orchestrator's own, on the ROM machine.
     figure, or the remaining cost is named. The timing rows are bit-identical to
     before. The page's estimate is within 1.5x of the measured time for both
     grids at 200 and 1,000 draws.
+  - **Done 2026-11-11.** `sim_cells.ignition_timing_points` now computes each
+    distinct input once per design point: the memo key is `(x_base, x_candidate,
+    phi_moved, bfs_moved, lookup_byte_base, lookup_byte_candidate)` (the point's own
+    rpm word, coolant and pedal flag are fixed within it) and holds the outcome dict
+    with its JSON key, so the per-pair loop is two `x_from_bfs`, two `_lookup_byte`
+    and a dict lookup. The memo is per point, never across points, so no two rows
+    share a dict or a list. `ignition_timing_at` and its callees are pure given
+    `(tb, tc, state, ...)` (read: `_selection`, `_unread_changes`, `_base_sum_change`,
+    `_term_27c6` (an `lru_cache`), none mutates its inputs, and every returned
+    list is built fresh by the one call that is now shared). Its other users
+    (`ignition_timing_cells`, `tests/test_ignition_timing.py`) call it directly and
+    are unchanged. At 16 x 16 and 1,000 draws on the real ZS44A-20261004 image the
+    block takes 0.93 s against 81.5 s for the old function on the same arguments
+    (in-process, both on one run's `result` and `design`), rows `==` and equal as
+    sorted JSON.
+  - **Bit-identical:** (1) on the real image, rows captured from the unmodified
+    function before the change and compared with `cmp` after: form 16 x 14 at 100
+    draws (201 points, 227 outcomes) and 16 x 16 at 40 draws (231 points) are
+    byte-identical JSON; and old and new compared in one process at 16 x 16 x 1,000
+    draws (above). (2) In the suite, against `_timing_points_per_pair` (the pre-W09.13
+    loop kept in `tests/test_rom_editor.py`), rows `==` and equal as sorted JSON:
+    - **The memo key is pinned by** `tests/test_rom_editor.py::
+      test_the_timing_points_share_only_pairs_that_give_the_same_inputs`: a
+      `MonteCarloResult` built by hand whose 56 draws within ONE point cross BFS
+      equal / moved / X up / X down / not computed on either side with phi equal, moved,
+      across the enrichment retard's threshold byte, off a whole byte, and unknown
+      (the image's below-threshold enrichment gain is set to 0 so the lookup byte can
+      decide an outcome). It asserts a point carries >= 8 outcomes, >= 3 distinct X and
+      both charge-word route sets, so it proves its own premise. Mutation check with the
+      verifier's `mutplug.py` (the key line replaced): the test fails under no `phi_moved`,
+      no lookup bytes, no `bfs_moved`, no candidate X, X only, no base X and the constant
+      `(0,)` key; the other three tests in this paragraph still pass, as they would.
+      Dropping only ONE side's lookup byte passes (equivalent mutants: given `moved`
+      and the other side's byte, the output cannot differ, since a moved phi holds the
+      retard whatever the bytes).
+    - On the real image,
+      `tests/test_rom_editor_private_rom.py::test_the_timing_points_equal_the_per_pair_path_on_the_real_image_with_varying_points`
+      (slow tier, skips by name without the image): Fuel Comp spec at 300 draws and K +5 % at
+      200, asserting >= 5 points carry two or more outcomes (26-40 of 201 measured) and
+      `==` the per-pair path. It fails under the constant key and the no-candidate-X
+      key (the coarse mutants); the finer ones are the hand-built test's.
+    - Not key tests (one outcome per design point on the synthetic image; they pin
+      equality, the pair count, and that `ignition_timing_at` is called < pairs/4 times,
+      so a return to one call per pair fails): `..._equal_the_per_pair_path_exactly_on_a_fuel_comp_edit`,
+      `..._on_a_k_edit`, `..._on_a_trim_edit` (which also asserts no dict or list is
+      shared between outcomes).
+  - **Wall times, real `spawn` child under the 4,096 MiB `RLIMIT_AS`** (same
+    light-load Fuel Comp edit, seed 20261015, `run_off_loop("rom_sim", ...)`;
+    before = HEAD in a throwaway worktree, after = this change; 1-minute load
+    0.95-1.8; the first before pass at load 2-13 is not used):
+
+    | grid | draws | before | after | 2026-10-17 |
+    |---|---|---|---|---|
+    | form 16 x 14 (201 placed) | 200 | 18.9 s | 4.1 s (4.14, 4.04) | 3.3 s |
+    | form 16 x 14 | 1,000 | 78.1 s | 7.7 s (7.64, 7.83) | 5.7 s |
+    | 16 x 16 (231 placed) | 200 | 20.2 s | 4.1 s (4.04, 4.08) | 3.9 s |
+    | 16 x 16 | 1,000 | 89.8 s | 8.2 s (8.30, 8.08) | 7.6 s |
+
+    16 x 16 at 1,000 draws is 1.08x the 2026-10-17 figure (Accept: within 2x). What
+    remains over that table (~8-35 %: form 1,000 is 7.7 against 5.7, 32 x 32 at
+    1,000 draws 26.6 against 21.9 s) is not the timing block (0.9 s at 16 x 16 x 1,000);
+    the response also grew ~20 % between the two tables. Not chased.
+  - **Estimate:** `romSimSize.ts` `LAPTOP_TIMINGS` is now ten rows, each the mean
+    of two runs (56 x 200/1,000, 224 x 200/1,000/2,000, 256 x 200/1,000/2,000,
+    1,024 x 1,000/2,000; wall 2.9, 4.6, 4.1, 7.7, 12.1, 4.1, 8.2, 12.4, 26.6, 42.1 s)
+    and `COST_FIT` refits to **3.0 s + 2.0e-5 s x points x draws**, within -10 % to
+    +11 % of its own rows (was 2.7 s + 1.6e-5, which predicted 6.4 s for a run that
+    took 99.7 s). The page's estimate against the measured time: form 3.9 s vs 4.1 s
+    and 7.5 s vs 7.7 s; 16 x 16 4.0 s vs 4.1 s and 8.2 s vs 8.2 s (all within
+    1.05x, Accept 1.5x). The reference line and the fit text now cite W09.13.
+    `romSimSize.test.ts` and `RomEditorSimulate.test.tsx` pin the new rows and bounds.
+  - **Gate (re-run after the key tests were added):** `ruff check .`, `ruff format
+    --check .`, `mypy` (whole config, 1,222 files) clean; pytest over the test files
+    importing `sim_cells` / `paired_scenarios` with `-m ""` (first pass: 16 files, 469
+    passed; after the key tests: `test_rom_editor`, `test_sim_cells`,
+    `test_ignition_timing`, `test_paired_scenarios`, `test_rom_editor_api`,
+    `test_sim_report`, `test_rom_sim_cli` 255 passed);
+    `tests/test_rom_editor_private_rom.py -n0 -m slow`: **20 passed, 1 xfailed** in
+    71.7 s (18 passed, 1 xfailed before this item; the two new cases are the
+    real-image timing-points ones); `pnpm typecheck`, `pnpm lint`, prettier on the
+    three changed files clean; `vitest related` on `romSimSize.ts` 11 files, 297
+    tests passed.
 
 ## Not in scope
 

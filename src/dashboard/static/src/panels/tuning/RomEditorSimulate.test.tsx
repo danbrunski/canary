@@ -1017,7 +1017,7 @@ describe("the cost estimate", () => {
       "2 points × 1,000 draws = 2,000 point-draws. Not yet measured on this server.",
     );
     expect(cost).toHaveTextContent("Reference, not a prediction: the dev laptop took");
-    expect(cost).toHaveTextContent("(W09.6)");
+    expect(cost).toHaveTextContent("(W09.13)");
     expect(cost).toHaveTextContent("least squares on relative error");
     expect(cost).toHaveTextContent("Below the Fine preset");
   });
