@@ -918,6 +918,41 @@ async def test_serve_in_background_force_exits_when_server_wont_stop(
     assert wedged.force_exit is True
 
 
+async def test_serve_in_background_installs_the_token_redaction(
+    config: CanaryConfig,
+) -> None:
+    """D03.71: whoever configured logging, the daemon starting uvicorn leaves
+    the request-path loggers redacting ``token=`` values."""
+    import logging
+
+    from src.daemon import serve_in_background
+    from src.log import PATH_LOGGERS, TokenRedactionFilter
+
+    components = build_components(config)
+    saved = {n: list(logging.getLogger(n).filters) for n in PATH_LOGGERS}
+    for n in PATH_LOGGERS:
+        logging.getLogger(n).filters[:] = []
+
+    class _Server:
+        started = True
+        should_exit = False
+        force_exit = False
+
+        async def serve(self) -> None:
+            return None
+
+    try:
+        async with serve_in_background(
+            components, server_factory=lambda config: cast(uvicorn.Server, _Server())
+        ):
+            pass
+        for n in PATH_LOGGERS:
+            assert any(isinstance(f, TokenRedactionFilter) for f in logging.getLogger(n).filters), n
+    finally:
+        for n, filters in saved.items():
+            logging.getLogger(n).filters[:] = filters
+
+
 async def test_run_daemon_wires_retention_sweeper_task(
     config: CanaryConfig,
     monkeypatch: pytest.MonkeyPatch,

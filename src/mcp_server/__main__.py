@@ -14,6 +14,7 @@ import logging
 import sys
 from collections.abc import Sequence
 
+from src.log import install_token_redaction
 from src.mcp_server.config import DEFAULT_BIND_PORT, load_from_env
 from src.mcp_server.server import build_server
 
@@ -48,6 +49,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=args.log_level,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    # D03.71: no request path may carry a credential into the journal.
+    install_token_redaction()
     log = logging.getLogger("canary-mcp")
     cfg = load_from_env()
     server = build_server(cfg)

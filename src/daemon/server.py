@@ -6,6 +6,8 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING, Any
 
+from src.log import install_token_redaction
+
 from .components import DaemonComponents
 
 if TYPE_CHECKING:
@@ -110,6 +112,10 @@ async def serve_in_background(
         )
     import uvicorn  # already loaded by _build_app, in the thread
 
+    # D03.71: ``/ws/control?token=...`` must never reach the journal. Already
+    # installed by ``configure_logging``; repeated here because this is where
+    # uvicorn starts, whoever configured logging (or didn't).
+    install_token_redaction()
     if server_factory is None:
         server_factory = uvicorn.Server
     server_config = uvicorn.Config(

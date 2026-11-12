@@ -2588,7 +2588,7 @@ that closed its task checklist.
   - Possibly related, unmeasured: throughout that drive a laptop client polled
     `GET /control/rom/backup` every ~6 s and `/models/behavior/live` every
     ~3 s. Check whether either handler does blocking work on the loop.
-- [ ] **D03.71 The dashboard's control token is written to the daemon's
+- [x] **D03.71 The dashboard's control token is written to the daemon's
   access log.** `useControlStream.ts` opens `/ws/control?token=…`, and
   uvicorn's access log records the full path, so the token sits in
   `journalctl -u canary` on every dashboard connect (seen 2026-11-12). The
@@ -2596,6 +2596,47 @@ that closed its task checklist.
   - Fix so it cannot recur: redact `token=` values in the access log with a
     filter on the `uvicorn.access` logger, and/or carry the token in the
     WebSocket subprotocol header instead of the query string.
+  - Done, server side (a client cannot reintroduce it): `src/log.py`
+    `TokenRedactionFilter` formats the record to decide, then rewrites any
+    `*token=<value>` (`token=`, `access_token=`, case-insensitive) to
+    `token=<redacted>` *in place*: in the format string and each string
+    argument, keeping `record.args` the same shape. Only a token split across
+    the format string and its arguments (`"token=%s" % value`) is rewritten to
+    the formatted text with no arguments. The first version always cleared
+    `args`, and the verifier caught it: uvicorn's `AccessFormatter` unpacks
+    `record.args` into five fields, so every token-bearing access line was
+    dropped and replaced by a "Logging error" traceback on stderr. It is
+    installed by `install_token_redaction()` on `uvicorn`, `uvicorn.access`,
+    `uvicorn.error` (where uvicorn logs `WebSocket /ws/control?token=…
+    [accepted]`) and the `websockets.*` loggers, and on the root JSON handler.
+    Callers: `configure_logging()` (the daemon, `scripts/serve_dashboard.py`),
+    `serve_in_background()` (where the daemon starts uvicorn) and the
+    `canary-mcp` entry point. uvicorn's own `dictConfig` keeps logger filters
+    (checked), so the order against `uvicorn.Config` does not matter.
+  - Evidence: `tests/test_log.py` (20 passed): a uvicorn-access-shaped record
+    for `/ws/control?token=<fake>` loses the token; token-free paths are
+    byte-identical; after `configure_logging()` and a real `uvicorn.Config`,
+    uvicorn's own access line is written readable
+    (`"GET /x?token=<redacted> HTTP/1.1" 200`) with no "Logging error" on stderr;
+    `test_a_real_uvicorn_server_logs_the_request_line_with_the_token_redacted`
+    serves two real requests on a free port and finds both access lines, with
+    neither the token nor an error. Both tests fail against the first version
+    (args cleared). `tests/test_daemon.py::test_serve_in_background_installs_the_token_redaction`
+    runs the daemon's own start path with the filters stripped first. Fakes
+    only; no real token in any fixture.
+  - Other places a token rides a URL (audited): `useControlStream.ts`
+    (`/ws/control?token=`, read by `websocket_control_auth_dependency` via
+    `query_params.get("token")` in `src/dashboard/security.py`) is the only
+    server-bound one. `lib/tokenHandoff.ts` and `main.tsx` carry
+    `#wb/<item>?token=` in the URL *fragment* (never sent to the server) and
+    scrub it on load. `docs/headless-api.md` shows
+    `websocat ws://…/ws/control?token=$CANARY_CONTROL_TOKEN`, which now logs
+    redacted but still lands in shell history. Every other route and the MCP
+    transport use `Authorization: Bearer`.
+  - Option, not done: carrying the token in `Sec-WebSocket-Protocol` instead of
+    the query string. The server does not read that header today, so it needs a
+    server change (accept the subprotocol, echo it back on accept) plus the
+    client and tests; the redaction above already closes the log leak.
   - Rotating the Pi's token (`/etc/canary/control.token`) after the fix is the
     operator's call.
 - [x] **GNSS sees no satellites (since at least 2026-10-10).** The no-fix case
