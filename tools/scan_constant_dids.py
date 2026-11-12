@@ -53,6 +53,7 @@ from tools._bus_tool import (
     PassiveRefusedError,
     PassiveVerdict,
     add_bus_tool_args,
+    args_response_id,
     open_client,
     parse_header,
     require_passive,
@@ -148,7 +149,7 @@ def _build_transport(
             session=session,
             keepalive_seconds=args.keepalive,
         )
-        responder = responder_for(request_id)
+        responder = responder_for(request_id, args_response_id(args))
         banner = f"Canable {args.config} (req 0x{request_id:X}"
         banner += f" → resp 0x{responder:X}" if responder is not None else ""
         if session is not None:

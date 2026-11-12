@@ -291,6 +291,84 @@ def test_open_client_hears_a_module_answering_outside_the_obd_window(
     assert response.responder_id == 0x748
 
 
+def test_response_id_pins_the_window_to_a_reply_off_header_plus_8() -> None:
+    """The BCM answers 0x745 on 0x765, not 0x74D (D03.66)."""
+    assert _bus_tool.response_window(0x745, 0x765) == (0x765, 0x765)
+    assert _bus_tool.responder_for(0x745, 0x765) == 0x765
+    assert _bus_tool.response_window(0x745) == (0x74D, 0x74D)
+    assert _bus_tool.args_response_id(_args("--response-id", "765")) == 0x765
+    assert _bus_tool.args_response_id(_args()) is None
+    assert _bus_tool.args_response_id(argparse.Namespace()) is None
+    with pytest.raises(ValueError, match="must be hex"):
+        _bus_tool.parse_response_id("bcm")
+    with pytest.raises(ValueError, match="11-bit"):
+        _bus_tool.parse_response_id("800")
+
+
+@pytest.mark.parametrize(("response_id", "heard"), [("765", True), (None, False)])
+def test_open_client_hears_the_bcm_only_with_its_response_id(
+    monkeypatch: pytest.MonkeyPatch, response_id: str | None, heard: bool
+) -> None:
+    """``--header 745`` without ``--response-id`` listens on 0x74D and drops the
+    BCM's reply on 0x765, the failure the endpoint had before D03.66."""
+    import threading
+
+    import can
+
+    channel = f"bus-tool-745-{response_id}"
+
+    class _Can:
+        pass
+
+    class _Hardware:
+        can = _Can()
+
+    class _Config:
+        hardware = _Hardware()
+
+    monkeypatch.setattr(CanaryConfig, "from_yaml", staticmethod(lambda _p: _Config()))
+    monkeypatch.setattr(
+        _bus_tool,
+        "bus_factory",
+        lambda _spec: can.interface.Bus(interface="virtual", channel=channel),
+    )
+    stop = threading.Event()
+    ready = threading.Event()
+
+    def _bcm() -> None:
+        ecu = can.interface.Bus(interface="virtual", channel=channel)
+        ready.set()
+        try:
+            while not stop.is_set():
+                frame = ecu.recv(timeout=0.05)
+                if frame is None or frame.arbitration_id != 0x745:
+                    continue
+                data = bytes(frame.data)
+                if data[1] == 0x22:
+                    reply = bytes([0x05, 0x62, data[2], data[3], 0x12, 0x34, 0x00, 0x00])
+                    ecu.send(can.Message(arbitration_id=0x765, data=reply, is_extended_id=False))
+        finally:
+            ecu.shutdown()
+
+    thread = threading.Thread(target=_bcm, daemon=True)
+    thread.start()
+    assert ready.wait(timeout=5.0)
+    extra = ("--response-id", response_id) if response_id is not None else ()
+    try:
+        args = _args("--no-daemon", "--header", "745", "--read-timeout", "0.3", *extra)
+        with _bus_tool.open_client(args, _bus_tool.require_passive(args)) as client:
+            response = client.query_mode_22(0x1101, request_id=0x745)
+    finally:
+        stop.set()
+        thread.join(timeout=1.0)
+    if heard:
+        assert response is not None
+        assert response.payload == bytes([0x12, 0x34])
+        assert response.responder_id == 0x765
+    else:
+        assert response is None
+
+
 def test_can_obd_probe_keeps_timeout_as_an_alias() -> None:
     """``--timeout`` was this tool's spelling before R06.1."""
     from tools import can_obd_probe

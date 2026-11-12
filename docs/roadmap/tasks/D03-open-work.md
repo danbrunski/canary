@@ -2238,10 +2238,15 @@ that closed its task checklist.
     bus handle with no TesterPresent between them, so the same read also
     shows whether the BCM's 0xC0 session survives the gaps (if not, a
     multi-step form is owed).
-  - **Owed (laptop, small):** `tools/_bus_tool.response_window` still assumes
-    reply = request + 8 for a physical header, so `--header 745` listens on
-    0x74D and misses the BCM's 0x765 the same way the endpoint did. Give the
-    bus tools a `--response-id` like the endpoint's.
+  - **Bus tools too (done 2026-11-12, laptop).** `tools/_bus_tool.response_window`
+    assumed reply = request + 8 for a physical header, so `--header 745`
+    listened on 0x74D and missed the BCM's 0x765 the same way the endpoint did.
+    Every tool built on `add_bus_tool_args` now takes `--response-id` (hex),
+    which pins the client's window to that id (`open_client`; flow control then
+    goes to the request id). `scan_constant_dids`'s banner reads it too.
+    `tests/test_bus_tool.py`
+    `test_open_client_hears_the_bcm_only_with_its_response_id` checks both
+    sides on a virtual bus: heard with `--response-id 765`, `None` without.
 - [~] **D03.67 `GET /control/power` says `on_battery: true` with input
   present.** *Seen 2026-11-10 17:00Z (SoC 12.9 %, charging, input present)
   and 2026-11-12 04:07Z (SoC 94.5 %, input present at 11.5 V, key on, engine

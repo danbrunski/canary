@@ -132,6 +132,15 @@ def add_bus_tool_args(
         default=header_default,
         help=f"ECU request CAN ID, hex (default {header_default}).",
     )
+    parser.add_argument(
+        "--response-id",
+        default=None,
+        help=(
+            "Reply CAN ID, hex, for a module that does not answer on header + 8 "
+            "(the BCM: --header 745 --response-id 765). Default: header + 8, or "
+            "any of 0x7E8-0x7EF for the functional 0x7DF."
+        ),
+    )
     if session_default is not None:
         parser.add_argument(
             "--session",
@@ -181,6 +190,24 @@ def parse_header(raw: str) -> int:
     return request_id
 
 
+def parse_response_id(raw: str | None) -> int | None:
+    """``--response-id`` -> an 11-bit reply id, ``None`` when not given."""
+    if raw is None:
+        return None
+    try:
+        response_id = int(raw, 16)
+    except ValueError:
+        raise ValueError(f"--response-id must be hex (e.g. 765), got {raw!r}") from None
+    if not 0 <= response_id <= 0x7FF:
+        raise ValueError(f"--response-id out of 11-bit CAN range: 0x{response_id:X}")
+    return response_id
+
+
+def args_response_id(args: argparse.Namespace) -> int | None:
+    """The parsed ``--response-id`` of ``args`` (``None`` when absent or unset)."""
+    return parse_response_id(getattr(args, "response_id", None))
+
+
 def resolve_session(raw: str) -> int | None:
     """``--session``: hex, ``auto`` (``data/dids.yaml``'s access block) or ``none``."""
     normalized = raw.strip().lower()
@@ -225,7 +252,11 @@ def open_client(args: argparse.Namespace, passive: PassiveVerdict) -> Iterator[C
     window ``request + 8`` exactly: the client's default window is
     0x7E8-0x7EF, so without it a module outside that range (``--header 740``
     answers on 0x748) would never be heard. The functional header 0x7DF keeps
-    the default window, where any ECU may answer.
+    the default window, where any ECU may answer. ``--response-id`` pins the
+    window to that one id instead, for a module that does not answer on
+    ``request + 8`` (the BCM: 0x745 -> 0x765, D03.66); flow control for a
+    multi-frame reply then goes to the request id
+    (:func:`src.collection.isotp.await_response`).
     """
     if not isinstance(passive, PassiveVerdict):
         raise TypeError(
@@ -233,31 +264,35 @@ def open_client(args: argparse.Namespace, passive: PassiveVerdict) -> Iterator[C
             f"got {type(passive).__name__}"
         )
     request_id = parse_header(args.header)
+    window = response_window(request_id, args_response_id(args))
     config = CanaryConfig.from_yaml(args.config)
     bus = bus_factory(config.hardware.can)
     try:
         yield CanObdClient(
             bus,
             request_id=request_id,
-            response_id_min=response_window(request_id)[0],
-            response_id_max=response_window(request_id)[1],
+            response_id_min=window[0],
+            response_id_max=window[1],
             timeout_seconds=args.read_timeout,
         )
     finally:
         bus.shutdown()
 
 
-def response_window(request_id: int) -> tuple[int, int]:
+def response_window(request_id: int, response_id: int | None = None) -> tuple[int, int]:
     """The response ids :func:`open_client`'s client accepts for ``request_id``:
-    ``request + 8`` for a physical header, the default window for 0x7DF."""
+    exactly ``response_id`` when given (``--response-id``), else ``request + 8``
+    for a physical header and the default window for 0x7DF."""
+    if response_id is not None:
+        return (response_id, response_id)
     if request_id == DEFAULT_REQUEST_ID:
         return (DEFAULT_RESPONSE_ID_MIN, DEFAULT_RESPONSE_ID_MAX)
     return (request_id + 8, request_id + 8)
 
 
-def responder_for(request_id: int) -> int | None:
+def responder_for(request_id: int, response_id: int | None = None) -> int | None:
     """The one response id :func:`open_client`'s client accepts, or ``None`` for any."""
-    return expected_responder(request_id, response_window(request_id))
+    return expected_responder(request_id, response_window(request_id, response_id))
 
 
 def header_record(tool: str, *, started_at: float, **fields: Any) -> dict[str, Any]:
