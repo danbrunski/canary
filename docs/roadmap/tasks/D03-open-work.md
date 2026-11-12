@@ -2289,10 +2289,14 @@ that closed its task checklist.
   tests/test_control_power.py tests/test_mcp_tools.py
   tests/test_mcp_tool_snapshot.py` green; `pnpm typecheck`, `pnpm lint`,
   vitest `PowerPanel.test.ts` (11) green.
-  **Owed (Pi):** deploy the watchdog (it runs on the system interpreter under
-  its own unit): `install_pi.sh`, or copy the script and restart `ups-shutdown`
-  under sudo. Until then the Pi's heartbeat has none of the new fields and the
-  daemon passes the old `on_battery` through. Not done on the laptop by design.
+  **Pi: deployed 2026-11-12** (`38abb699`, `ups-shutdown` restarted under sudo;
+  the unit runs the script from the checkout). `GET /control/power` on the
+  bench read `input_lost: false`, `on_battery: false`,
+  `shutdown_state: input_present`, `soc_critical: false`; `discharging` read
+  `null` in the first minute after the restart, before the watchdog had a
+  slope. Still worth a look: `discharging` turns boolean once the watchdog has
+  history, and a real key-off reads `counting_down` with
+  `input_lost_discharging`.
   **Operator decision (not taken):** should a critical-SoC floor override a
   keep-alive hold to protect the cells? Today it does not (an armed hold keeps
   the Pi up at 5 % SoC with input lost until the cells cut out). Options: (a)
