@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One-command in-vehicle deployment. Composes the pieces that need root into
-# a single idempotent run so the Pi boots ready for a truck test:
+# One-command in-vehicle deployment: installs everything that needs root, then
+# restarts the daemon so the Pi boots ready for a truck test.
 #
-#   1. scripts/install_pi.sh — system user, /etc/canary, /data/canary,
-#      control token, canary.service (installed + enabled).
-#   2. /data/canary/control — audit/jobs dir the control plane writes to.
-#   3. can0 auto-recovery — systemd/can0.service + the udev rule, so the
-#      SocketCAN link comes up on boot and after a USB re-enumeration
-#      without a human (docs/can-setup.md).
-#   4. Enable + start the daemon; print how to reach it from a phone/laptop.
+#   1. scripts/install_pi.sh — system user, /etc/canary, /data/canary (with
+#      its control/ audit/jobs dir, owned by the canary user), control token,
+#      can0.service + its udev rule (SocketCAN comes up on boot and after a USB
+#      re-enumeration, docs/can-setup.md), and canary.service installed and
+#      enabled. Everything this script used to do itself in separate steps
+#      (control dir, can0 report, `systemctl enable canary`) is done there.
+#   2. scripts/restart_canary.sh — the only way the daemon is restarted. It
+#      refuses while a capture or ECU backup is running (a restart silently
+#      ends a capture; on 2026-09-21 a deploy ended another session's tuning
+#      drive that way). Arguments to this script pass through to it, so
+#      `--force` is how ending a capture is made deliberate.
 #
 # Idempotent — safe to re-run after a `git pull`. Run as root:
 #
-#   sudo bash scripts/deploy_truck.sh
+#   sudo bash scripts/deploy_truck.sh [--force]
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run with sudo: sudo bash scripts/deploy_truck.sh" >&2
@@ -22,31 +26,22 @@ if [[ "${EUID}" -ne 0 ]]; then
 fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 CANARY_USER="${CANARY_USER:-canary}"
-CANARY_GROUP="${CANARY_GROUP:-canary}"
-DATA_DIR="${CANARY_DATA_DIR:-/data/canary}"
 TOKEN_FILE="${CANARY_CONTROL_TOKEN_FILE:-/etc/canary/control.token}"
 
 step() { printf '\n=== %s ===\n' "$1"; }
 
-step "1/4 Pi systemd install"
+step "1/2 Pi systemd install"
 bash "${SCRIPT_DIR}/install_pi.sh"
 
-step "2/4 control-plane data dir"
-install -d -o "${CANARY_USER}" -g "${CANARY_GROUP}" -m 0750 "${DATA_DIR}/control"
-echo "ensured ${DATA_DIR}/control"
-
-step "3/4 can0 auto-recovery"
-# install_pi.sh (step 1) installs and enables can0.service and its udev rule
-# since 2026-10-11; this step only reports it.
-systemctl is-enabled can0.service >/dev/null 2>&1 \
-  && echo "can0.service enabled (starts when can0 appears)" \
-  || echo "WARNING: can0.service is not enabled" >&2
-
-step "4/4 start the daemon"
-systemctl enable canary.service
-systemctl restart canary.service
+step "2/2 restart the daemon (refuses while a capture is active)"
+restart_rc=0
+bash "${SCRIPT_DIR}/restart_canary.sh" "$@" || restart_rc=$?
+if [[ "${restart_rc}" -ne 0 ]]; then
+  echo "Install finished, but the daemon was NOT restarted (exit ${restart_rc})." >&2
+  echo "It keeps running the old code until restart_canary.sh succeeds." >&2
+  exit "${restart_rc}"
+fi
 
 ip_addr="$(hostname -I 2>/dev/null | awk '{print $1}')"
 host_name="$(hostname)"

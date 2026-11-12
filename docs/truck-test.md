@@ -3,7 +3,9 @@
 In-vehicle quickstart for driving a capture from a phone/laptop via the
 control API. Assumes `sudo bash scripts/deploy_truck.sh` has been run (Pi
 boots with `canary.service`, `canary-mcp.service`, `ups-shutdown.service`
-+ `can0.service` enabled and a control token).
++ `can0.service` enabled and a control token). The script ends by restarting
+the daemon through `scripts/restart_canary.sh`, so it refuses (exit 3) while a
+capture or ECU backup is running; pass `--force` only when ending it is intended.
 
 Full API reference: `docs/headless-api.md`. SocketCAN details:
 `docs/can-setup.md`. Running the Pi as its own field WiFi AP (no router):

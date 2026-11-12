@@ -15,18 +15,31 @@ ignored and untracked). What regrew is scaffolding: R07.5 and R07.2 each
 closed on a one-off grep with no guard, and both counts are back above where
 they started.
 
-- [ ] **R30.1 `scripts/deploy_truck.sh` restarts the daemon with a bare
+- [x] **R30.1 `scripts/deploy_truck.sh` restarts the daemon with a bare
   `systemctl restart canary.service`.** `AGENTS.md`: "Use
   `scripts/restart_canary.sh`, never a bare `systemctl restart canary`",
   after a deploy ended another session's capture on 2026-09-21.
   `update_canary.sh` goes through `restart_canary.sh`; this script, which
   `docs/truck-test.md` advertises as the one-command deploy, does not. Its
   other steps are now done by `install_pi.sh`.
-  - [ ] Call `restart_canary.sh` for the last step, or retire the script into
+  - [x] Call `restart_canary.sh` for the last step, or retire the script into
     `install_pi.sh && restart_canary.sh` and update `docs/truck-test.md`.
-  - [ ] A test that no tracked `.sh` other than `restart_canary.sh` contains
+    Done: `deploy_truck.sh` is now `install_pi.sh` then `bash
+    restart_canary.sh "$@"` (exit code passed through, `--force` forwarded,
+    message that the daemon kept running old code on a refusal). Dropped as
+    redundant: the `${DATA_DIR}/control` install (`install_pi.sh` creates it
+    and `chown -R`s `/data/canary`), the can0 report (`install_pi.sh` runs
+    `systemctl enable can0.service` under `set -e`) and `systemctl enable
+    canary.service` (`install_pi.sh`). `docs/truck-test.md` notes the refusal.
+    `bash -n` clean; script not run (sudo/systemctl).
+  - [x] A test that no tracked `.sh` other than `restart_canary.sh` contains
     `systemctl restart canary` followed by `.service` or end of word
     (`canary-mcp` and `canary-provision` are separate services).
+    `tests/test_daemon_restart_guard.py` (4 tests, `git ls-files '*.sh'`):
+    also catches `restart_if_changed canary` (the installer's `systemctl
+    restart "$@"` helper; it is only ever called with gpsd, chrony, journald
+    and avahi). Verified it fails on `git show HEAD:scripts/deploy_truck.sh`
+    (names the 2026-09-21 incident and `restart_canary.sh`) and passes now.
 
 - [ ] **R30.2 Tests import each other's private builders again.** R07.5
   closed with zero `from tests.test_*` imports. There are now 112 in 58
