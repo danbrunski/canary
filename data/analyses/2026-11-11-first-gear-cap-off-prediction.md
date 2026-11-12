@@ -1,11 +1,14 @@
-# ZS44A-Tuned-20261112: first-gear torque cap off — edit, evidence, frozen predictions
+# ZS44A-Tuned-20261111-2: first-gear torque cap off — edit, evidence, frozen predictions
 
 Written 2026-11-11, **before any flash**, at the operator's request ("let's add
 support for editing those values ... and create a new tune file for it"). The
-file is `Tuned ROMs/ZS44A-Tuned-20261112.OsirisROM`, built by CANary from
-`ZS44A-Tuned-20261111.OsirisROM` (the running tune). The name is the next free
-one, not a flash date. The operator reviews it and flashes it; nothing here
-wrote to the ECU.
+file is `Tuned ROMs/ZS44A-Tuned-20261111-2.OsirisROM`, built by CANary from
+`ZS44A-Tuned-20261111.OsirisROM` (the running tune). It is the second tune file
+built on 2026-11-11, hence the `-2`; the name is a build date, not a flash date
+(it was first written as `ZS44A-Tuned-20261112` and renamed the same day at the
+operator's request, bytes unchanged). If it is flashed, the revision is
+recorded as `ZS44A-20261111-2`. The operator reviews it and flashes it; nothing
+here wrote to the ECU.
 
 - Container sha256 `3a01904fbd579860889c46465dd75d25d230c1cad8a8e4e412c39e240cdd79e7`
 - Image sha256 `108bb32b0156e52c7c4ae6c2fe551bdc995a44302ce1a091a7a27ba8e4e2f1ba`
