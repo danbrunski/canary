@@ -735,7 +735,7 @@ W09.6 is the orchestrator's own, on the ROM machine.
     `tests/test_rom_editor_private_rom.py -m slow`: 9 passed, 1 xfailed, the
     existing strict xfail).
 
-- [ ] **W09.6 — Real-ROM acceptance (on the machine with the images).**
+- [~] **W09.6 — Real-ROM acceptance (on the machine with the images).** *Laptop half done and re-verified 2026-11-11; open: the Pi measurement and the Pi browser walkthrough (both Pi steps); see the 2026-11-11 bullet below.*
   - `tests/test_rom_editor_private_rom.py`, skipping by name when the images
     are absent, as `tests/test_fuel_comp_restore_private_rom.py` does. Through
     `rom_editor.simulate_edits` on ZS44A-20261004 (a matched revision):
@@ -1043,7 +1043,60 @@ W09.6 is the orchestrator's own, on the ROM machine.
         - `rom_editor._template` forced to LTFT 0 (case 3: fails on the
           learned-state assertion, and without it on the hand-built
           `run_paired` pulse comparison at (0, byte 191)).
-      - **Quiet-machine re-measure on fuel-mv-2 (2026-10-17), the table the page now
+      - **Re-run 2026-11-11 (laptop; the four checks, the e2e and the 16 x 16 timing). The
+        wall times in the 2026-10-17 table below are superseded: a run is now 6-15x slower.**
+        - **Checks:** `tests/test_rom_editor_private_rom.py -n0 -m slow`: **18 passed,
+          1 xfailed** in 40.5 s (the strict xfail is the E07.6 WOT-figure finding above,
+          unchanged; negative control, K +5 %, Target AFR +4 on the WOT column and the Fuel
+          Comp region edit all pass on the real ZS44A-20261004 image, expectations untouched).
+          The file skips by name through `operator_image("r20261004")` /
+          `OPERATOR_ROMS[IMAGE_KEY]` when the image is absent, as
+          `tests/test_fuel_comp_restore_private_rom.py` does.
+        - **e2e:** `pnpm e2e e2e/romEditor.spec.ts` 11 passed (25 s; the 5 of 2026-10-15 plus
+          the later coarse/typical-values/trims/phone/Recent cases), `pnpm typecheck` and
+          `pnpm lint` clean. The API is mocked there; the real-image browser walkthrough
+          stays open (Pi).
+        - **Timing, laptop** (same real `spawn` child under the 4,096 MiB `RLIMIT_AS`, same
+          light-load Fuel Comp edit and seed 20261015, via `run_off_loop("rom_sim", ...)`;
+          child peak RSS / VmPeak polled from `/proc` (VmHWM / VmPeak); Core Ultra 9 185H,
+          12 CPUs, 1-minute load 1.3-2.6 for the rows below, other sessions running):
+
+          | grid | placed | draws | wall | child peak RSS | VmPeak | response |
+          |---|---|---|---|---|---|---|
+          | 16 x 16 (fill 0-100 % in 16) | 231 of 256 | 200 | 23.9 s | 225 MiB | 1,928 MiB | 844,694 B |
+          | 16 x 16 | 231 | 1,000 | 99.7 s | 317 MiB | 2,020 MiB | 849,119 B |
+          | form 16 x 14 | 201 of 224 | 20 | 4.9 s | 207 MiB | 1,909 MiB | 828,901 B |
+          | form 16 x 14 | 201 | 200 | 19.6 s | 222 MiB | 1,924 MiB | 833,303 B |
+          | form 16 x 14 | 201 | 1,000 | 81.1 s | 301 MiB | 2,003 MiB | 837,644 B |
+
+          (16 x 16 at 1,000 draws started at load ~3; the other rows 1.3-2.6. Rows taken at
+          load 6-15 read 1.5-4x higher and are not used.) Child CPU seconds track the walls
+          (83.8 s for the form grid at 1,000), so it is compute, not waiting.
+        - **Why: E09.7's timing block.** `sim_cells.ignition_timing_points` (called from
+          `rom_editor._simulate`) runs a Python loop over every (point, draw) pair, each
+          calling `ignition_timing_at` -> `ecu_state_models.trim_lookup` /
+          `selected_timing_trim` (cProfile at 20 draws: 16.1 of 28.3 s there, 6.8 M calls of
+          `ecu_state_models._byte`). It landed 2026-10-17/18 (`9fe73552`, `f5b49d9c`), after
+          the 2026-10-17 re-measure, and is ~0.4 ms per pair: about 3.3 s + 0.08 s per draw on
+          the form grid. The response is also ~20 % larger (833 KB against 686 KB).
+          **`romSimSize.ts` `COST_FIT` (2.7 s + 1.6e-5 s x points x draws) now predicts 6.4 s
+          for the 16 x 16 at 1,000 draws against the 99.7 s measured (15x under), and 5.9 s
+          against 23.9 s at 200 draws (4x under).** The "Estimated time" the page shows is
+          wrong by that factor until `LAPTOP_TIMINGS` is re-measured and refit (W09.9's
+          per-host calibration absorbs a constant factor only after the first run). Not
+          edited here: that is `romSimSize.ts` and E09.7's loop. A vectorised or per-point
+          cached trim lookup would remove most of it.
+        - **Cap extrapolation (not measured):** a linear fit of the form-grid rows gives
+          ~0.4 ms per placed (point, draw) pair, so the cap (945 placed x 2,000 draws) would
+          take ~12-13 min on the laptop, close to `DIGEST_TIMEOUT_SECONDS` = 900 s, and the
+          Pi would exceed it at any plausible 3-6x slowdown. The cap itself was not run.
+        - **Still open (Pi):** the same two rows on the Pi after collection stops
+          (`vehicle_state` `parked` or `bench`), whether 1,000 draws fits
+          `DIGEST_TIMEOUT_SECONDS` there (at 3-6x the laptop's 99.7 s it is 5-10 min:
+          inside 900 s, not by much), and whether `MAX_DRAWS` has to drop; then the browser
+          walkthrough on the Pi dashboard (10-04 image, light-load Fuel Comp +2 %, preview,
+          download the spec, simulate, screenshot). Operator step: the 3-6x is a guess.
+      - **Quiet-machine re-measure on fuel-mv-2 (2026-10-17; wall times superseded by 2026-11-11 above, RSS still holds), the table the page now
         quotes.** The same real `spawn` child and the same light-load Fuel Comp edit
         (seed 20261015, 4,096 MiB `RLIMIT_AS`) as the fuel-mv-1 table, one `measure2.py`
         run per row, twice (three times for the form grid at 200 draws); 1-minute load 0.6–1.6
