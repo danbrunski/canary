@@ -2578,6 +2578,26 @@ that closed its task checklist.
     batch), and the memory scheduler's per-window counters if it keeps any.
   - Until then, read the target word's silence beside `ECM_ENGINE_PERIOD`'s
     before calling a gap real.
+  - *Journal checked 2026-11-12:* `journalctl -u canary` around the four gaps
+    in `_capture-tuning-2026-11-12T034249` (03:43:51, 03:49:14, 03:54:30,
+    04:02:45Z) has no warning or error. The whole capture logged three
+    warnings, all capture start-up, none from the memory path, so the daemon
+    does not log a missed window read. That makes this an instrumentation
+    item first: count misses per window (NRC, timeout, skipped for budget) in
+    the scheduler's stats and the capture record.
+  - Possibly related, unmeasured: throughout that drive a laptop client polled
+    `GET /control/rom/backup` every ~6 s and `/models/behavior/live` every
+    ~3 s. Check whether either handler does blocking work on the loop.
+- [ ] **D03.71 The dashboard's control token is written to the daemon's
+  access log.** `useControlStream.ts` opens `/ws/control?token=…`, and
+  uvicorn's access log records the full path, so the token sits in
+  `journalctl -u canary` on every dashboard connect (seen 2026-11-12). The
+  token is the daemon's write credential.
+  - Fix so it cannot recur: redact `token=` values in the access log with a
+    filter on the `uvicorn.access` logger, and/or carry the token in the
+    WebSocket subprotocol header instead of the query string.
+  - Rotating the Pi's token (`/etc/canary/control.token`) after the fix is the
+    operator's call.
 - [x] **GNSS sees no satellites (since at least 2026-10-10).** The no-fix case
   above has come back, and this time it doesn't clear. Every GPS row in
   `2026-10-10T171856`, `_capture-tuning-2026-10-10T171518`,
