@@ -437,7 +437,7 @@
     }
   },
   "get_binned_analysis": {
-    "description": "Bin a value channel by an x (and optional y) channel over a\n        session/date scope \u2014 \"trims by rpm\u00d7load\" without hand-written SQL\n        or a refit (Task 5.1). ``agg``: mean/median/p95/count.",
+    "description": "Bin ``value`` (a ``source:channel`` key) by ``x`` (and ``y`` if given)\n    over the requested scope \u2014 \"trims by rpm\u00d7load\" without hand-written SQL\n    or a refit. ``agg`` is one of ``mean``/``median``/``p95``/``count``.\n\n    ``units=\"engineering\"`` rescales ``decoded:`` channels through\n    ``bindings.yaml`` first. Those are stored as raw integers on purpose\n    (``decoded:ECM_RPM`` is 8 counts/rpm), so the default ``stored`` bins them\n    in counts \u2014 right for comparing against training features, wrong for\n    reading as rpm. ``did:`` channels are not available on this path at all\n    (their values live in ``value_text``); use the local channel reader.\n\n    Equivalent to ``GET /analysis/binned`` \u2014 see\n    :func:`src.analysis.binned_analysis.compute_binned_analysis` for the\n    response shape (``available: false`` with a ``reason`` when the scope\n    has no data for the requested channels together).\n    ",
     "inputSchema": {
       "properties": {
         "agg": {
@@ -468,6 +468,11 @@
           ],
           "default": null,
           "title": "Since"
+        },
+        "units": {
+          "default": "stored",
+          "title": "Units",
+          "type": "string"
         },
         "until": {
           "anyOf": [

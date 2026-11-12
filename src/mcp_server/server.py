@@ -201,6 +201,7 @@ READ_DELEGATIONS: tuple[Delegation, ...] = (
     Delegation(capture_profiles_tool.list_capture_profiles),
     Delegation(sessions_tool.get_session),
     Delegation(sessions_tool.get_dataset_health),
+    Delegation(binned_analysis_tool.get_binned_analysis),
     Delegation(sessions_tool.get_training_runs),
     Delegation(vehicle_ledger_tool.list_vehicle_events),
     Delegation(classification_tool.get_session_classification),
@@ -397,34 +398,6 @@ def _register_read_tools(
 ) -> None:
     """Register all read tools as MCP tools."""
     _register_delegations(mcp, READ_DELEGATIONS, client, None)
-
-    @mcp.tool()
-    async def get_binned_analysis(
-        value: str,
-        x: str,
-        y: str | None = None,
-        x_bins: int = 12,
-        y_bins: int | None = None,
-        agg: str = "mean",
-        session: str | None = None,
-        since: str | None = None,
-        until: str | None = None,
-    ) -> dict[str, Any]:
-        """Bin a value channel by an x (and optional y) channel over a
-        session/date scope — "trims by rpm×load" without hand-written SQL
-        or a refit (Task 5.1). ``agg``: mean/median/p95/count."""
-        return await binned_analysis_tool.get_binned_analysis(
-            client,
-            value=value,
-            x=x,
-            y=y,
-            x_bins=x_bins,
-            y_bins=y_bins,
-            agg=agg,
-            session=session,
-            since=since,
-            until=until,
-        )
 
     @mcp.tool()
     async def get_session_timeseries(

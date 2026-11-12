@@ -529,3 +529,39 @@ async def test_get_capture_quality_is_live_or_recomputed_by_session() -> None:
     await client.aclose()
     assert historic["stored"]["scope"] == "trailing_snapshot"
     assert historic["recomputed"]["scope"] == "recompute"
+
+
+async def test_get_binned_analysis_tool_forwards_units_through_fastmcp() -> None:
+    """R29.4: the registered MCP tool (not just the delegate) accepts ``units``
+    and the daemon request carries it. The hand-written closure stopped at
+    ``until``, so an MCP client could not bin ``decoded:`` channels in
+    engineering units."""
+    from mcp.server.fastmcp import FastMCP
+
+    from src.mcp_server import server as server_module
+
+    seen: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> dict[str, Any]:
+        seen.append(dict(request.url.params))
+        return {"available": True}
+
+    client = await _fake_daemon({"GET /analysis/binned": handler})
+    row = next(
+        d for d in server_module.READ_DELEGATIONS if d.delegate.__name__ == "get_binned_analysis"
+    )
+    mcp = FastMCP(name="t")
+    mcp.tool()(server_module.bind_delegation(row, client, None))
+
+    listed = {t.name: t for t in await mcp.list_tools()}
+    assert "units" in listed["get_binned_analysis"].inputSchema["properties"]
+
+    await mcp.call_tool(
+        "get_binned_analysis",
+        {"value": "decoded:ECM_RPM", "x": "obd:ENGINE_LOAD", "units": "engineering"},
+    )
+    await mcp.call_tool("get_binned_analysis", {"value": "decoded:ECM_RPM", "x": "obd:ENGINE_LOAD"})
+    await client.aclose()
+    assert seen[0]["units"] == "engineering"
+    assert seen[0]["value"] == "decoded:ECM_RPM"
+    assert "units" not in seen[1]  # the default is not sent

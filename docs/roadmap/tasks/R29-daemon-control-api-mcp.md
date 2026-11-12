@@ -90,14 +90,25 @@ it; go after that work lands.
   - Pinned by `tests/test_exceptions_pickle.py` and
     `tests/test_route_table_snapshot.py`.
 
-- [ ] **R29.4 The MCP `get_binned_analysis` tool dropped `units`.** The
+- [x] **R29.4 The MCP `get_binned_analysis` tool dropped `units`.** The
   closure in `mcp_server/server.py` stops at `until`; the delegate in
   `tools/binned_analysis.py` and the daemon route take
   `units: str = "stored"`, whose docstring calls the raw-count default "the
   trap this option closes". An MCP client cannot ask for engineering units,
   so binning `decoded:ECM_RPM` through MCP works in counts.
   `tests/fixtures/mcp_tool_snapshot.json` pins the drifted schema.
-  - [ ] Delete the closure, add a `Delegation` row, regenerate the snapshot.
+  - [x] Delete the closure, add a `Delegation` row, regenerate the snapshot.
+    Closure deleted from `_register_read_tools`; `Delegation(binned_analysis_tool.get_binned_analysis)`
+    added to `READ_DELEGATIONS`. Snapshot regenerated with
+    `CANARY_UPDATE_MCP_SNAPSHOT=1 pytest -n0 tests/test_mcp_tool_snapshot.py`;
+    its diff is the added `units` property (default `"stored"`) and the
+    description now taken from the delegate, nothing else. New
+    `tests/test_mcp_tools.py::test_get_binned_analysis_tool_forwards_units_through_fastmcp`
+    calls the bound tool via FastMCP with `units="engineering"` and asserts the
+    daemon request carries `units=engineering` (default is not sent).
+    `pytest tests/test_mcp_*.py tests/test_binned_analysis.py tests/test_layering.py`:
+    284 passed; ruff, ruff format, mypy src clean. `docs/mcp-server.md` already
+    documented `units`.
 
 - [ ] **R29.5 Fifteen MCP tools are closures that restate their delegate's
   signature.** `record_feedback` and `record_vehicle_event` exist only to
