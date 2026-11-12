@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from src.dashboard.status import classify_vehicle_state
+from src.paths import REPO_ROOT
 from src.telemetry import TelemetryRecord
 
 
@@ -683,3 +684,279 @@ def test_the_derivations_read_passive_from_the_gate() -> None:
     tx_gate.set_passive(True, source="control")
     assert derive_from_inputs(inputs, None, now).state == "passive"
     assert derive_from_latest_rows(rows, replay_id=None, now=now).state == "passive"
+
+
+# --- R29.14: one "engine running" definition and named state groups ----------
+
+
+def _pre_r29_14_state(**kw: Any) -> str:
+    """The rule table as it stood before R29.14, copied verbatim, so the grid
+    below proves the new ``broadcast_rpm`` field changed no verdict."""
+    from src.collection.vehicle_power import classify_supply
+    from src.vehicle_state import FRESHNESS_THRESHOLD_SECONDS, RPM_RUNNING_THRESHOLD
+
+    def fresh(age: float | None) -> bool:
+        return age is not None and age <= FRESHNESS_THRESHOLD_SECONDS
+
+    obd_fresh = fresh(kw["obd_freshness_seconds"])
+    can_fresh = fresh(kw["can_freshness_seconds"])
+    supply = kw["supply_voltage"] if fresh(kw["supply_freshness_seconds"]) else None
+    rpm = kw["obd_rpm"]
+    from_broadcast = False
+    if not (obd_fresh and rpm is not None) and kw["broadcast_rpm"] is not None and can_fresh:
+        rpm, from_broadcast = kw["broadcast_rpm"], True
+    if kw["replay_id"] is not None:
+        return "replay"
+    if not obd_fresh and not can_fresh:
+        port = classify_supply(supply)
+        state = "parked" if port == "vehicle" else "bench" if port == "bench" else "no_data"
+    elif (obd_fresh or from_broadcast) and rpm is not None and rpm >= RPM_RUNNING_THRESHOLD:
+        state = "engine_running"
+    elif obd_fresh and (rpm is None or rpm == 0):
+        state = "ignition_only"
+    elif can_fresh and not obd_fresh:
+        state = "engine_off"
+    else:
+        state = "unknown"
+    if kw["passive"] and state in ("engine_off", "unknown"):
+        state = "passive"
+    return state
+
+
+def test_no_verdict_changed_when_broadcast_rpm_joined_the_state() -> None:
+    import itertools
+
+    ages = (None, 1.0, 20.0)
+    grid = itertools.product(
+        (None, 0.0, 200.0, 800.0),  # obd_rpm
+        (None, 0.0, 200.0, 800.0),  # broadcast_rpm
+        ages,  # obd age
+        ages,  # can age
+        ((None, None), (12.6, 1.0), (0.5, 1.0), (12.6, 20.0)),  # supply, age
+        (None, "r1"),
+        (False, True),
+    )
+    checked = 0
+    for obd, broadcast, obd_age, can_age, (volts, volts_age), replay, passive in grid:
+        kw: dict[str, Any] = {
+            "obd_rpm": obd,
+            "broadcast_rpm": broadcast,
+            "coolant_temp": None,
+            "run_time": None,
+            "obd_freshness_seconds": obd_age,
+            "can_freshness_seconds": can_age,
+            "supply_voltage": volts,
+            "supply_freshness_seconds": volts_age,
+            "replay_id": replay,
+            "passive": passive,
+        }
+        state = classify_vehicle_state(**kw)
+        assert state.state == _pre_r29_14_state(**kw), kw
+        can_fresh = can_age is not None and can_age <= 10.0
+        assert state.broadcast_rpm == (broadcast if can_fresh else None), kw
+        checked += 1
+    assert checked == 4 * 4 * 3 * 3 * 4 * 2 * 2
+
+
+def test_broadcast_rpm_rides_on_the_state_and_its_dict_only_while_can_is_fresh() -> None:
+    fresh = classify_vehicle_state(
+        **_common_telemetry(
+            rpm=0.0,
+            broadcast_rpm=812.3456,
+            obd_freshness_seconds=1.0,
+            can_freshness_seconds=0.2,
+        )
+    )
+    assert fresh.state == "ignition_only"  # the verdict still prefers fresh OBD
+    assert fresh.rpm == 0.0
+    assert fresh.broadcast_rpm == 812.3456
+    assert fresh.to_dict()["broadcast_rpm"] == 812.35
+    stale = classify_vehicle_state(
+        **_common_telemetry(
+            rpm=0.0,
+            broadcast_rpm=812.0,
+            obd_freshness_seconds=1.0,
+            can_freshness_seconds=30.0,
+        )
+    )
+    assert stale.broadcast_rpm is None
+    assert stale.to_dict()["broadcast_rpm"] is None
+
+
+def test_every_derivation_carries_the_fresh_broadcast_rpm(tmp_path: Path) -> None:
+    """Parquet and live derivations of one instant just after a start: the last
+    OBD ``0`` is a second old and the broadcast reads 800."""
+    from datetime import UTC, datetime
+
+    from src.dashboard.status import derive_vehicle_state_from_storage
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.vehicle_state import derive_from_inputs, derive_from_live_source
+
+    now = datetime(2026, 11, 12, 12, 0, 30, tzinfo=UTC)
+    storage = tmp_path / "vehicle"
+    session = storage / "2026-11-12T120000"
+    write_records_to_parquet(
+        [
+            TelemetryRecord(
+                timestamp=now.replace(second=29), source="obd", channel="RPM", value=0.0
+            ),
+            _broadcast_rpm(now.replace(second=29), 6400),  # 800 rpm x 8 counts
+        ],
+        session,
+    )
+    parquet = derive_vehicle_state_from_storage(
+        storage, replay_controller=None, now=now, session_dir=session
+    )
+    inputs = {
+        "rpm": 0.0,
+        "broadcast_rpm": 800.0,
+        "obd_freshness_seconds": 1.0,
+        "can_freshness_seconds": 1.0,
+    }
+    live = derive_from_inputs(inputs, None, now, passive=False)
+
+    class _Source:
+        def vehicle_state_inputs(self, _now: datetime) -> dict[str, float | None]:
+            return dict(inputs)
+
+    from_source = derive_from_live_source(_Source(), replay_controller=None, now=now)
+    for state in (parquet, live, from_source):
+        assert state.state == "ignition_only"
+        assert state.broadcast_rpm == 800.0
+
+    stale_now = now.replace(minute=1)  # 31 s later: CAN no longer fresh
+    stale = derive_vehicle_state_from_storage(
+        storage, replay_controller=None, now=stale_now, session_dir=session
+    )
+    assert stale.broadcast_rpm is None
+
+
+@pytest.mark.parametrize(
+    ("kw", "expected"),
+    [
+        (
+            {"rpm": 0.0, "broadcast_rpm": 800.0, "obd_freshness_seconds": 1.0},
+            "broadcast engine speed 800 rpm >= 400 (vehicle_state ignition_only)",
+        ),
+        (
+            {"rpm": 750.0, "broadcast_rpm": None, "obd_freshness_seconds": 1.0},
+            "vehicle_state engine_running, rpm 750",
+        ),
+        ({"rpm": 0.0, "broadcast_rpm": 399.0, "obd_freshness_seconds": 1.0}, None),
+        ({"rpm": 0.0, "broadcast_rpm": 0.0, "obd_freshness_seconds": 1.0}, None),
+        # A stale broadcast is no evidence: the classifier drops it.
+        (
+            {
+                "rpm": 0.0,
+                "broadcast_rpm": 800.0,
+                "obd_freshness_seconds": 1.0,
+                "can_freshness_seconds": 30.0,
+            },
+            None,
+        ),
+    ],
+)
+def test_engine_running_evidence_reads_the_verdict_or_a_fresh_broadcast(
+    kw: dict[str, Any], expected: str | None
+) -> None:
+    from src.vehicle_state import engine_running_evidence
+
+    telemetry = {"can_freshness_seconds": 0.2, **kw}
+    state = classify_vehicle_state(**_common_telemetry(**telemetry))
+    assert engine_running_evidence(state) == expected
+
+
+def test_the_write_guard_and_the_rom_backup_share_one_engine_running_definition() -> None:
+    import inspect
+
+    from src.control import nonvolatile_write, rom_backup
+
+    for module in (nonvolatile_write, rom_backup):
+        assert "engine_running_evidence(" in inspect.getsource(module), module.__name__
+    reading = rom_backup.VehicleReading(state="ignition_only", rpm=0.0, broadcast_rpm=800.0)
+    assert rom_backup._engine_running(reading) == (
+        "broadcast engine speed 800 rpm >= 400 (vehicle_state ignition_only)"
+    )
+
+
+def test_named_state_groups_keep_their_membership() -> None:
+    """Membership moved into ``src.vehicle_state`` unchanged (R29.14)."""
+    from src.vehicle_state import (
+        ECM_SILENT_STATES,
+        ENGINE_ON_STATES,
+        IDLE_STATES,
+        KEY_ON_STATES,
+        QUIET_STATES,
+        SCORABLE_STATES,
+        UNTRUSTED_STATES,
+    )
+
+    assert ENGINE_ON_STATES == {"engine_running"}
+    assert KEY_ON_STATES == {"ignition_only", "engine_running"}
+    assert UNTRUSTED_STATES == {"replay", "passive", "unknown"}
+    assert QUIET_STATES == {"parked", "bench", "no_data"}
+    assert ECM_SILENT_STATES == {"engine_off", "parked", "bench", "no_data"}
+    assert IDLE_STATES == {"engine_off", "parked", "no_data"}
+    assert SCORABLE_STATES == {"engine_running", "replay"}
+
+
+def test_consumers_use_the_named_groups() -> None:
+    from src.config.collection import IdleShutdownConfig
+    from src.control import capture_autostart, key_cycle_pairing
+    from src.daemon import idle_shutdown, inference
+    from src.vehicle_state import (
+        ENGINE_ON_STATES,
+        IDLE_STATES,
+        KEY_ON_STATES,
+        SCORABLE_STATES,
+        UNTRUSTED_STATES,
+    )
+
+    assert capture_autostart.RUNNING_STATES is ENGINE_ON_STATES
+    assert key_cycle_pairing.ON_STATES is KEY_ON_STATES
+    assert key_cycle_pairing.UNTRUSTED_STATES is UNTRUSTED_STATES
+    assert inference._SCORABLE_VEHICLE_STATES is SCORABLE_STATES
+    assert set(idle_shutdown.DEFAULT_ACTIVE_STATES) == KEY_ON_STATES
+    assert set(idle_shutdown.DEFAULT_IDLE_STATES) == IDLE_STATES
+    # ``src.config`` sits below ``src.vehicle_state`` (tests/test_layering.py),
+    # so its default cannot import the group; it is pinned to it instead.
+    assert set(IdleShutdownConfig().idle_states) == IDLE_STATES
+
+
+#: String literals naming two or more vehicle states that may stay outside
+#: ``src/vehicle_state.py``, by file. May only shrink.
+_STATE_SET_LITERALS_ALLOWED: dict[str, int] = {
+    # Layer 0: cannot import src.vehicle_state; pinned to IDLE_STATES above.
+    "src/config/collection.py": 1,
+    # The ROM read's own mid-read rule (KOEO, or passive while it holds the
+    # bus), not a shared meaning.
+    "src/control/rom_backup.py": 1,
+}
+
+
+def test_no_new_string_set_of_state_names_outside_vehicle_state() -> None:
+    """Regrowth guard (R29.14): a set, tuple or list literal of two or more
+    distinct vehicle-state names belongs in ``src.vehicle_state`` as a named
+    group. ``parked`` (2026-10-04) took several edits because each consumer
+    restated its own."""
+    import ast
+    from typing import get_args
+
+    from src.vehicle_state import VehicleStateName
+
+    names = set(get_args(VehicleStateName))
+    root = REPO_ROOT
+    found: dict[str, int] = {}
+    for path in sorted((root / "src").rglob("*.py")):
+        rel = path.relative_to(root).as_posix()
+        if rel == "src/vehicle_state.py":
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, (ast.Set, ast.Tuple, ast.List)) or len(node.elts) < 2:
+                continue
+            values = [e.value for e in node.elts if isinstance(e, ast.Constant)]
+            if len(values) != len(node.elts) or not all(isinstance(v, str) for v in values):
+                continue
+            if set(values) <= names and len(set(values)) >= 2:
+                found[rel] = found.get(rel, 0) + 1
+    assert found == _STATE_SET_LITERALS_ALLOWED

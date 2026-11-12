@@ -65,6 +65,48 @@ RPM_RUNNING_THRESHOLD = ENGINE_RUNNING_MIN_RPM
 #: are the cases the 12 V sense explains, ``no_data`` the case it does not.
 QUIET_STATES: frozenset[str] = frozenset({"parked", "bench", "no_data"})
 
+# Named groups of verdicts (R29.14). Each one used to be restated as a string
+# set in the module that needed it, which is how ``parked`` (2026-10-04) took
+# several edits to land. A consumer imports the group whose *meaning* it wants;
+# ``tests/test_vehicle_state.py`` pins the membership and refuses a new string
+# set of state names elsewhere in ``src/``.
+
+#: The engine is running: what an autostarted capture waits for
+#: (``capture_autostart``). ``ignition_only`` is deliberately absent — KOEO
+#: reaches no set point and produces no pulls. Not the same question as "may
+#: anything that needs the engine stopped proceed": for that use
+#: :func:`engine_running_evidence`, which also reads a fresh broadcast rpm.
+ENGINE_ON_STATES: frozenset[str] = frozenset({"engine_running"})
+
+#: The key is on and the ECM is answering: KOEO or the engine running. Proof
+#: the rig is attached to a live vehicle (``idle_shutdown``'s arming states)
+#: and the "on" half of a key cycle (``key_cycle_pairing``).
+KEY_ON_STATES: frozenset[str] = frozenset({"ignition_only", "engine_running"})
+
+#: Verdicts that are no evidence about the key or the engine: the data is
+#: re-emitted (``replay``), CANary is not asking (``passive``), or the rule
+#: table could not decide (``unknown``). ``key_cycle_pairing`` ignores them.
+UNTRUSTED_STATES: frozenset[str] = frozenset({"replay", "passive", "unknown"})
+
+#: The ECM is not answering: key off with the bus awake (``engine_off``), or
+#: both buses silent (:data:`QUIET_STATES`). ``tuning_readiness`` reports each
+#: of these as not ready.
+ECM_SILENT_STATES: frozenset[str] = frozenset({"engine_off"}) | QUIET_STATES
+
+#: Parked or disconnected from a vehicle that is still there: what idle
+#: shutdown counts down in (``idle_shutdown``, ``IdleShutdownConfig``). Not
+#: ``bench`` — idle shutdown saves a parked vehicle's battery, and a bench Pi
+#: draws from USB-C or the UPS — and not ``ignition_only`` (an operator at the
+#: wheel running diagnostics) or ``unknown`` (if the classifier could not
+#: decide, neither should a shutdown).
+IDLE_STATES: frozenset[str] = ECM_SILENT_STATES - {"bench"}
+
+#: The states IF and the sequence detector score in (``daemon.inference``).
+#: ``replay`` re-emits real running-vehicle data through the live pipeline,
+#: so it scores like ``engine_running``; no KOEO-trained model exists to make
+#: ``ignition_only`` meaningful.
+SCORABLE_STATES: frozenset[str] = frozenset({"engine_running", "replay"})
+
 #: The decoded broadcast channel carrying engine speed. Stored as raw counts
 #: (``decoded:`` rows are raw by design); scaled through the binding.
 BROADCAST_RPM_CHANNEL = "ECM_RPM"
@@ -83,6 +125,13 @@ class VehicleState:
 
     state: VehicleStateName
     rpm: float | None = None
+    #: The decoded broadcast engine speed, in rpm, **only while CAN is fresh**
+    #: (the same rule the classifier applies before falling back to it);
+    #: ``None`` when absent or stale. Carried separately from ``rpm`` because
+    #: the classifier prefers a fresh OBD rpm: a last OBD ``0`` stays fresh for
+    #: up to ten seconds after a start, while this already reads 800. Read it
+    #: through :func:`engine_running_evidence`, never by itself (R29.14).
+    broadcast_rpm: float | None = None
     coolant_temp: float | None = None
     run_time: float | None = None
     obd_freshness_seconds: float | None = None
@@ -110,6 +159,7 @@ class VehicleState:
         return {
             "state": self.state,
             "rpm": _round(self.rpm),
+            "broadcast_rpm": _round(self.broadcast_rpm),
             "coolant_temp": _round(self.coolant_temp),
             "run_time": _round(self.run_time),
             "obd_freshness_seconds": _round(self.obd_freshness_seconds),
@@ -201,16 +251,18 @@ def classify_vehicle_state(
 
     supply_fresh = _fresh(supply_freshness_seconds, freshness_threshold_seconds)
     supply = supply_voltage if supply_fresh else None
+    fresh_broadcast_rpm = broadcast_rpm if can_fresh else None
     rpm = obd_rpm
     rpm_from_broadcast = False
-    if not (obd_fresh and obd_rpm is not None) and broadcast_rpm is not None and can_fresh:
-        rpm = broadcast_rpm
+    if not (obd_fresh and obd_rpm is not None) and fresh_broadcast_rpm is not None:
+        rpm = fresh_broadcast_rpm
         rpm_from_broadcast = True
 
     if replay_id is not None:
         return VehicleState(
             state="replay",
             rpm=rpm,
+            broadcast_rpm=fresh_broadcast_rpm,
             coolant_temp=coolant_temp,
             run_time=run_time,
             obd_freshness_seconds=obd_freshness_seconds,
@@ -241,6 +293,7 @@ def classify_vehicle_state(
     return VehicleState(
         state=state,
         rpm=rpm,
+        broadcast_rpm=fresh_broadcast_rpm,
         coolant_temp=coolant_temp,
         run_time=run_time,
         obd_freshness_seconds=obd_freshness_seconds,
@@ -248,6 +301,51 @@ def classify_vehicle_state(
         supply_voltage=supply,
         passive=passive,
     )
+
+
+class EngineEvidence(Protocol):
+    """What :func:`engine_running_evidence` reads: a verdict, the rpm it used,
+    and the broadcast rpm **already gated on CAN freshness** (``None`` when
+    absent or stale). :class:`VehicleState` is one; so is the ROM backup's
+    ``VehicleReading``."""
+
+    @property
+    def state(self) -> str: ...
+
+    @property
+    def rpm(self) -> float | None: ...
+
+    @property
+    def broadcast_rpm(self) -> float | None: ...
+
+
+def engine_running_evidence(
+    reading: EngineEvidence, *, rpm_running_threshold: float = RPM_RUNNING_THRESHOLD
+) -> str | None:
+    """Why the engine counts as running, or ``None`` (R29.14).
+
+    The one definition for anything that must not proceed with the engine
+    running — the non-volatile write guard and the ROM backup. The
+    classifier's verdict, **or** a fresh broadcast engine speed at or above the
+    running threshold whatever the verdict says. The classifier prefers a fresh
+    OBD rpm, so a last OBD ``0`` keeps the verdict at ``ignition_only`` for up
+    to :data:`FRESHNESS_THRESHOLD_SECONDS` after a start while the broadcast
+    already reads 800; a gate that read only the verdict would pass then.
+
+    ``None`` is not proof the engine is stopped: it says only that none of the
+    evidence here shows it running. Callers still require their own positive
+    state (``ignition_only``, a fresh OBD answer, rpm 0).
+    """
+    broadcast = reading.broadcast_rpm
+    if broadcast is not None and broadcast >= rpm_running_threshold:
+        return (
+            f"broadcast engine speed {broadcast:.0f} rpm >= "
+            f"{rpm_running_threshold:.0f} (vehicle_state {reading.state})"
+        )
+    if reading.state == "engine_running":
+        rpm = "" if reading.rpm is None else f", rpm {reading.rpm:.0f}"
+        return f"vehicle_state engine_running{rpm}"
+    return None
 
 
 class _ReplayStatusLike(Protocol):
@@ -464,9 +562,17 @@ class VehicleStateCache:
 
 __all__ = [
     "BROADCAST_RPM_CHANNEL",
+    "ECM_SILENT_STATES",
+    "ENGINE_ON_STATES",
     "FRESHNESS_THRESHOLD_SECONDS",
+    "IDLE_STATES",
+    "KEY_ON_STATES",
+    "QUIET_STATES",
     "RPM_RUNNING_THRESHOLD",
+    "SCORABLE_STATES",
+    "UNTRUSTED_STATES",
     "VEHICLE_STATE_TTL_SECONDS",
+    "EngineEvidence",
     "VehicleState",
     "VehicleStateCache",
     "VehicleStateName",
@@ -474,5 +580,6 @@ __all__ = [
     "derive_from_inputs",
     "derive_from_latest_rows",
     "derive_from_live_source",
+    "engine_running_evidence",
     "running_replay_id",
 ]

@@ -25,7 +25,7 @@ from src.config import HardwareConfig, NonvolatileWriteConfig
 from src.control.audit import ControlAuditLogger
 from src.decode.hat_adc_board import load_hat_adc_board
 from src.timefmt import parse_iso_utc
-from src.vehicle_state import VehicleState
+from src.vehicle_state import VehicleState, engine_running_evidence
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _Block = TypeVar("_Block")
@@ -224,6 +224,9 @@ def supply_voltage_from_latest_rows(
 class NonvolatileWriteSignals:
     """Fresh inputs sampled at an authorization/block boundary."""
 
+    #: Carries the fresh-gated ``broadcast_rpm`` beside the verdict, which is
+    #: what :func:`src.vehicle_state.engine_running_evidence` needs (R29.14).
+    #: Build it with a ``derive_*`` function so that field is filled.
     vehicle_state: VehicleState
     vehicle_speed_kph: float | None
     vehicle_speed_freshness_seconds: float | None
@@ -277,7 +280,13 @@ class AuthorizedBlockWriter(Protocol[_BlockContra]):
 
 
 class NonvolatileWriteGuard:
-    """Mint and consume authorizations; re-check interlocks between blocks."""
+    """Mint and consume authorizations; re-check interlocks between blocks.
+
+    Stricter than the ROM backup's engine check on purpose: a fresh broadcast
+    engine speed must read exactly 0, not merely below the running threshold,
+    so a cranking engine refuses (``broadcast_rpm_nonzero``) before it counts
+    as running.
+    """
 
     def __init__(
         self,
@@ -419,6 +428,14 @@ class NonvolatileWriteGuard:
             )
         if state.state == "engine_running":
             raise AuthorizationRefusedError("engine_running", "engine is running")
+        # The verdict alone is not enough (R29.14): the classifier prefers a
+        # fresh OBD rpm, so the last OBD ``0`` keeps it at ``ignition_only``
+        # for seconds after a start while the broadcast already reads 800.
+        running = engine_running_evidence(state)
+        if running is not None:
+            raise AuthorizationRefusedError(
+                "broadcast_engine_running", f"engine is running: {running}"
+            )
         if state.state != "ignition_only":
             raise AuthorizationRefusedError(
                 "engine_state_not_ignition_only",
@@ -426,6 +443,16 @@ class NonvolatileWriteGuard:
             )
         if state.rpm != 0:
             raise AuthorizationRefusedError("rpm_nonzero", f"engine RPM is {state.rpm!r}, not zero")
+        # ``rpm`` is the OBD reading while OBD is fresh, so the rule above cannot
+        # see a crank (1-399 rpm on the broadcast) behind a last OBD ``0``. A
+        # fresh broadcast reads exactly 0 at key-on, engine-off: 2,484,155 of
+        # 2,484,156 KOEO frames across 89 stored sessions, and the one
+        # nonzero frame is an engine-stop edge (R29.14).
+        if state.broadcast_rpm is not None and state.broadcast_rpm != 0:
+            raise AuthorizationRefusedError(
+                "broadcast_rpm_nonzero",
+                f"broadcast engine speed is {state.broadcast_rpm:g} rpm, not zero",
+            )
         if (
             signals.vehicle_speed_freshness_seconds is None
             or signals.vehicle_speed_freshness_seconds > self.policy.max_signal_age_seconds

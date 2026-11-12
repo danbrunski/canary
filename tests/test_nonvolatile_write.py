@@ -28,6 +28,8 @@ from src.control.nonvolatile_write import (
     supply_voltage_from_latest_rows,
 )
 from src.dashboard.status import VehicleState, VehicleStateName
+from src.operating import ENGINE_RUNNING_MIN_RPM
+from src.vehicle_state import FRESHNESS_THRESHOLD_SECONDS, derive_from_inputs
 
 IMAGE = sha256_image(b"candidate calibration")
 OTHER_IMAGE = sha256_image(b"different calibration")
@@ -167,6 +169,116 @@ def test_running_and_unknown_are_distinct_refusals(audit: ControlAuditLogger, cl
     assert running.value.code == "engine_running"
     assert unknown.value.code == "engine_state_not_ignition_only"
     assert "cannot tell" not in running.value.detail
+
+
+def _derived_signals(
+    *, obd_rpm: float, obd_age: float, broadcast_rpm: float | None, can_age: float
+) -> NonvolatileWriteSignals:
+    """Signals whose vehicle state comes from the real derivation, not a hand-built one."""
+    state = derive_from_inputs(
+        {
+            "rpm": obd_rpm,
+            "broadcast_rpm": broadcast_rpm,
+            "coolant_temp": 60.0,
+            "run_time": 0.0,
+            "obd_freshness_seconds": obd_age,
+            "can_freshness_seconds": can_age,
+            "supply_voltage": None,
+            "supply_freshness_seconds": None,
+        },
+        None,
+        datetime(2026, 11, 12, 12, 0, tzinfo=UTC),
+        passive=False,
+    )
+    return replace(signals(), vehicle_state=state)
+
+
+def test_a_fresh_broadcast_rpm_refuses_while_the_last_obd_zero_is_still_fresh(
+    audit: ControlAuditLogger, clock: Clock
+) -> None:
+    """R29.14: the engine starts, the broadcast reads 800, and the last OBD
+    ``0`` is still inside both the classifier's 10 s window and the guard's
+    5 s one. The verdict stays ``ignition_only`` with rpm 0 (the classifier
+    prefers fresh OBD), so a guard reading only the verdict would grant."""
+    policy = NonvolatileWriteConfig()
+    reading = _derived_signals(
+        obd_rpm=0.0,
+        obd_age=1.0,
+        broadcast_rpm=800.0,
+        can_age=0.1,
+    )
+    assert reading.vehicle_state.obd_freshness_seconds is not None
+    assert reading.vehicle_state.obd_freshness_seconds < policy.max_signal_age_seconds
+    assert reading.vehicle_state.obd_freshness_seconds < FRESHNESS_THRESHOLD_SECONDS
+    # The premise: the classifier's verdict alone says key-on, engine-off.
+    assert reading.vehicle_state.state == "ignition_only"
+    assert reading.vehicle_state.rpm == 0.0
+    with pytest.raises(AuthorizationRefusedError) as caught:
+        guard(audit, clock).authorize(request(lambda: reading))
+    assert caught.value.code == "broadcast_engine_running"
+    assert "800" in caught.value.detail
+    entries = [json.loads(line) for line in audit.path.read_text().splitlines()]
+    assert entries[-1]["payload"]["reason_code"] == "broadcast_engine_running"
+    assert entries[-1]["payload"]["signals"]["vehicle_state"]["broadcast_rpm"] == 800.0
+
+
+def test_a_broadcast_start_between_blocks_aborts_before_the_next_write(
+    audit: ControlAuditLogger, clock: Clock
+) -> None:
+    readings: Iterator[NonvolatileWriteSignals] = iter(
+        [
+            signals(),
+            signals(),
+            _derived_signals(obd_rpm=0.0, obd_age=2.0, broadcast_rpm=760.0, can_age=0.1),
+        ]
+    )
+    authorization = guard(audit, clock).authorize(request(lambda: next(readings)))
+    written: list[int] = []
+    with pytest.raises(AuthorizationRefusedError) as caught:
+        execute_authorized_blocks(
+            authorization,
+            image_sha256=IMAGE,
+            ecu=ECU,
+            blocks=[b"one", b"two"],
+            write_block=lambda _authorization, index, _block: written.append(index),
+        )
+    assert caught.value.code == "broadcast_engine_running"
+    assert written == [0]
+
+
+@pytest.mark.parametrize(
+    ("broadcast_rpm", "can_age"),
+    [
+        (None, 0.1),  # no broadcast engine speed at all
+        (0.0, 0.1),  # fresh, engine stopped
+        (800.0, FRESHNESS_THRESHOLD_SECONDS + 1.0),  # stale CAN: no evidence either way
+    ],
+)
+def test_a_broadcast_rpm_authorizes_only_at_exactly_zero_or_without_fresh_evidence(
+    broadcast_rpm: float | None,
+    can_age: float,
+    audit: ControlAuditLogger,
+    clock: Clock,
+) -> None:
+    reading = _derived_signals(
+        obd_rpm=0.0, obd_age=1.0, broadcast_rpm=broadcast_rpm, can_age=can_age
+    )
+    assert reading.vehicle_state.state == "ignition_only"
+    assert isinstance(guard(audit, clock).authorize(request(lambda: reading)), Authorization)
+
+
+@pytest.mark.parametrize("broadcast_rpm", [1.0, 56.25, ENGINE_RUNNING_MIN_RPM - 1.0])
+def test_a_cranking_broadcast_rpm_below_the_running_threshold_refuses(
+    broadcast_rpm: float, audit: ControlAuditLogger, clock: Clock
+) -> None:
+    """The guard is stricter than ``engine_running_evidence``: a fresh broadcast
+    between 0 and the running threshold is a crank, not key-on/engine-off."""
+    reading = _derived_signals(obd_rpm=0.0, obd_age=1.0, broadcast_rpm=broadcast_rpm, can_age=0.1)
+    assert reading.vehicle_state.state == "ignition_only"
+    assert reading.vehicle_state.rpm == 0.0
+    with pytest.raises(AuthorizationRefusedError) as caught:
+        guard(audit, clock).authorize(request(lambda: reading))
+    assert caught.value.code == "broadcast_rpm_nonzero"
 
 
 @pytest.mark.parametrize(

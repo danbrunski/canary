@@ -35,7 +35,7 @@ from src.paths import BINDINGS_YAML as DEFAULT_BINDINGS_PATH
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.telemetry import TelemetryRecord, channel_of
 from src.timefmt import format_timestamp
-from src.vehicle_state import VehicleState, derive_from_live_source
+from src.vehicle_state import SCORABLE_STATES, VehicleState, derive_from_live_source
 
 from .autotag_hook import LiveAutoTagHook
 from .committees_live import build_live_committees
@@ -177,7 +177,7 @@ FEATURE_BUILD_STARTUP_TIMEOUT_SECONDS = 15.0
 #: like ``engine_running``. Everything else (ignition_only, engine_off,
 #: no_data, unknown) is skipped — no koeo-trained model exists yet to make
 #: ignition_only meaningful, so it stays gated out with the others.
-_SCORABLE_VEHICLE_STATES = frozenset({"engine_running", "replay"})
+_SCORABLE_VEHICLE_STATES = SCORABLE_STATES
 
 
 @dataclass(frozen=True)

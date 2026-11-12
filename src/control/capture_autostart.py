@@ -27,9 +27,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-#: The state the engine must be in for a capture to run. `ignition_only` is
+from src.vehicle_state import ENGINE_ON_STATES
+
+#: The states the engine must be in for a capture to run
+#: (:data:`src.vehicle_state.ENGINE_ON_STATES`). `ignition_only` is
 #: deliberately absent: KOEO reaches no set point and produces no pulls.
-RUNNING_STATE = "engine_running"
+RUNNING_STATES = ENGINE_ON_STATES
 
 #: What `update` asks the caller to do this tick.
 Action = Literal["start", "stop"]
@@ -102,7 +105,7 @@ class CaptureAutostartDecider:
         :param capture_active: is a profile capture running right now?
         :param now: monotonic seconds.
         """
-        running = state == RUNNING_STATE
+        running = state in RUNNING_STATES
 
         if not running:
             if self._not_running_since is None:

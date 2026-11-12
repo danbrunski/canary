@@ -87,6 +87,7 @@ from typing import Any
 from src.collection import tuning_profile, tx_gate
 from src.config import IdleShutdownConfig
 from src.daemon.ups import read_keepalive_remaining, read_watchdog_status
+from src.vehicle_state import IDLE_STATES, KEY_ON_STATES
 
 log = logging.getLogger(__name__)
 
@@ -95,11 +96,11 @@ log = logging.getLogger(__name__)
 #: ``unknown`` (the classifier could not decide, so neither should we).
 #: Not ``bench``: idle shutdown saves a parked vehicle's battery, and a bench
 #: Pi draws from USB-C or the UPS, not the vehicle.
-DEFAULT_IDLE_STATES: tuple[str, ...] = ("engine_off", "parked", "no_data")
+DEFAULT_IDLE_STATES: tuple[str, ...] = tuple(sorted(IDLE_STATES))
 
 #: States proving we are actually attached to a live vehicle. Observing one of
 #: these arms the countdown; until then the rig might be sitting on a bench.
-DEFAULT_ACTIVE_STATES: tuple[str, ...] = ("engine_running", "ignition_only")
+DEFAULT_ACTIVE_STATES: tuple[str, ...] = tuple(sorted(KEY_ON_STATES))
 
 
 def input_power_present(status: dict[str, Any] | None) -> bool | None:

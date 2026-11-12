@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.vehicle_state import ECM_SILENT_STATES, ENGINE_ON_STATES
+
 
 def readiness_entry(
     ok: bool | None, value: Any, detail: str, fix: str | None = None
@@ -132,27 +134,38 @@ def calibration_entry(calibration: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-_VEHICLE_STATE: dict[str, tuple[bool | None, str, str | None]] = {
-    "engine_running": (True, "engine running", None),
-    "ignition_only": (None, "key on, engine off", "Start the engine to log driving data"),
-    "engine_off": (False, "key off: the ECM is not answering", "Turn the key on"),
-    "parked": (False, "parked: the vehicle's bus is asleep (key off)", "Turn the key on"),
-    "bench": (False, "on the bench: no vehicle on the OBD port", "Plug the Pi into the vehicle"),
+#: Detail and fix per verdict. Whether a verdict is ready comes from the named
+#: groups in :mod:`src.vehicle_state` (R29.14), not from this table: ready
+#: while the engine runs, not ready while the ECM is silent, undecided
+#: otherwise (KOEO, replay, passive, unknown).
+_VEHICLE_STATE: dict[str, tuple[str, str | None]] = {
+    "engine_running": ("engine running", None),
+    "ignition_only": ("key on, engine off", "Start the engine to log driving data"),
+    "engine_off": ("key off: the ECM is not answering", "Turn the key on"),
+    "parked": ("parked: the vehicle's bus is asleep (key off)", "Turn the key on"),
+    "bench": ("on the bench: no vehicle on the OBD port", "Plug the Pi into the vehicle"),
     "no_data": (
-        False,
         "no fresh CAN, OBD or 12 V supply reading",
         "Check the Pi's connection to the vehicle",
     ),
-    "replay": (None, "replay active: data is re-emitted", "Stop the replay for live data"),
-    "unknown": (None, "vehicle state not classified", "Read the raw vehicle_state fields"),
+    "replay": ("replay active: data is re-emitted", "Stop the replay for live data"),
+    "unknown": ("vehicle state not classified", "Read the raw vehicle_state fields"),
 }
+
+
+def _vehicle_state_ready(state: str) -> bool | None:
+    if state in ENGINE_ON_STATES:
+        return True
+    if state in ECM_SILENT_STATES:
+        return False
+    return None
 
 
 def vehicle_state_entry(state: str | None) -> dict[str, Any]:
     if state is None:
         return readiness_entry(None, None, "vehicle state not reported")
-    ok, detail, fix = _VEHICLE_STATE.get(state, (None, f"state {state}", None))
-    return readiness_entry(ok, state, detail, fix)
+    detail, fix = _VEHICLE_STATE.get(state, (f"state {state}", None))
+    return readiness_entry(_vehicle_state_ready(state), state, detail, fix)
 
 
 def build_tuning_readiness(

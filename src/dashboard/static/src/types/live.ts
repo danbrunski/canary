@@ -266,6 +266,11 @@ export interface VehicleState {
     | "passive"
     | "unknown";
   rpm: number | null;
+  /** The decoded broadcast engine speed while CAN is fresh, else null. Kept
+   *  beside `rpm` because the verdict prefers a fresh OBD rpm, whose last `0`
+   *  outlives an engine start by seconds (R29.14). Absent from daemons older
+   *  than that change. */
+  broadcast_rpm?: number | null;
   coolant_temp: number | null;
   run_time: number | null;
   obd_freshness_seconds: number | null;

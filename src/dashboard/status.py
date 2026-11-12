@@ -31,15 +31,16 @@ from src.storage.sidecar import read_json_object
 from src.vehicle_state import FRESHNESS_THRESHOLD_SECONDS as FRESHNESS_THRESHOLD_SECONDS
 from src.vehicle_state import RPM_RUNNING_THRESHOLD as RPM_RUNNING_THRESHOLD
 from src.vehicle_state import VEHICLE_STATE_TTL_SECONDS as VEHICLE_STATE_TTL_SECONDS
-from src.vehicle_state import VehicleState as VehicleState
-from src.vehicle_state import VehicleStateCache as VehicleStateCache
-from src.vehicle_state import VehicleStateName as VehicleStateName
-from src.vehicle_state import classify_vehicle_state as classify_vehicle_state
 from src.vehicle_state import (
+    ReplayStatusSource,
     derive_from_latest_rows,
     derive_from_live_source,
     running_replay_id,
 )
+from src.vehicle_state import VehicleState as VehicleState
+from src.vehicle_state import VehicleStateCache as VehicleStateCache
+from src.vehicle_state import VehicleStateName as VehicleStateName
+from src.vehicle_state import classify_vehicle_state as classify_vehicle_state
 
 if TYPE_CHECKING:  # annotation only — src.daemon's package __init__ imports the dashboard
     # Annotation only: importing it at runtime loads the whole src.daemon package (R04.8).
@@ -249,7 +250,7 @@ def _capture_snapshot(storage_writer: Any = None) -> dict[str, Any]:
 def derive_vehicle_state_from_storage(
     storage_path: Path,
     *,
-    replay_controller: ReplayController | None,
+    replay_controller: ReplayStatusSource | None,
     now: datetime | None = None,
     session_dir: Path | None = None,
 ) -> VehicleState:

@@ -45,12 +45,14 @@ from typing import Any, Literal
 
 from src.control.paired_devices import PairedDevices, clean_name
 from src.provisioning.gate import write_window
+from src.vehicle_state import KEY_ON_STATES
+from src.vehicle_state import UNTRUSTED_STATES as UNTRUSTED_STATES
 
 log = logging.getLogger(__name__)
 
-ON_STATES = frozenset({"ignition_only", "engine_running"})
-#: States that are not evidence about the key.
-UNTRUSTED_STATES = frozenset({"replay", "passive", "unknown"})
+#: The key is on (:data:`src.vehicle_state.KEY_ON_STATES`). States in
+#: :data:`src.vehicle_state.UNTRUSTED_STATES` are not evidence about the key.
+ON_STATES = KEY_ON_STATES
 #: ON held longer than this is driving, not a pairing gesture. It includes the
 #: classifier's ~10 s lag in noticing the ECM has gone quiet.
 MAX_ON_S = 60.0

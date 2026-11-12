@@ -90,8 +90,8 @@ from src.collection import private_traffic, tx_gate
 from src.collection.can_obd_client import CanObdClient, RawReply
 from src.collection.isotp import DEFAULT_REQUEST_ID, nrc_name
 from src.control.rom_library import RomLibrary
-from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.vehicle.platforms import VehicleDataFile
+from src.vehicle_state import engine_running_evidence
 from src.yaml_load import load_yaml
 
 log = logging.getLogger(__name__)
@@ -303,21 +303,14 @@ class _Failure:
 def _engine_running(reading: VehicleReading) -> str | None:
     """Why the engine counts as running, or ``None``.
 
-    The classifier's verdict, **or** a fresh broadcast engine speed at or above
-    the running threshold whatever the verdict says. The classifier prefers a
-    fresh OBD rpm, and once OBD polling pauses for the read its last ``0`` stays
-    "fresh" for up to ten seconds — exactly the window in which the session is
-    entered — while the broadcast already reads 800.
+    :func:`src.vehicle_state.engine_running_evidence`, the definition the
+    non-volatile write guard uses too (R29.14): the classifier's verdict,
+    **or** a fresh broadcast engine speed at or above the running threshold
+    whatever the verdict says. Once OBD polling pauses for the read its last
+    ``0`` stays "fresh" for up to ten seconds — exactly the window in which
+    the session is entered — while the broadcast already reads 800.
     """
-    if reading.broadcast_rpm is not None and reading.broadcast_rpm >= ENGINE_RUNNING_MIN_RPM:
-        return (
-            f"broadcast engine speed {reading.broadcast_rpm:.0f} rpm >= "
-            f"{ENGINE_RUNNING_MIN_RPM:.0f} (vehicle_state {reading.state})"
-        )
-    if reading.state == "engine_running":
-        rpm = "" if reading.rpm is None else f", rpm {reading.rpm:.0f}"
-        return f"vehicle_state engine_running{rpm}"
-    return None
+    return engine_running_evidence(reading)
 
 
 def _now_iso(wall: float) -> str:

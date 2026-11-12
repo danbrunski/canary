@@ -49,11 +49,9 @@ from src.vehicle.profiles import active_registry
 from src.vehicle.profiles import profile_dir as vehicle_profile_dir
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 from src.vehicle_state import (
-    FRESHNESS_THRESHOLD_SECONDS,
     LiveStateSource,
     ReplayStatusSource,
-    derive_from_inputs,
-    running_replay_id,
+    derive_from_live_source,
 )
 
 
@@ -80,7 +78,7 @@ def vehicle_reading(
     if live_source is None:
         state = derive_vehicle_state_from_storage(
             config.collection.storage_path,
-            replay_controller=replay_controller,  # type: ignore[arg-type]
+            replay_controller=replay_controller,
         )
         return VehicleReading(
             state=state.state,
@@ -89,11 +87,9 @@ def vehicle_reading(
             obd_freshness_seconds=state.obd_freshness_seconds,
             watch_unavailable="no live telemetry source; live inference is not running",
         )
-    inputs = live_source.vehicle_state_inputs(now)
-    state = derive_from_inputs(inputs, running_replay_id(replay_controller), now)
-    can_age = inputs.get("can_freshness_seconds")
-    can_fresh = can_age is not None and can_age <= FRESHNESS_THRESHOLD_SECONDS
-    broadcast = inputs.get("broadcast_rpm") if can_fresh else None
+    state = derive_from_live_source(live_source, replay_controller=replay_controller, now=now)
+    # Fresh-gated by the classifier: ``None`` when absent or CAN is stale.
+    broadcast = state.broadcast_rpm
     return VehicleReading(
         state=state.state,
         rpm=state.rpm,
