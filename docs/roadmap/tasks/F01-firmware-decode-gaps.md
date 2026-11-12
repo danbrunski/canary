@@ -185,6 +185,24 @@ Same conventions as the other task files: task-level truth is the checkboxes,
     (N01's noise floor).
   - **Accept:** entry and exit conditions listed with their thresholds, and
     checked against `0xFFFF26B8` on one logged drive.
+  - [~] 2026-11-12: entry traced, exit partly. The only writer of
+    `0xFFFF26B8` is `0x04F240`, main entry 29, before the fuel task (37).
+    - **Decel cut** `0x050130`: idle flag `0xFFFF2833` bit 4 plus
+      `0xFFFF2835` bit 4, and rpm above curve `0xD379` on coolant. Warm, that
+      is 1,800 rpm, or 1,400 rpm on the moving path (curve `0xD3AD`); 3,000
+      cold. No hysteresis. Identical on all seven images.
+    - **Checked against the captures' fuel-cut sentinel** (ten drives, 1,884
+      cut reads). No closed-throttle read below 1,300 rpm cuts, and 66 % at
+      or above 2,000 rpm do. So `0xFFFF2835` bit 4, or a delay, still gates
+      entry.
+    - **Dead on this calibration:** the zone cut `0x050000` (tables zero, zone
+      flag never set) and the BFS decel curves.
+    - **Protection cuts listed:** overheat above 2,200 rpm, stationary
+      high-rpm, and the diagnostic limps.
+    - **Not done:** `0xFFFF2835` bit 4, the re-entry group
+      `0x05059C`/`0x05099E`, the limp flags' meanings, `0xFFFF2841` bit 1,
+      and the same-window truck check. Firmware doc: "The cut mask and the
+      decel cut".
 
 ## Spark
 

@@ -1031,6 +1031,57 @@ ratio of (DID − Ts) to the predicted pulse has median 1.006, p10–p90
   - The BFS decel-cut curves are all zero.
   - Limp cut at 2,800 rpm on diagnostic item `0x30`.
   - No BFS- or airflow-based cut while moving.
+- **The cut mask and the decel cut (F01.5, 2026-11-12).**
+  - **One writer.** `0xFFFF26B8` is written only by `FUELCUT_mask_26B8_task`
+    (`0x04F240`), main-cycle entry 29. The fuel task is entry 37, so the mask
+    is always this cycle's when the command is formed.
+  - **The mask** is `0x3F` (all six cylinders) if any of about fifteen
+    condition routines returns true, ORed with a second decel group and the
+    item-`0x30` limp cut, then `& 0x3F`. A test mode (`0xFFFF47FE` bit 3)
+    substitutes `0xFFFF2F78`.
+  - **Decel cut** (`0x050130`; decompile text, with branches on this image's
+    calibration pruned by the decompiler). It needs the idle flag
+    `0xFFFF2833` bit 4 and `0xFFFF2835` bit 4. It then cuts while rpm
+    exceeds curve `0xD379` on the rescaled coolant byte, or, on the path
+    taken when `0xFFFF282B` bit 6 (and `0xFFFF282F` bit 6) is set, while
+    speed `0xFFFF111C` > 3 and rpm exceeds curve `0xD3AD`. A fault flag
+    (`FaultGroup_flags` bit 3) adds 600 rpm, and another
+    (`FaultGroup_flags_snap` bit 0) sets an 1,800 rpm floor. Each cut sets
+    `0xFFFF47AB` bit 6. There is no hysteresis in this routine: it resumes
+    when rpm falls to the curve or the throttle opens.
+
+    | Coolant °C | −40 to 0 | 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80–100 | 110 |
+    |---|---|---|---|---|---|---|---|---|---|---|
+    | `0xD379`, rpm | 3,000 | 2,800 | 2,700 | 2,600 | 2,500 | 2,400 | 2,200 | 2,000 | 1,800 | 1,800 |
+    | `0xD3AD`, rpm | 3,000 | 2,800 | 2,700 | 2,600 | 2,500 | 2,400 | 2,200 | 2,000 | 1,400 | 1,600 |
+
+    The curves are identical on all seven images.
+  - **Data** (ten tuning captures 2026-10-26 to 11-12, 20,633 command reads
+    against Mode 01 rpm and throttle within 0.3 s, coolant 33–96 °C). The
+    1,884 cut reads (the `_SENTINEL` channel) span 1,312–5,350 rpm (5 %:
+    1,838). With throttle ≤ 6.0 %, no read below 1,300 rpm is in cut, and
+    66 % of reads at or above 2,000 rpm are. That is consistent with the
+    curves, but not with the throttle flag alone: `0xFFFF2835` bit 4 (not
+    identified) or a delay gates the rest.
+  - **Dead here:** the zone cut `0x050000` (rpm tables `0xD389`/`0xD391`
+    all zero, and `0xFFFF287C` bit 1, its zone flag, is only ever cleared),
+    `0x04F6F2` (returns 0), and the BFS decel curves.
+  - **Other cut routines, traced from decompile text:**
+    - Coolant ≥ 140 °C (°C + 50 byte ≥ 190, with hysteresis) cuts off idle
+      above 2,200 rpm (`0x04F994`).
+    - Stationary, off idle, an accumulator over rpm curve `0xD1CF` reaching
+      1,200 cuts above 1,750 rpm and resumes below 1,500 (`0x04F808`).
+    - `0xFFFF2823` bit 7 cuts at ≥ 2,400 rpm (`0x04FC26`).
+    - `0xFFFF47CB` bit 3 cuts above 2,800 rpm, with 300 rpm hysteresis
+      (`0x04FFB4`).
+    - `0xFFFF47EE` bit 3 with `0xFFFF545C` > 4 cuts above 2,500 rpm and holds
+      to 2,000 (`0x050EA4`).
+    - `0xFFFF478D` bit 7 cuts (`0x04FFF4`).
+    - `0x050D58` combines a speed-word limit (`0xFFFF1044` ≥ 0x3852) and the
+      throttle failsafe.
+  - **Not decoded:** the re-entry group `0x05059C`/`0x05099E`/`0x050906`
+    (`0xFFFF15AE`/`15AF`, `0xFFFF3C80`–`3C84`), the meanings of the fault and
+    diagnostic flags above, and `0xFFFF2841` bit 1.
 
 ### Closed-loop enable and trim authority (F01.2, 2026-11-12)
 
