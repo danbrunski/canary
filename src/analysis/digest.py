@@ -499,6 +499,39 @@ def digest_preflight(
 #: unlocked way to touch the mirror.
 _TOP_LEVEL_LOCK = threading.RLock()
 
+#: Set on a whole-session (trip-less) digest that took the top level from a
+#: real trip's refusal: that trip's ``started_at``, which the digest then ranks
+#: as (D03.63). A trip-less record has no start of its own, so without this an
+#: older trip's digest landing afterwards (its child was still running) found
+#: nothing newer at the top level and took it back, though a newer trip had
+#: already been answered. A later whole-session digest inherits the rank.
+TOP_LEVEL_RANK_KEY = "ranks_as_trip_started_at"
+
+
+def _ranked_start(record: Mapping[str, Any] | None) -> datetime | None:
+    """A top-level record's place in trip order: its own trip's start, or, for
+    a whole-session digest standing in for a refused trip, that trip's."""
+    if record is None:
+        return None
+    return trip_started_at(record.get("trip")) or trip_started_at(
+        {"started_at": record.get(TOP_LEVEL_RANK_KEY)}
+    )
+
+
+def _tripless_rank(session_dir: Path) -> str | None:
+    """The rank a trip-less digest written now carries if it takes the top
+    level: the start of the real trip whose refusal it replaces, or the rank of
+    the whole-session digest it replaces. Called under :data:`_TOP_LEVEL_LOCK`."""
+    refused = read_digest_skipped(session_dir)
+    if refused is not None and trip_started_at(refused.get("trip")) is not None:
+        return str(refused["trip"]["started_at"])
+    held = read_digest(session_dir)
+    if held is not None and trip_started_at(held.get("trip")) is None:
+        rank = held.get(TOP_LEVEL_RANK_KEY)
+        if trip_started_at({"started_at": rank}) is not None:
+            return str(rank)
+    return None
+
 
 def _file_away_current_answer(session_dir: Path) -> None:
     """Keep the session's top-level answer as its trip's own record (D03.63).
@@ -530,8 +563,9 @@ def _top_level_may_take(
     trip (on demand, or a caller with no tracker edge) never displaces a real
     trip's answer, with one exception: a computed whole-session digest may
     replace a real trip's *refusal*, so raising a budget and asking again still
-    serves the session instead of the stale 409. Called under
-    :data:`_TOP_LEVEL_LOCK`.
+    serves the session instead of the stale 409. That digest then ranks as the
+    refused trip (:data:`TOP_LEVEL_RANK_KEY`), so a real trip older than it is
+    filed under ``trip_digests/`` only. Called under :data:`_TOP_LEVEL_LOCK`.
     """
     new_start = trip_started_at(trip)
     held = read_digest(session_dir)
@@ -542,7 +576,8 @@ def _top_level_may_take(
         if digest_start is not None:
             return False
         return is_digest or refusal_start is None
-    newest = max((start for start in (digest_start, refusal_start) if start), default=None)
+    held_rank = _ranked_start(held)
+    newest = max((start for start in (held_rank, refusal_start) if start), default=None)
     return newest is None or new_start >= newest
 
 
@@ -833,11 +868,17 @@ def write_digest(session_dir: Path, digest: SessionDigest) -> Path:
     than the one the top level already holds (:func:`_top_level_may_take`),
     mirrored to ``digest.json`` with the top-level refusal removed, all under
     one lock so no reader sees both. The trip's own refusal, if any, goes too.
+    A whole-session digest that replaces a real trip's refusal carries that
+    trip's start as its rank (:data:`TOP_LEVEL_RANK_KEY`).
     """
     path = session_dir / DIGEST_FILENAME
     key = trip_key(digest.trip)
     payload = digest.to_dict()
     with _TOP_LEVEL_LOCK:
+        if trip_started_at(digest.trip) is None:
+            rank = _tripless_rank(session_dir)
+            if rank is not None:
+                payload[TOP_LEVEL_RANK_KEY] = rank
         _file_away_current_answer(session_dir)
         write_json_sidecar(
             trip_digest_path(session_dir, key), payload, default=_json_default, mkdir=True

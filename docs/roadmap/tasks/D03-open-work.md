@@ -2030,13 +2030,18 @@ that closed its task checklist.
     `trip` block names the window but the anomaly/ledger/fingerprint windows
     are not cut to it. (2) The synchronous `handle_trip_end` (offline scripts)
     takes no trip. (3) Pi/drive: confirm two digests from a real two-trip
-    capture (`trip_digests/` holds two `.json` after a stop-and-go). (4) A
-    narrow misorder remains through the trip-less path (verifier, 2026-11-12):
-    an on-demand whole-session digest may replace trip two's refusal, and if
-    trip one's real digest lands after it, trip one takes the top level back,
-    because a trip-less record has no start time to rank. It needs an on-demand
-    compute while trip one's child is still running. Fix: give a trip-less
-    digest that replaces a refusal the replaced trip's start as its rank.
+    capture (`trip_digests/` holds two `.json` after a stop-and-go). (4) ~~A
+    narrow misorder remains through the trip-less path~~ **fixed 2026-11-12:**
+    an on-demand whole-session digest could replace trip two's refusal, and if
+    trip one's real digest landed after it, trip one took the top level back,
+    because a trip-less record had no start time to rank. A whole-session
+    digest that replaces a real trip's refusal now carries that trip's
+    `started_at` as `ranks_as_trip_started_at` (`TOP_LEVEL_RANK_KEY`), which
+    `_top_level_may_take` reads (`_ranked_start`); a later whole-session digest
+    inherits it, and a trip-less digest that replaced nothing carries none.
+    `test_a_whole_session_digest_that_replaced_a_refusal_ranks_as_the_refused_trip`
+    fails without the fix; digest, tuning-refresh, trip-end, per-trip, catalog,
+    brain-job and shutdown-deadline tests 118 passed.
 - [~] **D03.64 Scoring a long capture OOM-kills the daemon.** *From the
   2026-11-10 boot.*
   - **What happened.** At 16:59:58Z the daemon tried to finalize the

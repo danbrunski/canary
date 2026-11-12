@@ -432,6 +432,56 @@ def test_a_tripless_record_never_displaces_a_real_trips_answer(tmp_path: Path) -
     assert held is not None and held["trip"] == OLDER
 
 
+def test_a_whole_session_digest_that_replaced_a_refusal_ranks_as_the_refused_trip(
+    tmp_path: Path,
+) -> None:
+    """The verifier's misorder (D03.63 owed item 4): trip two is refused, an
+    on-demand whole-session digest replaces the refusal, then trip one's digest
+    lands (its child was still running). Trip one is older than the trip the
+    top level now stands in for, so it is filed under its trip only."""
+    from src.analysis.digest import TOP_LEVEL_RANK_KEY, persist_digest
+
+    session = _session(tmp_path)
+    write_digest_skipped(session, _stub_skip(session, NEWER))
+    persist_digest(session, _stub_digest(session, None))
+    top = read_digest(session)
+    assert top is not None and top["trip"] is None
+    assert top[TOP_LEVEL_RANK_KEY] == NEWER["started_at"]
+
+    persist_digest(session, _stub_digest(session, OLDER))
+    top = read_digest(session)
+    assert top is not None and top["trip"] is None, "trip one took the top level back"
+    assert read_digest_skipped(session) is None
+    assert read_trip_digest(session, trip_key(OLDER)) is not None
+
+    # A forced whole-session recompute keeps the rank it replaces.
+    persist_digest(session, _stub_digest(session, None))
+    top = read_digest(session)
+    assert top is not None and top[TOP_LEVEL_RANK_KEY] == NEWER["started_at"]
+    persist_digest(session, _stub_digest(session, OLDER))
+    top = read_digest(session)
+    assert top is not None and top["trip"] is None
+
+    # A trip newer than the rank, or the refused trip's own digest, takes it.
+    later = _block("2026-05-20T20:00:00Z")
+    persist_digest(session, _stub_digest(session, later))
+    top = read_digest(session)
+    assert top is not None and top["trip"] == later and TOP_LEVEL_RANK_KEY not in top
+    other = write_rich_session(tmp_path, name="2026-05-24T180000")
+    write_digest_skipped(other, _stub_skip(other, NEWER))
+    persist_digest(other, _stub_digest(other, None))
+    persist_digest(other, _stub_digest(other, NEWER))
+    top = read_digest(other)
+    assert top is not None and top["trip"] == NEWER
+
+    # Without a replaced refusal a whole-session digest carries no rank, so a
+    # real trip still replaces it (the third case above).
+    plain = write_rich_session(tmp_path, name="2026-05-25T180000")
+    persist_digest(plain, _stub_digest(plain, None))
+    top = read_digest(plain)
+    assert top is not None and TOP_LEVEL_RANK_KEY not in top
+
+
 def test_trips_are_ordered_by_parsed_start_not_by_key_or_spelling(tmp_path: Path) -> None:
     from src.analysis.digest import persist_digest
 
