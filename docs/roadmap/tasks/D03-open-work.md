@@ -2111,6 +2111,52 @@ that closed its task checklist.
     digest of log lines, and one warning lists the recorded revisions (one
     digest changed in the fixture; a full `--write` also rewrites 89 floats by
     up to 3e-14, which was left out). A flash record has to run these too.
+- [ ] **D03.66 `POST /control/obd_request` cannot address a one-byte local
+  identifier.** *Found 2026-11-11 reading the BCM's TPMS registration
+  (`data/analyses/2026-11-11-tpms-bcm-read.md`).* The endpoint always encodes a
+  two-byte identifier after the service byte, so a KWP-style
+  ReadDataByLocalIdentifier (`21 1F` on the BCM, 0x745/0x765) cannot be sent;
+  the read was done with `cansend` from a shell on the Pi instead. The ECM's
+  Mode 22 (two-byte) path is unaffected.
+  **Accept:** a caller can send a service byte followed by a one-byte
+  identifier (and by an arbitrary byte string, for services that take no
+  identifier), through the HTTP route and the MCP tool; the default stays the
+  two-byte encoding, so existing callers are unchanged; docs and tests cover
+  both widths; a test pins the exact bytes on the wire for `21 1F` to 0x745.
+  The endpoint keeps no service allowlist (AGENTS.md), and nothing here
+  changes which services it will send.
+- [ ] **D03.67 `GET /control/power` says `on_battery: true` with input
+  present.** *Seen 2026-11-10 17:00Z (SoC 12.9 %, charging, input present)
+  and 2026-11-12 04:07Z (SoC 94.5 %, input present at 11.5 V, key on, engine
+  off).* `scripts/ups_shutdown_watch.py` `on_battery()` is true when the SoC
+  falls faster than `UPS_MIN_DISCHARGE_RATE` **or** sits at or below
+  `UPS_CRITICAL_SOC` (15 %), whatever the PLD line says. So the flag means
+  "battery draining or critically low", and the payload reads as a
+  contradiction (`input_lost: false`, `on_battery: true`) with no reason
+  given. The 11-10 case is the critical-SoC clause firing on a battery that
+  was being charged. Related, from the same notes: the policy between the
+  critical-SoC floor and an armed keep-alive is not written down (which wins
+  when both apply).
+  **Accept:** the status record and `GET /control/power` say which condition
+  holds, in fields that cannot contradict each other (for example the
+  discharge state and the critical-SoC state reported separately from input
+  loss, with the shutdown countdown's own reason), the MCP tool and the
+  dashboard power panel show the same, and the keep-alive vs critical-SoC
+  rule is stated in the watchdog's docstring and `docs/headless-api.md` and
+  pinned by a test. Deploying the watchdog is a Pi step (it runs on the
+  system interpreter under its own unit).
+- [~] **D03.68 Broadcast `ECM_COOLANT_TEMP` once read 94/118 °C beside PID
+  0x05's 49/78 °C (2026-11-10 drive log, "Loose ends").** *Checked
+  2026-11-12 on the laptop.* The stored decode is right: on both 2026-11-12
+  captures (33–95 °C), 0x551 byte 0 − 40, 0x233 byte 0 − 50 and 0x23D byte 7 −
+  50 each equal PID 0x05 on every paired read (1,147–1,220 pairs per id on the
+  warm drive, 423–440 on the warm-up; per-pair difference p5/p50/p95
+  0.0/0.0/0.0; `~/canary-data/analysis-scripts/2026-11-12/coolant_bytes.py`).
+  118 at 78 °C is exactly 0x551's raw byte (T + 40), so the odd reading was
+  most likely a presentation path showing a raw byte, not the binding.
+  **Owed (Pi, engine running):** read `/telemetry/latest` (and the MCP
+  `get_recent_telemetry`) for `ECM_COOLANT_TEMP` beside `COOLANT_TEMP`; if
+  they differ, find the path that skips the offset. No binding change.
 ## Opened 2026-09-23 on the drive
 
 - [x] **D03.28 `GET /anomalies` parses the whole anomaly history in the collecting
