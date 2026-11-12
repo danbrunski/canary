@@ -1,5 +1,20 @@
 # Implementation task index
 
+**Status 2026-11-12: R22, the third codebase review (refactor, physics, skills).**
+[`R22-refactor-README.md`](R22-refactor-README.md) indexes ten new checklists,
+none implemented: R23 (collection and storage hot path), R24 (helpers written
+many times across packages), R25 (simulation, twin and plants), R26 (tuning
+workbench, signals, vehicle records), R27 (detection stack), R28 (dashboard
+frontend), R29 (daemon, control plane, API and MCP) and R30 (scripts, tools,
+test scaffolding and the gates);
+[`M01-physics-model-accuracy.md`](M01-physics-model-accuracy.md), a review of
+the physics in the trip, dyno, IMU, fuel-plant and λ code; and
+[`L01-skill-updates.md`](L01-skill-updates.md), corrections owed to the
+`engine-management` and `vehicle-nissan-xterra-2008` skills. R22 lists the
+defects found on the way (trip distance and 0–60 figures, analysis that still
+runs in-process on the Pi, a gap in the non-volatile write guard) ahead of the
+structural work, and the nine questions that need the operator.
+
 **Status 2026-11-12: F01, engine functions the firmware has not told us yet.**
 [`F01-firmware-decode-gaps.md`](F01-firmware-decode-gaps.md) lists what a
 listing pass can still explain about the ECM, in the order worth doing:
