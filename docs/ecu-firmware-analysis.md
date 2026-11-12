@@ -180,9 +180,13 @@ them signed or divides by them. UpRev's Tuning Guide (Rev 8) lists no setting
 for any of the three. Its "Target Drive Force" tables (pro-tuner only) are the
 drive-torque maps below, and its "ETC Control" setting switches the whole
 torque path off (linear throttle, no cruise), which is probably cal `0x8ADE`
-bit 7 (inferred). A candidate with the threshold moved is frozen in
-`data/analyses/2026-11-11-first-gear-cap-off-prediction.md`. Why Nissan caps first gear is not read from the
-code (driveline or traction protection are the usual reasons).
+bit 7 (inferred). The threshold was moved in ZS44A-20261111-2 (flashed
+2026-11-12T01:02:20Z), and the first drive agrees with this reading: in first
+gear at pedal byte 220-250 and 3,000-4,200 rpm the throttle byte read 218-225
+on all 47 frames, where six earlier captures never exceeded 120 on 316 frames
+(`data/analyses/2026-11-11-first-gear-cap-off-prediction.md`, "Result"). Why
+Nissan caps first gear is not read from the code (driveline or traction
+protection are the usual reasons).
 
 Not checked on the truck: the limit word itself. One RAM window during a
 first-gear pull would show it: `0xFFFF27D2` (ratio), `0xFFFF3C62` (expect 3,138),

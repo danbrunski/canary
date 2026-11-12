@@ -108,3 +108,4 @@ are in the session and capture files on the Pi and the laptop.
 | 2026-09-20 | USB capture of UpRev's cable | `99fbd62b…f06e56` (`uprev-flash-20260920-evidence.json`) |
 | 2026-10-04 | `/data/canary/re/uprev-flash-20261004/can0-20261004T230137Z.log` | `b6dc201e…699e991` |
 | 2026-11-11 | `/data/canary/flash-captures/flash-20261111T174424Z.candump.log`; K-line in session `2026-11-11T173212` | `33a2974c…48b77331` (`uprev-flash-20261111-evidence.json`) |
+| 2026-11-12 (ZS44A-20261111-2) | `/data/canary/flash-captures/flash-20261112T010129Z.candump.log`; K-line in session `2026-11-11T183314` | `916066c6…ad3cf462` (`uprev-flash-20261111-2-evidence.json`) |

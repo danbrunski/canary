@@ -128,3 +128,62 @@ than that, so one drive cannot score it.
   and two of its four readers are untraced. Its own flash, later.
 - **Fuel Targets part-pedal cells:** unnecessary if this works, since first gear
   then reads the last column.
+
+## Result: flashed 2026-11-12T01:02:19.999390Z, first drive scored the same evening
+
+**Flash.** Recorded and verified from the capture
+(`docs/skunkworks/uprev-flash-20261111-2-evidence.json`): 16/16 range CRCs
+before programming match 20261111, all 8 uploaded pages equal this image, only
+page `0x8000` differs from the old one, 16/16 range CRCs after programming match
+it. Revision `ZS44A-20261111-2` in `tune_revisions.yaml`.
+
+**Drive.** `_capture-tuning-2026-11-12T010305`, 494 s, a few minutes around the
+block from a 24 °C coolant start (68 °C at the pulls). Scripts:
+`~/canary-data/analysis-scripts/2026-11-12/score_first_gear.py`,
+`first_gear_partpedal.py`, `pull_reads.py`.
+
+**The frozen selection is empty for first gear, because the regime was not
+driven:** the pedal byte never reached 250 in first gear (maximum 230). The one
+full-pedal moment of the drive was in second gear. So predictions 1, 2 and 5 are
+not scored. That is a statement about the drive, not about the edit.
+
+| Prediction | Verdict | What the drive shows |
+|---|---|---|
+| 1. First gear, pedal ≥ 250: throttle byte ≥ 250 on ≥ 90 % of frames, 2,000–5,600 rpm | **not scored** (no frames) | See the matched-pedal table below: the falsifier (throttle still 99–117) did not occur |
+| 2. Enrichment flag sets, targets are the last column | **not scored** | No first-gear read above the switch. `mem:ECM_PEDAL_ENRICH_FLAGS` is not in the `tuning` profile, which the prediction overlooked; the last-column read is the usable evidence next time |
+| 3. Second to fifth gear unchanged | **consistent, thin** | One full-pedal moment in second (104 frames, 1.1 s, 3,065–3,569 rpm): throttle byte median 255, ≥ 250 on 100 % of frames at 3,200–3,600 rpm (tip-in at 3,000–3,200: 64 %, minimum 244). RAM target raw 149 at 3,372 rpm, the last column |
+| 4. No new trouble code, cruise works | **codes: held; cruise: not tested** | No stored or pending code, MIL off, at 01:03:49Z and 01:07:39Z |
+| 5. First-gear AFR follows the last column | **not scored** | No first-gear read above the switch |
+
+**What the drive does show (not a frozen prediction; same frame selection, pedal
+below 250).** First gear (rpm ÷ wheel word 0.68–0.90), per 0x23D frame, the
+throttle byte at the same pedal byte and rpm, this drive against six earlier
+tuning captures (2026-10-26 to 2026-11-11, 13,842 first-gear frames):
+
+| pedal byte | rpm | frames new / old | throttle byte new: p10 / median / max | old: p10 / median / max |
+|---|---|---|---|---|
+| 220–250 | 3,000–3,600 | 26 / 183 | 218 / 222 / 225 | 104 / 107 / 120 |
+| 220–250 | 3,600–4,200 | 21 / 133 | 220 / 224 / 225 | 108 / 111 / 120 |
+| 180–220 | 3,000–3,600 | 29 / 158 | 186 / 200 / 214 | 104 / 105 / 119 |
+| 180–220 | 3,600–4,200 | 28 / 58 | 207 / 208 / 217 | 110 / 116 / 120 |
+| 180–220 | 4,200–4,800 | 29 / 75 | 188 / 207 / 209 | 115 / 128 / 151 |
+| 140–180 | 2,400–3,000 | 51 / 251 | 136 / 142 / 172 | 98 / 101 / 104 |
+| 60–100 | 2,400–3,000 | 124 / 976 | 85 / 85 / 88 | 57 / 75 / 97 |
+
+Above pedal byte ~140 the old throttle sat on the cap whatever the pedal did;
+the new throttle follows the pedal, about 5 counts under it (pedal 227 →
+throttle 222). The distributions do not overlap in any cell from pedal 140 up.
+Below the cap (pedal 60–100) old and new overlap, as they should. PID 0x11 read
+73.7 % at pedal 215 and 79.6 % at pedal 228 in first gear (41–73 % at pedal 255
+on the 2026-11-11 drive).
+
+**Limits.** All new first-gear frames above pedal 180 come from one pull
+(250.8–252.3 s, 2,890–4,560 rpm), on a part-warm engine. Nothing in first gear
+below 2,400 or above 4,800 rpm at high pedal, and no standing-start launch at
+full pedal. The cells are the same pedal and rpm on both sides, so the
+comparison does not depend on how the drives differed, but it is one pull.
+
+**Verdict: keep.** The edit did what the firmware reading said the word does,
+and nothing it could have broken shows. Still owed, on any later drive: one
+first-gear pull with the pedal on the floor from ~2,000 rpm (scores 1 and 5,
+and 2 through the last-column target read), and setting cruise once (4).
