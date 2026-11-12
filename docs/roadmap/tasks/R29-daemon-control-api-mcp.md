@@ -250,7 +250,7 @@ it; go after that work lands.
   - `brain_jobs.py` (1,155 lines) splits the same way: store and index, kind
     runners and `precheck`, scheduler.
 
-- [ ] **R29.14 "Engine running" is defined three ways, and the non-volatile
+- [x] **R29.14 "Engine running" is defined three ways, and the non-volatile
   write guard uses the weakest.** `classify_vehicle_state` uses the OBD rpm
   while OBD is fresh (10 s) and the broadcast rpm only otherwise. So a last
   OBD `0` followed by a start classifies as `ignition_only` until the OBD
@@ -268,12 +268,80 @@ it; go after that work lands.
   `idle_shutdown.DEFAULT_ACTIVE_STATES`,
   `inference._SCORABLE_VEHICLE_STATES`, `tuning_readiness`), which is how
   `parked` (2026-10-04) needed several edits.
-  - [ ] A test first: stale-but-fresh OBD rpm 0 with a fresh broadcast rpm of
+  - [x] A test first: stale-but-fresh OBD rpm 0 with a fresh broadcast rpm of
     800 must be refused by the guard. Expect it to fail today.
-  - [ ] A fresh-gated `broadcast_rpm` on `VehicleState`, one
+    `tests/test_nonvolatile_write.py::test_a_fresh_broadcast_rpm_refuses_while_the_last_obd_zero_is_still_fresh`
+    builds the state through `derive_from_inputs` (OBD rpm 0 at 1 s, CAN
+    0.1 s, broadcast 800) and asserts the premise: verdict `ignition_only`,
+    rpm 0, OBD age under both 5 s and 10 s. Against the unchanged guard it
+    failed with `DID NOT RAISE AuthorizationRefusedError` (the guard
+    granted), as did the between-blocks variant
+    (`test_a_broadcast_start_between_blocks_aborts_before_the_next_write`,
+    broadcast 760 at block 1); both pass after the fix. The premise held.
+  - [x] A fresh-gated `broadcast_rpm` on `VehicleState`, one
     `engine_running_evidence(state)` in `vehicle_state.py` used by the guard
     and by `rom_backup`, and named state sets there that the five modules
     import.
+    `classify_vehicle_state` sets `broadcast_rpm` only while CAN is fresh
+    (its existing rule), so every `derive_*` path carries it and `to_dict()`
+    serialises it. `engine_running_evidence` takes any reading with
+    `state`/`rpm`/`broadcast_rpm` (`VehicleState` or `rom_backup.VehicleReading`)
+    and returns `rom_backup`'s old wording verbatim. The guard keeps every
+    old refusal and adds `broadcast_engine_running` after the OBD-age and
+    `engine_running` checks. `routes/rom_library.vehicle_reading` reads
+    `VehicleState.broadcast_rpm`; its `# type: ignore[arg-type]` went by
+    typing `derive_vehicle_state_from_storage`'s `replay_controller` as
+    `ReplayStatusSource` (all it uses). Groups `ENGINE_ON_STATES`,
+    `KEY_ON_STATES`, `UNTRUSTED_STATES`, `ECM_SILENT_STATES`, `IDLE_STATES`,
+    `SCORABLE_STATES` (beside `QUIET_STATES`) are imported by
+    `capture_autostart` (`RUNNING_STATES`), `key_cycle_pairing`
+    (`ON_STATES`, `UNTRUSTED_STATES`), `idle_shutdown` (both defaults),
+    `inference._SCORABLE_VEHICLE_STATES` and `tuning_readiness` (ready =
+    engine on, not ready = ECM silent); membership unchanged and pinned.
+    `config.collection.IdleShutdownConfig.idle_states` is layer 0 and cannot
+    import them, so a test pins it to `IDLE_STATES`. Regrowth guard:
+    `test_no_new_string_set_of_state_names_outside_vehicle_state` (AST scan of
+    `src/`, allowlist may only shrink: that config default and `rom_backup`'s
+    mid-read `("ignition_only", "passive")`). Verdicts unchanged:
+    `test_no_verdict_changed_when_broadcast_rpm_joined_the_state` compares
+    every one of 2304 input combinations against a verbatim copy of the old
+    rule table. Tests: `tests/test_vehicle_state.py`,
+    `test_nonvolatile_write.py`, `test_rom_backup.py`,
+    `test_rom_library_api.py`, `test_capture_autostart.py`,
+    `test_idle_shutdown.py`, `test_key_cycle_pairing.py`,
+    `test_inference_profile_gate.py`, `test_ecu_calibration_id.py`,
+    `test_daemon.py`, `test_dashboard_api.py`, `test_layering.py` green;
+    ruff, format, `mypy src`, `pnpm typecheck` clean.
+  - Cranking gap closed (orchestrator decision after verification): the
+    guard also refuses `broadcast_rpm_nonzero` when a fresh broadcast rpm is
+    not exactly 0, so 1-399 rpm behind a fresh OBD `0` no longer authorizes.
+    `engine_running_evidence` and `rom_backup` are unchanged: the guard is
+    deliberately stricter than the backup job (its docstring says so).
+    Tests: `test_a_cranking_broadcast_rpm_below_the_running_threshold_refuses`
+    (1, 56.25, 399), and
+    `test_a_broadcast_rpm_authorizes_only_at_exactly_zero_or_without_fresh_evidence`
+    (None, 0, stale 800). KOEO check, offline: all 264 sessions in
+    `~/canary-data/sessions/nissan-xterra-2008`, every `0x1F9` frame
+    (bytes 2-3 big-endian / 8, the `ECM_RPM` binding) whose latest OBD
+    `RPM` was 0 and at most 10 s old. Steady KOEO (next OBD `RPM` also 0,
+    within 10 s): 2,484,156 frames in 89 sessions, min 0, max 56.25,
+    **1 nonzero** (56.25 rpm in `_capture-tuning-2026-09-23T142926`, which I
+    did not inspect further). Frames where OBD changes next (starts):
+    47,214 frames in 91 sessions, 1,925 nonzero, max 1868.75; e.g.
+    `2026-10-26T003705` ramps 184 → 1818 rpm within 1.3 s of an OBD `0`.
+    So a stopped engine's broadcast reads exactly 0.
+  - `key_cycle_pairing` re-exports `UNTRUSTED_STATES` explicitly
+    (`as UNTRUSTED_STATES`), because `mypy` on `tests/` refused the
+    implicit re-export.
+  - Behaviour changes:
+    - `/status.vehicle_state` (and MCP `get_status`, and the guard's audit
+      `signals.vehicle_state`) gains `broadcast_rpm`.
+    - New guard refusal codes `broadcast_engine_running` and
+      `broadcast_rpm_nonzero`.
+    - `idle_shutdown.DEFAULT_IDLE_STATES` order is now
+      `("engine_off", "no_data", "parked")`, with the same members.
+    - `capture_autostart.RUNNING_STATE` (a string) became `RUNNING_STATES`
+      (a frozenset); nothing imported the old name.
   - Deep tier (near the non-volatile-write conditions). No change to what
     `ignition_only` means for anything else.
 
