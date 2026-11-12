@@ -135,6 +135,46 @@ That is the state the KS1 harness repair changes.
 
 ## 4. Firmware: what else 0x91F8 moves
 
-Pending (a read-only trace of the readers at `0x03B126` and `0x093478` and of every
-consumer of `0xFFFF27D2` and `0xFFFF1180`). The answer decides which correction in
-section 1, if any, is right.
+Traced read-only on 2026-11-12 (`docs/ecu-firmware-analysis.md`, "What else the
+output-shaft constant `0x91F8` moves"). Three functions read the word and a fourth
+multiplies by it. The consumers, by section 1's two kinds:
+
+- **Gear identifier: one, and it is switched off.** The first-gear cap's test
+  (estimate ≥ cal `0x9308`) is the only consumer that wants the true gearbox
+  ratio. `0x9308` has been 32,767 since ZS44A-20261111-2, so the test never
+  passes. Even at the stock 3,584 it separates first from second on the current
+  word (first clamps at 4.59, second reads 2.84).
+- **Engine-to-wheel conversion: one, cruise torque.** `0x0DAA62` turns the cruise
+  drive-force command into an engine torque as force × cal `0x934E` × 2,048 ÷ the
+  ratio latched at engagement. That is the second kind in section 1. The current
+  word makes the estimate read overall reduction ÷ 3.692, which is right for the
+  4.08 axle, provided `0x934E` carries the stock axle (inferred). Correcting
+  `0x91F8` alone would make cruise ask for about 10 % more torque per unit of
+  force. The cruise loop closes on speed, so that is not unsafe, only a change
+  with nothing gained. Keeping cruise neutral would take a matching `0x934E` edit.
+- **Nothing else sees it.** Vehicle speed, the speed limiter, the cruise
+  gear-change cancel and the expected-rpm limit all cancel the word. On this
+  calibration, pedal goes to torque through the torque map with no ratio: the
+  Target Drive Force stage needs cal `0x8ADE` bit 7 clear, and here it is set.
+  Idle, the full-load path and diagnostics do not read it, and no rev-matching
+  code reads the ratio.
+
+**Verdict: leave `0x91F8` as it is.** The one consumer that would want it
+corrected is disabled, and the one live consumer is already right for the 4.08
+axle because the high reading absorbs the regear. If the first-gear cap is ever
+re-enabled, place its threshold in the word's own units (the "As a ratio" column
+of section 1) rather than correcting the word.
+
+Still worth reading live, now as checks rather than inputs to an edit:
+`0xFFFF27D2` in steady fifth (expect 1,158 ± 10; it tests the speed word's unit),
+and `0xFFFF2CA2`, `0xFFFF3B4A`, `0xFFFF475A` during cruise (they test the cruise
+reading).
+
+**A third cap trigger, found on the way.** When bit 3 of `0xFFFF4856` is set, the
+same function applies the 3,138 cap in every gear. Its inputs are counters kept by
+the CAN receive layer, so it reads as a limp cap on a lost message (inferred). It
+is not set in normal driving: second to fifth gear at full pedal reach throttle
+255, which the cap would prevent. If the truck is ever down on power in every gear
+with no codes, read `0xFFFF4856` first. The other trigger, `0xFFFF2208`, cannot
+fire here: its only writers are the automatic's message handlers, which return at
+once on this calibration, and start-up zeroes it.

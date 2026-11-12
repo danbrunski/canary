@@ -155,13 +155,13 @@ What limits first gear:
 | **A torque cap applies while that ratio is at or above the cal word `0x9308` = 3,584 (3.50).** `0x073474` then sets the limit word `0xFFFF3C62` to the cal word `0x8EBC` = **3,138**, and otherwise to `0x8EBA` = `0x7FFF` (no limit). First gear is 4.368 and second is 2.518, so first is the only forward gear capped (the default ratio at a standstill is also above the threshold). | Verified (code and bytes) | The branch needs cal `0x8AD4` bit 7 and `0x8ADE` bit 7, both set (`0xA0`, `0x80`). A second term, the 8-entry curve `0xE634` on rpm, is `0xFFFF` throughout, which is no limit. The cap drops in at once and is released at 400 per tick (cal `0x9446`). The same function also applies the cap when the state byte `0xFFFF2208` is 1, 8 or 9 with bit 4 of `0xFFFF2858` clear, whatever the gear; that state is not identified, so the threshold is the edit that removes the gear trigger alone. Seven sibling limit words (`0x0735AE` onward) follow a state byte `0xFFFF2208` and were not read further. |
 | The cap is a flat torque, so the throttle it allows changes with rpm: the torque map's rpm row decides how much air 3,138 needs. If the unit is N·m × 10 it is 314 N·m at the crank. | Derived from the two tables above | Full-load torque in the map (last column) is 3,065 at 1,600 rpm, 3,344 at 2,000, 3,749 at 4,000, 3,320 at 5,600 and 3,082 at 6,000. It crosses 3,138 at **1,705 rpm** rising and **5,906 rpm** falling, so the cap cannot bind outside that range. |
 | **Measured: first-gear full-pedal throttle follows the cap.** Every local session on disk (first-gear frames from 2026-07-27 on), 0x23D pedal ≥ 250 with the throttle byte from the same frame, gear from rpm ÷ 0x284 wheel speed (8,755 first-gear frames, 23 sessions). | Measured; matches the prediction at the low end and in shape. The high end is not reached in the data. | The throttle byte is 255 on 94 % of frames at 1,600–1,800 rpm and on 30 % at 1,800–2,000, then never until 5,600 rpm. Band medians: 99–104 of 255 at 2,400–3,200 rpm, 115–117 at 3,400–3,800, **110–111 at 3,800–4,200**, 130 at 4,400–4,600, 175 at 5,000–5,200, 203 at 5,400–5,600, 229 at 5,600–5,800 (26 % of frames at 255). The dip at 4,000 rpm is the map's torque peak: the air the cap asks for falls from 0.908 of scale at 3,700 rpm to 0.871 at 4,100. Spread inside a band is a few counts (10th to 90th percentile 98–100 at 2,400–2,600). Second to fifth gear, 130,000 frames: median 255 and 25th percentile at least 250 in every band from 2,000 to 5,500 rpm. |
-| The driver demand itself goes through a drive-torque stage that also uses the ratio: a target from the 16 × 16 map at flash `0xF71A` (the word `0xFFFF1248` on axis `0xFFE0`, 0–727, which fits accelerator counts; a vehicle-speed word `0xFFFF10E2` on axis `0x10000`; a second identical map at `0xF51A`) is divided by the estimated ratio (`0x0769B0`, `0x0776AA`) and capped at the full-load torque for the rpm to give `0xFFFF2812` (`0x0778E8`). | Verified (code) for each step; not the cause | Its numbers were not reconciled with the truck (the speed word's unit is not established). The cap above accounts for first gear without it. |
+| The driver demand itself goes through a drive-torque stage that also uses the ratio: a target from the 16 × 16 map at flash `0xF71A` (the word `0xFFFF1248` on axis `0xFFE0`, 0–727, which fits accelerator counts; a vehicle-speed word `0xFFFF10E2` on axis `0x10000`; a second identical map at `0xF51A`) is divided by the estimated ratio (`0x0769B0`, `0x0776AA`) and capped at the full-load torque for the rpm to give `0xFFFF2812` (`0x0778E8`). **Corrected 2026-11-12: this stage does not run on ZS44A.** It needs `0x8ADE` bit 7 clear and `0x89A6` bit 5 set. With bit 7 set (this truck), pedal goes to torque through the torque map with no ratio (`0x0781F0`, `0x075F3C`); see "What else the output-shaft constant `0x91F8` moves". | Verified (code) for each step; not the cause; gated off here | Its numbers were not reconciled with the truck (the speed word's unit is not established). The cap above accounts for first gear without it. |
 
 How the ratio estimate is formed, and what a regear does to it (2026-11-11):
 
 | What | Confidence | Evidence |
 |---|---|---|
-| The ratio is engine rpm ÷ output-shaft rpm. Engine rpm is `0xFFFF1174` (`w120A` × 50 / 16, filtered). Output-shaft rpm is `0xFFFF1180`, computed from the ECM's vehicle speed `0xFFFF10C2` as speed × 32,768 ÷ the **cal word `0x91F8` = 25,491**. | Verified (code) | `0x076128`, `0x0761C4` (speed × `0x1C71C`, then `>> 6`, × 18, ÷ the word), `0x0773D0` (rpm × 1,024 ÷ output rpm). |
+| The ratio is engine rpm ÷ output-shaft rpm. Engine rpm is `0xFFFF1174` (`w120A` × 50 / 16, filtered). Output-shaft rpm is `0xFFFF117E` (filtered into `0xFFFF1180`), computed from the ECM's vehicle speed `0xFFFF10C2` (0.1 km/h per count, inferred) as speed × 65,536 ÷ the **cal word `0x91F8` = 25,491**, 25.71 shaft rpm per km/h. (Corrected 2026-11-12: the shift is 5, not 6, and the speed unit 0.1 km/h, not 0.05; the physical result is unchanged.) | Verified (code) | `0x076128`, `0x0761C4` (speed × `0x1C71C`, then `>> 5`, × 18, ÷ the word), `0x0773D0` (rpm × 1,024 ÷ output rpm). |
 | That one word is tire circumference ÷ final drive. With the speed word at 0.05 km/h per count it gives 25.71 output-shaft rpm per km/h, which is 0.648 m of travel per shaft revolution: the stock 3.692 axle with a 2.39 m tire. | Inferred: the speed word's unit is taken from the result being a gearbox ratio | The same word turns output rpm back into the 0.1 km/h speed word `0xFFFF116E` (`0x0762B4`), so the ECM's speed does not depend on it. Two more readers, `0x03B126` and `0x093478`, were not traced. |
 | **The 4.08 regear makes every gear read about 10–12 % short.** The speed comes from the wheel-speed sensors, so tire size cancels and the axle change shows through in full: 4.08 / 3.692 = 1.105. From the measured speed error instead (PID `0x0D` is 0.92 × GPS, 2.559 m tire) the factor is 1.123. | Derived; not read live | Expected `0xFFFF27D2`: first 4.83–4.91 (clamped to 4.59), second 2.78–2.83, fifth 1.105–1.123 where a stock truck reads 1.000. Second stays under the 3.50 threshold, so the regear does not move the first-gear cap to another gear. |
 | Scaling the word by 3.692 / 4.08 (to about 23,070) would put the estimate back on the gearbox ratios. A steady fifth-gear read of `0xFFFF27D2` gives the exact factor: new word = 25,491 × 1,024 ÷ the reading. | Proposed, not done | A main-calibration edit, its own flash. What else the two untraced readers do with it is open. |
@@ -179,8 +179,11 @@ throttle fully in first gear. Both are editable entries in `rom_map.yaml`
 them signed or divides by them. UpRev's Tuning Guide (Rev 8) lists no setting
 for any of the three. Its "Target Drive Force" tables (pro-tuner only) are the
 drive-torque maps below, and its "ETC Control" setting switches the whole
-torque path off (linear throttle, no cruise), which is probably cal `0x8ADE`
-bit 7 (inferred). The threshold was moved in ZS44A-20261111-2 (flashed
+torque path off (linear throttle, no cruise). That setting is not cal `0x8ADE`
+bit 7, as first guessed here: that bit is set on this truck and the cruise and
+pedal-to-torque-map code both run (corrected 2026-11-12, "What else the
+output-shaft constant `0x91F8` moves"; the bit reads as "manual gearbox",
+inferred). The threshold was moved in ZS44A-20261111-2 (flashed
 2026-11-12T01:02:20Z), and the first drive agrees with this reading: in first
 gear at pedal byte 220-250 and 3,000-4,200 rpm the throttle byte read 218-225
 on all 47 frames, where six earlier captures never exceeded 120 on 316 frames
@@ -193,6 +196,81 @@ first-gear pull would show it: `0xFFFF27D2` (ratio), `0xFFFF3C62` (expect 3,138)
 `0xFFFF2814`, `0xFFFF1C74`, `0xFFFF1C36`, `0xFFFF2D28`, `0xFFFF3CDC` and the flag
 byte `0xFFFF2841`. The check script is
 `~/canary-data/analysis-scripts/2026-11-11/first_gear_cap_check.py`.
+
+### What else the output-shaft constant `0x91F8` moves
+
+Read from the image on 2026-11-12, to decide whether scaling the word by
+3.692 / 4.08 (about 0.905, to about 23,070) is safe. Readers were found by a scan
+of the raw image that resolves PC-relative literals, base-register offsets and
+GBR, so code in listing gaps is covered, and each hit was read in the listing or
+a read-only decompile. This traces the two readers the table above left open.
+"Dead" means a calibration bit switches the branch off in ZS44A. Four bits decide
+most of them: `0x8ADE` bit 7 (set), `0x86DB` bit 7 (clear), `0x89A6` bit 5 (clear)
+and `0x8ACB` bit 6 (clear). `0x8ADE` bit 7 set switches off everything that reads
+the transmission control unit's messages, so it is taken to mean "manual gearbox"
+(inferred). It is not UpRev's "ETC Control" off, as guessed above: with it set,
+the cruise code and the pedal-to-torque-map path both run on this truck.
+
+| What | Confidence | Evidence |
+|---|---|---|
+| Three functions read the word: `0x0761C4`, `0x0762B4` and `0x03B126`. A fourth, `0x093478`, multiplies by it. No other literal or base-relative form of `0x91F8` is in the image. | Verified (code) | Pool words `0x0762EC`, `0x03B2A8`, `0x0936A0`. |
+| Correction to the table above: `0x0761C4` shifts right 5, not 6, so output-shaft rpm `0xFFFF117E` = speed `0xFFFF10C2` × 65,536 ÷ the word, and the speed word is 0.1 km/h per count. The physical result (25.71 shaft rpm per km/h) is unchanged. `0xFFFF117E` is filtered into `0xFFFF1180` and `0xFFFF2304`. | Verified (code); the unit is inferred, and consistent with `0x093A42` comparing `0xFFFF116E` and `0xFFFF117A` directly | Five `shar` at `0x0761E8`. `0x0DA914` writes `0xFFFF3CFC` = min(speed, `0x4800`) × `0x1C71C`. |
+| **Vehicle speed does not depend on the word.** `0xFFFF116E` = `0xFFFF2304` × the word >> 16 cancels it (to rounding). `0x03B126` forms the filtered speed `0xFFFF117A` before dividing by the word. The drive-force map's speed `0xFFFF10E2` and the speed limiter's `0xFFFF10EE` are snapshot copies of those two (block `0xFFFF1124` to `0xFFFF1098`, `0x020F92`). | Verified (code) | `0x077B20` (limit word `0xFFFF1C8A`) compares `0xFFFF10EE` with the map-slot value at RAM `0xFFFFB050`. |
+| `0x03B126` also makes a second output-shaft rpm, `0xFFFF22A0` = `0xFFFF117A` × 65,535 ÷ the word, filtered into `0xFFFF118C`. The ratio estimators divide by the lower of the two output-shaft speeds when the two speed words disagree by 2.5 km/h (bit 0 of `0xFFFF4859`, `0x093A42`). Both scale with the word alike. | Verified (code) | `0x0773D0`, `0x076448`. |
+| The ratio estimate has three copies, all rpm × 1,024 ÷ output-shaft rpm, clamped 748–4,696: `0xFFFF27D2` (`0x0773D0`; copy `0xFFFF197A`, snapshot `0xFFFF2746`), `0xFFFF1F72` (`0x076448`) and `0xFFFF19A2` (`0x07719A`, which runs only on an automatic). Scaling the word by 0.905 scales all of them by 0.905. | Verified (code) | `0x0773D0` takes the manual branch when `0x8ADE` bit 7 or `0x86DB` bit 7 is set. |
+
+Consumers, and what scaling the word by 0.905 does to each:
+
+| Consumer | Effect of 0.905 | Confidence |
+|---|---|---|
+| First-gear cap `0x073474` (ratio ≥ `0x9308`). | None while `0x9308` is 32,767 (ZS44A-20261111-2). With the stock 3,584 it would still catch only first gear, which reads 4.37 instead of the clamped 4.59. | Verified (code); ratios derived |
+| **Pedal to torque request, every gear.** With `0x8ADE` bit 7 set, `0x0781F0` takes the driver torque `0xFFFF1C68` from `0x075F3C`, which goes from pedal target area through the torque map and never uses the ratio. The Target Drive Force maps `0xF71A`/`0xF51A` (`0x077938`) and the divisions by the ratio (`0x0776AA`, `0x076EE4`, `0x0767D4`, `0x0769B0`) run only with that bit clear and `0x89A6` bit 5 set. Correction to the drive-torque row above: that stage does not run on this calibration. | None | Verified (code): gates at `0x0781F0`, `0x077060`, `0x0768B8` |
+| **Cruise torque**, `0x0DAA62`: `0xFFFF475A` = the cruise drive-force command `0xFFFF3B4A` (written by `0x0DAFAC`) × `0x4211` (cal `0x934E`) × 2,048 ÷ the ratio latched at engagement (`0xFFFF2BBA`), >> 15. `0x077610` and `0x076CEC` raise the torque demand to it while bit 7 of `0xFFFF478B` is set. | Torque per unit of drive force +10.5 %. The stock word already absorbs the regear: the ratio then reads overall reduction ÷ 3.692, and on a stock truck it reads the gearbox ratio, so `0x934E` carries the stock axle (inferred). So today's conversion is right for the 4.08 axle. Changing the word alone makes cruise about 10 % more aggressive; scaling `0x934E` by the same 0.905 keeps it as it is. The loop closes on speed either way. | Structure verified (code). That this is cruise, and the axle inside `0x934E`, are inferred |
+| **Cruise ratio check**, `0x093478`. When cruise engages (bit 7 of `0xFFFF4793`, set by `0x0DD0CA`) it latches the ratio snapshot into `0xFFFF2CA2`. It then predicts speed as rpm × the word ÷ the latched ratio, and compares the prediction with the filtered speed `0xFFFF470C`. A difference over 5 km/h above 32 km/h sets bit 2 of `0xFFFF4798`, and so does any of four received-message bytes (`0xFFFF4443`, `43E8`, `42C6`, `4142`) reaching 20. `0x0DD0CA` uses the bit to drop cruise (inferred: the clutch or gear-change cancel). | None: the latched ratio carries 1 ÷ the word, so the word cancels. In first gear the prediction stops being 5–7 % off, because the clamp no longer applies. | Verified (code). Readers of the bit are all in the cruise code (`0x0DD0CA`, and `0x0DB520`/`0x0DDD4A` via snapshot `0xFFFF4790`). No DTC reads it. |
+| Expected-rpm limit, `0x094F54`: `0xFFFF16B4` = `0xFFFF197A` × `0xFFFF10F2` ÷ 1,024 + 600. It feeds the torque-ratio curve `0xEF6A` (`0x077554`, giving `0xFFFF1C50`). | None: the product cancels the word. `0xFFFF1C50`'s live readers are the cap siblings (limits 32,767) and the road-load estimate below. | Verified (code) |
+| Road-load estimate, `0x0788F0`: drive force from `0xFFFF1AFA` at ratio `0xFFFF197A`, less rolling resistance and inertia, into `0xFFFF1994`. | None: its only reader, `0x078B1C`, multiplies by curve `0xEC9A`, which is all zero. | Verified (code and bytes) |
+| Output-shaft deceleration `0xFFFF1146` (`0x03ADC0`, snapshot `0xFFFF10BA`). | +10.5 %. `0x03B688` acts only at 0xFFFF (cal `0x9306`). `0x0642A4` adds 2 instead of 4 to an rpm threshold in 25-rpm steps (`0xFFFF14C2`, giving bit 4 of `0xFFFF2857`) when deceleration × 3.83 is under 6, so its switch point moves 10 %. Negligible. | Verified (code); what the threshold is for is not read |
+| `0x04F3A4`: output rpm × 3.83 against rpm, giving bit 4 of `0xFFFF2844`. | None: cal `0x8806` = 0xFF holds the bit set. | Verified (code) |
+| Diagnostics. | None. Nothing compares speed with rpm through the word except the cruise check above. The other check in `0x093478` (`0xFFFF4710` against `0xFFFF116E`) is off (`0xFF42` bit 3 clear) and does not use the word. | Verified (code) |
+| Dead in ZS44A. Behind `0x86DB` bit 7: `0x047AD0`, `0x0667F0`, `0x07113E`, `0x073068`, `0x07A718`. Behind `0x89A7` bit 5: `0x07777E`. Behind `0x8ACB` bit 6: `0x0DAA62`'s ratio branch. Behind `0x8ADE` bit 7 set: the automatic's received output-shaft rpm (`0x0CC434`, `0x0CC6EC`, `0x0CEA3E`, `0x0CEAAA`). Driven by the automatic's gear bytes `0xFFFF108E`/`108F`, which are zero here: `0x06547C`, `0x066656` and `0x07A19E`'s ratio-table terms. | None | Verified (code) |
+
+So on this truck the word changes the first-gear cap's gear test and the cruise
+torque conversion, and nothing else of consequence. Speed, the speed limiter,
+pedal response, idle and the full-load torque path do not see it. No rev-matching
+code reads the ratio. If the word is scaled, scaling `0x934E` by the same factor
+keeps cruise as it is (inferred). Not checked on the truck: during cruise,
+`0xFFFF2CA2` (the latched ratio), `0xFFFF3B4A` and `0xFFFF475A`, which would
+confirm the cruise reading. With cruise off, `0xFFFF2CA2` holds 4,696.
+
+**The `0xFFFF2208` trigger cannot fire on this calibration** (verified, code). Its
+only writers are `0x0CC1E4`, which stores the high nibble of received byte
+`0xFFFF41B2` (the low three bits become the automatic's current gear
+`0xFFFF1090`), and `0x0CE994`, which zeroes it when that message is lost. Both
+return at once with `0x8ADE` bit 7 set. Start-up zeroes RAM from `0xFFFF1000` to
+`0xFFFF2AC2` (`0x028E30`, called from the application start at `0x029000`), so the
+byte stays 0. Bit 4 of `0xFFFF2858` has one writer, `0x04FE6C`, which clears it
+whenever `0x8ADE` bit 7 is set. On an automatic it is set above 1,800 rpm when
+`0xFFFF1BAA` ≥ 24,000 and cleared below 1,500. So 2208 is a code from the
+transmission control unit (inferred from the gear in the same byte). Codes 1, 8
+and 9 give the 3,138 cap. Codes 9, 10 and 14 drive the
+sibling limit words `0xFFFF3C60`, `3C64` and `3C8A` (`0x073716`, `0x0735AE`,
+`0x073834`), whose calibration values (`0x8EBE`–`0x8EC8`) are all 32,767. What the
+codes mean (range or shift-mode states) is inferred, not read.
+
+The same function has a third trigger that the row above missed. When bit 3 of
+`0xFFFF4856` is set, the cap follows bit 4 of `0xFFFF2858` alone. That bit is
+always clear here, so the cap would apply in every gear. `0x063D7C` sets bit 3
+when bit 7 of `0xFFFF4785` is set and any of `0xFFFF2B46`, `2B47`, `2B4E`, `2B4F`,
+`2B78`, `2B79` or `2B7A` reaches 11. These are snapshots of per-message bytes kept
+by the CAN receive layer (`0x0CBBFE`); on this calibration only `0xFFFF41B1` and
+`0xFFFF41BB` feed them. Inferred: a received-message timeout, so a CAN fault gives a
+limp-mode torque cap in all gears. Its snapshot (bit 3 of `0xFFFF484E`) also
+suspends the cruise ratio check (verified, code). It is not set in normal driving
+(inferred from measurement): second to fifth gear at full pedal read throttle 255,
+which a 3,138 cap would prevent between 1,705 and 5,906 rpm. Which messages
+`0xFFFF41B1` and `0xFFFF41BB` track is not identified. A live read of
+`0xFFFF4856`, `0xFFFF2B46`, `0xFFFF2B47`, `0xFFFF2208` (expect 0) and
+`0xFFFF2858` would confirm all of this.
 
 ### Diagnostic service handlers
 
@@ -949,12 +1027,15 @@ ratio of (DID − Ts) to the predicted pulse has median 1.006, p10–p90
   flash-resident 2-D maps. The `+0x260` map is the engine torque map
   (2026-11-11); `rom_map.yaml` names it but does not yet declare it as a table.
 - **Throttle demand:** a live read of the first-gear limit word `0xFFFF3C62`
-  and of the ratio word `0xFFFF27D2` in a steady fifth-gear cruise (expect about
-  1,130–1,150 with the 4.08 axles, 1,024 stock); the readers `0x03B126` and
-  `0x093478` of the cal word `0x91F8`;
-  the seven sibling limits and their state byte `0xFFFF2208`; the unit of the
-  speed word `0xFFFF10E2` in the drive-torque stage ("The enrichment switch
-  tests target throttle").
+  and of the ratio word `0xFFFF27D2` in a steady fifth-gear cruise (expect
+  1,158 ± 10 with the 4.08 axles, 1,024 stock;
+  `data/analyses/2026-11-12-ratio-estimate-and-full-pedal-lean.md`). During
+  cruise, `0xFFFF2CA2`, `0xFFFF3B4A` and `0xFFFF475A` (the cruise torque
+  conversion). The fault-cap inputs `0xFFFF4856` bit 3, `0xFFFF2B46`/`2B47`,
+  and which messages `0xFFFF41B1`/`41BB` track. (The readers of `0x91F8` and
+  the state byte `0xFFFF2208` were traced on 2026-11-12, "What else the
+  output-shaft constant `0x91F8` moves". The drive-torque stage whose speed
+  word was owed here does not run on this calibration.)
 - **Disassembly gaps:** `0x0726DC` was found only by an opcode scan. Functions
   reached through task tables are not all in the listing, so "no store found"
   is not evidence until the gaps are seeded.
