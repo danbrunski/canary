@@ -255,7 +255,7 @@ Same conventions as the other task files: task-level truth is the checkboxes,
 
 ## Air and throttle
 
-- [ ] **F01.8 The MAF curve and the MAF-fault fallback.** The MAF transfer
+- [x] **F01.8 The MAF curve and the MAF-fault fallback.** The MAF transfer
   curve `0xE27E` is not in `rom_map.yaml` (E09.8). The airflow pipeline is
   decoded but stateful. The fallback table `0x95E5` (item `0x114`) has one
   unidentified axis input (`b107F`).
@@ -263,6 +263,21 @@ Same conventions as the other task files: task-level truth is the checkboxes,
     the engine runs on if the MAF signal is lost.
   - **Accept:** `0xE27E` is a declared, editable table with a verified axis;
     the fallback's second input is named.
+  - [x] 2026-11-12. Firmware doc: "The MAF curve and the MAF-fault fallback".
+    - **The curve.** `rom_map.yaml` `maf_transfer_curve` is editable and
+      verified: 64 be16 cells, entry *i* at MAF A/D word 16 *i* (0.078 V
+      nominal), cells in the airflow word (149/25,600 g/s).
+      - The axis is implicit, from the lookup's step, so it is stated in the
+        entry's evidence. The schema has no implicit-axis field.
+      - Checked against the 2026-09-17 sweeps: DID `0x1209` ÷ curve(DID
+        `0x1204`) has median 1.0000 below 8 g/s, and 1.007 above 16 g/s,
+        where purge adds.
+    - **The model.** `airflow_qa` cites the curve, so the classifier names the
+      lever (blocked on `airflow_qa`, E09.8). The "unmapped byte" tests and
+      the dashboard fixture moved to `0xE584`.
+    - **The fallback.** Its second input is `0xFFFF107F`, the PID `0x45`
+      relative throttle position. Its rpm bands end in a fuel cut at 2,400
+      rpm, the FSM's MAF fail-safe.
 
 - [ ] **F01.9 Throttle area units.** The area curve (axis `0xDD94`, values
   `0xEE6A`) is used both ways: by the air model that makes the Fuel Comp load

@@ -637,10 +637,10 @@ def test_inspect_names_the_lever_and_the_strings_equal_the_librarys(
 def test_inspect_says_a_changed_byte_outside_the_map_is_not_mapped(
     world: dict[str, Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The MAF curve at 0xE27E is in no table of ``rom_map.yaml`` (E09.8 maps
-    it), so only an edited image can express it."""
+    """0xE584 (the timing combine's subtrahend curve, F01.6) is in no table of
+    ``rom_map.yaml``, so only an edited image can express it."""
     image = bytearray(world["image"])
-    image[0xE27E] ^= 0x01
+    image[0xE584] ^= 0x01
     saved = world["root"] / "maf.bin"
     saved.write_bytes(bytes(image))
     code, payload, _ = _cli(
@@ -649,7 +649,7 @@ def test_inspect_says_a_changed_byte_outside_the_map_is_not_mapped(
     )  # fmt: skip
     assert code == 0
     messages = payload["levers"]["messages"]
-    assert any("0xE27E" in m and "not mapped" in m for m in messages)
+    assert any("0xE584" in m and "not mapped" in m for m in messages)
     assert payload["levers"]["messages"] == _expected_messages(world, bytes(image))
     assert {o["status"] for o in payload["levers"]["outputs"]} == {"unknown"}
 

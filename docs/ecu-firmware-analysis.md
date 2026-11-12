@@ -1211,6 +1211,74 @@ Both routines run in the main cycle (task `0x0219D0` entries 56 and 57).
   opcode scan does not resolve them), and the vehicle check, a cold-start
   capture that reproduces `mem:ECM_TARGET_EQUIV_RATIO`.
 
+### The MAF curve and the MAF-fault fallback (F01.8, 2026-11-12)
+
+**The curve: `rom_map.yaml` `maf_transfer_curve`, editable.**
+
+- **Lookup.** `0x03BB4E` calls `0x026C44` with `r4` = `0xE27E` and `r5` =
+  `0xFFFF2118` << 4, and stores the result to `0xFFFF1054`.
+  - `0x026C44` returns entry 63 for an input of 0x3F00 or more.
+  - Below that it interpolates at index input >> 8 with fraction input & 0xFF
+    (`0x027244`, 16-bit cells).
+  - So this is a 64-entry curve on a uniform axis: entry *i* sits at
+    `0xFFFF2118` = 16 *i*.
+- **Axis.** `0xFFFF2118` is the MAF A/D word `0xFFFF102C` (DID `0x1204`)
+  less the after-start hot-wire term, which is 0 once warm.
+  - At the nominal 5/1024 V per count, entries are 0.078 V apart, covering
+    0–4.92 V; above that the curve is flat.
+  - The A/D reference is not read from code, so the volts are nominal. The
+    counts are exact.
+- **Cells.** The airflow word (149/25,600 g/s per count). They read 0 at
+  entry 0, 204 (1.2 g/s) at entries 1–6, then rise monotonically to 62,215
+  (362 g/s) at entry 63.
+- **Same on every image.** No UpRev tune has changed it.
+- **Checked against the truck.** The 2026-09-17 DID sweeps
+  (`~/canary-data/did_log`) read DID `0x1204` about 5 ms before DID
+  `0x1209`. On 278 steady pairs, the per-sample ratio of `0x1209` to this
+  curve at `0x1204`:
+
+  | Airflow | Median | p10–p90 |
+  |---|---|---|
+  | Below 8 g/s | 1.0000 | 0.993–1.005 |
+  | 16–200 g/s | 1.007 | — |
+
+  The higher band reads about 0.7 % high. The purge vapour term `0xFFFF273E`
+  adds to the reported word, which fits that offset.
+- **What it means for the build.** This is the lever for the cone intake
+  and a new MAF housing. Only the product K × curve sets the base fuel
+  schedule, and the curve also moves every load axis (as K does). The
+  simulator does not route a curve edit through the airflow word yet
+  (E09.8). Until then, the classifier names the lever and blocks on
+  `airflow_qa`.
+
+**The MAF-fault fallback.** When diagnostic item `0x114` faults (MAF
+circuit; `0xFFFF2824` bit 7), `0x03CAE6`–`0x03CB46` replaces BFS with a
+table:
+
+- BFS = `0x95E5`[(rpm band − 1) × 4 + throttle band] << 8.
+- **Rpm band** comes from `0xFFFF1206` (rpm / 12.5, `0x038FEA`). It is 1, 2
+  or 3 below 800, 1,600 and 2,400 rpm.
+- **At 2,400 rpm and above, BFS is 0, so fuel is cut.** The FSM states this
+  fail-safe (EC section, MAF circuit: "Engine speed will not rise more than
+  2,400 rpm due to the fuel cut").
+- **Throttle band** comes from `0xFFFF107F`, the second input E09 had left
+  unidentified. It is relative throttle position, the byte PID `0x45` and
+  DID `0x111E` report, and `0x0704DE` writes it. The band is 0–3 at 7, 15
+  and 22 counts (2.7, 5.9 and 8.6 %).
+  - Its value is the secondary throttle reading above the closed reference
+    `0xFFFF2D58`, × 0x505B / 65,536, capped at 255.
+  - It is 18 under a throttle-sensor fault (`FaultGroup_flags` bit 2).
+- **Table** (raw bytes, identical on every image):
+
+  | rpm band | < 2.7 % | 2.7–5.9 % | 5.9–8.6 % | ≥ 8.6 % |
+  |---|---|---|---|---|
+  | < 800 | 54 | 60 | 76 | 97 |
+  | 800–1,600 | 50 | 52 | 64 | 90 |
+  | 1,600–2,400 | 48 | 49 | 56 | 84 |
+
+  Above 8.6 % throttle the table stops rising. So a truck with a failed MAF
+  makes little more than light-throttle power, up to the 2,400 rpm cut.
+
 ### Ignition timing chain: the remaining terms (F01.6, 2026-11-12)
 
 E09.7 decoded the chain's spine: `0xFFFF27C6`, `0xFFFF279A`, the trim term,

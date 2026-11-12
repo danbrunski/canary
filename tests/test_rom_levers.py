@@ -6,8 +6,8 @@ Nothing real is read. What these pin:
 
 - the three accepted strings (timing trim: the torque stage's blockers, "no
   torque plant" while it is unbuilt and, built, "torque production built, not
-  validated (owed H07.10, ...)" with "spark response unmeasured"; a MAF-curve
-  byte: "not mapped"; a Fuel Comp edit: "closed loop: trim authority
+  validated (owed H07.10, ...)" with "spark response unmeasured"; a byte no
+  map names: "not mapped"; a Fuel Comp edit: "closed loop: trim authority
   undecoded");
 - the edit's own torque/power claim (E07.5 item 8): the controls are derived
   from the comparison, and the claim is refused by name;
@@ -66,8 +66,9 @@ from tests.test_rom_effects import _bump, modelled_image
 
 MODE = "conditional_rom_comparison"
 #: An image offset the application model does not read and ``rom_map.yaml``
-#: does not map: the MAF curve (E09.8 maps it).
-MAF_CURVE = 0xE27E
+#: does not map: the timing combine's subtrahend curve 0xE584 (all zero on
+#: this calibration, F01.6). It was the MAF curve 0xE27E until F01.8 mapped that.
+UNMAPPED_BYTE = 0xE584
 #: What the built, unvalidated torque stage says (E07.5 stage 4, 2026-10-17).
 TEXT_TORQUE_UNVALIDATED = (
     "torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2"
@@ -156,9 +157,9 @@ def _blockers(result: LeverClassification, output: str) -> set[str]:
     return {b.code for o in result.outputs if o.output == output for b in o.blockers}
 
 
-def _maf_image(world: World) -> bytes:
+def _unmapped_image(world: World) -> bytes:
     image = bytearray(world.image)
-    image[MAF_CURVE] ^= 0x01
+    image[UNMAPPED_BYTE] ^= 0x01
     return bytes(image)
 
 
@@ -184,15 +185,27 @@ def test_a_timing_trim_edit_names_the_torque_stage_and_what_it_owes(world: World
     assert reached == {"ignition_timing", "ignition_trim_selected"}
 
 
-def test_a_maf_curve_byte_is_not_mapped(world: World) -> None:
-    result = world.classify(_maf_image(world))
+def test_an_unmapped_byte_is_not_mapped(world: World) -> None:
+    result = world.classify(_unmapped_image(world))
     (lever,) = result.levers
-    assert lever.lever == "unmapped" and (lever.start, lever.end) == (MAF_CURVE, MAF_CURVE)
+    assert lever.lever == "unmapped" and (lever.start, lever.end) == (UNMAPPED_BYTE, UNMAPPED_BYTE)
     assert TEXT_NOT_MAPPED == "not mapped"
-    assert any(f"0x{MAF_CURVE:X}" in m and TEXT_NOT_MAPPED in m for m in result.messages)
+    assert any(f"0x{UNMAPPED_BYTE:X}" in m and TEXT_NOT_MAPPED in m for m in result.messages)
     # Unknown bytes make every output unknown, never unchanged.
     assert all(o.status == "unknown" for o in result.outputs)
     assert all("not_mapped" in {b.code for b in o.blockers} for o in result.outputs)
+
+
+def test_a_maf_curve_edit_is_a_named_lever_the_airflow_node_blocks(world: World) -> None:
+    """F01.8 mapped the MAF curve 0xE27E and the airflow node cites it, so an
+    edit to it is its own lever. It reaches the fuel outputs through
+    airflow_qa, which no twin computes yet (E09.8), and is never "not mapped"."""
+    result = world.classify(world.candidate("maf_transfer_curve", slot=None))
+    assert [e.lever for e in result.levers] == ["maf_transfer_curve"]
+    assert not any(TEXT_NOT_MAPPED in m for m in result.messages)
+    bfs = next(o for o in result.outputs if o.output == "base_fuel_schedule_word")
+    assert bfs.reached
+    assert any(b.code == "unmodelled" and b.node == "airflow_qa" for b in bfs.blockers)
     assert not any(o.number for o in result.outputs)
 
 
@@ -682,8 +695,8 @@ def test_a_mapped_table_no_node_reads_says_what_the_unknown_reason_means(world: 
             assert {b.code for b in o.blockers} & {"mapped_unmodelled"}
             assert "not_mapped" not in {b.code for b in o.blockers}
     # The unmapped case is unchanged.
-    maf = world.classify(_maf_image(world))
-    assert any(m.endswith("-> target_equiv_ratio: not mapped") for m in maf.messages)
+    unmapped = world.classify(_unmapped_image(world))
+    assert any(m.endswith("-> target_equiv_ratio: not mapped") for m in unmapped.messages)
 
 
 def _stated(rw: RunWorld, candidate: bytes, **conditioned: float) -> Any:
@@ -756,7 +769,7 @@ def test_the_controls_an_edit_changes_are_read_from_the_comparison(world: World)
     assert controls(world.candidate("fuel_targets")) == (("lambda", "spark"), ())
     assert controls(world.candidate("fuel_compensation")) == (("lambda", "spark"), ())
     assert controls(world.candidate("k_constant")) == (("lambda", "spark"), ())
-    _, unresolved = controls(_maf_image(world))
+    _, unresolved = controls(_unmapped_image(world))
     assert "unknown_bytes_changed" in unresolved
     assert controls(world.image) == ((), ())
     # Bytes changed but no output and no contract quantity reached: nothing
@@ -791,7 +804,9 @@ def test_a_torque_or_power_claim_for_an_edit_is_refused_by_name(world: World) ->
     assert any(r.startswith("lambda_response_unmeasured") for r in fuel)
     # Fuel Targets reaches spark through the charge word, so both are unmeasured.
     assert any(r.startswith("spark_response_unmeasured") for r in fuel)
-    assert refusals(_maf_image(world))[0].startswith("controls_unresolved: unknown_bytes_changed")
+    assert refusals(_unmapped_image(world))[0].startswith(
+        "controls_unresolved: unknown_bytes_changed"
+    )
     assert refusals(world.candidate("timing_trim_a"), "knock")[-1].startswith("knock_unmodelled")
     with pytest.raises(SimulationRefusalError) as refused:
         require_edit_claim(

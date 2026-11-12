@@ -1462,6 +1462,46 @@ tables:
       = min(filtered pulse + transient, D8B3[rpm]); 255 at all 16 rpm points
       in the UpRev base and the tunes, a 65,280-count cap. The rpm breakpoints
       it is searched with are not identified, so no axis is declared.
+  # -- The MAF transfer curve (F01.8): sensor reading to airflow. The axis is
+  # implicit (the lookup's uniform step), so it is stated here, not referenced.
+  - id: maf_transfer_curve
+    name: MAF transfer curve (sensor reading to airflow)
+    short_name: MAF transfer curve
+    group: airflow
+    editable: true
+    offset: 0xE27E
+    rows: 64
+    cols: 1
+    dtype: be16
+    decode:
+      kind: linear
+      quantity: airflow
+      unit: g/s
+      scale: 0.005820312   # 149 / 25,600: the airflow word's unit (cal 0x83E9 = 149)
+      confidence: verified
+      evidence: >-
+        The cell is the airflow word that 0x03BB40 stores to 0xFFFF1054 and that
+        PID 0x10 and DID 0x1209 report, after a two-point average and the purge
+        term, as word x cal 0x83E9 (149) >> 8 in 0.01 g/s. Checked against
+        the 2026-09-17 DID sweeps (~/canary-data/did_log, 278 steady pairs,
+        DID 0x1204 read about 5 ms before DID 0x1209). The per-sample ratio of
+        0x1209 to this curve at 0x1204 was median 1.0000 (p10 0.993, p90 1.005)
+        below 8 g/s and 1.007 at 16-200 g/s, where the purge vapour term
+        0xFFFF273E adds to the word.
+    confidence: verified
+    evidence: >-
+      0x03BB4E-0x03BB62: r4 = 0xE27E, r5 = 0xFFFF2118 << 4, jsr 0x026C44, result
+      to 0xFFFF1054. 0x026C44 returns the word at +0x7E (entry 63) for an input
+      of 0x3F00 or more, else interpolates (0x027244) at index input >> 8 with
+      fraction input & 0xFF. So this is a 64-entry curve on a uniform axis.
+      Entry i sits at 0xFFFF2118 = 16 i, where 0xFFFF2118 is the MAF A/D word
+      0xFFFF102C (DID 0x1204), less the after-start hot-wire term, which is 0
+      warm. That is 0.078 V per entry at the nominal 5/1024 V per count:
+      0 to 4.92 V, flat above. Monotonic: 0 at entry 0, 204 at 1-6, then
+      rising to 62,215 (362 g/s) at entry 63. Identical on all seven listed
+      images; no UpRev tune has changed it. This is the lever for a new MAF
+      housing or intake tube. The simulator does not route an edit through
+      the airflow word yet (E09.8).
   # -- The manifold-filling filter's time constants (E05.2): 0x03CC3C reads
   # one of two 8 x 8 byte maps by rpm and the Fuel Comp load byte, and turns it
   # into the filter weight 0xFFFF1164 (src/decode/air_charge.py).

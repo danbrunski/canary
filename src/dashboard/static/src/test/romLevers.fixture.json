@@ -72,50 +72,56 @@
           },
           {
             "code": "unmodelled",
+            "text": "unmodelled: enrichment_state_request",
+            "node": "enrichment_state_request",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: enrichment_state",
+            "node": "enrichment_state",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: enrichment_multiplier",
+            "node": "enrichment_multiplier",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: correction_1736",
+            "node": "correction_1736",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: correction_175c",
+            "node": "correction_175c",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: correction_26e8",
+            "node": "correction_26e8",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: correction_sum",
+            "node": "correction_sum",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
             "text": "unmodelled: knock_trim_difference",
             "node": "knock_trim_difference",
             "detail": null
           },
           {
-            "code": "unmodelled",
-            "text": "unmodelled: timing_trim_terms",
-            "node": "timing_trim_terms",
-            "detail": null
-          },
-          {
-            "code": "unmodelled",
-            "text": "unmodelled: base_timing_sum",
-            "node": "base_timing_sum",
-            "detail": null
-          },
-          {
-            "code": "unmodelled",
-            "text": "unmodelled: base_timing_select",
-            "node": "base_timing_select",
-            "detail": null
-          },
-          {
-            "code": "unmodelled",
-            "text": "unmodelled: timing_cycle_copy",
-            "node": "timing_cycle_copy",
-            "detail": null
-          },
-          {
-            "code": "unmodelled",
-            "text": "unmodelled: timing_retard_combine",
-            "node": "timing_retard_combine",
-            "detail": null
-          },
-          {
-            "code": "unmodelled",
-            "text": "unmodelled: timing_rate_limit",
-            "node": "timing_rate_limit",
-            "detail": null
-          },
-          {
-            "code": "unmodelled",
-            "text": "unmodelled: timing_final_byte",
-            "node": "timing_final_byte",
+            "code": "observed_not_predicted",
+            "text": "observed, not predicted: timing_charge_word",
+            "node": "timing_charge_word",
             "detail": null
           },
           {
@@ -331,7 +337,7 @@
     ],
     "messages": [
       "Fuel Comp -> target_equiv_ratio: a number can be given (for points that state only the fill byte)",
-      "Fuel Comp -> ignition_timing: observed, not predicted: load_input_x; unmodelled: manifold_fill_filter, near_wot_flag, fill_transient, fill_blend, knock_trim_difference, timing_trim_terms, base_timing_sum, base_timing_select, timing_cycle_copy, timing_retard_combine, timing_rate_limit, timing_final_byte; engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured",
+      "Fuel Comp -> ignition_timing: observed, not predicted: load_input_x, timing_charge_word; unmodelled: manifold_fill_filter, near_wot_flag, fill_transient, fill_blend, enrichment_state_request, enrichment_state, enrichment_multiplier, correction_1736, correction_175c, correction_26e8, correction_sum, knock_trim_difference; engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured",
       "Fuel Comp -> ignition_trim_selected: observed, not predicted: load_input_x; unmodelled: manifold_fill_filter, near_wot_flag, fill_transient, fill_blend; engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured",
       "Fuel Comp -> base_fuel_schedule_word: a number can be given (for points that state only the fill byte)",
       "Fuel Comp -> injector_pulse_ms: plant not qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); closed loop: trim authority undecoded",
@@ -358,11 +364,11 @@
       }
     ],
     "messages": [
-      "Timing trim A -> ignition_timing: unmodelled: timing_trim_terms, base_timing_sum, base_timing_select, timing_cycle_copy, timing_retard_combine, timing_rate_limit, timing_final_byte; engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured",
+      "Timing trim A -> ignition_timing: engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured",
       "Timing trim A -> ignition_trim_selected: engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured",
       "torque/power claim for this edit (spark): refused; engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured"
     ],
-    "outcome": "partial",
+    "outcome": "evaluable",
     "outputs": [
       {
         "assumes_conditioned": [],
@@ -379,48 +385,6 @@
       {
         "assumes_conditioned": [],
         "blockers": [
-          {
-            "code": "unmodelled",
-            "detail": null,
-            "node": "timing_trim_terms",
-            "text": "unmodelled: timing_trim_terms"
-          },
-          {
-            "code": "unmodelled",
-            "detail": null,
-            "node": "base_timing_sum",
-            "text": "unmodelled: base_timing_sum"
-          },
-          {
-            "code": "unmodelled",
-            "detail": null,
-            "node": "base_timing_select",
-            "text": "unmodelled: base_timing_select"
-          },
-          {
-            "code": "unmodelled",
-            "detail": null,
-            "node": "timing_cycle_copy",
-            "text": "unmodelled: timing_cycle_copy"
-          },
-          {
-            "code": "unmodelled",
-            "detail": null,
-            "node": "timing_retard_combine",
-            "text": "unmodelled: timing_retard_combine"
-          },
-          {
-            "code": "unmodelled",
-            "detail": null,
-            "node": "timing_rate_limit",
-            "text": "unmodelled: timing_rate_limit"
-          },
-          {
-            "code": "unmodelled",
-            "detail": null,
-            "node": "timing_final_byte",
-            "text": "unmodelled: timing_final_byte"
-          },
           {
             "code": "engine_torque_not_computed",
             "detail": "conditional_rom_comparison gives engine_torque the role unused",
@@ -453,7 +417,7 @@
         "reached": true,
         "refused_if_conditioned": [],
         "source": "application_model",
-        "status": "unevaluable"
+        "status": "changed"
       },
       {
         "assumes_conditioned": [],
@@ -559,13 +523,13 @@
     "tool": "rom_levers",
     "tool_version": "2"
   },
-  "maf_curve": {
+  "unmapped_byte": {
     "levers": [
       {
         "blockers": [
           {
             "code": "not_mapped",
-            "detail": "bytes 0xE27E are outside rom_map.yaml: no node reads them",
+            "detail": "bytes 0xE584 are outside rom_map.yaml: no node reads them",
             "node": null,
             "text": "not mapped"
           }
@@ -573,17 +537,17 @@
         "byte_class": "unknown",
         "changed_bytes": 1,
         "changed_cells": null,
-        "end": 57982,
+        "end": 58756,
         "label": "unmapped bytes in Calibration",
         "lever": "unmapped",
         "nodes": [],
         "slots": [],
-        "start": 57982,
+        "start": 58756,
         "tables": []
       }
     ],
     "messages": [
-      "unmapped bytes in Calibration 0xE27E: not mapped (outside rom_map.yaml)",
+      "unmapped bytes in Calibration 0xE584: not mapped (outside rom_map.yaml)",
       "unmapped bytes in Calibration -> target_equiv_ratio: not mapped",
       "unmapped bytes in Calibration -> ignition_timing: not mapped; engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured",
       "unmapped bytes in Calibration -> ignition_trim_selected: not mapped; engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured",

@@ -640,7 +640,8 @@ def test_copies_in_different_slots_may_share_a_label() -> None:
 def test_the_shipped_map_marks_the_fuel_chain_and_trims_editable_in_map_1() -> None:
     """The ROM Editor's editable tables are the map's ``editable: true``:
     each verified, so its edits export. Since 2026-11-11 that includes three
-    main-calibration words outside the map slots."""
+    main-calibration words outside the map slots, and since 2026-11-12 the MAF
+    transfer curve (F01.8)."""
     rom_map = load_rom_map(PROFILE)
     editable = [t for t in rom_map.tables if t.editable]
     assert {t.id for t in editable} == {
@@ -649,6 +650,7 @@ def test_the_shipped_map_marks_the_fuel_chain_and_trims_editable_in_map_1() -> N
         "k_constant",
         "timing_trim_a",
         "timing_trim_b",
+        "maf_transfer_curve",
         *MAIN_CAL_WORDS,
     }
     assert all(t.confidence == "verified" for t in editable)

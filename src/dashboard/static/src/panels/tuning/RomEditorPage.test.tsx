@@ -14,7 +14,7 @@ import {
 } from "../../test/romLibraryFixtures";
 import {
   LEVERS_FUEL_COMP,
-  LEVERS_MAF_CURVE,
+  LEVERS_UNMAPPED_BYTE,
   LEVERS_TIMING_TRIM,
 } from "../../test/romLeverFixtures";
 import {
@@ -661,13 +661,13 @@ describe("ROM Editor page: what the edit can and cannot show (E09.14b)", () => {
     vi.clearAllMocks();
     window.history.replaceState(null, "", "/");
 
-    await previewWithLevers(LEVERS_MAF_CURVE);
+    await previewWithLevers(LEVERS_UNMAPPED_BYTE);
     block = within(await screen.findByRole("region", { name: "Preview result" })).getByRole(
       "region",
       { name: LEVERS_HEADING },
     );
-    expect(block).toHaveTextContent(/0xE27E: not mapped \(outside rom_map\.yaml\)/);
-    expect(shown(block)).toEqual(LEVERS_MAF_CURVE.messages);
+    expect(block).toHaveTextContent(/0xE584: not mapped \(outside rom_map\.yaml\)/);
+    expect(shown(block)).toEqual(LEVERS_UNMAPPED_BYTE.messages);
   });
 
   it("shows whatever strings it is given, unaltered", async () => {

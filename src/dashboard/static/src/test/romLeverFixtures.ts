@@ -6,7 +6,7 @@
 //
 //   fuel_comp    the page's preview of a light-load Fuel Comp edit
 //   timing_trim  `rom_sim inspect` on a Timing trim A edit (the page cannot make one)
-//   maf_curve    `rom_sim inspect` on a changed byte at 0xE27E, in no table (likewise)
+//   unmapped_byte  `rom_sim inspect` on a changed byte at 0xE584, in no table (likewise)
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -16,7 +16,7 @@ import type { RomLevers } from "../types/romEditor";
 interface LeverCases {
   fuel_comp: RomLevers;
   timing_trim: RomLevers;
-  maf_curve: RomLevers;
+  unmapped_byte: RomLevers;
 }
 
 const cases = JSON.parse(
@@ -25,4 +25,4 @@ const cases = JSON.parse(
 
 export const LEVERS_FUEL_COMP: RomLevers = cases.fuel_comp;
 export const LEVERS_TIMING_TRIM: RomLevers = cases.timing_trim;
-export const LEVERS_MAF_CURVE: RomLevers = cases.maf_curve;
+export const LEVERS_UNMAPPED_BYTE: RomLevers = cases.unmapped_byte;

@@ -204,11 +204,11 @@ def test_a_fuel_comp_edit_says_what_a_number_can_and_cannot_be_given_for(
     assert messages == _cli_for(world, capsys, page, "fc_accept")["levers"]["messages"]
 
 
-def test_a_timing_trim_and_the_maf_curve_are_the_clis_alone(
+def test_a_timing_trim_and_an_unmapped_byte_are_the_clis_alone(
     world: dict[str, Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The MAF curve (0xE27E, in no table until E09.8) reaches the classifier
-    only through ``inspect``. A timing trim is editable on the page since
+    """A byte no map names (0xE584, the timing combine's subtrahend curve)
+    reaches the classifier only through ``inspect``. A timing trim is editable on the page since
     E09.7, and its preview says what ``inspect`` says, word for word; what
     each says is pinned here and in ``tests/test_rom_levers.py``."""
     trim = _trim_levers(world, capsys)["messages"]
@@ -218,8 +218,8 @@ def test_a_timing_trim_and_the_maf_curve_are_the_clis_alone(
         "conditional_rom_comparison; torque production built, not validated" in m
         for m in trim
     ), trim
-    maf = _maf_levers(world, capsys)["messages"]
-    assert any("0xE27E" in m and "not mapped" in m for m in maf), maf
+    unmapped = _unmapped_levers(world, capsys)["messages"]
+    assert any("0xE584" in m and "not mapped" in m for m in unmapped), unmapped
 
 
 def _trim_levers(world: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
@@ -239,10 +239,10 @@ def _trim_levers(world: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> d
     return levers
 
 
-def _maf_levers(world: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
+def _unmapped_levers(world: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
     image = bytearray(world["image"])
-    image[0xE27E] ^= 0x01
-    saved = world["root"] / "maf.bin"
+    image[0xE584] ^= 0x01
+    saved = world["root"] / "unmapped.bin"
     saved.write_bytes(bytes(image))
     levers: dict[str, Any] = _inspect(world, capsys, "--candidate-rom", saved)["levers"]
     return levers
@@ -363,11 +363,11 @@ def test_no_front_end_source_carries_a_classifier_string_of_its_own() -> None:
 
 def _real_payloads(world: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
     """The three accept cases' ``levers``: a Fuel Comp edit as the page previews
-    it, a timing-trim edit and a MAF-curve byte as ``inspect`` classifies them."""
+    it, a timing-trim edit and a byte no map names as ``inspect`` classifies them."""
     return {
         "fuel_comp": _preview(world, PAGE_EDITS["fuel_comp"])["levers"],
         "timing_trim": _trim_levers(world, capsys),
-        "maf_curve": _maf_levers(world, capsys),
+        "unmapped_byte": _unmapped_levers(world, capsys),
     }
 
 
@@ -392,8 +392,8 @@ def test_the_front_end_fixture_is_real_classifier_output(
     world: dict[str, Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The vitest and e2e fixtures are copies of real ``levers`` payloads:
-    the page's Fuel Comp preview, and ``inspect`` on a timing trim and on the
-    MAF curve. Their keys are checked against the classifier's types, so a
+    the page's Fuel Comp preview, and ``inspect`` on a timing trim and on a
+    byte no map names. Their keys are checked against the classifier's types, so a
     renamed or added field fails here; regenerate with
     ``CANARY_UPDATE_LEVERS_FIXTURE=1`` and prettier (see the module). The
     values are what the code said when they were made and are not compared: a
@@ -413,6 +413,6 @@ def test_the_front_end_fixture_is_real_classifier_output(
     said = {name: "\n".join(levers["messages"]) for name, levers in fixture.items()}
     assert "torque production built, not validated" in said["timing_trim"]
     assert "spark response unmeasured" in said["timing_trim"]
-    assert "not mapped" in said["maf_curve"]
+    assert "not mapped" in said["unmapped_byte"]
     assert "closed loop: trim authority undecoded" in said["fuel_comp"]
     assert "plant not qualified" in said["fuel_comp"]

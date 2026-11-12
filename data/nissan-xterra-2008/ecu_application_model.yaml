@@ -570,10 +570,10 @@ ram:
      meaning: 'Bit 7: any of the three fault holds non-zero.'}
   - {address: 0xFFFF2116, width: 8, signed: false, name: bfs_ceiling_byte, units: raw_counts, confidence: code,
      meaning: 'Curve 0xD8B3 at 0xFFFF1207; BFS cap = it << 8.'}
-  - {address: 0xFFFF1206, width: 8, signed: false, name: engine_speed_1206, units: raw_counts, confidence: unknown,
-     meaning: 'Byte the MAF-fault table 0x95E5 is banded by (0x40/0x80/0xC0).'}
-  - {address: 0xFFFF107F, width: 8, signed: false, name: unidentified_107f, units: raw_counts, confidence: unknown,
-     meaning: 'Second band of the MAF-fault table 0x95E5 (7/15/22).'}
+  - {address: 0xFFFF1206, width: 8, signed: false, name: engine_speed_1206, units: rpm_div_12_5, confidence: code,
+     meaning: 'Engine speed byte, rpm / 12.5 (0x038FEA: min(255, 0xFFFF1204 >> 3)); the MAF-fault table 0x95E5 bands it at 64/128/192 (800/1,600/2,400 rpm) (F01.8).'}
+  - {address: 0xFFFF107F, width: 8, signed: false, name: relative_throttle_position, units: pid45_counts, confidence: code,
+     meaning: 'Relative throttle position, the byte PID 0x45 and DID 0x111E report (x 100/255 %): 0x0704DE, (secondary throttle reading - closed reference 0xFFFF2D58) x 0x505B >> 16, capped 255; 18 under a throttle-sensor fault. The MAF-fault table 0x95E5 bands it at 7/15/22 (2.7/5.9/8.6 %) (F01.8).'}
   # -- E05.3 (d): RAM the command overrides touch outside the traced nodes
   # (closed-loop feedback and the injector pulse chain; docs/ecu-firmware-analysis.md,
   # "A/F sensor and lambda chain" and "Injector pulse chain").
@@ -764,6 +764,7 @@ nodes:
       - {when: '0xFFFF283B bit 6 clear', then: '0xFFFF20A8 copies 0xFFFF2104 (no low-pass)'}
       - {when: '0xFFFF283C bit 3 set, no MAF fault or hold', then: 'the lead path with residue (state words not catalogued)'}
     rom:
+      - {rom_map: maf_transfer_curve, role: 'the MAF curve: 0xFFFF1054 = curve at 0xFFFF2118 << 4 (F01.8)'}
       - {offset: 0x83E9, width: 8, value: 149, role: 'PID 0x10 / DID 0x1209 report scale'}
       - {offset: 0x89B3, width: 8, value: 1, role: '0xFFFF1056 filter setting'}
       - {offset: 0x8A68, width: 8, value: 128, role: 'non-transient airflow average weight'}
@@ -1075,7 +1076,7 @@ nodes:
     rounding: none
     saturation: 'BFS floored at 0 and capped at the rpm ceiling 0xD8B3 << 8 (255 at all 16 points: 65,280)'
     branches:
-      - {when: '0xFFFF2824 bit 7 set (MAF fault, item 0x114)', then: 'BFS = table 0x95E5 byte << 8 by 0xFFFF1206 band and 0xFFFF107F band (not modelled)'}
+      - {when: '0xFFFF2824 bit 7 set (MAF fault, item 0x114)', then: 'BFS = table 0x95E5[(rpm band - 1) x 4 + throttle band] << 8, rpm band 1-3 from 0xFFFF1206 < 64/128/192 (800/1,600/2,400 rpm), throttle band 0-3 from 0xFFFF107F >= 7/15/22; at 2,400 rpm and above BFS = 0 (fuel cut, the FSM''s 2,400 rpm MAF fail-safe) (0x03CAE6-0x03CB46; not modelled)'}
     rom:
       - {rom_map: bfs_ceiling, role: 'BFS ceiling by rpm'}
     outside_schedule: 'Group 0x20, inside 0x03C62C; the cycle snapshot copies BFS to 0xFFFF1038.'

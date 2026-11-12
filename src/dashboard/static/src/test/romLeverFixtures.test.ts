@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RomLeverBlocker, RomLeverEntry, RomLeverOutput, RomLevers } from "../types/romEditor";
-import { LEVERS_FUEL_COMP, LEVERS_MAF_CURVE, LEVERS_TIMING_TRIM } from "./romLeverFixtures";
+import { LEVERS_FUEL_COMP, LEVERS_UNMAPPED_BYTE, LEVERS_TIMING_TRIM } from "./romLeverFixtures";
 
 // `satisfies Record<keyof T, true>` makes each list exactly the interface's
 // keys (a missing or extra one does not compile), so the fixtures, which
@@ -57,7 +57,7 @@ describe("the lever fixtures (real classifier payloads)", () => {
   const cases = {
     fuel_comp: LEVERS_FUEL_COMP,
     timing_trim: LEVERS_TIMING_TRIM,
-    maf_curve: LEVERS_MAF_CURVE,
+    unmapped_byte: LEVERS_UNMAPPED_BYTE,
   };
 
   it.each(Object.entries(cases))("%s has exactly the keys of the TypeScript types", (_, levers) => {
@@ -81,7 +81,7 @@ describe("the lever fixtures (real classifier payloads)", () => {
     expect(LEVERS_TIMING_TRIM.messages.join("\n")).toContain(
       "Timing trim A -> ignition_trim_selected: engine torque not computed in conditional_rom_comparison; torque production built, not validated",
     );
-    expect(LEVERS_MAF_CURVE.messages.join("\n")).toMatch(/0xE27E: not mapped/);
+    expect(LEVERS_UNMAPPED_BYTE.messages.join("\n")).toMatch(/0xE584: not mapped/);
     expect(LEVERS_FUEL_COMP.messages.join("\n")).toContain("closed loop: trim authority undecoded");
   });
 });
