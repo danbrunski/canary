@@ -1813,6 +1813,29 @@ W09.6 is the orchestrator's own, on the ROM machine.
     like `/tables` and `/trace`, not a real image's payload. A look at the
     heat colouring on a real image in both themes belongs with W09.6.
 
+- [ ] **W09.13 — Simulate's timing block costs 0.4 ms per (point, draw), and the
+  page's time estimate is 4-15x under (found by W09.6's re-run, 2026-11-11).**
+  `sim_cells.ignition_timing_points` calls `paired_scenarios.ignition_timing_at`
+  once per (design point, draw) pair. Each call re-reads trim bytes from the image
+  through `ecu_state_models.trim_lookup` / `selected_timing_trim`; cProfile at 20
+  draws put 16.1 of 28.3 s there, with 6.8 M calls of `ecu_state_models._byte`.
+  It landed with E09.7 (`9fe73552`, `f5b49d9c`, 2026-10-17/18), after the last
+  timing re-measure. A 16 x 16 run at 1,000 draws takes 99.7 s on the laptop.
+  `romSimSize.ts` `COST_FIT` predicts 6.4 s for it.
+  - Make the block cheap without changing a single output value. The function is
+    pure in its per-pair inputs (rpm word, the two X values, coolant, the pedal
+    flag, `phi_moved`, `bfs_moved`, the two lookup bytes), and X is quantized, so
+    draws at one point repeat. Memoizing per call on those inputs, or
+    precomputing the trim tables once per ROM, should collapse most of the work.
+    A test must pin the result as identical to the per-pair path on a real-shaped
+    design (rows compared with `==`, not approximately).
+  - Re-measure `LAPTOP_TIMINGS` at low machine load, refit `COST_FIT`, and update
+    whatever pins them. Record the before and after wall times here.
+  - **Accept:** a 16 x 16 run at 1,000 draws takes within 2x of the 2026-10-17
+    figure, or the remaining cost is named. The timing rows are bit-identical to
+    before. The page's estimate is within 1.5x of the measured time for both
+    grids at 200 and 1,000 draws.
+
 ## Not in scope
 
 - **Writing the ECU or producing a flashable file.** See "Decisions"; the
