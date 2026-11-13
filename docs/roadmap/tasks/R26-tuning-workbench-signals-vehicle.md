@@ -22,7 +22,7 @@ The cross-cutting copies found here (`_aware`, `_iso`,
 `model_validate(load_yaml(…))`, the bin rule, time-lookup leftovers) are in
 [R24](R24-shared-primitives.md).
 
-- [ ] **R26.1 The workbench reads each session once per channel.**
+- [~] **R26.1 The workbench reads each session once per channel.**
   `workbench._read_optional` loops
   `for spec in dict.fromkeys(specs): read_channels(session, [spec], …)`, one
   scan of the parquet chunks per spec, so that one unresolvable name does not
@@ -32,16 +32,58 @@ The cross-cutting copies found here (`_aware`, `_iso`,
   per session (five reads, then seven, then one for baro: about thirteen
   scans per session, times the sessions selected), in the workbench child
   behind the heaviest dashboard page.
-  - [ ] Time `trim_surface` on one 20-minute tuning session with
-    `SharedSessionRead.disk_reads` counting. The mechanism is read; the size
-    on the Pi is not measured.
-  - [ ] Wrap each per-session body in
+  - [~] Time `trim_surface` on one 20-minute tuning session with
+    `SharedSessionRead.disk_reads` counting. Laptop done; the Pi figure is not
+    measured (needs the Pi, and no analysis runs on it while it collects).
+    Session `_capture-tuning-2026-11-12T034249` (20.7 min, 1.78 M rows, 34.5 MB),
+    scans counted by wrapping `channels.read_session`, one process, laptop
+    under other sessions' load (so seconds are indicative, scans are exact):
+    `trim_surface` 13 scans / 41.0 s before, 1 scan / 6.6 s after;
+    `timing_surface` 4 / 11.6 s to 2 / 8.4 s (values, then the barometer in
+    `conditions_block`); `session_frame` 6 / 16.6 s to 1 / 5.9 s. The result of
+    each, `json`-dumped, is identical before and after (HEAD vs this tree, same
+    inputs). Script: `<scratchpad>/r261/bench.py`.
+  - [x] Wrap each per-session body in
     `with shared_session_read(session, specs, …)` (no behavior change), or
     resolve spec names against the catalog first and make one call.
-  - [ ] `trim_surface`: derive "missing" from what the first read returned and
-    drop the second.
+    Chose the wrap: `read_channels` still runs once per spec, so a name that
+    does not resolve (or whose rows refuse it, e.g. `_did_series` on pre-K01.1
+    rows, which is decided from the data) fails alone exactly as before; a
+    one-call read would fail the whole batch and need that isolation rebuilt.
+    `_read_optional` itself enters the block (every caller: `_aligned_or_missing`
+    for `trim_surface`, `timing_surface`, `pull_comparison`, the barometer, the
+    regime channels), and `session_frame` and `trim_surface` enter an outer one
+    that the inner ones reuse. `tests/test_workbench_analysis.py::
+    test_read_optional_reads_the_session_once_and_isolates_each_spec` (an
+    unresolvable, an absent and present specs: 4 scans in the old loop, 1 now,
+    frame and `unresolved` equal to the old loop's),
+    `test_session_frame_and_value_surfaces_read_each_session_once`.
+  - [x] `trim_surface`: derive "missing" from what the first read returned and
+    drop the second. One `_read_optional` of all seven specs; `_not_captured`
+    names the missing from the required five (the optional bank 2 never
+    appears in `missing`), and the barometer read for `conditions_block` is
+    served from the same scan (`baro_reads`).
+    `test_trim_surface_reads_each_session_once_including_the_barometer`
+    (two sessions, two scans) and
+    `test_trim_surface_not_captured_keeps_missing_order_and_reads_once`.
   - Must not change: `Unavailable.missing` order, the `not_captured` /
-    `refused` split.
+    `refused` split. Held: `test_trim_surface_not_captured_keeps_missing_order_and_reads_once`
+    compares against the old `_aligned_or_missing` logic kept in the test with
+    one spec unresolvable, one resolvable but absent, the rest present
+    (`missing` = required order, the unresolvable one in its place). The
+    `refused` kind is `_session_delivery`'s and untouched. Gate:
+    `pytest -m ""` over every test file naming the workbench modules or
+    `shared_session_read`, ruff, mypy green.
+  - Verified independently: byte-identical JSON (HEAD vs tree) for
+    `trim_surface`, `timing_surface`, `session_frame` and `pull_comparison`
+    on five real sessions (current and old DID-only tuning captures, a default
+    session); `pull_comparison` over two sessions 8 → 4 scans. Cost: one
+    session's union frame is held at once, so peak RSS rises
+    (laptop, 20.7-min capture: `trim_surface` 296 → 310 MB, `timing_surface`
+    276 → 335 MB, two-session `pull_comparison` 273 → 398 MB). The frame is
+    freed per session, so a multi-session selection does not stack it; the
+    workbench child's `RLIMIT_AS` is 4 GiB on the 8 GB Pi. A session several
+    times larger than 43 MB on disk was not measured against that cap.
 
 - [x] **R26.2 The digest reports a failed read as "none measured".**
   `tuning_digest.py` has eleven `except Exception`. Three of them turn an

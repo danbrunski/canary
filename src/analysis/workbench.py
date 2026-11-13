@@ -35,6 +35,7 @@ from src.analysis.channels import (
     concat_channel_frames,
     parse_spec,
     read_channels,
+    shared_session_read,
 )
 from src.analysis.noise_floor import NoiseFloor, Significance, significance
 from src.analysis.tuning import (
@@ -371,22 +372,35 @@ def _classify_regimes(
 def _read_optional(
     session: Path, specs: list[str], inputs: WorkbenchInputs
 ) -> tuple[pd.DataFrame, list[str]]:
-    """Read what resolves; return the long frame and the specs that did not."""
+    """Read what resolves; return the long frame and the specs that did not.
+
+    One :func:`read_channels` call per spec, so a name the catalogs cannot
+    resolve (or whose rows refuse it) fails alone and costs only itself. Those
+    calls share one scan of the session (R26.1): ``shared_session_read`` holds
+    the rows every resolvable spec needs, and each call is served its own
+    subset of them, exactly the rows its own filtered read would have
+    returned. Inside a caller's block that already holds them (``trim_surface``)
+    no scan is made here.
+    """
     frames: list[pd.DataFrame] = []
     unresolved: list[str] = []
-    for spec in dict.fromkeys(specs):
-        try:
-            frames.append(
-                read_channels(
-                    session,
-                    [spec],
-                    bindings_path=inputs.bindings_path,
-                    dids_path=inputs.dids_path,
-                    calibration=inputs.calibration,
+    wanted = list(dict.fromkeys(specs))
+    with shared_session_read(
+        session, wanted, bindings_path=inputs.bindings_path, dids_path=inputs.dids_path
+    ):
+        for spec in wanted:
+            try:
+                frames.append(
+                    read_channels(
+                        session,
+                        [spec],
+                        bindings_path=inputs.bindings_path,
+                        dids_path=inputs.dids_path,
+                        calibration=inputs.calibration,
+                    )
                 )
-            )
-        except (ChannelSpecError, ValueError, KeyError):
-            unresolved.append(spec)
+            except (ChannelSpecError, ValueError, KeyError):
+                unresolved.append(spec)
     if not frames:
         return pd.DataFrame(columns=["timestamp", "spec", "value", "unit"]), unresolved
     return concat_channel_frames(frames), unresolved
@@ -417,16 +431,23 @@ def session_frame(
     if regime not in REGIMES:
         raise ChannelSpecError(f"unknown regime {regime!r}; expected one of {', '.join(REGIMES)}")
     names = [parse_spec(text).text for text in specs]
-    requested = read_channels(
-        session_dir,
-        names,
-        bindings_path=inputs.bindings_path,
-        dids_path=inputs.dids_path,
-        calibration=inputs.calibration,
-    )
     regime_specs = _regime_specs(inputs)
     aux_specs = [spec for spec in regime_specs.values() if spec not in names]
-    aux, _unresolved = _read_optional(session_dir, aux_specs, inputs)
+    # The requested channels and the regime's own share one scan (R26.1).
+    with shared_session_read(
+        session_dir,
+        [*names, *aux_specs],
+        bindings_path=inputs.bindings_path,
+        dids_path=inputs.dids_path,
+    ):
+        requested = read_channels(
+            session_dir,
+            names,
+            bindings_path=inputs.bindings_path,
+            dids_path=inputs.dids_path,
+            calibration=inputs.calibration,
+        )
+        aux, _unresolved = _read_optional(session_dir, aux_specs, inputs)
     long = concat_channel_frames([requested, aux]) if not aux.empty else requested
     present = set(long["spec"].unique()) if not long.empty else set()
     missing = [name for name in names if name not in present]
@@ -896,20 +917,32 @@ def _edges_ok(edges: tuple[float, ...], name: str) -> None:
         raise GateError(f"{name} edges must be at least two strictly increasing values")
 
 
+def _not_captured(
+    session: Path, required: list[str], present: set[str], unresolved: list[str]
+) -> Unavailable | None:
+    """``not_captured`` naming the ``required`` specs the read did not return
+    (in ``required`` order, then any unresolved one not already named), or
+    ``None`` when every one is there."""
+    missing = [spec for spec in required if spec not in present]
+    if not missing:
+        return None
+    return Unavailable(
+        session.name,
+        "not_captured",
+        "This capture's profile does not poll " + ", ".join(missing),
+        missing=missing + [s for s in unresolved if s in required and s not in missing],
+    )
+
+
 def _aligned_or_missing(
     session: Path, specs: list[str], inputs: WorkbenchInputs
 ) -> pd.DataFrame | Unavailable:
     """Aligned frame over ``specs`` (require_all), or which were never captured."""
     long, unresolved = _read_optional(session, specs, inputs)
     present = set(long["spec"].unique()) if not long.empty else set()
-    missing = [spec for spec in specs if spec not in present]
-    if missing:
-        return Unavailable(
-            session.name,
-            "not_captured",
-            "This capture's profile does not poll " + ", ".join(missing),
-            missing=missing + [s for s in unresolved if s not in missing],
-        )
+    absent = _not_captured(session, specs, present, unresolved)
+    if absent is not None:
+        return absent
     return align_long(long, specs, require_all=False)
 
 
@@ -940,18 +973,29 @@ def trim_surface(
     per_session: list[dict[str, Any]] = []
     gates: dict[str, Any] = {"started": 0, "filtered": {}, "remaining": 0}
     contributing: list[Path] = []
+    baro_reads: dict[str, pd.DataFrame] = {}
     for session in sessions:
         specs = [rpm, airflow, FUEL_STATUS_SPEC]
         for stft, ltft in TRIM_SPECS.values():
             specs += [stft, ltft]
         # Bank 2 is optional (a single-bank engine has none); bank 1 is not.
         required = [rpm, airflow, FUEL_STATUS_SPEC, *TRIM_SPECS["b1"]]
-        aligned = _aligned_or_missing(session, required, inputs)
-        if isinstance(aligned, Unavailable):
-            skipped.append(aligned)
+        # One scan of the session for the trims and the barometer (R26.1).
+        with shared_session_read(
+            session,
+            [*specs, BARO_SPEC],
+            bindings_path=inputs.bindings_path,
+            dids_path=inputs.dids_path,
+        ):
+            long, unresolved = _read_optional(session, specs, inputs)
+            present = set(long["spec"].unique()) if not long.empty else set()
+            absent = _not_captured(session, required, present, unresolved)
+            if absent is None:
+                baro_frame, _ = _read_optional(session, [BARO_SPEC], inputs)
+                baro_reads[session.name] = baro_frame
+        if absent is not None:
+            skipped.append(absent)
             continue
-        long, _ = _read_optional(session, specs, inputs)
-        present = set(long["spec"].unique())
         use = [spec for spec in specs if spec in present]
         frame = align_long(long, use, require_all=False)
         session_cells: dict[str, list[dict[str, Any]]] = {}
@@ -1028,7 +1072,7 @@ def trim_surface(
         "per_session": per_session,
         "gates": gates,
         "unavailable": [item.as_dict() for item in skipped],
-        "conditions": conditions_block(contributing, inputs, gates=gates),
+        "conditions": conditions_block(contributing, inputs, gates=gates, baro_reads=baro_reads),
     }
 
 

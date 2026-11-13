@@ -16,17 +16,23 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import pytest
 import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.analysis import channels
+from src.analysis.channels import ChannelSpecError, concat_channel_frames, read_channels
 from src.analysis.lambda_delivery import load_lambda_delivery
 from src.analysis.noise_floor import ChannelFloor, NoiseFloor
 from src.analysis.tuning import GateError
 from src.analysis.tuning_frame import load_provider_registry
 from src.analysis.workbench import (
+    TRIM_SPECS,
+    Unavailable,
     WorkbenchInputs,
+    _read_optional,
     conditions_block,
     pooled_delivery_error,
     pull_comparison,
@@ -41,6 +47,7 @@ from src.config import CanaryConfig
 from src.control import child_pool, workbench_jobs
 from src.control.logs import list_logs, summarize_log
 from src.dashboard.routes import workbench as workbench_routes
+from src.preprocessing.loader import read_session
 from src.signals.afr import AfrCalibration
 from src.storage.capture_manifest import CAPTURE_MANIFEST_FILENAME, CAPTURE_QUALITY_FILENAME
 from src.storage.parquet_writer import write_records_to_parquet
@@ -343,6 +350,142 @@ def test_trim_surface_not_captured_names_the_channel(tmp_path: Path) -> None:
     result = trim_surface([session], inputs=INPUTS)
     assert result["unavailable_kind"] == "not_captured"
     assert "obd:FUEL_STATUS" in result["unavailable"][0]["missing"]
+
+
+# ------------------------------------------------------- one scan per session (R26.1)
+
+
+def _reference_read_optional(
+    session: Path, specs: list[str], inputs: WorkbenchInputs
+) -> tuple[pd.DataFrame, list[str]]:
+    """``_read_optional`` as it was before R26.1: one scan per spec."""
+    frames: list[pd.DataFrame] = []
+    unresolved: list[str] = []
+    for spec in dict.fromkeys(specs):
+        try:
+            frames.append(
+                read_channels(
+                    session,
+                    [spec],
+                    bindings_path=inputs.bindings_path,
+                    dids_path=inputs.dids_path,
+                    calibration=inputs.calibration,
+                )
+            )
+        except (ChannelSpecError, ValueError, KeyError):
+            unresolved.append(spec)
+    if not frames:
+        return pd.DataFrame(columns=["timestamp", "spec", "value", "unit"]), unresolved
+    return concat_channel_frames(frames), unresolved
+
+
+def _reference_not_captured(session: Path, required: list[str]) -> dict[str, Any] | None:
+    """The ``Unavailable`` the old ``_aligned_or_missing`` gave ``trim_surface``
+    for ``required``, from its own per-spec reads (its first of two)."""
+    long, unresolved = _reference_read_optional(session, required, INPUTS)
+    present = set(long["spec"].unique()) if not long.empty else set()
+    missing = [spec for spec in required if spec not in present]
+    if not missing:
+        return None
+    return Unavailable(
+        session.name,
+        "not_captured",
+        "This capture's profile does not poll " + ", ".join(missing),
+        missing=missing + [s for s in unresolved if s not in missing],
+    ).as_dict()
+
+
+@pytest.fixture
+def scan_count(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    """The session directories read from disk, one entry per scan."""
+    scans: list[Path] = []
+    real = read_session
+
+    def counting(session: Any, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        scans.append(Path(session))
+        return real(session, *args, **kwargs)
+
+    monkeypatch.setattr(channels, "read_session", counting)
+    return scans
+
+
+def test_read_optional_reads_the_session_once_and_isolates_each_spec(
+    tmp_path: Path, scan_count: list[Path]
+) -> None:
+    session = _write(tmp_path, "2026-09-18T120000", [_closed(stft=s) for s in (1.0, 2.0, 3.0)])
+    unresolvable = "did:NO_SUCH_DID"  # the catalogs cannot resolve it
+    absent = "obd:NEVER_POLLED"  # resolves, but this session has no rows for it
+    specs = ["obd:RPM", unresolvable, absent, "obd:SHORT_FUEL_TRIM_1", "obd:RPM", "obd:MAF"]
+
+    expected_long, expected_unresolved = _reference_read_optional(session, specs, INPUTS)
+    reference_scans = len(scan_count)
+    assert reference_scans == 4  # per distinct spec; the unresolvable one never reaches the disk
+    scan_count.clear()
+
+    long, unresolved = _read_optional(session, specs, INPUTS)
+
+    assert len(scan_count) == 1
+    assert unresolved == expected_unresolved == [unresolvable]
+    pd.testing.assert_frame_equal(long, expected_long)
+    assert set(long["spec"]) == {"obd:RPM", "obd:SHORT_FUEL_TRIM_1", "obd:MAF"}  # not `absent`
+
+
+def test_trim_surface_not_captured_keeps_missing_order_and_reads_once(
+    tmp_path: Path, scan_count: list[Path]
+) -> None:
+    """One axis unresolvable, one required spec resolvable but absent, the rest
+    present: ``missing`` is in the required order, as it was with two reads."""
+    session = _write(
+        tmp_path,
+        "2026-09-18T120000",
+        [{"RPM": 2000.0, "SHORT_FUEL_TRIM_1": 1.0, "SHORT_FUEL_TRIM_2": 1.0}] * 3,
+    )
+    unresolvable = "did:NO_SUCH_DID"
+    required = ["obd:RPM", unresolvable, "obd:FUEL_STATUS", *TRIM_SPECS["b1"]]
+    # FUEL_STATUS and LONG_FUEL_TRIM_1 resolve but were never polled here.
+    expected = _reference_not_captured(session, required)
+    assert expected is not None and expected["missing"] == [
+        unresolvable,
+        "obd:FUEL_STATUS",
+        "obd:LONG_FUEL_TRIM_1",
+    ]
+    scan_count.clear()
+
+    result = trim_surface([session], inputs=INPUTS, airflow=unresolvable)
+
+    assert result["unavailable_kind"] == "not_captured"
+    assert result["unavailable"] == [expected]
+    assert len(scan_count) == 1  # was one scan per spec, in two passes
+
+
+def test_trim_surface_reads_each_session_once_including_the_barometer(
+    tmp_path: Path, scan_count: list[Path]
+) -> None:
+    rows = [{**_closed(), "BAROMETRIC_PRESSURE": 80.0}] * 6
+    a = _write(tmp_path, "2026-09-18T120000", rows)
+    b = _write(tmp_path, "2026-09-18T130000", rows)
+
+    result = trim_surface([a, b], inputs=INPUTS)
+
+    assert sorted(scan_count) == [a, b]  # one scan each, nothing for conditions
+    assert result["conditions"]["baro"]["min_kpa"] == 80.0
+    assert result["conditions"]["baro"]["sessions_without"] == []
+    assert result["n"] == 12
+
+
+def test_session_frame_and_value_surfaces_read_each_session_once(
+    tmp_path: Path, scan_count: list[Path]
+) -> None:
+    session = _write(tmp_path, "2026-09-18T120000", [_closed()] * 6)
+
+    session_frame(session, ["obd:RPM", "obd:MAF"], inputs=INPUTS)
+    assert scan_count == [session]  # the regime's channels shared the one scan
+
+    scan_count.clear()
+    result = timing_surface([session], inputs=INPUTS)
+    assert result["available"] is True
+    # The values (rpm, airflow, timing) in one scan, the barometer in another.
+    assert scan_count == [session, session]
 
 
 def test_pull_comparison_flags_a_drop_where_timing_was_advanced(tmp_path: Path) -> None:
