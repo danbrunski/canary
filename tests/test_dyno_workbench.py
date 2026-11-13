@@ -88,9 +88,7 @@ def _providers(tmp: Path) -> Any:
 
 
 def _inputs(profile_data: Path, *, providers: Any) -> WorkbenchInputs:
-    return WorkbenchInputs(
-        afr_stoich=14.7, providers=providers, registry=REGISTRY, profile_data=profile_data
-    )
+    return WorkbenchInputs(providers=providers, registry=REGISTRY, profile_data=profile_data)
 
 
 def _profile(tmp: Path, *, measured: bool) -> Path:

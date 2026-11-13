@@ -322,7 +322,6 @@ class LambdaDeliveryReadout:
         declaration: LambdaDeliveryDeclaration,
         *,
         calibration: AfrCalibration | None,
-        afr_stoich: float,
         noise_floor: NoiseFloor | None = None,
         did_map: DidMap | None = None,
         declaration_path: Path | None = None,
@@ -376,7 +375,6 @@ class LambdaDeliveryReadout:
                             target_source=commanded.name,
                             measured_source=measured.name,
                             calibration=calibration,
-                            afr_stoich=afr_stoich,
                             settle_s=settle_s,
                         ),
                         target_spec=commanded.spec,
@@ -667,8 +665,9 @@ def build_live_lambda_delivery(
     """The live readout, or ``None`` (``/status`` says which kind of none).
 
     Built from the vehicle's :class:`~src.analysis.tuning_context.TuningContext`
-    — the one place the declaration, AFR calibration, stoichiometry and noise
-    floor are resolved (R05.1). Never raises into the inference loop.
+    — the one place the declaration, AFR calibration (whose ``afr_scale`` the
+    voltage route converts at, M01.3) and noise floor are resolved (R05.1).
+    Never raises into the inference loop.
     """
     from src.analysis.tuning_context import TuningContext
 
@@ -702,7 +701,6 @@ def build_live_lambda_delivery(
     readout = LambdaDeliveryReadout(
         context.lambda_delivery,
         calibration=context.calibration,
-        afr_stoich=context.afr_stoich,
         noise_floor=context.noise_floor,
         did_map=did_map,
         declaration_path=context.lambda_delivery_path,

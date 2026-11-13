@@ -53,7 +53,6 @@ from src.analysis.fuel_comp_samples import eligible_summary, session_samples
 from src.analysis.lambda_delivery import load_lambda_delivery
 from src.analysis.rom_map import load_rom_map
 from src.signals.afr import load_afr_calibration
-from src.signals.derived import FUEL_PROPERTIES
 from src.storage.sessions import recorded_sessions, session_started_at
 from src.vehicle.tune_revisions import load_tune_revisions
 
@@ -84,9 +83,6 @@ def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--since", help="first session start date (UTC, YYYY-MM-DD)")
     parser.add_argument("--session", action="append", default=[], help="session name(s) only")
-    parser.add_argument(
-        "--fuel-type", choices=sorted(FUEL_PROPERTIES), default="gasoline", help="for stoich AFR"
-    )
     parser.add_argument("--known-answer", action="store_true")
     parser.add_argument(
         "--control-closed-position",
@@ -124,7 +120,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     delivery = load_lambda_delivery(profile / "lambda_delivery.yaml")
     afr = load_afr_calibration(profile / "afr_calibration.yaml")
-    afr_stoich = FUEL_PROPERTIES[args.fuel_type].afr_stoich
     rom_dirs = args.rom_dir if args.rom_dir else rom_dirs_from_env()
     resolver = RevisionImageResolver(
         registry,
@@ -177,7 +172,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 declaration=declaration,
                 delivery=delivery,
                 afr_calibration=afr,
-                afr_stoich=afr_stoich,
                 registry=registry,
                 resolver=resolver,
             )

@@ -32,7 +32,8 @@ export function liveValue(
   channels: Map<string, ChannelSnapshot>,
   provider: RomProvider | null,
   now: number,
-  stoich: number,
+  /** The ECM's AFR at lambda = 1 (`afr_scale`), never the fuel's stoich. */
+  afrScale: number,
 ): { value: number; timestamp: number } | null {
   if (!provider) return null;
   const row = streamRow(channels, provider.spec);
@@ -49,7 +50,7 @@ export function liveValue(
     const sentinel = streamRow(channels, `${provider.spec}_SENTINEL`);
     if (sentinel?.timestamp && Date.parse(sentinel.timestamp) >= timestamp) return null;
     if (value <= 0) return null;
-    value = stoich / value;
+    value = afrScale / value;
   } else if (provider.transform !== "identity") return null;
   return Number.isFinite(value) ? { value, timestamp } : null;
 }

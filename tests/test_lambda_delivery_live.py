@@ -112,9 +112,7 @@ def _offline(
 ) -> tuple[pd.DataFrame, Any]:
     """The offline engine's rows, read the way ``delivery_error`` reads them."""
     route = DeliveryRoute(target, measured, "obd:RPM", declaration.measured(measured).spec)
-    inputs = read_delivery_inputs(
-        session, route, declaration, calibration=calibration, afr_stoich=STOICH
-    )
+    inputs = read_delivery_inputs(session, route, declaration, calibration=calibration)
     samples = delivery_samples(
         target=inputs.target,
         measured=inputs.measured,
@@ -123,7 +121,6 @@ def _offline(
         target_source=target,
         measured_source=measured,
         calibration=calibration,
-        afr_stoich=STOICH,
         baro=inputs.baro,
     )
     return samples.frame.reset_index(drop=True), inputs
@@ -174,7 +171,6 @@ def _readout(
     return LambdaDeliveryReadout(
         declaration,
         calibration=calibration,
-        afr_stoich=STOICH,
         noise_floor=load_noise_floor(PROFILE / "noise_floor.yaml"),
         did_map=load_did_map(DIDS_YAML),
         declaration_path=PROFILE / "lambda_delivery.yaml",
@@ -316,7 +312,6 @@ def test_the_stream_decides_the_same_rows_whatever_the_tick_cadence(
             target_source=target,
             measured_source=measured,
             calibration=calibration,
-            afr_stoich=STOICH,
         )
         frames = []
         lo, end = -math.inf, max(tt.max(), mt.max())
@@ -442,7 +437,6 @@ def test_a_late_read_is_counted_not_silently_folded(
         target_source="mode01_pid_0x44",
         measured_source="ecm_lambda_pid_0x24",
         calibration=calibration,
-        afr_stoich=STOICH,
     )
     times = np.arange(0.0, 20.0, 0.25)
     stream.extend(
@@ -487,7 +481,6 @@ def test_an_empty_measured_side_is_measured_missing_not_an_error(
         target_source="mode01_pid_0x44",
         measured_source="ecm_lambda_pid_0x24",
         calibration=calibration,
-        afr_stoich=STOICH,
     )
     assert samples.counts["measured_missing"] == samples.counts["total"] == 2
 
@@ -498,7 +491,6 @@ def test_an_empty_measured_side_is_measured_missing_not_an_error(
 
 def _xterra_context(declaration: LambdaDeliveryDeclaration, calibration: AfrCalibration) -> Any:
     return lambda _config: TuningContext(
-        afr_stoich=STOICH,
         calibration=calibration,
         noise_floor=load_noise_floor(PROFILE / "noise_floor.yaml"),
         lambda_delivery=declaration,
@@ -557,7 +549,7 @@ def test_a_vehicle_without_a_declaration_says_so(tmp_path: Path) -> None:
         components,
         source,
         recorder,
-        context_factory=lambda _config: TuningContext(afr_stoich=STOICH),
+        context_factory=lambda _config: TuningContext(),
     )
     assert live is None
     assert source.record_observers == []

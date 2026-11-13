@@ -28,6 +28,7 @@ from src.preprocessing.loader import resample_and_segment
 from src.signals.derived import TripSummary, summarize_trip
 from src.storage.sidecar import read_json_object, require_telemetry, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
+from src.vehicle.speed_correction import trip_speed_correction
 
 TRIP_SUMMARY_FILENAME = "trip_summary.json"
 
@@ -40,7 +41,15 @@ TRIP_SUMMARY_FILENAME = "trip_summary.json"
 #: v3: ``decoded:ECM_RPM`` is scaled to rpm before the idle test (f8b7d38). v2
 #: used raw counts (8/rpm) for idle time in any session with no Mode 01 RPM,
 #: e.g. every ``tuning-did`` capture (D03.22).
-SCHEMA_VERSION = 3
+#: v4 (2026-11-12, M01.2-M01.4): distance and speeds are road speed (the
+#: profile's measured ``obd:SPEED`` ratio to GPS, 0.9203 on the Xterra, so
+#: +8.7 %), fuel is zero in decel fuel cut, and the summary states
+#: ``speed_basis`` and ``fuel_basis``. With the Xterra's fuel moved to ``e10``
+#: (+3.85 % fuel volume per unit air) its mpg moved x1.057 and x1.072 on two
+#: stored drives (2026-10-10T153117, 2026-09-20T152758; the fuel-cut share
+#: differs by drive).
+#: Economy, distance and speed trends do not carry across this version.
+SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -70,7 +79,9 @@ def compute_trip_summary(session_dir: Path, config: CanaryConfig) -> TripSummary
     """
     require_telemetry(session_dir)
     frame = resample_and_segment([session_dir], config, value="value_number")
-    return summarize_trip(frame, config.vehicle.parameters)
+    return summarize_trip(
+        frame, config.vehicle.parameters, speed_correction=trip_speed_correction(config)
+    )
 
 
 def write_trip_summary(

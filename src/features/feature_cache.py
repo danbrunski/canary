@@ -17,7 +17,8 @@ from src.config import CanaryConfig, require_profile_scoped
 from src.decode.dbc import DEFAULT_DBC_DIR
 from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.storage.session_files import session_files_fingerprint
-from src.vehicle.profiles import active_registry_sources
+from src.vehicle.profiles import active_registry_sources, profile_dir
+from src.vehicle.speed_correction import DYNO_FILENAME
 
 log = logging.getLogger(__name__)
 
@@ -69,7 +70,14 @@ DEFAULT_DIDS_PATH = DIDS_YAML
 #:     first breakpoint where the map declares it, and each row's map is the
 #:     revision flashed at its timestamp, not ``active_revision``. The key now
 #:     hashes the flash-history files too (``tune_revisions``).
-FEATURE_FRAME_CACHE_VERSION = 10
+#: 11 — M01.2 / M01.4 (2026-11-12): ``derived:FUEL_RATE_LPH`` (and the power,
+#:     torque and instant-economy channels built on it) is 0 on decel fuel-cut
+#:     rows (PID 0x44 = 0), and ``derived:INSTANT_ECONOMY_*`` /
+#:     ``GEAR_ESTIMATE`` use road speed, ``obd:SPEED`` over the profile's
+#:     measured ratio to GPS. Cached frames carry the old values for unchanged
+#:     inputs. The key now hashes the profile's ``dyno.yaml`` too, where that
+#:     ratio is recorded, so a re-measured ratio invalidates frames.
+FEATURE_FRAME_CACHE_VERSION = 11
 
 
 def build_feature_frame_cache_key(
@@ -139,6 +147,10 @@ def _feature_frame_cache_metadata(
         # flashed when it was recorded.
         "tune_revisions": [_file_cache_entry(path) for path in active_registry_sources(config)],
         "vehicle_parameters": config.vehicle.parameters.model_dump(mode="json"),
+        # M01.2: the trip speed correction's ratio (``obd:SPEED`` / GPS) is
+        # read from this file (``src.vehicle.speed_correction``); a missing
+        # file hashes as absent, which is the uncorrected basis.
+        "speed_correction": _file_cache_entry(profile_dir(config) / DYNO_FILENAME),
     }
     return {**payload, "cache_key": _stable_hash(payload)}
 

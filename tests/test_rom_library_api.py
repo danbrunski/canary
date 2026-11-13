@@ -211,7 +211,9 @@ def test_trace_context_serves_the_vehicles_trace_definitions_for_a_library_image
     context = response.json()
     assert context["sha256"] == sha
     assert context["map_slot"] == 1
-    assert context["afr_stoich"] == pytest.approx(14.7)
+    # M01.3: the ECM's AFR scale, under its name and the deprecated old one.
+    assert context["afr_scale"] == pytest.approx(14.7)
+    assert context["afr_stoich"] == context["afr_scale"]
     assert context["matches_recorded_revision"] is False
     kinds = {table["kind"]: table for table in context["tables"]}
     assert set(kinds) == {"fuel_targets", "fuel_compensation"}

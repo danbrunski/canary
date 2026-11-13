@@ -55,7 +55,6 @@ from src.analysis.noise_floor import load_noise_floor  # noqa: E402
 from src.paths import DIDS_YAML  # noqa: E402
 from src.preprocessing.loader import read_session  # noqa: E402
 from src.signals.afr import AfrCalibration, load_afr_calibration  # noqa: E402
-from src.signals.derived import FUEL_PROPERTIES  # noqa: E402
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds  # noqa: E402
 
 #: What every check below reads from the polled rows: only ``read_channels``
@@ -245,7 +244,6 @@ def state_counts(
     *,
     calibration: AfrCalibration | None,
     noise_floor_path: Path | None,
-    afr_stoich: float,
 ) -> dict[str, Any]:
     floor = load_noise_floor(noise_floor_path) if noise_floor_path else None
     out: dict[str, Any] = {}
@@ -278,7 +276,6 @@ def state_counts(
                 target_source=target.name,
                 measured_source=instrument.name,
                 calibration=calibration,
-                afr_stoich=afr_stoich,
                 baro=baro if instrument.transform == "voltage_afr" else None,
             )
             per[instrument.name] = samples.summary(floor, declaration)
@@ -295,7 +292,6 @@ def enrichment_delay_scan(
     declaration: LambdaDeliveryDeclaration,
     *,
     calibration: AfrCalibration | None,
-    afr_stoich: float,
 ) -> dict[str, Any]:
     """The enrichment transport-delay scan each route's declared delay rests on.
 
@@ -339,7 +335,6 @@ def enrichment_delay_scan(
             "target_source": source.name,
             "measured_source": sensor.name,
             "calibration": calibration,
-            "afr_stoich": afr_stoich,
         }
         delay = estimate_transport_delay(
             drives, candidates=DELAY_CANDIDATES, regimes=["enrichment"], **common
@@ -379,14 +374,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "drives its declaration names (fitted_on, else informed_by): mean-residual scan, "
         "per-read sign tests against the arg-min and 0 s, and both brackets (R05.16).",
     )
-    parser.add_argument(
-        "--fuel-type",
-        choices=sorted(FUEL_PROPERTIES),
-        default="gasoline",
-        help="Fuel the vehicle runs; sets stoichiometry for AFR-quantity instruments.",
-    )
     args = parser.parse_args(argv)
-    stoich = FUEL_PROPERTIES[args.fuel_type].afr_stoich
     profile_dir = args.declaration.parent
     providers = args.providers or profile_dir / "tuning_providers.yaml"
     calibration_path = args.calibration or profile_dir / "afr_calibration.yaml"
@@ -472,12 +460,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             declaration,
             calibration=calibration,
             noise_floor_path=noise_path,
-            afr_stoich=stoich,
         )
         report["sessions"][session_dir.name] = entry
     if args.fit_enrichment_delay:
         report["enrichment_transport_delay"] = enrichment_delay_scan(
-            args.sessions, declaration, calibration=calibration, afr_stoich=stoich
+            args.sessions, declaration, calibration=calibration
         )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2, default=_json_default) + "\n")

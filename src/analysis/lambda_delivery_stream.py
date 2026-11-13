@@ -112,7 +112,6 @@ class DeliveryStream:
         target_source: str,
         measured_source: str,
         calibration: AfrCalibration | None,
-        afr_stoich: float,
         settle_s: float = DEFAULT_SETTLE_S,
     ) -> None:
         if settle_s < 0:
@@ -121,7 +120,6 @@ class DeliveryStream:
         self.commanded = declaration.commanded(target_source)
         self.instrument = declaration.measured(measured_source)
         self.calibration = calibration
-        self.afr_stoich = afr_stoich
         self.settle_s = settle_s
         self.quantity = resolve_quantity(self.commanded, calibration)
         self.delays_s = declared_delays_s(declaration, self.commanded.name)
@@ -230,7 +228,6 @@ class DeliveryStream:
             sentinel.times,
             commanded=self.commanded,
             quantity=self.quantity,
-            afr_stoich=self.afr_stoich,
         )
         decided = np.concatenate([target.flag, sentinel.flag])[side.origin]
         measured_side = measured_side_from_arrays(
@@ -238,7 +235,6 @@ class DeliveryStream:
             measured.values,
             instrument=self.instrument,
             calibration=self.calibration,
-            afr_stoich=self.afr_stoich,
             baro_times=self._baro.times if self.needs_baro else None,
             baro_kpa=self._baro.values if self.needs_baro else None,
         )

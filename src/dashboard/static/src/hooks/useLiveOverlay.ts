@@ -112,9 +112,9 @@ export function useLiveOverlay({
       : []
     : null;
 
-  const rpm = liveValue(channels, context.live.rpm, now, context.afr_stoich);
-  const bfs = liveValue(channels, context.live.base_fuel_schedule, now, context.afr_stoich);
-  const commanded = liveValue(channels, context.live.commanded_afr, now, context.afr_stoich);
+  const rpm = liveValue(channels, context.live.rpm, now, context.afr_scale);
+  const bfs = liveValue(channels, context.live.base_fuel_schedule, now, context.afr_scale);
+  const commanded = liveValue(channels, context.live.commanded_afr, now, context.afr_scale);
   const fuelCutRow = context.live.commanded_afr
     ? streamRow(channels, `${context.live.commanded_afr.spec}_SENTINEL`)
     : null;

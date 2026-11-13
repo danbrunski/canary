@@ -93,7 +93,7 @@ function context(overrides: Partial<RomTraceContext> = {}, fuel = trace(true)): 
   return {
     sha256: SHA_TUNED,
     map_slot: 1,
-    afr_stoich: 14.7,
+    afr_scale: 14.7,
     recorded_revision: "ZS44A-20260920",
     matches_recorded_revision: true,
     warnings: ["Inferred lookup only"],

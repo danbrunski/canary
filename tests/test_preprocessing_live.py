@@ -17,6 +17,7 @@ from src.features.feature_pipeline import build_feature_frame
 from src.features.live import LiveFeatureSource, build_prepared_live_tick
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from src.vehicle.speed_correction import trip_speed_correction
 from tests.configs import example_config
 
 
@@ -1003,7 +1004,9 @@ def test_live_trip_integrals_match_batch_compute_derived_channels(
             "obd:MAF": maf_values,
         }
     )
-    batch = compute_derived_channels(wide, config.vehicle.parameters)
+    batch = compute_derived_channels(
+        wide, config.vehicle.parameters, speed_correction=trip_speed_correction(config)
+    )
     batch_last = batch.iloc[-1]
 
     src = LiveFeatureSource(config=config)
@@ -1022,6 +1025,84 @@ def test_live_trip_integrals_match_batch_compute_derived_channels(
         "derived:IDLE_TIME_S",
         "derived:AVG_ECONOMY_L_PER_100KM",
     ):
+        assert live[channel] == pytest.approx(batch_last[channel]), channel
+
+
+def test_live_and_batch_apply_the_same_speed_ratio_and_fuel_cut(
+    config: CanaryConfig, tmp_path: Path
+) -> None:
+    """M01.2 / M01.4 through both paths: a profile whose ``dyno.yaml``
+    records an ``obd:SPEED`` ratio, and a drive with a decel fuel cut (PID
+    0x44 = 0). Batch and live land on the same corrected totals, and those
+    totals are the hand-computed ones: distance is the indicated trapezoid
+    divided by the ratio, and the fuel-cut rows accrue no fuel."""
+    from src.signals.derived import compute_derived_channels
+
+    ratio = 0.9203
+    (tmp_path / "dyno.yaml").write_text(
+        "schema_version: 1\n"
+        "motion_sources:\n"
+        "  speed:\n"
+        "    - channel: obd:SPEED\n"
+        f"      ratio_to_gps: {ratio}\n"
+        "      evidence: test\n"
+    )
+    daemon = config.daemon.model_copy(update={"afr_calibration": tmp_path / "afr_calibration.yaml"})
+    config = config.model_copy(update={"daemon": daemon})
+    correction = trip_speed_correction(config)
+    assert correction.ratio_to_gps == ratio
+
+    n = 8
+    start = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    timestamps = [start + timedelta(seconds=i) for i in range(n)]
+    rpm_values = [1500.0, 1800.0, 2000.0, 2200.0, 1800.0, 1500.0, 1400.0, 1300.0]
+    speed_values = [20.0, 35.0, 50.0, 60.0, 55.0, 50.0, 45.0, 40.0]
+    maf_values = [8.0, 9.0, 10.0, 11.0, 5.0, 5.0, 5.0, 6.0]
+    #: Rows 4-6 are decel fuel cut; the wideband reads its lean limit there.
+    phi_values = [1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    lambda_values = [1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 1.0]
+    wide = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime([t.isoformat() for t in timestamps], utc=True),
+            "obd:RPM": rpm_values,
+            "obd:SPEED": speed_values,
+            "obd:MAF": maf_values,
+            "obd:COMMANDED_EQUIV_RATIO": phi_values,
+            "obd:O2_WR_LAMBDA_S1": lambda_values,
+        }
+    )
+    batch_last = compute_derived_channels(
+        wide, config.vehicle.parameters, speed_correction=correction
+    ).iloc[-1]
+
+    src = LiveFeatureSource(config=config)
+    for t, rpm, speed, maf, phi, lam in zip(
+        timestamps, rpm_values, speed_values, maf_values, phi_values, lambda_values, strict=True
+    ):
+        src.observe(TelemetryRecord.obd(t.timestamp(), "RPM", rpm, "rpm"))
+        src.observe(TelemetryRecord.obd(t.timestamp(), "SPEED", speed, "km/h"))
+        src.observe(TelemetryRecord.obd(t.timestamp(), "MAF", maf, "g/s"))
+        src.observe(TelemetryRecord.obd(t.timestamp(), "COMMANDED_EQUIV_RATIO", phi, ""))
+        src.observe(TelemetryRecord.obd(t.timestamp(), "O2_WR_LAMBDA_S1", lam, ""))
+        src.tick(t)
+    live = src.latest_derived_channels
+    assert live is not None
+
+    indicated_km = sum(
+        (a + b) / 2.0 / 3600.0 for a, b in zip(speed_values, speed_values[1:], strict=False)
+    )
+    assert batch_last["derived:TRIP_DISTANCE_KM"] == pytest.approx(indicated_km / ratio)
+    fuel = config.vehicle.parameters
+    from src.signals.derived import fuel_properties
+
+    props = fuel_properties(fuel)
+    lph = [
+        0.0 if p == 0.0 else m / (props.afr_stoich * lam) / (props.density_kg_per_l * 1000) * 3600
+        for m, p, lam in zip(maf_values, phi_values, lambda_values, strict=True)
+    ]
+    fuel_l = sum((a + b) / 2.0 / 3600.0 for a, b in zip(lph, lph[1:], strict=False))
+    assert batch_last["derived:FUEL_USED_L"] == pytest.approx(fuel_l)
+    for channel in ("derived:TRIP_DISTANCE_KM", "derived:FUEL_USED_L", "derived:CO2_KG"):
         assert live[channel] == pytest.approx(batch_last[channel]), channel
 
 

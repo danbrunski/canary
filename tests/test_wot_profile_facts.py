@@ -71,12 +71,12 @@ def test_min_load_defaults_to_the_profiles_wot_floor() -> None:
     from src.mcp_server.tools import tuning_analysis
 
     xterra = load_provider_registry(Path("data/nissan-xterra-2008/tuning_providers.yaml"))
-    context = TuningContext(afr_stoich=14.7, providers=xterra)
+    context = TuningContext(providers=xterra)
     assert xterra.mode01_wot is not None
     assert context.resolve_min_load(None) == xterra.mode01_wot.load_floor_pct == 85.0
     assert context.resolve_min_load(70.0) == 70.0
     with pytest.raises(ValueError, match="mode01_wot"):
-        TuningContext(afr_stoich=14.7).resolve_min_load(None)
+        TuningContext().resolve_min_load(None)
 
     signature = inspect.signature(tuning_analysis.get_delivery_error)
     assert signature.parameters["min_load"].default is None

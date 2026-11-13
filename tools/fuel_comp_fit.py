@@ -69,7 +69,6 @@ from src.analysis.rom_trace import load_viewer_definition
 from src.analysis.target_phi import TwinRefusalError, load_twin_definition, resolve_table
 from src.paths import DIDS_YAML
 from src.signals.afr import load_afr_calibration
-from src.signals.derived import FUEL_PROPERTIES
 from src.storage.sessions import recorded_sessions, session_started_at
 from src.vehicle.tune_revisions import load_tune_revisions
 
@@ -98,9 +97,6 @@ def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
         "--samples",
         type=Path,
         help=f"reuse a samples.parquet from tools.fuel_comp_samples (v{SAMPLES_VERSION})",
-    )
-    parser.add_argument(
-        "--fuel-type", choices=sorted(FUEL_PROPERTIES), default="gasoline", help="for stoich AFR"
     )
     parser.add_argument(
         "--dids",
@@ -287,7 +283,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                     declaration=declaration,
                     delivery=delivery,
                     afr_calibration=afr,
-                    afr_stoich=FUEL_PROPERTIES[args.fuel_type].afr_stoich,
                     registry=registry,
                     resolver=resolver,
                     dids_path=args.dids,

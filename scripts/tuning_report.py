@@ -62,7 +62,6 @@ def _run_delivery_error(args: argparse.Namespace) -> int:
         measured_spec=args.measured,
         min_load=context.resolve_min_load(args.min_load),
         revisions=context.registry,
-        afr_stoich=context.afr_stoich,
         mode01_exclusion_note=context.mode01_exclusion_note,
         rpm_bands=context.rpm_bands,
     )
@@ -124,7 +123,6 @@ def _run_compare(args: argparse.Namespace) -> int:
         floor_channel=args.floor_channel,
         conditions=args.conditions,
         revisions=context.registry,
-        afr_stoich=context.afr_stoich,
     )
     sd = (
         floor.sd_for(args.floor_channel)
@@ -161,7 +159,6 @@ def _run_null_run(args: argparse.Namespace) -> int:
         axes=tuple(args.axes),
         unsafe_axes=args.unsafe_axes,
         revisions=context.registry,
-        afr_stoich=context.afr_stoich,
     )
     if result.n_cells < 2:
         print(f"only {result.n_cells} matched cell(s) — need at least 2 to have a spread")

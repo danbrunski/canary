@@ -49,9 +49,21 @@ motion_sources:
       evidence: >-
         The committee relation in committees.yaml (SPEED_SOURCE_DIVERGENCE):
         per-row median obd/gps over 2185 paired seconds of 2026-08-06T162657,
-        re-measured 0.915-0.924 on six drives. At ~0.7 Hz in 1 km/h steps it
-        is too coarse to differentiate at the default smoothing and is
-        refused as such; listed for completeness of the order.
+        re-measured 0.915-0.924 on six drives (2026-07-28 to 2026-09-21) by
+        the committee evaluator on 2026-09-25. Every one of those drives was
+        on the pre-HAT USB GNSS receiver, before the 2026-09-23 HAT install,
+        and on the tires as they were then. At ~0.7 Hz in 1 km/h steps it is
+        too coarse to differentiate at the default smoothing and is refused
+        as such by the dyno; listed for completeness of the order. ALSO the
+        trip path's speed correction (M01.2, 2026-11-12): trip distance,
+        average and maximum speed, instant economy and the gear estimate use
+        obd:SPEED / this ratio (src.vehicle.speed_correction). It is a
+        profile constant, deliberately: it drifts as the tires wear (full
+        tread is about 2 % of the rolling radius, so the ECM's reading of
+        true speed moves by up to ~2 % over the tires' life) and the
+        per-drive rolling-circumference estimate (/control/tires) tracks that
+        drift, but the trip path does not follow it yet (M01.2 follow-up).
+        Re-measure after a tire change and record the new value here.
   rpm:
     - decoded:ECM_RPM
     - obd:RPM

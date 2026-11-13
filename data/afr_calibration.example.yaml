@@ -3,6 +3,11 @@ schema_version: 1
 # Both sections are operator-exported facts; no vehicle-specific curve or ROM
 # target is hard-coded in shared code.
 active_revision: example-rom-revision
+# The AFR this ECM states at lambda = 1: the constant its tables and display
+# use (14.7 on most gasoline ECMs), NOT the fuel's stoichiometric ratio. Every
+# AFR in this file is in this scale; voltage-route AFR divides back to lambda
+# by it. Required.
+afr_scale: 14.7
 # How this ECM reports Mode-01 PID 0x44: phi (fuel/air) | lambda (air/fuel).
 # They are reciprocals and BOTH read 1.0 at stoich, so the convention is
 # invisible in closed loop — it can only be settled under enrichment. Log PID

@@ -45,7 +45,7 @@ does, the fix is a spec change and a retrain is owed (the 2026-09 IF incident).
 
 ## Part A — Trip, economy and acceleration figures
 
-- [~] **M01.1 (Error) 0–60 mph and quarter-mile times include the time spent
+- [x] **M01.1 (Error) 0–60 mph and quarter-mile times include the time spent
   stationary.** `signals/derived.py` `_accel_metrics` sets `launch_t` at the
   *first* sample at or below launch speed (2 mph). While the truck sits at
   exactly 0 km/h, which is what the integer speed PID reads at a stop,
@@ -70,12 +70,16 @@ does, the fix is a spec change and a retrain is owed (the 2026-09 IF incident).
     `test_accel_metrics_wait_is_excluded_through_summarize_trip`,
     `test_accel_metrics_creep_below_launch_speed_restarts_clock` (creep at
     ≤ 2 mph before the pull), `test_accel_metrics_bogged_run_does_not_count`.
-  - [~] The thresholds are on raw `obd:SPEED` (M01.2), so "60 mph" is reached
+  - [x] The thresholds are on raw `obd:SPEED` (M01.2), so "60 mph" is reached
     at about 65 true and the quarter mile ends at about 437 m. Use corrected
     speed.
-    *Remaining:* needs M01.2's per-profile speed correction function, which
-    does not exist yet; `summarize_trip` still feeds raw `obd:SPEED`. Wire
-    the corrected series into the `_accel_metrics` call when M01.2 lands.
+    *Done 2026-11-12 with M01.2:* `summarize_trip` hands `_accel_metrics`
+    road speed (its `SpeedCorrection`). `test_accel_metrics_run_on_road_speed`:
+    true speed ramps at 3 m/s² after a 30 s wait and the ECM reports 0.9203
+    of it. Corrected: 0–60 8.9408 s (60 mph reached at an indicated 55.2),
+    ¼ mile 16.3704 s at 402.336 m of road, trap 176.8 km/h; analytic 8.941 s
+    and 16.377 s. Uncorrected, the same trace gives 9.7151 s and 17.0701 s
+    (60 mph at a true 65.2, the quarter mile at 437 m).
   - [x] At 1 Hz the crossing time is quantized to a second. Interpolate the
     crossing between samples, or report the resolution with the figure.
     *Done 2026-11-12:* linear interpolation between the straddling samples —
@@ -87,7 +91,7 @@ does, the fix is a spec change and a retrain is owed (the 2026-09 IF incident).
     (4 m/s²: 6.7056 s, not 7 s); the 3 m/s² case lands within 0.007 s of the
     analytic quarter mile.
 
-- [ ] **M01.2 (Error) Trip distance integrates the ECM's speed, which reads
+- [~] **M01.2 (Error) Trip distance integrates the ECM's speed, which reads
   0.9203 × true on this truck.** `compute_derived_channels`
   (`derived:TRIP_DISTANCE_KM`), `summarize_trip` and the live accumulator in
   `features/live.py` all integrate raw `obd:SPEED`. The bias is recorded in
@@ -96,25 +100,65 @@ does, the fix is a spec change and a retrain is owed (the 2026-09 IF incident).
   in `docs/can-pids-dids.md`. The trip path does not apply it. Distance and
   average speed are 8.0 % low, so L/100 km reads 8.7 % high from this term
   alone. One hour at an indicated 100 km/h is 108.7 km.
-  - [ ] A per-profile speed correction for the Mode 01 speed channel, read by
+  - [x] A per-profile speed correction for the Mode 01 speed channel, read by
     one function that the batch and live paths both call (they are pinned
     equal by
     `test_live_trip_integrals_match_batch_compute_derived_channels`). A
     vehicle with no measured ratio integrates uncorrected and **says so**:
     the trip summary carries a `speed_basis` field.
-  - [ ] The ratio drifts with tire wear (full tread is about 2 % of radius)
+    *Done 2026-11-12:* `src/signals/speed_correction.py` `SpeedCorrection`
+    (`road_speed`, `basis`; `TRIP_SPEED_CHANNEL = "obd:SPEED"`) is a
+    **required** keyword of `compute_instantaneous_channels`,
+    `compute_derived_channels`, `summarize_trip` and
+    `TripSample.from_point`, so no caller can forget it. The ratio is read
+    from the profile's own `dyno.yaml` `motion_sources.speed` entry for
+    `obd:SPEED` by `src/vehicle/speed_correction.py`
+    `trip_speed_correction(config)` (mtime-cached; no file / no entry is
+    `SpeedCorrection.unmeasured`, naming which; malformed raises), not
+    through a platform: another truck of the generation on other tires must
+    not borrow it. Callers: `trip_summary_sidecar`, `feature_transform`
+    (instant economy, gear) and `LiveFeatureSource` (trip integrals).
+    `TripSummary.speed_basis` and `fuel_basis` are required dataclass fields
+    (and required in `dashboard/schemas.py` `TripSummaryFields` and the TS
+    type). Tests: `test_live_and_batch_apply_the_same_speed_ratio_and_fuel_cut`
+    (live = batch = hand-computed, at ratio 0.9203 with a fuel cut),
+    `test_distance_and_average_speed_integrate_road_speed` (1 h at an
+    indicated 100 km/h = 108.66 km), `test_the_summary_states_its_speed_basis`,
+    `test_the_basis_fields_are_required`, and `tests/test_speed_correction.py`
+    (bounds, unmeasured kinds, malformed file, and the loader agreeing with
+    the dyno's `MotionSources` schema for every tracked `dyno.yaml`).
+    Maximum speed and instant economy use road speed too.
+  - [x] The ratio drifts with tire wear (full tread is about 2 % of radius)
     and was measured in September on the pre-HAT receiver. Decide whether it
     is a profile constant or follows the rolling-circumference estimate
     (`/control/tires`).
-  - [ ] Bump the trip-summary sidecar's schema version so old sidecars
+    *Decided (operator, 2026-11-12): a profile constant, 0.9203 for
+    `obd:SPEED`.* Provenance and the tire-wear caveat are in its `evidence`
+    in `data/nissan-xterra-2008/dyno.yaml`: measured 2026-08-06T162657
+    (2185 paired seconds), re-measured 0.915–0.924 on six drives
+    2026-07-28..09-21 by the committee evaluator on 2026-09-25, all on the
+    pre-HAT USB receiver; re-measure after a tire change.
+  - [ ] *Future item (not part of this fix):* follow the per-drive
+    rolling-circumference estimate (`/control/tires`) instead of the
+    constant, so tire wear and a tire change track themselves.
+  - [x] Bump the trip-summary sidecar's schema version so old sidecars
     recompute, and note the date in the docs: mpg trends do not carry across
     it (the same warning as the 2026-07-26 `dt` fix).
-  - [ ] `_gear_estimate` matches rpm ÷ speed against the ratio table using the
+    *Done 2026-11-12:* `trip_summary_sidecar.SCHEMA_VERSION` 3 → 4 (the
+    daemon route and `get_or_compute_trip_summary` recompute any other
+    version); the dated warning is in its comment and in
+    `docs/mcp-server.md` (`get_trip_summary`). `docs/headless-api.md` was
+    dirty with another session's edit, so its row is not changed.
+  - [x] `_gear_estimate` matches rpm ÷ speed against the ratio table using the
     same biased speed. It still picks correctly on this gearbox (8.6 % bias
     against 30 % spacing between 5th and 6th); apply the correction there too
     so a close-ratio box is not marginal.
+    *Done 2026-11-12:* `compute_instantaneous_channels` hands
+    `_gear_estimate` road speed.
+    `test_gear_estimate_matches_on_road_speed`: gears 6 % apart, indicated
+    8 % low; uncorrected names gear 1, corrected gear 2 (true).
 
-- [ ] **M01.3 (Error, two parts) One constant is doing two jobs: the fuel's
+- [x] **M01.3 (Error, two parts) One constant is doing two jobs: the fuel's
   stoichiometric ratio and the ECM's AFR display scale.**
   - **(a) Latent.** `analysis/tuning_context.py` fills
     `TuningContext.afr_stoich` from
@@ -132,13 +176,48 @@ does, the fix is a spec change and a retrain is owed (the 2026-09 IF incident).
     `TuningContext` docstring ("it comes from the configured fuel … a
     gasoline literal is wrong for every other profile") steers the next
     editor toward that mistake.
-    - [ ] Carry the AFR scale on the thing that produced the number (the AFR
+    - [x] Carry the AFR scale on the thing that produced the number (the AFR
       calibration, or the measured-source declaration for a third-party
       gauge) and remove `afr_stoich` from `TuningContext`, so an AFR-quantity
       source cannot be converted with a fuel property. Sweep the callers
       (`delivery_evidence`, `sim_design`, `plant_validation`).
-    - [ ] Test: set the profile's fuel to something other than gasoline and
+      *Done 2026-11-12:* `AfrCalibration.afr_scale` is a required field
+      (Xterra `afr_scale: 14.7`, the 0xE644 table's λ × 7350 = AFR × 500);
+      `MeasuredSource.afr_scale` is required for an `identity` AFR source and
+      refused on `voltage_afr` (whose scale is the calibration's) and on λ
+      sources; `CommandedSource.afr_scale` is required for `quantity: afr`.
+      `to_lambda(..., afr_scale=)` refuses an AFR without one, and every
+      `afr_stoich` parameter on the delivery, tuning-frame, channel and
+      digest paths is gone: the scale is resolved from the source
+      (`MeasuredSource.scale_for(calibration)`), so no caller can hand in a
+      fuel property. The same defect in reverse was swept too: φ→AFR
+      (`obd:COMMANDED_AFR`, the tuning frame's `equiv_ratio_afr`), the
+      delivery report's AFR columns, `derived:AFR_B*` and the A/F-voltage λ
+      bank balance now use `calibration.afr_scale`. `sim_design`,
+      `plant_validation.fill_samples` and `tools/rom_sim.py` lost their
+      `fuel_type` / `--fuel-type` (it only fed that conversion), as did
+      `scripts/lambda_delivery_evidence.py` and three `tools/fuel_comp_*`
+      CLIs. The ROM-maps API emits `afr_scale` (and the old `afr_stoich`
+      alias). Values unchanged: the delivery samples of every
+      commanded × measured route (voltage routes included) and the tuning
+      frame hash identically at HEAD and after, on
+      `_capture-ram-study-2026-10-04T204557`,
+      `_capture-tuning-2026-11-12T010305`/`T034249` and the committed
+      fixtures. Refusals: `test_an_afr_source_declared_without_a_scale_is_refused`,
+      `test_an_afr_calibration_without_its_scale_is_refused`,
+      `test_an_afr_reading_needs_its_sources_scale`
+      (`tests/test_lambda_delivery.py`).
+    - [x] Test: set the profile's fuel to something other than gasoline and
       assert the voltage-route λ does not move.
+      *Done 2026-11-12:*
+      `test_a_non_gasoline_fuel_does_not_move_the_voltage_route_lambda`
+      (gasoline vs E85 profile through `TuningContext.from_config`; λ at the
+      stoich knot = 7387/500/14.7),
+      `test_the_context_carries_no_fuel_stoichiometry`,
+      `test_a_non_gasoline_profiles_workbench_afr_is_the_ecms_afr`
+      (`tests/test_tuning_context.py`), and
+      `test_lambda_balance_is_taken_in_lambda_after_each_banks_own_transfer[e85]`
+      (`tests/test_bank_balance_persistence.py`, fails on the old code).
   - **(b) Present.** `signals/derived.py`
     `FUEL_PROPERTIES["gasoline"] = (14.7, 0.745, 2.31, 43.0)` (stoich, kg/L,
     kg CO2/L, MJ/kg) are E0 values. `fuel_plant.yaml` works at 14.1 with the
@@ -154,34 +233,118 @@ does, the fix is a spec change and a retrain is owed (the 2026-09 IF incident).
       blend is not constant: stoich lies between 14.1 (E10) and 14.7 (E0),
       the bracket `fuel_plant.yaml` already states, and any fuel-mass, economy
       or CO2 figure carries up to 4 % from the blend alone. λ does not.
-    - [ ] Add an `e10` fuel type (stoich 14.08, 0.749 kg/L, 2.28 kg CO2/L,
+    - [x] Add an `e10` fuel type (stoich 14.08, 0.749 kg/L, 2.28 kg CO2/L,
       41.7 MJ/kg), or put stoich and density in the profile, and select it for
       this truck. **Do (a) first**, or selecting it triggers the latent error.
-    - [ ] The trip summary states the fuel basis it used, next to
+      *Done 2026-11-12:* `FUEL_PROPERTIES["e10"]` in `signals/derived.py`,
+      `"e10"` in `VehicleParameters.fuel_type` (dashboard choices follow:
+      `tests/test_profile_edit.py`), and `profiles.yaml` sets
+      `fuel_type: e10` for `nissan-xterra-2008` (the 2013 stays `gasoline`:
+      no operator answer for it). Selected last, after (a) in this tree.
+      Per sample on 2026-10-10T153117 and 2026-09-20T152758, every
+      non-fuel-cut row's `derived:FUEL_RATE_LPH` moved by exactly
+      ×1.038458 = (14.7·0.745)/(14.08·0.749) (8,219 rows, min = max).
+      `test_e10_constants`,
+      `test_e10_fuel_volume_moves_by_the_analytic_factor_per_unit_air`.
+      LHV is **41.3**, not the 41.7 above: the blend arithmetic used for e85
+      (0.0789 kg ethanol at 26.8 MJ/kg + 0.6705 kg E0 at 43.0, over
+      0.7494 kg) gives 41.29, and 41.7 cannot be reproduced from those
+      components; CO2 2.28 is that arithmetic's. LHV feeds only
+      `_estimated_power_kw`'s fuel-energy route: E0 → E10 moves
+      `derived:ESTIMATED_POWER_HP` / `ESTIMATED_TORQUE_NM` ×1.0028 (×1.0125
+      at 41.7). Pinned by
+      `test_blend_co2_and_heating_value_follow_the_blend_arithmetic[e10]`.
+    - [x] The trip summary states the fuel basis it used, next to
       `speed_basis` (M01.2).
-    - [ ] Octane does not change stoich: 91 is still an ethanol blend, so
+      *Done 2026-11-12:* `TripSummary.fuel_basis` (required), e.g. `e10:
+      stoich 14.08, 0.749 kg/L, 2.28 kg CO2/L, LHV 41.3 MJ/kg; zero in decel
+      fuel cut (obd:COMMANDED_EQUIV_RATIO = 0 on 60 rows)`, or "decel fuel
+      cut not detectable (no obd:COMMANDED_EQUIV_RATIO), so fuel-cut rows
+      count fuel". `test_fuel_basis_says_whether_fuel_cut_was_detectable`.
+    - [x] Octane does not change stoich: 91 is still an ethanol blend, so
       these constants stay when the grade changes. What the grade changes is
       knock margin, so record the change as a vehicle event when it happens
       and do not compare spark or knock data across it without saying so.
       Z1's published power figures are on 93 octane
       (`docs/roadmap/supercharger-build.md`); the build will run on 91.
-    - [ ] The `e85` row's CO2 (1.56 kg/L against about 1.64) and LHV are also
+      *Done 2026-11-12 (text only, as briefed):* the `FUEL_PROPERTIES`
+      comment and the comment on the Xterra's `fuel_type` in `profiles.yaml`
+      say both. No machinery built.
+    - [x] The `e85` row's CO2 (1.56 kg/L against about 1.64) and LHV are also
       a little low; check them when the table is touched.
+      *Done 2026-11-12:* 1.64 kg CO2/L and 29.1 MJ/kg by blend arithmetic
+      (85 % ethanol by volume at 0.789 kg/L, 52.14 % C, 26.8 MJ/kg; 15 % E0 at
+      0.745 kg/L, 86.6 % C, 43.0 MJ/kg); the CO2 also matches the volume blend
+      of EPA's 5.75 / 8.78 kg CO2/gal factors. Component figures are handbook
+      values from memory, not a fetched source; the arithmetic is pinned in
+      `test_blend_co2_and_heating_value_follow_the_blend_arithmetic[e85]`. Stoich
+      and density unchanged.
   - With M01.2: reported mpg ≈ 0.955 × true. The two errors have opposite
     signs, so fixing one alone makes the number worse.
 
-- [ ] **M01.4 (Approximation, undocumented) Fuel is counted during decel fuel
+- [x] **M01.4 (Approximation, undocumented) Fuel is counted during decel fuel
   cut.** `_instant_fuel_g_s` computes MAF ÷ (stoich · λ) for every sample with
   λ > 0. In fuel cut the injectors are off, MAF still reads a few g/s and the
   wideband sits at its lean limit, so each second counts a little fuel that
   was not injected: 5 g/s at λ 2.0 is 0.82 L/h. `signals/afr.fuel_cut_rows`
   (PID 0x44 = 0) exists and this path does not use it.
-  - [ ] Measure it first on a stored mountain drive: the share of
+  - [x] Measure it first on a stored mountain drive: the share of
     `derived:FUEL_USED_L` accrued in rows `fuel_cut_rows` marks. The estimate
     is about 1 % on an ordinary drive and 3 % on a long descent.
-  - [ ] Zero the fuel rate in fuel-cut rows. Keep the existing rule that a
+    *Measured 2026-11-12* (HEAD code, `resample_and_segment` 1 Hz grid,
+    `compute_derived_channels` without calibration as the sidecar runs it;
+    wideband λ present on every drive; descent = largest drop of 30 s-smoothed
+    GPS altitude):
+
+    | Drive | Whole drive: fuel, share in cut rows | Descent: drop, distance, share |
+    |---|---|---|
+    | 2026-09-20T152758 (mountain) | 2.706 L, **2.10 %** | 467 m over 8.9 min, 8.6 km indicated, **12.4 %** |
+    | 2026-10-10T153117 (ordinary) | 3.031 L, **0.92 %** | 148 m, 11.3 km, 0.82 % |
+    | 2026-08-06T162657 | 9.63 L, 1.46 % | 303 m, 12.5 km, 3.6 % |
+    | 2026-09-10T142711 | 3.53 L, 2.30 % | 306 m, 7.0 km, 4.4 % |
+    | 2026-10-10T134622 | 3.64 L, 1.11 % | 293 m, 7.5 km, 3.2 % |
+
+    These are lower bounds: PID 0x44 is fresh on only 29–60 % of grid rows,
+    and a row without it is not known to be in cut. On φ-observed rows alone
+    the share is 3.5 % (09-20T152758) and 1.4 % (10-10T153117), and 24 % of
+    the 09-20 descent. The 160 φ = 0 rows of those two drives sit at a median
+    6 % throttle, 60 km/h and λ 2.0 (the wideband's lean limit), so φ 0 is
+    fuel cut, not "λ unavailable" as an older test assumed.
+  - [x] Zero the fuel rate in fuel-cut rows. Keep the existing rule that a
     missing λ during open-loop enrichment yields NaN, not stoich; that part is
     right and its comment says why.
+    *Done 2026-11-12:* `_instant_fuel_g_s` returns 0 g/s on
+    `fuel_cut_rows` for every method. `fuel_cut_rows` and
+    `COMMANDED_EQUIV_RATIO_COLUMN` moved to `signals/fuel_cut.py` (`derived`
+    cannot import `afr`, which imports `derived`); `afr` re-exports them, and
+    `test_fuel_cut_is_defined_once` holds it to one definition under `src/`.
+    The feature-frame cache moved to version 11 and hashes the profile's
+    `dyno.yaml` (`test_the_feature_cache_key_hashes_the_speed_ratio_the_trip_channels_read`),
+    so retraining cannot reuse pre-fix frames. The live integrals read
+    the same zeroed `derived:FUEL_RATE_LPH`, so there is no live copy. The
+    commanded-ratio route used to give NaN there, and the integrator bridged
+    the cut with the fuelled samples either side. Removing it took 1.005 %
+    of 10-10T153117's fuel and 2.379 % of 09-20T152758's (more than the
+    rows' own increments, because a zeroed row also halves its neighbors'
+    trapezoids). Tests: `test_fuel_cut_rows_count_no_fuel_on_the_wideband_route`,
+    `test_fuel_cut_is_not_bridged_on_the_commanded_ratio_route`,
+    `test_missing_lambda_outside_fuel_cut_stays_nan_not_stoich`,
+    `test_a_commanded_ratio_of_zero_is_fuel_cut_not_infinite` (was
+    `..._lambda_of_zero_is_absent_not_infinite`). Cross-check against the
+    ECM's own fuel counter (0x551 byte 1, F01.14): in φ-0 rows it advanced on
+    13 of 98 (09-20) and 19 of 60 (10-10) rows, at 0.32 and 0.68 L/h on the
+    fuelled-row scale against the old 1.45 and 1.82 L/h, so zero is much the
+    nearer; the residual (≈0.3–0.4 % of each drive's fuel) is the 1 Hz grid's
+    φ timing at the edges of a cut.
+    *Known answer, M01.2 + M01.3(b) + M01.4 together* (stored sidecar path
+    `compute_trip_summary`, HEAD worktree against this tree, per sample):
+    every moving row's distance increment ×1.086602 = 1/0.9203 (1,667 rows,
+    min = max); every non-cut fuel-rate row ×1.038458; every cut row 0.
+    Re-integrating the old per-row rates with those two changes reproduces
+    the new totals to 5 decimals. 10-10T153117: 19.846 → 21.565 km, 3.0313 →
+    3.1162 L, 15.40 → 16.28 mpg (×1.0570 = (1/0.9203) / 1.03846 /
+    (1 − 0.01005)); 09-20T152758: 11.304 → 12.283 km, 2.7064 → 2.7436 L,
+    9.82 → 10.53 mpg (×1.0719, cut share 2.379 %).
 
 - [ ] **M01.5 (Question) MAF-based economy has never been checked against a
   fill-up.** Fuel = MAF ÷ (stoich · λ) inherits the MAF's calibration error

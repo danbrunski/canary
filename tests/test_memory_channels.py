@@ -41,6 +41,7 @@ from src.decode.dids import (
     plan_memory_reads,
     select_memory_channels,
 )
+from src.signals.afr import AfrCalibration
 
 _TARGET = MemoryChannel(
     name="ECM_TARGET_EQUIV_RATIO",
@@ -269,7 +270,13 @@ def test_commanded_afr_provider_converts_phi_to_afr(tmp_path: Path) -> None:
     session.mkdir()
     _session_frame().to_parquet(session / "telemetry-0001.parquet")
 
-    frame = build_tuning_frame(session, providers_path=registry, afr_stoich=14.7).values
+    # M01.3(a): the AFR is in the ECM's scale, so the role needs the calibration.
+    refused = build_tuning_frame(session, providers_path=registry)
+    assert refused.capability["commanded_afr"]["available"] is False
+    assert "afr_scale" in str(refused.capability["commanded_afr"]["reason"])
+    frame = build_tuning_frame(
+        session, providers_path=registry, calibration=AfrCalibration(afr_scale=14.7)
+    ).values
 
     assert frame["commanded_afr"].dropna().iloc[0] == pytest.approx(12.63, abs=0.01)
     # The instrument reading survives the conversion, as it does for voltage.
@@ -306,7 +313,7 @@ def test_fueling_active_is_true_wherever_a_target_exists(tmp_path: Path) -> None
     session.mkdir()
     _session_frame().to_parquet(session / "telemetry-0001.parquet")
 
-    frame = build_tuning_frame(session, providers_path=registry, afr_stoich=14.7).values
+    frame = build_tuning_frame(session, providers_path=registry).values
 
     assert frame["fueling_active"].tolist() == [True]
 

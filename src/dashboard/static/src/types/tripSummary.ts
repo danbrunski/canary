@@ -16,6 +16,10 @@ export interface TripSummaryFields {
   zero_to_60_mph_s: number | null;
   quarter_mile_s: number | null;
   quarter_mile_trap_kph: number | null;
+  /** The speed the distance and speeds were computed on (M01.2). */
+  speed_basis: string;
+  /** The fuel constants and fuel-cut handling (M01.3(b), M01.4). */
+  fuel_basis: string;
 }
 
 export interface TripSummaryResponse {

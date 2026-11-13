@@ -27,6 +27,7 @@ from src.signals.afr import FlashHistory, append_afr_channels, load_afr_calibrat
 from src.signals.committees import append_committee_residuals, committee_channel_reason
 from src.signals.derived import compute_anomaly_signals, compute_instantaneous_channels
 from src.vehicle.profiles import active_flash_history
+from src.vehicle.speed_correction import trip_speed_correction
 
 log = logging.getLogger(__name__)
 
@@ -262,9 +263,13 @@ def append_derived_channels(
     # λ on others, the two are reciprocals, and they agree at stoich — so
     # guessing is silent at idle and worst under enrichment, exactly where the
     # fuel estimate matters. Passing it lets the fuel math use the verified
-    # convention instead of hard-coding λ.
+    # convention instead of hard-coding λ. The speed correction (M01.2) is the
+    # profile's measured ratio, the same one the trip integrals apply.
     framed = compute_instantaneous_channels(
-        framed, config.vehicle.parameters, calibration=afr_calibration
+        framed,
+        config.vehicle.parameters,
+        speed_correction=trip_speed_correction(config),
+        calibration=afr_calibration,
     )
     # Sensor-committee channels (H04.1): the member transforms and the spread
     # residuals of redundant sensors of one quantity (e.g. OBD↔GPS speed).

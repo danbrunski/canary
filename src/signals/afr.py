@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from src.columns import SESSION_COLUMN, arrived_column
 from src.config import VehicleParameters
 from src.signals.derived import _append_dependency_gap, _selected_input, fuel_properties
+from src.signals.fuel_cut import COMMANDED_EQUIV_RATIO_COLUMN, fuel_cut_rows
 from src.signals.pairing import to_seconds
 from src.signals.vehicle_signals import (
     LoadAxisChannel,
@@ -570,6 +571,16 @@ class AfrCalibration(_Strict):
     schema_version: int = 1
     provenance: dict[str, str] = Field(default_factory=dict)
     active_revision: str | None = None
+    #: M01.3(a) — the AFR this ECM states at λ = 1, required: the constant its
+    #: author chose for every AFR it holds or produces (the A/F voltage table,
+    #: the target maps, the residual-source bounds), and so the scale of every
+    #: AFR derived here from λ or φ. A property of the ECM's program, not of
+    #: the fuel: the Xterra's tables are λ × 7350 = AFR × 500, i.e. λ × 14.7,
+    #: whatever is in the tank. Converting these AFRs with the configured
+    #: fuel's stoich read every voltage-route λ 4.3 % lean the day the profile
+    #: said E10. Fuel-mass arithmetic uses the fuel's stoich
+    #: (:func:`src.signals.derived.fuel_properties`); nothing here does.
+    afr_scale: float = Field(gt=0)
     #: Per-vehicle, because it is an ECM behaviour rather than a standard.
     commanded_equiv_ratio_convention: EquivRatioConvention = "unverified"
     voltage_transfer: VoltageAfrTransfer | None = None
@@ -626,8 +637,8 @@ class AfrCalibration(_Strict):
                 return source
         raise KeyError(f"no voltage residual source named {name!r}")
 
-    def commanded_afr(self, value: float, *, afr_stoich: float) -> float:
-        """Convert a raw PID 0x44 reading to commanded AFR.
+    def commanded_afr(self, value: float) -> float:
+        """Convert a raw PID 0x44 reading to commanded AFR, in :attr:`afr_scale`.
 
         Raises when the convention is unverified — a wrong guess here is a
         reciprocal, i.e. an error that grows with how rich the target is,
@@ -644,10 +655,10 @@ class AfrCalibration(_Strict):
         if value <= 0:
             raise ValueError(f"equivalence ratio must be positive, got {value}")
         if self.commanded_equiv_ratio_convention == "phi":
-            return afr_stoich / value
-        return afr_stoich * value
+            return self.afr_scale / value
+        return self.afr_scale * value
 
-    def commanded_afr_series(self, ratio: pd.Series, *, afr_stoich: float) -> pd.Series:
+    def commanded_afr_series(self, ratio: pd.Series) -> pd.Series:
         """Convert a series of raw PID 0x44 readings, fuel cut included.
 
         A reading of exactly zero is decel fuel cut — the ECU is commanding no
@@ -666,11 +677,11 @@ class AfrCalibration(_Strict):
         numeric = pd.to_numeric(ratio, errors="coerce")
         positive = numeric[numeric > 0].dropna()
         probe = float(positive.iloc[0]) if not positive.empty else 1.0
-        self.commanded_afr(probe, afr_stoich=afr_stoich)
+        self.commanded_afr(probe)
         valid = numeric.where(numeric > 0)
         if self.commanded_equiv_ratio_convention == "phi":
-            return afr_stoich / valid
-        return afr_stoich * valid
+            return self.afr_scale / valid
+        return self.afr_scale * valid
 
     def target_map(self, revision: str) -> TargetAfrMap | None:
         """The map recorded for exactly ``revision``, or ``None``.
@@ -1116,32 +1127,6 @@ class TargetAfrLookup:
     fuel_cut_rows: int = 0
 
 
-#: J1979 PID 0x44, commanded equivalence ratio. Exactly zero is the ECM
-#: commanding no fuel at all: decel fuel cut (``AfrCalibration.commanded_afr_series``
-#: reads it the same way), whatever the vehicle's phi/lambda convention.
-COMMANDED_EQUIV_RATIO_COLUMN = "obd:COMMANDED_EQUIV_RATIO"
-
-
-def fuel_cut_rows(frame: pd.DataFrame) -> pd.Series:
-    """Rows on which the ECM reports decel fuel cut: its commanded
-    equivalence ratio (PID 0x44) reads exactly zero (P02.15).
-
-    A sentinel is a state, not a number: the ECM has no target then (UpRev
-    displays its TARGET AFR as 30.00), so the target map has nothing to say.
-    PID 0x03 ``FUEL_STATUS`` cannot stand in. Its fuel-cut code (0x04) is
-    "open loop for load *or* decel fuel cut" by J1979. On the Xterra's two
-    default drives it reads 0x04 on 154 rows that also carry phi: 114 at
-    phi 0, 35 near stoich, 3 under enrichment (phi 1.15-1.16), so it would
-    withhold real targets. Phi 0 agrees with it the other way (114 of 117
-    phi-0 rows read 0x04). A row with no commanded ratio is not in fuel cut as
-    far as this knows: absent, the state is unknown, not "cut".
-    """
-    if COMMANDED_EQUIV_RATIO_COLUMN not in frame:
-        return pd.Series(False, index=frame.index, dtype=bool)
-    ratio = pd.to_numeric(frame[COMMANDED_EQUIV_RATIO_COLUMN], errors="coerce")
-    return ratio.eq(0.0).fillna(False).astype(bool)
-
-
 def target_map_refusal(calibration: AfrCalibration, revision: str | None) -> str | None:
     """Why rows on ``revision`` get no target map, or ``None`` when one is recorded.
 
@@ -1261,7 +1246,14 @@ def append_afr_channels(
     (logged once per process by refusal), never the gain-1 value.
     """
     out = frame.copy()
-    stoich = fuel_properties(vehicle).afr_stoich
+    # M01.3(a): every AFR here is compared with the calibration's (the voltage
+    # route, the target maps), so a wideband's λ becomes AFR at the ECM's
+    # scale, never the fuel's stoich (14.08 for E10 against the tables' 14.7).
+    # With no calibration there is no ECM scale and nothing in that scale to
+    # compare against, so the wideband-only AFR stays the fuel's mass ratio.
+    scale = (
+        calibration.afr_scale if calibration is not None else fuel_properties(vehicle).afr_stoich
+    )
     transfer = calibration.voltage_transfer if calibration else None
     floor = transfer.censored_floor_afr if transfer else 10.0
     ceiling = transfer.censored_ceiling_afr if transfer else 18.0
@@ -1279,7 +1271,7 @@ def append_afr_channels(
         for lambda_column in wideband_lambda_columns(bank):
             if measured is not None or lambda_column not in out:
                 continue
-            candidate = pd.to_numeric(out[lambda_column], errors="coerce") * stoich
+            candidate = pd.to_numeric(out[lambda_column], errors="coerce") * scale
             # Presence is not the same as data. Bank-2 lambda is unsupported on
             # some ECUs (it stays in poll sets because that is a fact about one
             # vehicle), leaving an all-NaN column that must not shadow a
@@ -1298,9 +1290,7 @@ def append_afr_channels(
             out[f"derived:AFR_B{bank}"] = measured
             out[f"derived:AFR_CENSORED_B{bank}"] = measured.le(floor) | measured.ge(ceiling)
 
-    _append_lambda_bank_balances(
-        out, calibration, baro, stoich=stoich, floor=floor, ceiling=ceiling
-    )
+    _append_lambda_bank_balances(out, calibration, baro, floor=floor, ceiling=ceiling)
 
     if calibration is None or not calibration.target_maps or "obd:RPM" not in out:
         return out
@@ -1355,7 +1345,6 @@ def _append_lambda_bank_balances(
     calibration: AfrCalibration | None,
     baro: BaroSamples | None,
     *,
-    stoich: float,
     floor: float,
     ceiling: float,
 ) -> None:
@@ -1383,6 +1372,12 @@ def _append_lambda_bank_balances(
         pairs.append(
             (LAMBDA_BANK_BALANCE_WIDEBAND, (wideband_lambda_columns(1), wideband_lambda_columns(2)))
         )
+    if not pairs:
+        return
+    assert calibration is not None
+    # M01.3(a): the voltage route's AFR is in the ECM's scale, so it divides
+    # back to λ by that scale; the configured fuel's stoich is not it.
+    scale = calibration.afr_scale
     for output, groups in pairs:
         selected = [_selected_input(out, group) for group in groups]
         if any(column is None for column in selected):
@@ -1396,8 +1391,8 @@ def _append_lambda_bank_balances(
                 _log_baro_refusals(output, converted, calibration)
                 afr = converted.afr
             else:
-                afr = pd.to_numeric(out[column], errors="coerce") * stoich
-            lambdas.append((afr / stoich).where((afr > floor) & (afr < ceiling)))
+                afr = pd.to_numeric(out[column], errors="coerce") * scale
+            lambdas.append((afr / scale).where((afr > floor) & (afr < ceiling)))
         out[output] = (lambdas[0] - lambdas[1]).astype(float)
         _append_dependency_gap(out, output, *groups)
 

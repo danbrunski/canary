@@ -1004,19 +1004,12 @@ _EQUIV_RATIO_CHANNEL = "COMMANDED_EQUIV_RATIO"
 def _commanded_afr_series(
     frame: pd.DataFrame,
     calibration: AfrCalibration | None,
-    afr_stoich: float | None,
 ) -> pd.DataFrame:
     if calibration is None:
         raise ChannelSpecError(
             f"{COMMANDED_AFR_SPEC} needs an AFR calibration; pass calibration= "
-            "(the vehicle profile's afr_calibration.yaml)"
-        )
-    if afr_stoich is None:
-        # No gasoline default (R05.1): a literal 14.7 here made the workbench
-        # disagree with the serve path for any non-gasoline profile.
-        raise ChannelSpecError(
-            f"{COMMANDED_AFR_SPEC} needs the vehicle's stoichiometric AFR; pass "
-            "afr_stoich= (TuningContext.afr_stoich, from derived.fuel_properties)"
+            "(the vehicle profile's afr_calibration.yaml): its convention says phi or "
+            "lambda, and its afr_scale is the AFR the ECM states at lambda = 1 (M01.3)"
         )
     rows = frame[(frame["source"] == "obd") & (frame["channel"] == _EQUIV_RATIO_CHANNEL)]
     out = rows.loc[:, ["timestamp"]].copy()
@@ -1024,7 +1017,7 @@ def _commanded_afr_series(
     # Raises for an unverified convention — deliberately loud, once per call.
     # A ratio of 0.0 is decel fuel cut (no target at all) and converts to NaN,
     # which is dropped below; see AfrCalibration.commanded_afr_series.
-    out["value"] = calibration.commanded_afr_series(ratio, afr_stoich=afr_stoich)
+    out["value"] = calibration.commanded_afr_series(ratio)
     out["unit"] = "AFR"
     return out.dropna(subset=["value"])
 
@@ -1036,7 +1029,6 @@ def read_channels(
     bindings_path: Path = BINDINGS_YAML,
     dids_path: Path = DIDS_YAML,
     calibration: AfrCalibration | None = None,
-    afr_stoich: float | None = None,
     acquired_time: bool = False,
 ) -> pd.DataFrame:
     """Read ``specs`` from one session as a long frame in engineering units.
@@ -1090,7 +1082,7 @@ def read_channels(
     parts: list[pd.DataFrame] = []
     for spec in parsed:
         if spec.source == "obd" and spec.name.upper() == "COMMANDED_AFR":
-            part = _commanded_afr_series(frame, calibration, afr_stoich)
+            part = _commanded_afr_series(frame, calibration)
         else:
             part = readers[spec.source](spec)
         part = part.assign(spec=spec.text)
@@ -1212,7 +1204,6 @@ def read_aligned(
     bindings_path: Path = BINDINGS_YAML,
     dids_path: Path = DIDS_YAML,
     calibration: AfrCalibration | None = None,
-    afr_stoich: float | None = None,
 ) -> pd.DataFrame:
     """Put ``specs`` on one clock, refusing stale joins by default.
 
@@ -1250,7 +1241,6 @@ def read_aligned(
         bindings_path=bindings_path,
         dids_path=dids_path,
         calibration=calibration,
-        afr_stoich=afr_stoich,
     )
     return align_long(
         long,

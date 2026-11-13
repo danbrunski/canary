@@ -1201,7 +1201,6 @@ def _digest_inputs(session_dir: Path, context: TuningContext, profile: str | Non
             session_dir,
             providers_path=context.providers_path,
             calibration=context.calibration,
-            afr_stoich=context.afr_stoich,
         )
         capabilities = {
             "roles": semantic.capability,
@@ -1346,7 +1345,6 @@ def _delivery(inputs: _DigestInputs) -> tuple[dict[str, Any] | None, list[str]]:
                 ),
                 calibration=context.calibration,
                 revisions=context.registry,
-                afr_stoich=context.afr_stoich,
                 rpm_bands=load_wot.rpm_bands,
                 # The ROM's Base Fuel Schedule axis is not yet observable, so
                 # an all-DID delivery result cannot claim the Mode-01 load
@@ -1385,7 +1383,6 @@ def _mode01_delivery(session_dir: Path, context: TuningContext) -> DeliveryError
         declaration=context.lambda_delivery,
         calibration=context.calibration,
         revisions=context.registry,
-        afr_stoich=context.afr_stoich,
         mode01_exclusion_note=context.mode01_exclusion_note,
         rpm_bands=load_wot.rpm_bands,
         min_load=load_wot.load_floor_pct,
@@ -1555,7 +1552,8 @@ def compute_tuning_digest(
     profile = _capture_profile_name(session_dir)
     # R05.1: one resolution of the vehicle's tuning facts — the *active* flash
     # registry (a flash recorded from the dashboard lives in the operational
-    # copy), the profile's noise floor, and stoichiometry from the fuel.
+    # copy), the profile's noise floor, and the AFR calibration whose
+    # afr_scale every AFR here is in (M01.3: never the fuel's stoich).
     context = TuningContext.from_config(config)
     with shared_session_read(session_dir, _digest_specs(session_dir, context)):
         return _tuning_digest(session_dir, context, profile)

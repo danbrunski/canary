@@ -14,9 +14,16 @@ Its batch twin is ``compute_derived_channels``' cumulative columns, pinned
 equal by ``test_live_trip_integrals_match_batch_compute_derived_channels``.
 
 Pure: no I/O and no clock of its own. The caller supplies the tick's ``now``,
-its operating row, the bindings that scale a ``decoded:`` fallback and the
-fuel constants, each read per call so a hot-reloaded config applies on the
-next tick.
+its operating row, the bindings that scale a ``decoded:`` fallback, the speed
+correction and the fuel constants, each read per call so a hot-reloaded
+config applies on the next tick.
+
+Distance integrates *road* speed: :meth:`TripSample.from_point` applies the
+same :class:`~src.signals.speed_correction.SpeedCorrection` the batch path's
+``compute_derived_channels`` applies (M01.2). The fuel rate it reads is the
+operating row's ``derived:FUEL_RATE_LPH``, which
+``compute_instantaneous_channels`` already zeroed in decel fuel cut (M01.4),
+so neither correction has a second, live-only implementation.
 """
 
 from __future__ import annotations
@@ -34,6 +41,7 @@ from src.signals.derived import (
     MAX_INTEGRATION_DT_S,
     FuelProperties,
 )
+from src.signals.speed_correction import TRIP_SPEED_CHANNEL, SpeedCorrection
 from src.telemetry import DECODED_SOURCE, OBD_SOURCE, channel_key
 
 #: The cumulative columns :meth:`TripIntegrals.channels` reports, keyed as
@@ -56,7 +64,8 @@ class TripSample:
 
     :meth:`from_point` is the one place the operating row is read, with the
     same candidates as ``compute_derived_channels`` (``derived._series``):
-    prefer the OBD PID, fall back to the decoded broadcast.
+    prefer the OBD PID, fall back to the decoded broadcast. ``speed_kph`` is
+    road speed, ``speed_correction`` applied.
     """
 
     speed_kph: float | None
@@ -64,12 +73,18 @@ class TripSample:
     fuel_lph: float | None
 
     @classmethod
-    def from_point(cls, point: dict[str, Any], bindings: Bindings | None) -> TripSample:
+    def from_point(
+        cls,
+        point: dict[str, Any],
+        bindings: Bindings | None,
+        speed_correction: SpeedCorrection,
+    ) -> TripSample:
         # ``_first_finite`` scales a ``decoded:`` fallback to engineering
         # units — the broadcast rpm is 8 counts/rpm, and before 2026-09-18
         # its raw count went straight into the 200 rpm idle gate.
+        indicated = _first_finite(point, TRIP_SPEED_CHANNEL, bindings=bindings)
         return cls(
-            speed_kph=_first_finite(point, channel_key(OBD_SOURCE, "SPEED"), bindings=bindings),
+            speed_kph=None if indicated is None else speed_correction.road_speed(indicated),
             rpm=_first_finite(
                 point,
                 channel_key(OBD_SOURCE, "RPM"),

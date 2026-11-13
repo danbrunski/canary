@@ -19,7 +19,7 @@ Subcommands::
 Usage::
 
     .venv/bin/python -m tools.rom_sim design drives --base-revision ZS44A-20260920 \\
-        --sessions _capture-tuning-2026-09-23T142926 --fuel-type gasoline \\
+        --sessions _capture-tuning-2026-09-23T142926 \\
         --battery-v-when-unmeasured 14.0 --rom-dir "<ROM dir>" --out <scratch>/designs
     .venv/bin/python -m tools.rom_sim inspect --edits spec.yaml --rom-dir "<ROM dir>"
     .venv/bin/python -m tools.rom_sim run --base --revision ZS44A-20260920 \\
@@ -37,8 +37,8 @@ edited image (``--candidate-rom``, e.g. saved from UpRev).
 What it makes impossible rather than documented:
 
 - **Nothing the result depends on has a default.** ``--draws``, ``--seed``,
-  ``--fuel-type`` (drive designs), ``--battery-v-when-unmeasured`` (when a
-  drive needs it), the whole grid environment, and the learned trims and
+  ``--battery-v-when-unmeasured`` (when a drive needs it), the whole grid
+  environment, and the learned trims and
   candidate events a run starts from (``--stft-pct``, ``--ltft-pct``,
   ``--candidate-events``; ``none`` is a stated answer) are refused when
   missing: ``argument_missing``, or the library's own ``environment_unstated``
@@ -135,7 +135,6 @@ from src.analysis.sim_montecarlo import TOOL_VERSION as MONTECARLO_TOOL_VERSION
 from src.analysis.sim_report import TOOL_VERSION as REPORT_TOOL_VERSION
 from src.analysis.sim_report import render_report
 from src.paths import REPO_ROOT
-from src.signals.derived import FUEL_PROPERTIES
 from src.vehicle.tune_revisions import load_tune_revisions
 
 TOOL = "rom_sim"
@@ -414,18 +413,13 @@ def _design_payload(command: str, design: SimDesign, directory: Path) -> dict[st
 
 
 def cmd_design_drives(args: argparse.Namespace) -> dict[str, Any]:
-    _need(args, "base_revision", "sessions", "fuel_type", "out")
+    _need(args, "base_revision", "sessions", "out")
     out = _out_dir(args.out, _all_rom_dirs(args))
-    if args.fuel_type not in FUEL_PROPERTIES:
-        raise SimDesignRefusalError(
-            "fuel_type_unknown", f"{args.fuel_type!r} is not one of {sorted(FUEL_PROPERTIES)}"
-        )
     root = Path(args.sessions_root).expanduser()
     design = build_drive_design(
         [_session_path(name, root) for name in args.sessions],
         _profile(args),
         args.base_revision,
-        fuel_type=args.fuel_type,
         rom_dirs=_rom_dirs(args),
         plant_version=args.plant_version,
         battery_v_when_unmeasured=args.battery_v_when_unmeasured,
@@ -940,9 +934,6 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_SESSIONS,
         help="where bare session names are found (default: the laptop's ~/canary-data copy)",
-    )
-    drives.add_argument(
-        "--fuel-type", choices=sorted(FUEL_PROPERTIES), help="the vehicle's fuel (required)"
     )
     drives.add_argument(
         "--battery-v-when-unmeasured",

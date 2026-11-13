@@ -122,7 +122,7 @@ def restore_run(
     root = tmp_path_factory.mktemp("restore")
     _cli(
         "design", "drives", "--base-revision", OLD, "--sessions", SESSION,
-        "--sessions-root", SESSIONS_ROOT, "--fuel-type", "gasoline",
+        "--sessions-root", SESSIONS_ROOT,
         "--battery-v-when-unmeasured", "14.0", "--rom-dir", ROM_DIR, "--out", root / "designs",
         "--plant-version", plant,
     )  # fmt: skip
@@ -409,7 +409,7 @@ def test_a_default_draw_run_over_a_real_wot_drive_on_fuel_mv_2_never_refuses(
         pytest.skip(f"private drive not on this machine: {SESSIONS_ROOT / WOT_SESSION}")
     _cli(
         "design", "drives", "--base-revision", OLD, "--sessions", WOT_SESSION,
-        "--sessions-root", SESSIONS_ROOT, "--fuel-type", "gasoline",
+        "--sessions-root", SESSIONS_ROOT,
         "--battery-v-when-unmeasured", "14.0", "--rom-dir", ROM_DIR, "--out", tmp_path / "d",
     )  # fmt: skip
     (design_dir,) = (tmp_path / "d").iterdir()

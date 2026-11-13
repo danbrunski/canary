@@ -12,6 +12,10 @@ own copy of these facts, and they drifted:
   of the profile directory;
 - stoichiometry was a literal ``14.7`` default in a dozen signatures that no
   caller overrode, while the serve path read it from the configured fuel.
+  Both were the wrong quantity (M01.3): an AFR from the ECM or a gauge is λ
+  times its producer's constant, so its scale now travels with the producer
+  (``AfrCalibration.afr_scale``, ``MeasuredSource.afr_scale``) and this
+  context carries no fuel stoich at all.
 
 :meth:`TuningContext.from_config` is the one place those are resolved.
 """
@@ -31,7 +35,6 @@ from src.analysis.noise_floor import NoiseFloor, load_noise_floor
 from src.analysis.tuning_frame import LoadWotCriterion, ProviderRegistry, load_provider_registry
 from src.config import CanaryConfig
 from src.signals.afr import AfrCalibration, load_afr_calibration
-from src.signals.derived import fuel_properties
 from src.vehicle.profiles import active_registry, profile_dir
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 
@@ -40,13 +43,13 @@ from src.vehicle.tune_revisions import TuneRevisionRegistry
 class TuningContext:
     """Vehicle facts every tuning analysis needs, from profile data only.
 
-    Plain data so it pickles into the analysis child. ``afr_stoich`` has no
-    default on purpose: it comes from the configured fuel
-    (:func:`src.signals.derived.fuel_properties`), and a gasoline literal is
-    wrong for every other profile.
+    Plain data so it pickles into the analysis child. It holds no
+    stoichiometry, on purpose (M01.3): converting an AFR to λ takes the scale
+    of whatever produced that AFR — the ECM's (``calibration.afr_scale``) or a
+    declared measured source's — never the configured fuel's stoich, which
+    reads every voltage-route λ 4.3 % lean the day the profile says E10.
     """
 
-    afr_stoich: float
     calibration: AfrCalibration | None = None
     providers: ProviderRegistry | None = None
     providers_path: Path | None = None
@@ -118,7 +121,6 @@ def context_fields(config: CanaryConfig) -> dict[str, Any]:
     idle = config.preprocessing.operating_modes.get("idle")
     declaration = load_lambda_delivery(lambda_path) if lambda_path.exists() else None
     return {
-        "afr_stoich": fuel_properties(config.vehicle.parameters).afr_stoich,
         "calibration": (
             load_afr_calibration(calibration_path) if calibration_path.exists() else None
         ),

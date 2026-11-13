@@ -35,6 +35,7 @@ from src.signals.derived import (
     compute_anomaly_signals,
     compute_derived_channels,
 )
+from src.signals.speed_correction import SpeedCorrection
 from src.telemetry import (
     INPUT_GATED_SOURCES,
     NON_TRAINABLE_SOURCES,
@@ -50,6 +51,9 @@ REPO = Path(__file__).resolve().parents[1]
 TELEMETRY_PY = REPO / "src" / "telemetry.py"
 XTERRA = REPO / "data" / "nissan-xterra-2008"
 ROWS = 240
+
+#: These frames test channel inputs, not the speed scale (M01.2).
+UNCORRECTED_SPEED = SpeedCorrection.unmeasured("test frame: no measured ratio")
 
 
 def _session_frame(extra: dict[str, np.ndarray] | None = None) -> pd.DataFrame:
@@ -236,7 +240,9 @@ def test_every_derived_channel_the_pipeline_emits_declares_its_inputs() -> None:
         flash_history=registry,
     )
     frame = compute_anomaly_signals(frame, vehicle)
-    frame = compute_derived_channels(frame, vehicle, calibration=calibration)
+    frame = compute_derived_channels(
+        frame, vehicle, speed_correction=UNCORRECTED_SPEED, calibration=calibration
+    )
     frame = append_committee_residuals(frame)
     emitted = {
         column

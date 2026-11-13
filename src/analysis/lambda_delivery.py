@@ -123,6 +123,28 @@ class ResidualDefinition(_Strict):
     positive: Literal["lean"]
 
 
+def _check_afr_scale(
+    name: str, quantity: str, afr_scale: float | None, *, declared_here: bool
+) -> None:
+    """An AFR source states its scale where it is declared; nothing else may.
+
+    M01.3(a): an "AFR" is λ times a constant its producer chose. Converting it
+    with the configured fuel's stoich instead made every voltage-route λ read
+    4.3 % lean the day the profile said E10 (14.08 against the ECM's 14.7).
+    """
+    if quantity == "afr" and declared_here and afr_scale is None:
+        raise ValueError(
+            f"{name}: an AFR source must declare afr_scale, the AFR it reports at "
+            "lambda = 1 (its producer's display constant, e.g. 14.7), so it can be "
+            "converted to lambda without borrowing the fuel's stoichiometry (M01.3)"
+        )
+    if afr_scale is not None and not (quantity == "afr" and declared_here):
+        raise ValueError(
+            f"{name}: afr_scale belongs only on an AFR source whose scale is declared "
+            "here (a voltage_afr route takes its scale from the AFR calibration)"
+        )
+
+
 class CommandedSource(_Strict):
     """One channel that can carry the ECU's commanded mixture."""
 
@@ -146,11 +168,17 @@ class CommandedSource(_Strict):
     plausible_max: float
     #: Named where it matters, e.g. PID 0x44's closed-loop behaviour.
     limitations: list[str] = Field(default_factory=list)
+    #: M01.3(a) — for ``quantity: afr`` only, and then required: the AFR this
+    #: source reports at λ = 1, i.e. the scale its author chose (an ECM or a
+    #: gauge displays λ × 14.7 whatever is in the tank). Never the fuel's
+    #: stoich: that is a property of the fuel, not of the number's producer.
+    afr_scale: float | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def _checks(self) -> CommandedSource:
         if not self.plausible_min < self.plausible_max:
             raise ValueError(f"{self.name}: plausible_min must be below plausible_max")
+        _check_afr_scale(self.name, self.quantity, self.afr_scale, declared_here=True)
         if self.sentinel_spec is None and self.fuel_cut_value is None:
             raise ValueError(
                 f"{self.name}: a commanded source must say how fuel cut appears on it "
@@ -187,6 +215,35 @@ class MeasuredSource(_Strict):
     #: (PID 0x24 pegs at 2.000 under fuel cut). Source quantity.
     rail_low: float | None = None
     rail_high: float | None = None
+    #: M01.3(a) — the AFR this source reports at λ = 1: required for an
+    #: ``identity`` AFR source (a third-party gauge or wideband controller
+    #: displays λ × its own constant, usually 14.7, and cannot know the fuel),
+    #: refused on ``voltage_afr`` (the calibration that holds the transfer
+    #: states it, ``AfrCalibration.afr_scale``) and on a λ source.
+    afr_scale: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _scale(self) -> MeasuredSource:
+        if self.transform == "voltage_afr" and self.quantity != "afr":
+            raise ValueError(
+                f"{self.name}: a voltage_afr route yields AFR, so its quantity must be afr"
+            )
+        _check_afr_scale(
+            self.name, self.quantity, self.afr_scale, declared_here=self.transform == "identity"
+        )
+        return self
+
+    def scale_for(self, calibration: AfrCalibration | None) -> float | None:
+        """The AFR per λ this route's readings are in, from what produced them.
+
+        ``None`` for a λ source, and for a ``voltage_afr`` route without a
+        calibration (whose reads are ``calibration_unknown`` anyway).
+        """
+        if self.quantity != "afr":
+            return None
+        if self.transform == "voltage_afr":
+            return None if calibration is None else calibration.afr_scale
+        return self.afr_scale
 
 
 #: Largest remainder (percent) a disagreement may leave and still be filed
@@ -520,12 +577,21 @@ def load_lambda_delivery(
 # Conventions and the one residual
 
 
-def to_lambda(values: pd.Series | np.ndarray, quantity: Quantity, *, afr_stoich: float) -> Any:
+def to_lambda(
+    values: pd.Series | np.ndarray, quantity: Quantity, *, afr_scale: float | None = None
+) -> Any:
     """Convert a mixture reading to lambda. Non-positive readings become NaN.
 
     ``phi`` is fuel/air relative to stoich, so ``lambda = 1 / phi``; ``afr``
-    is ``afr / stoich``. A non-positive phi is fuel cut or garbage, never a
+    is ``afr / afr_scale``. A non-positive phi is fuel cut or garbage, never a
     mixture, so it maps to NaN rather than dividing into infinity.
+
+    ``afr_scale`` is the AFR the *source* reports at λ = 1 — the scale its
+    producer chose (:meth:`MeasuredSource.scale_for`, ``CommandedSource.
+    afr_scale``, ``AfrCalibration.afr_scale``) — and is required for ``afr``.
+    It is not the fuel's stoich: an ECM's or gauge's AFR is λ × 14.7 whatever
+    is in the tank, so dividing by an E10 stoich reads every λ 4.3 % lean
+    (M01.3).
     """
     if isinstance(values, np.ndarray) and values.dtype.kind == "f":
         # Already numeric: coercion would be the identity, at pandas' cost
@@ -540,9 +606,12 @@ def to_lambda(values: pd.Series | np.ndarray, quantity: Quantity, *, afr_stoich:
     elif quantity == "lambda":
         out[valid] = array[valid]
     elif quantity == "afr":
-        if not afr_stoich > 0:
-            raise LambdaDeliveryError(f"afr_stoich must be positive, got {afr_stoich}")
-        out[valid] = array[valid] / afr_stoich
+        if afr_scale is None or not afr_scale > 0:
+            raise LambdaDeliveryError(
+                f"an AFR reading converts to lambda only at its source's declared "
+                f"afr_scale, got {afr_scale!r} (M01.3: never the fuel's stoichiometry)"
+            )
+        out[valid] = array[valid] / afr_scale
     else:  # pragma: no cover - Literal guards this
         raise LambdaDeliveryError(f"unknown mixture quantity {quantity!r}")
     if isinstance(values, pd.Series):
@@ -772,7 +841,6 @@ def target_side_from_arrays(
     *,
     commanded: CommandedSource,
     quantity: Quantity | None,
-    afr_stoich: float,
 ) -> _TargetSide:
     """One row per target observation *and* per fuel-cut sentinel observation,
     so a cut is counted as ``fuel_cut`` instead of disappearing.
@@ -800,7 +868,9 @@ def target_side_from_arrays(
     target_lambda = (
         np.full(len(times), np.nan)
         if quantity is None
-        else np.where(cut | invalid, np.nan, to_lambda(raw, quantity, afr_stoich=afr_stoich))
+        else np.where(
+            cut | invalid, np.nan, to_lambda(raw, quantity, afr_scale=commanded.afr_scale)
+        )
     )
     return _TargetSide(times, raw, cut, invalid, target_lambda, order)
 
@@ -811,14 +881,11 @@ def _target_side(
     *,
     commanded: CommandedSource,
     quantity: Quantity | None,
-    afr_stoich: float,
 ) -> _TargetSide:
     """:func:`target_side_from_arrays` over long frames."""
     t_times, t_raw = _long_values(target)
     s_times, _ = _long_values(sentinel)
-    return target_side_from_arrays(
-        t_times, t_raw, s_times, commanded=commanded, quantity=quantity, afr_stoich=afr_stoich
-    )
+    return target_side_from_arrays(t_times, t_raw, s_times, commanded=commanded, quantity=quantity)
 
 
 @dataclass(frozen=True)
@@ -842,7 +909,6 @@ def measured_side_from_arrays(
     *,
     instrument: MeasuredSource,
     calibration: AfrCalibration | None,
-    afr_stoich: float,
     baro_times: np.ndarray | None = None,
     baro_kpa: np.ndarray | None = None,
 ) -> _MeasuredSide:
@@ -888,7 +954,12 @@ def measured_side_from_arrays(
         railed |= m_raw >= instrument.rail_high
     if instrument.rail_low is not None:
         railed |= m_raw <= instrument.rail_low
-    m_lambda = to_lambda(m_value, instrument.quantity, afr_stoich=afr_stoich)
+    if calibration_missing:
+        m_lambda = np.full(len(m_raw), np.nan)
+    else:
+        m_lambda = to_lambda(
+            m_value, instrument.quantity, afr_scale=instrument.scale_for(calibration)
+        )
     return _MeasuredSide(
         m_times, m_lambda, railed, censored, calibration_missing, baro_missing, baro_stale
     )
@@ -899,7 +970,6 @@ def _measured_side(
     *,
     instrument: MeasuredSource,
     calibration: AfrCalibration | None,
-    afr_stoich: float,
     baro: pd.DataFrame | None = None,
 ) -> _MeasuredSide:
     """:func:`measured_side_from_arrays` over long frames."""
@@ -910,7 +980,6 @@ def _measured_side(
         m_raw,
         instrument=instrument,
         calibration=calibration,
-        afr_stoich=afr_stoich,
         baro_times=b_times,
         baro_kpa=b_kpa,
     )
@@ -1239,7 +1308,6 @@ def delivery_samples(
     measured_source: str | None = None,
     sentinel: pd.DataFrame | None = None,
     calibration: AfrCalibration | None = None,
-    afr_stoich: float,
     delay: TransportDelay | None = None,
     drive_id: str | None = None,
     evaluation: bool = False,
@@ -1279,14 +1347,11 @@ def delivery_samples(
     instrument = declaration.measured(measured_source)
     _refuse_dependent_drive(drive_id, declaration, delay, evaluation=evaluation)
     quantity = resolve_quantity(commanded, calibration)
-    target_side = _target_side(
-        target, sentinel, commanded=commanded, quantity=quantity, afr_stoich=afr_stoich
-    )
+    target_side = _target_side(target, sentinel, commanded=commanded, quantity=quantity)
     measured_side = _measured_side(
         measured,
         instrument=instrument,
         calibration=calibration,
-        afr_stoich=afr_stoich,
         baro=baro,
     )
     delays_s = declared_delays_s(
@@ -1329,7 +1394,6 @@ def estimate_transport_delay(
     target_source: str | None = None,
     measured_source: str | None = None,
     calibration: AfrCalibration | None = None,
-    afr_stoich: float,
     min_rows: int = 30,
     regimes: Sequence[Regime] | None = None,
 ) -> TransportDelay:
@@ -1372,7 +1436,6 @@ def estimate_transport_delay(
                 target_source=target_source,
                 measured_source=measured_source,
                 calibration=calibration,
-                afr_stoich=afr_stoich,
                 delay=frozen,
                 drive_id="__training__",
                 baro=inputs.baro,
@@ -1475,7 +1538,6 @@ def per_pair_delay_support(
     target_source: str | None = None,
     measured_source: str | None = None,
     calibration: AfrCalibration | None = None,
-    afr_stoich: float,
     tie_pct: float = 0.01,
 ) -> list[PairwiseDelaySupport]:
     """Each candidate against ``reference_s``, read by read (see :class:`PairwiseDelaySupport`).
@@ -1499,7 +1561,6 @@ def per_pair_delay_support(
                 target_source=target_source,
                 measured_source=measured_source,
                 calibration=calibration,
-                afr_stoich=afr_stoich,
                 delay=frozen,
                 drive_id="__training__",
                 baro=inputs.baro,

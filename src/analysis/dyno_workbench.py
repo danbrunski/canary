@@ -361,7 +361,6 @@ def _session_read(session: Path, specs: list[str], inputs: WorkbenchInputs) -> p
         bindings_path=inputs.bindings_path,
         dids_path=inputs.dids_path,
         calibration=inputs.calibration,
-        afr_stoich=inputs.afr_stoich,
         acquired_time=True,
     )
 

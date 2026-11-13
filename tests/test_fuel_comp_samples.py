@@ -178,7 +178,6 @@ def _run(
         declaration=declaration,
         delivery=delivery,
         afr_calibration=afr,
-        afr_stoich=14.7,
         registry=kwargs.pop("registry", _registry(("synthetic", datetime(2026, 8, 1, tzinfo=UTC)))),
         resolver=kwargs.pop("resolver", _resolver()),
         session_name="synthetic-session",

@@ -110,7 +110,6 @@ from src.analysis.sim_kit import sim_plant_version
 from src.atomic_write import atomic_write_text
 from src.paths import BINDINGS_YAML, DIDS_YAML, REPO_ROOT
 from src.signals.afr import load_afr_calibration
-from src.signals.derived import FUEL_PROPERTIES
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.vehicle.tune_revisions import (
     TuneRevision,
@@ -692,7 +691,6 @@ def build_drive_design(
     profile_dir: Path,
     base_revision: str,
     *,
-    fuel_type: str,
     resolver: RevisionImageResolver | Callable[[str], FuelCompCalibration] | None = None,
     rom_dirs: Sequence[Path] = (),
     plant_version: str | None = None,
@@ -710,13 +708,10 @@ def build_drive_design(
     ``resolver`` maps a revision to its Fuel Comp calibration for N02's fill
     byte (default: a :class:`RevisionImageResolver` over ``rom_dirs``, else
     ``$CANARY_ROM_DIRS``); without the image every point is unplaced under
-    N02's own ``rom_image:*`` reason. ``fuel_type`` is the vehicle's (N02's
-    open-loop route reads its stoichiometric AFR; nothing defaults it).
-    Sessions are ordered by when their data starts, never by name."""
-    if fuel_type not in FUEL_PROPERTIES:
-        raise SimDesignRefusalError(
-            "fuel_type_unknown", f"{fuel_type!r} is not one of {sorted(FUEL_PROPERTIES)}"
-        )
+    N02's own ``rom_image:*`` reason. N02's open-loop route converts AFR at
+    the scale its source declares (M01.3), so no fuel is asked for: the
+    ``fuel_type`` this once took only fed the fuel's stoich into that
+    conversion. Sessions are ordered by when their data starts, never by name."""
     paths = [Path(s) for s in sessions]
     if not paths:
         raise SimDesignRefusalError("no_sessions", "a drive design needs at least one drive")
@@ -784,7 +779,6 @@ def build_drive_design(
                 declaration=declaration,
                 delivery=delivery,
                 afr_calibration=afr,
-                afr_stoich=FUEL_PROPERTIES[fuel_type].afr_stoich,
                 registry=reg,
                 resolver=resolver,
                 bindings_path=bindings_path,

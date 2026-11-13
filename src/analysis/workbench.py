@@ -126,8 +126,9 @@ class WorkbenchInputs(TuningContext):
     The vehicle's :class:`~src.analysis.tuning_context.TuningContext` plus the
     catalogs to decode with. Plain data so it pickles into the analysis child.
     Vehicle facts arrive from profile data (calibration, providers, flash
-    registry, noise floor, the ``idle`` operating mode, stoichiometry from the
-    configured fuel); nothing vehicle-specific is coded.
+    registry, noise floor, the ``idle`` operating mode); AFR is in the
+    calibration's ``afr_scale``, never the configured fuel's stoich (M01.3).
+    Nothing vehicle-specific is coded.
     """
 
     bindings_path: Path = BINDINGS_YAML
@@ -382,7 +383,6 @@ def _read_optional(
                     bindings_path=inputs.bindings_path,
                     dids_path=inputs.dids_path,
                     calibration=inputs.calibration,
-                    afr_stoich=inputs.afr_stoich,
                 )
             )
         except (ChannelSpecError, ValueError, KeyError):
@@ -423,7 +423,6 @@ def session_frame(
         bindings_path=inputs.bindings_path,
         dids_path=inputs.dids_path,
         calibration=inputs.calibration,
-        afr_stoich=inputs.afr_stoich,
     )
     regime_specs = _regime_specs(inputs)
     aux_specs = [spec for spec in regime_specs.values() if spec not in names]
@@ -680,7 +679,6 @@ def _session_delivery(
             route,
             inputs.lambda_delivery,
             calibration=inputs.calibration,
-            afr_stoich=inputs.afr_stoich,
             bindings_path=inputs.bindings_path,
             dids_path=inputs.dids_path,
             mode01_exclusion_note=inputs.mode01_exclusion_note,
@@ -692,7 +690,6 @@ def _session_delivery(
                 route,
                 declaration=declaration,
                 calibration=inputs.calibration,
-                afr_stoich=inputs.afr_stoich,
                 rpm_bands=bands,
                 min_load=min_load,
                 session=session,

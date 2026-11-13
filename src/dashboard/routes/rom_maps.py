@@ -82,6 +82,10 @@ def inspect_rom(
         "tables": tables,
         "live": live_providers(profile_dir),
         "warnings": definition.warnings,
+        # M01.3: the AFR the ECM states at lambda = 1 (its tables' numerator),
+        # not the fuel's stoich. ``afr_stoich`` is the same number under its
+        # old, misleading name, kept for a dashboard bundle built before it.
+        "afr_scale": editor.definition.afr_numerator / 128,
         "afr_stoich": editor.definition.afr_numerator / 128,
     }
 
@@ -129,6 +133,9 @@ def library_trace_context(
         # The slot the trace definitions apply to: the one the target
         # definition (and so the ECM's active-slot check) is written for.
         "map_slot": targets.map_slot,
+        # M01.3: the ECM's AFR at lambda = 1, not the fuel's stoich;
+        # ``afr_stoich`` is the old name for the same number (older bundles).
+        "afr_scale": targets.afr_numerator / 128,
         "afr_stoich": targets.afr_numerator / 128,
         "recorded_revision": current.revision if current else None,
         "matches_recorded_revision": bool(current and current.image_sha256 == sha),

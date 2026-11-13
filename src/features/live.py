@@ -94,6 +94,7 @@ from src.telemetry import (
     channel_key,
 )
 from src.vehicle.profiles import active_flash_history
+from src.vehicle.speed_correction import trip_speed_correction
 
 log = logging.getLogger(__name__)
 
@@ -715,12 +716,12 @@ class LiveFeatureSource:
         """Advance the session-scoped trip integrals by one tick's operating row.
 
         :meth:`TripIntegrals.accrue` does the math; the bindings that scale a
-        ``decoded:`` fallback and the fuel constants are read here, per tick,
-        so a hot-reloaded config applies on the next tick.
+        ``decoded:`` fallback, the speed correction and the fuel constants are
+        read here, per tick, so a hot-reloaded config applies on the next tick.
         """
         return self._trip.accrue(
             now,
-            TripSample.from_point(point, self.bindings),
+            TripSample.from_point(point, self.bindings, trip_speed_correction(self.config)),
             fuel_properties(self.config.vehicle.parameters),
         )
 

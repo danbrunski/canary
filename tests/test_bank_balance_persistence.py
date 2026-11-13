@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -409,21 +409,25 @@ def _voltage_frame() -> pd.DataFrame:
     return baro_columns(frame)
 
 
-def test_lambda_balance_is_taken_in_lambda_after_each_banks_own_transfer() -> None:
-    vehicle = VehicleParameters()
+@pytest.mark.parametrize("fuel_type", ["gasoline", "e85"])
+def test_lambda_balance_is_taken_in_lambda_after_each_banks_own_transfer(
+    fuel_type: Literal["gasoline", "e85"],
+) -> None:
+    """M01.3(a): the voltage route's AFR divides back to λ at the ECM's scale
+    (the calibration's ``afr_scale``), so the balance does not move with the
+    configured fuel; E85's stoich (9.8) would have scaled it by 1.5."""
+    vehicle = VehicleParameters(fuel_type=fuel_type)
     calibration = AfrCalibration.model_validate(_CHAIN)
     out = append_afr_channels(
         _voltage_frame(), vehicle, calibration, channel_units=None, flash_history=NO_HISTORY
     )
     balance = out[LAMBDA_BANK_BALANCE_AF_VOLTAGE]
-    from src.signals.derived import fuel_properties
-
-    afr_stoich = fuel_properties(vehicle).afr_stoich
+    assert calibration.afr_scale == 14.7
     assert balance.iloc[0] == pytest.approx(0.0)
     # Equal voltage steps are unequal mixture steps: +0.24 V lean is +0.93
     # AFR, -0.24 V rich only -0.47 AFR.
-    assert balance.iloc[1] == pytest.approx((15.65 - 14.72) / afr_stoich)
-    assert balance.iloc[2] == pytest.approx((14.72 - 14.25) / afr_stoich)
+    assert balance.iloc[1] == pytest.approx((15.65 - 14.72) / 14.7)
+    assert balance.iloc[2] == pytest.approx((14.72 - 14.25) / 14.7)
     # A bank at the fuel-cut ceiling is no measurement, not a huge asymmetry.
     assert np.isnan(balance.iloc[3])
     assert np.isnan(balance.iloc[4])

@@ -63,17 +63,90 @@ def _long(values: Sequence[float | None], *, start: float = 0.0, step: float = 1
 
 def test_phi_and_lambda_agree_at_stoich_and_diverge_away_from_it() -> None:
     at_stoich = np.array([1.0])
-    assert to_lambda(at_stoich, "phi", afr_stoich=14.7) == pytest.approx(
-        to_lambda(at_stoich, "lambda", afr_stoich=14.7)
-    )
+    assert to_lambda(at_stoich, "phi") == pytest.approx(to_lambda(at_stoich, "lambda"))
     rich = np.array([1.25])
-    assert to_lambda(rich, "phi", afr_stoich=14.7) == pytest.approx([0.8])
-    assert to_lambda(rich, "lambda", afr_stoich=14.7) == pytest.approx([1.25])
-    assert to_lambda(np.array([11.76]), "afr", afr_stoich=14.7) == pytest.approx([0.8])
+    assert to_lambda(rich, "phi") == pytest.approx([0.8])
+    assert to_lambda(rich, "lambda") == pytest.approx([1.25])
+    assert to_lambda(np.array([11.76]), "afr", afr_scale=14.7) == pytest.approx([0.8])
+
+
+def test_an_afr_reading_needs_its_sources_scale() -> None:
+    """M01.3(a): AFR converts to λ only at the scale its producer declared."""
+    with pytest.raises(LambdaDeliveryError, match="afr_scale"):
+        to_lambda(np.array([14.7]), "afr")
+
+
+def _measured(**overrides: Any) -> dict[str, Any]:
+    entry = {
+        "name": "gauge",
+        "spec": "obd:SOME_GAUGE_AFR",
+        "quantity": "afr",
+        "sensor": "gauge_b1",
+        "convention_evidence": "synthetic",
+    }
+    entry.update(overrides)
+    return entry
+
+
+def test_an_afr_source_declared_without_a_scale_is_refused() -> None:
+    """M01.3(a): a gauge reporting "AFR" must say what AFR it reports at λ = 1,
+    so nothing can convert it with the configured fuel's stoich instead."""
+    from pydantic import ValidationError
+
+    from src.analysis.lambda_delivery import CommandedSource, MeasuredSource
+
+    with pytest.raises(ValidationError, match="must declare afr_scale"):
+        MeasuredSource.model_validate(_measured())
+    gauge = MeasuredSource.model_validate(_measured(afr_scale=14.7))
+    assert gauge.scale_for(None) == 14.7
+    # A voltage route's scale is its calibration's, and only there.
+    with pytest.raises(ValidationError, match="afr_scale belongs only"):
+        MeasuredSource.model_validate(_measured(transform="voltage_afr", afr_scale=14.7))
+    route = MeasuredSource.model_validate(_measured(transform="voltage_afr"))
+    assert route.scale_for(AfrCalibration(afr_scale=14.7)) == 14.7
+    with pytest.raises(ValidationError, match="quantity must be afr"):
+        MeasuredSource.model_validate(_measured(quantity="lambda", transform="voltage_afr"))
+    with pytest.raises(ValidationError, match="afr_scale belongs only"):
+        MeasuredSource.model_validate(_measured(quantity="lambda", afr_scale=14.7))
+    commanded = {
+        "name": "target",
+        "spec": "obd:SOME_TARGET_AFR",
+        "quantity": "afr",
+        "convention_evidence": "synthetic",
+        "valid_regimes": ["enrichment"],
+        "fuel_cut_value": 0.0,
+        "plausible_min": 9.0,
+        "plausible_max": 20.0,
+    }
+    with pytest.raises(ValidationError, match="must declare afr_scale"):
+        CommandedSource.model_validate(commanded)
+    assert CommandedSource.model_validate({**commanded, "afr_scale": 14.7}).afr_scale == 14.7
+
+
+def test_an_afr_calibration_without_its_scale_is_refused() -> None:
+    """M01.3(a): the ECM's AFR scale is part of its calibration, required."""
+    from pydantic import ValidationError
+
+    doc = load_yaml((PROFILE / "afr_calibration.yaml").read_text())
+    assert doc["afr_scale"] == 14.7
+    doc.pop("afr_scale")
+    with pytest.raises(ValidationError, match="afr_scale"):
+        AfrCalibration.model_validate(doc)
+
+
+def test_an_identity_afr_source_converts_at_its_declared_scale() -> None:
+    """A gauge that displays λ × 14.7 reads λ 1.0 at 14.7, whatever the fuel."""
+    from src.analysis.lambda_delivery import MeasuredSource, measured_side_from_arrays
+
+    gauge = MeasuredSource.model_validate(_measured(afr_scale=14.7))
+    side = measured_side_from_arrays(
+        np.array([0.0, 1.0]), np.array([14.7, 11.76]), instrument=gauge, calibration=None
+    )
+    assert side.lam == pytest.approx([1.0, 0.8])
 
 
 def test_non_positive_mixture_readings_are_not_numbers() -> None:
-    out = to_lambda(np.array([0.0, -1.0, np.nan, 1.2]), "phi", afr_stoich=14.7)
+    out = to_lambda(np.array([0.0, -1.0, np.nan, 1.2]), "phi")
     assert np.isnan(out[:3]).all()
     assert out[3] == pytest.approx(1 / 1.2)
 
@@ -122,8 +195,7 @@ def test_delivery_error_uses_the_same_residual_as_the_relationship() -> None:
         inputs,
         route,
         declaration=declaration,
-        calibration=AfrCalibration(commanded_equiv_ratio_convention="phi"),
-        afr_stoich=14.7,
+        calibration=AfrCalibration(afr_scale=14.7, commanded_equiv_ratio_convention="phi"),
         rpm_bands=(2500.0, 3000.0, 3500.0, 4000.0, 4500.0, 5000.0, 6500.0),
         min_load=None,
     )
@@ -186,7 +258,6 @@ def test_fuel_cut_sentinel_is_a_state_not_a_lean_delivery() -> None:
         declaration=doc,
         target_source="ram_final_target",
         measured_source="ecm_lambda_pid_0x24",
-        afr_stoich=14.7,
     )
     frame = samples.frame
     assert samples.counts["fuel_cut"] == 1
@@ -215,7 +286,6 @@ def test_every_ineligible_state_is_named_and_carries_no_residual() -> None:
         declaration=doc,
         target_source="ram_final_target",
         measured_source="ecm_lambda_pid_0x24",
-        afr_stoich=14.7,
     )
     states = dict(zip(samples.frame["state"], samples.frame["target_raw"], strict=True))
     counts = samples.counts
@@ -241,7 +311,6 @@ def test_post_fuel_cut_recovery_is_not_a_rich_delivery_finding() -> None:
         declaration=doc,
         target_source="ram_final_target",
         measured_source="ecm_lambda_pid_0x24",
-        afr_stoich=14.7,
     )
     frame = samples.frame
     holdoff = doc.eligibility.regimes.closed_loop.post_fuel_cut_holdoff_s
@@ -266,8 +335,7 @@ def test_pid_0x44_is_refused_as_a_closed_loop_target() -> None:
         declaration=doc,
         target_source="mode01_pid_0x44",
         measured_source="ecm_lambda_pid_0x24",
-        calibration=AfrCalibration(commanded_equiv_ratio_convention="phi"),
-        afr_stoich=14.7,
+        calibration=AfrCalibration(afr_scale=14.7, commanded_equiv_ratio_convention="phi"),
     )
     assert samples.counts["source_not_valid_in_regime"] > 0
     assert samples.counts[ELIGIBLE] == 0
@@ -281,8 +349,7 @@ def test_unverified_convention_refuses_rather_than_guessing() -> None:
         declaration=doc,
         target_source="mode01_pid_0x44",
         measured_source="ecm_lambda_pid_0x24",
-        calibration=AfrCalibration(commanded_equiv_ratio_convention="unverified"),
-        afr_stoich=14.7,
+        calibration=AfrCalibration(afr_scale=14.7, commanded_equiv_ratio_convention="unverified"),
     )
     assert samples.counts["convention_unverified"] == 6
     assert samples.frame["residual_pct"].isna().all()
@@ -296,8 +363,7 @@ def test_voltage_measured_source_without_a_transfer_is_named_not_dropped() -> No
         declaration=doc,
         target_source="ram_final_target",
         measured_source="af_voltage_b1",
-        calibration=AfrCalibration(),
-        afr_stoich=14.7,
+        calibration=AfrCalibration(afr_scale=14.7),
     )
     assert samples.counts["calibration_unknown"] == 6
 
@@ -317,7 +383,6 @@ def test_voltage_transfer_censoring_is_a_named_state() -> None:
         target_source="ram_final_target",
         measured_source="af_voltage_b1",
         calibration=calibration,
-        afr_stoich=14.7,
         baro=_long([SEA_LEVEL_KPA], start=-1.0),
     )
     assert samples.counts["measured_censored"] == 6
@@ -336,7 +401,6 @@ def test_a_voltage_route_without_baro_is_a_named_state_not_a_gain_1_value() -> N
         "target_source": "ram_final_target",
         "measured_source": "af_voltage_b1",
         "calibration": calibration,
-        "afr_stoich": 14.7,
     }
     assert delivery_samples(**common).counts["baro_missing"] == 6
     stale = delivery_samples(**common, baro=_long([80.0], start=-120.0))
@@ -406,7 +470,6 @@ def test_transport_delay_is_estimated_on_training_drives_and_frozen() -> None:
         target_source="ram_final_target",
         measured_source="ecm_lambda_pid_0x24",
         min_rows=10,
-        afr_stoich=14.7,
     )
     assert delay.seconds == pytest.approx(1.0)
     assert delay.fitted_on == ("driveA",)
@@ -421,7 +484,6 @@ def test_a_test_drive_cannot_pick_its_own_lag() -> None:
         target_source="ram_final_target",
         measured_source="ecm_lambda_pid_0x24",
         min_rows=10,
-        afr_stoich=14.7,
     )
     inputs = _lagged_drive(1.0)
     with pytest.raises(LeakedDriveError, match="may not pick its own lag"):
@@ -433,7 +495,6 @@ def test_a_test_drive_cannot_pick_its_own_lag() -> None:
             measured_source="ecm_lambda_pid_0x24",
             delay=delay,
             drive_id="driveA",
-            afr_stoich=14.7,
         )
     with pytest.raises(LambdaDeliveryError, match="needs the drive id"):
         delivery_samples(
@@ -443,7 +504,6 @@ def test_a_test_drive_cannot_pick_its_own_lag() -> None:
             target_source="ram_final_target",
             measured_source="ecm_lambda_pid_0x24",
             delay=delay,
-            afr_stoich=14.7,
         )
 
 
@@ -459,7 +519,6 @@ def test_drives_that_chose_the_eligibility_constants_are_not_evaluation_evidence
             measured_source="ecm_lambda_pid_0x24",
             drive_id=informing,
             evaluation=True,
-            afr_stoich=14.7,
         )
 
 
@@ -472,7 +531,6 @@ def test_transport_delay_refuses_insufficient_training_evidence() -> None:
             target_source="ram_final_target",
             measured_source="ecm_lambda_pid_0x24",
             min_rows=500,
-            afr_stoich=14.7,
         )
 
 
@@ -654,7 +712,6 @@ def test_the_enrichment_delay_pairs_a_later_reading_and_closed_loop_does_not() -
         declaration=doc,
         target_source="ram_final_target",
         measured_source="ecm_lambda_pid_0x24",
-        afr_stoich=14.7,
     ).frame
     enrich = frame[frame["regime"] == "enrichment"]
     closed = frame[frame["regime"] == "closed_loop"]
@@ -675,8 +732,7 @@ def test_the_enrichment_rule_keeps_a_ramping_pull_the_closed_loop_rule_would_dro
         declaration=doc,
         target_source="mode01_pid_0x44",
         measured_source="ecm_lambda_pid_0x24",
-        calibration=AfrCalibration(commanded_equiv_ratio_convention="phi"),
-        afr_stoich=14.7,
+        calibration=AfrCalibration(afr_scale=14.7, commanded_equiv_ratio_convention="phi"),
     ).frame
     states = frame["state"].tolist()
     assert states[0] == "fuel_cut"
@@ -711,7 +767,6 @@ def test_a_regime_scoped_delay_scan_scores_only_that_regime() -> None:
             target_source="ram_final_target",
             measured_source="ecm_lambda_pid_0x24",
             min_rows=10,
-            afr_stoich=14.7,
             regimes=["enrichment"],
         )
     scoped = estimate_transport_delay(
@@ -721,7 +776,6 @@ def test_a_regime_scoped_delay_scan_scores_only_that_regime() -> None:
         target_source="ram_final_target",
         measured_source="ecm_lambda_pid_0x24",
         min_rows=5,
-        afr_stoich=14.7,
         regimes=["enrichment"],
     )
     assert scoped.seconds == pytest.approx(1.0)
@@ -759,8 +813,7 @@ def test_the_pid_0x44_route_pairs_as_acquired() -> None:
         declaration=doc,
         target_source="mode01_pid_0x44",
         measured_source="ecm_lambda_pid_0x24",
-        calibration=AfrCalibration(commanded_equiv_ratio_convention="phi"),
-        afr_stoich=14.7,
+        calibration=AfrCalibration(afr_scale=14.7, commanded_equiv_ratio_convention="phi"),
     )
     assert samples.delays_s == {"closed_loop": 0.0, "enrichment": 0.0}
     assert samples.frame["measured_lambda"].tolist() == pytest.approx([0.83] * 4)

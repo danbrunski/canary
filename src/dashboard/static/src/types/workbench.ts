@@ -432,7 +432,10 @@ export interface RomInspection {
   tables: RomTable[];
   live: Record<"rpm" | "base_fuel_schedule" | "commanded_afr", RomProvider | null>;
   warnings: string[];
-  afr_stoich: number;
+  /** The AFR the ECM states at lambda = 1 (its tables' numerator / 128), not
+   *  the fuel's stoich (M01.3). The server also sends it as the deprecated
+   *  `afr_stoich`, for bundles built before the rename. */
+  afr_scale: number;
 }
 
 /** One table kind's trace definition as `GET /control/rom/library/{sha}/trace`
@@ -458,7 +461,8 @@ export interface RomTraceContext {
   sha256: string;
   /** The map slot the trace definitions apply to. */
   map_slot: number;
-  afr_stoich: number;
+  /** The ECM's AFR at lambda = 1, as `RomInspection.afr_scale`. */
+  afr_scale: number;
   recorded_revision: string | null;
   /** This image is the revision the flash history names as running now. */
   matches_recorded_revision: boolean;

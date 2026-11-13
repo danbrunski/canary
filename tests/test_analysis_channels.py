@@ -469,7 +469,7 @@ def test_missing_binding_names_the_catalog(tmp_path: Path) -> None:
 
 
 def _calibration(convention: str) -> AfrCalibration:
-    return AfrCalibration(commanded_equiv_ratio_convention=convention)  # type: ignore[arg-type]
+    return AfrCalibration(afr_scale=14.7, commanded_equiv_ratio_convention=convention)  # type: ignore[arg-type]
 
 
 def test_commanded_afr_uses_the_recorded_convention(tmp_path: Path) -> None:
@@ -488,7 +488,6 @@ def test_commanded_afr_uses_the_recorded_convention(tmp_path: Path) -> None:
         session,
         ["obd:COMMANDED_AFR"],
         calibration=_calibration("phi"),
-        afr_stoich=14.7,
         bindings_path=BINDINGS,
         dids_path=DIDS,
     )
@@ -499,7 +498,6 @@ def test_commanded_afr_uses_the_recorded_convention(tmp_path: Path) -> None:
         session,
         ["obd:COMMANDED_AFR"],
         calibration=_calibration("lambda"),
-        afr_stoich=14.7,
         bindings_path=BINDINGS,
         dids_path=DIDS,
     )
@@ -530,7 +528,6 @@ def test_a_session_opening_on_fuel_cut_still_converts(tmp_path: Path) -> None:
         session,
         ["obd:COMMANDED_AFR"],
         calibration=_calibration("phi"),
-        afr_stoich=14.7,
         bindings_path=BINDINGS,
         dids_path=DIDS,
     )
@@ -549,7 +546,6 @@ def test_unverified_convention_refuses_rather_than_guessing(tmp_path: Path) -> N
             session,
             ["obd:COMMANDED_AFR"],
             calibration=_calibration("unverified"),
-            afr_stoich=14.7,
             bindings_path=BINDINGS,
             dids_path=DIDS,
         )
@@ -564,20 +560,25 @@ def test_commanded_afr_without_a_calibration_says_so(tmp_path: Path) -> None:
         read_channels(session, ["obd:COMMANDED_AFR"], bindings_path=BINDINGS, dids_path=DIDS)
 
 
-def test_commanded_afr_without_a_stoich_says_so(tmp_path: Path) -> None:
-    """R05.1: no gasoline default — a diesel profile must not get 14.7 silently."""
+def test_commanded_afr_is_in_the_ecms_afr_scale(tmp_path: Path) -> None:
+    """M01.3(a): PID 0x44 becomes AFR at the calibration's ``afr_scale`` (the
+    ECM's AFR at λ = 1), never a fuel's stoich; with no calibration there is
+    neither a convention nor a scale, and the refusal names both."""
     session = _session(
         tmp_path,
-        [TelemetryRecord(timestamp=T0, source="obd", channel="COMMANDED_EQUIV_RATIO", value=1.0)],
+        [TelemetryRecord(timestamp=T0, source="obd", channel="COMMANDED_EQUIV_RATIO", value=1.2)],
     )
-    with pytest.raises(ChannelSpecError, match="stoichiometric"):
-        read_channels(
-            session,
-            ["obd:COMMANDED_AFR"],
-            calibration=_calibration("phi"),
-            bindings_path=BINDINGS,
-            dids_path=DIDS,
-        )
+    with pytest.raises(ChannelSpecError, match="afr_scale"):
+        read_channels(session, ["obd:COMMANDED_AFR"], bindings_path=BINDINGS, dids_path=DIDS)
+    scaled = AfrCalibration(afr_scale=13.0, commanded_equiv_ratio_convention="phi")
+    out = read_channels(
+        session,
+        ["obd:COMMANDED_AFR"],
+        calibration=scaled,
+        bindings_path=BINDINGS,
+        dids_path=DIDS,
+    )
+    assert out["value"].tolist() == pytest.approx([13.0 / 1.2])
 
 
 def test_the_xterra_profile_records_phi() -> None:

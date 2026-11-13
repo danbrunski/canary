@@ -999,8 +999,8 @@ def test_row_pairing_and_counting_callers_refuse_a_change_only_decoded_provider(
         f"  - {{role: rpm, spec: '{rpm}'}}\n"
         f"  - {{role: operator_demand, spec: '{poll}'}}\n"
     )
-    frame_full = build_tuning_frame(full, providers_path=providers, afr_stoich=14.7)
-    frame_changed = build_tuning_frame(changed, providers_path=providers, afr_stoich=14.7)
+    frame_full = build_tuning_frame(full, providers_path=providers)
+    frame_changed = build_tuning_frame(changed, providers_path=providers)
     assert frame_full.capability["rpm"]["available"] is True
     assert frame_changed.capability["rpm"]["available"] is False
     assert "P02.10" in str(frame_changed.capability["rpm"]["reason"])

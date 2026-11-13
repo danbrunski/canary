@@ -53,6 +53,7 @@ def voltage_chain(points: list[dict[str, float]], **extra: Any) -> dict[str, Any
     """Calibration keys for a voltage route on ``points``: transfer, gain, residuals."""
     profile = _profile()
     return {
+        "afr_scale": profile["afr_scale"],
         "voltage_transfer": transfer(points, **extra),
         "baro_gain": profile["baro_gain"],
         "voltage_residual_sources": profile["voltage_residual_sources"],

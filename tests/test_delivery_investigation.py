@@ -203,7 +203,6 @@ def test_delivery_error_mints_evidence_from_b06_without_rebuilding_it(
         WOT_LEAN,
         declaration=ctx.lambda_delivery,
         calibration=ctx.calibration,
-        afr_stoich=ctx.afr_stoich,
         rpm_bands=ctx.mode01_wot.rpm_bands,
         min_load=ctx.mode01_wot.load_floor_pct,
         revisions=ctx.registry,

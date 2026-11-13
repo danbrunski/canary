@@ -32,9 +32,11 @@ class VehicleParameters(_Strict):
     #: The operator's usual load — driver and cargo — in kg. A default for a
     #: run's conditions; a run records what was actually aboard.
     usual_payload_kg: float | None = Field(default=None, ge=0.0)
-    #: ``gasoline`` | ``diesel`` | ``e85`` — selects stoichiometric AFR, fuel
-    #: density, and the CO2 emission factor.
-    fuel_type: Literal["gasoline", "diesel", "e85"] = "gasoline"
+    #: ``gasoline`` (E0) | ``e10`` | ``diesel`` | ``e85`` — selects the fuel's
+    #: stoichiometric AFR, density, CO2 factor and heating value
+    #: (``src.signals.derived.FUEL_PROPERTIES``). Most US pump gasoline is E10.
+    #: Not the ECM's AFR display scale: that belongs to the ECM (M01.3(a)).
+    fuel_type: Literal["gasoline", "e10", "diesel", "e85"] = "gasoline"
     #: Engine displacement in litres (volumetric-efficiency fuel estimate).
     displacement_l: float = 4.0
     #: Volumetric efficiency (0–1.2) for the speed-density fallback when no

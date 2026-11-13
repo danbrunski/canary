@@ -178,7 +178,6 @@ def test_state_counts_account_for_every_target_observation(
         target_source="ram_final_target",
         measured_source="ecm_lambda_pid_0x24",
         calibration=load_afr_calibration(PROFILE / "afr_calibration.yaml"),
-        afr_stoich=14.7,
     )
     counts = samples.counts
     assert counts["total"] == 1078

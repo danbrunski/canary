@@ -749,6 +749,4 @@ def test_delivery_inputs_out_of_memory_is_not_inputs_never_captured(
         measured_label="obd:O2_WR_LAMBDA_S1",
     )
     with pytest.raises(MemoryError):
-        tuning.read_delivery_inputs(
-            pd.DataFrame(), route, declaration, calibration=None, afr_stoich=14.7
-        )
+        tuning.read_delivery_inputs(pd.DataFrame(), route, declaration, calibration=None)

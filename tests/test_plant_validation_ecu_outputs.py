@@ -790,7 +790,6 @@ def test_the_artifact_is_verified_before_any_recording_is_read(
             sessions_root=tmp_path / "sessions",
             predictions_root=tmp_path / "predictions",
             resolver=never,
-            fuel_type="gasoline",
         )
     assert missing.value.reason == "prediction_artifact_missing"
 
@@ -959,7 +958,6 @@ def test_the_wot_artifact_is_checked_against_e08_7s_hashes_before_any_recording(
                 sessions_root=tmp_path / "sessions",
                 predictions_root=tmp_path / "predictions",
                 resolver=never,
-                fuel_type="gasoline",
                 block=WOT,
             )
         return refused.value
@@ -980,7 +978,6 @@ def test_the_wot_artifact_is_checked_against_e08_7s_hashes_before_any_recording(
             sessions_root=tmp_path / "sessions",
             predictions_root=tmp_path / "predictions",
             resolver=never,
-            fuel_type="gasoline",
             block=WOT,
             amendment=3,
         )
@@ -1112,7 +1109,6 @@ def real_score() -> tuple[dict[str, Any], pd.DataFrame, dict[str, pd.DataFrame]]
         sessions_root=SESSIONS_ROOT,
         predictions_root=PREDICTIONS_ROOT,
         resolver=resolver,
-        fuel_type="gasoline",
         recordings=FIVE,
     )
 
@@ -1199,7 +1195,7 @@ def test_a_null_control_fails_raw_bfs_and_passes_the_air_normalised_amendment(
     early = Boundary(datetime(2026, 9, 1, tzinfo=UTC), "exact", boundary.base, boundary.base)
     found: dict[tuple[str, str], dict[str, Any]] = {}
     for name in NULL_DRIVES:
-        fill = fill_samples(SESSIONS_ROOT / name, PROFILE, registry, resolver, fuel_type="gasoline")
+        fill = fill_samples(SESSIONS_ROOT / name, PROFILE, registry, resolver)
         for spec in case.ecu_outputs.outputs:
             reads = ecu_output_reads(
                 SESSIONS_ROOT / name,
@@ -1263,7 +1259,6 @@ def test_the_amended_real_verdict_is_still_insufficient_evidence() -> None:
         sessions_root=SESSIONS_ROOT,
         predictions_root=PREDICTIONS_ROOT,
         resolver=resolver,
-        fuel_type="gasoline",
         amendment=2,
         recordings=FIVE,
     )
@@ -1307,7 +1302,7 @@ def test_v3_does_not_pass_a_no_change_drive_against_the_real_prediction(
     ceiling = float(case.ecu_amendment(3).bfs_ceiling_counts)
     found: dict[tuple[str, int], dict[str, Any]] = {}
     for name in NULL_DRIVES:
-        fill = fill_samples(SESSIONS_ROOT / name, PROFILE, registry, resolver, fuel_type="gasoline")
+        fill = fill_samples(SESSIONS_ROOT / name, PROFILE, registry, resolver)
         reads = ecu_output_reads(
             SESSIONS_ROOT / name,
             spec,
@@ -1360,7 +1355,6 @@ def test_the_v3_real_verdict_is_still_insufficient_evidence() -> None:
         sessions_root=SESSIONS_ROOT,
         predictions_root=PREDICTIONS_ROOT,
         resolver=resolver,
-        fuel_type="gasoline",
         amendment=3,
         recordings=FIVE,
     )
@@ -1418,7 +1412,6 @@ def test_the_wot_null_control_does_not_pass_on_pre_flash_drives_outside_its_desi
         sessions_root=SESSIONS_ROOT,
         predictions_root=PREDICTIONS_ROOT,
         resolver=resolver,
-        fuel_type="gasoline",
     )
     assert null["passed"] == []
     assert null["design_points"] == 917
@@ -1479,7 +1472,6 @@ def test_the_wot_post_flash_verdict_is_insufficient_evidence_for_both_outputs() 
         sessions_root=SESSIONS_ROOT,
         predictions_root=PREDICTIONS_ROOT,
         resolver=resolver,
-        fuel_type="gasoline",
         block=WOT,
         recordings=FIVE,
     )

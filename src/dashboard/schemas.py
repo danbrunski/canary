@@ -441,6 +441,10 @@ class TripSummaryFields(BaseModel):
     zero_to_60_mph_s: float | None
     quarter_mile_s: float | None
     quarter_mile_trap_kph: float | None
+    #: The speed the distance and speeds were computed on (M01.2).
+    speed_basis: str
+    #: The fuel constants and fuel-cut handling (M01.3(b), M01.4).
+    fuel_basis: str
 
 
 class TripSummaryResponse(BaseModel):

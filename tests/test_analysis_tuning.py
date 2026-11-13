@@ -42,7 +42,7 @@ BINDINGS = Path("data/bindings.yaml")
 RPM_BANDS = (2500.0, 3000.0, 3500.0, 4000.0, 4500.0, 5000.0, 6500.0)
 DIDS = Path("data/dids.yaml")
 T0 = datetime(2026, 8, 5, 12, 0, 0, tzinfo=UTC)
-PHI = AfrCalibration(commanded_equiv_ratio_convention="phi")
+PHI = AfrCalibration(afr_scale=14.7, commanded_equiv_ratio_convention="phi")
 #: The dev vehicle's lambda-delivery declaration: which channel is the target,
 #: what each measured source is, and one eligibility rule per regime. Delivery
 #: error runs on it since R05.16, so each synthetic row here is one
@@ -64,7 +64,6 @@ def _mode01(session: Path | pd.DataFrame, **overrides: object) -> DeliveryError:
         "calibration": PHI,
         "bindings_path": BINDINGS,
         "dids_path": DIDS,
-        "afr_stoich": 14.7,
         "rpm_bands": RPM_BANDS,
         "min_load": 85.0,
     }
@@ -263,7 +262,6 @@ def test_the_semantic_route_converts_voltage_and_names_censored_samples(tmp_path
         calibration=calibration,
         bindings_path=BINDINGS,
         dids_path=DIDS,
-        afr_stoich=14.7,
         rpm_bands=RPM_BANDS,
         min_load=None,
     )
@@ -305,7 +303,6 @@ def test_the_voltage_route_applies_the_baro_gain_or_refuses_without_baro(
         "calibration": calibration,
         "bindings_path": BINDINGS,
         "dids_path": DIDS,
-        "afr_stoich": 14.7,
         "rpm_bands": RPM_BANDS,
         "min_load": None,
     }
@@ -330,7 +327,6 @@ def test_the_semantic_route_refuses_a_load_floor(tmp_path: Path) -> None:
             declaration=DECLARATION,
             route=semantic_route(DECLARATION, providers, measured_role="measured_afr_b1"),
             calibration=PHI,
-            afr_stoich=14.7,
             rpm_bands=RPM_BANDS,
             min_load=85.0,
         )
@@ -362,7 +358,6 @@ def test_a_clock_that_cannot_carry_the_declared_separation_refuses() -> None:
             route,
             declaration=DECLARATION,
             calibration=PHI,
-            afr_stoich=14.7,
             rpm_bands=RPM_BANDS,
             min_load=None,
         )
@@ -391,7 +386,6 @@ def test_compare_sessions_refuses_load_as_an_axis(tmp_path: Path) -> None:
                 axes=("obd:RPM", axis),
                 bindings_path=BINDINGS,
                 dids_path=DIDS,
-                afr_stoich=14.7,
             )
 
 
@@ -407,7 +401,6 @@ def test_unsafe_axes_is_an_explicit_escape_hatch(tmp_path: Path) -> None:
         unsafe_axes=True,
         bindings_path=BINDINGS,
         dids_path=DIDS,
-        afr_stoich=14.7,
     )
     # Same session against itself: every matched cell delta is exactly zero.
     assert result.n_cells > 0
@@ -426,7 +419,6 @@ def test_comparison_without_a_floor_says_unavailable_rather_than_guessing(
         axes=("obd:RPM",),
         bindings_path=BINDINGS,
         dids_path=DIDS,
-        afr_stoich=14.7,
     )
     assert result.cells["delta_sigma"].isna().all()
 
@@ -513,7 +505,6 @@ def test_an_idle_session_comparison_against_the_wot_floor_refuses(tmp_path: Path
         conditions=IDLE,
         bindings_path=BINDINGS,
         dids_path=DIDS,
-        afr_stoich=14.7,
     )
     assert result.cells["delta_sigma"].isna().all()
     assert result.floor_refusal is not None
@@ -536,7 +527,6 @@ def test_a_floor_without_comparison_conditions_is_refused(tmp_path: Path) -> Non
             floor_channel="spark",
             bindings_path=BINDINGS,
             dids_path=DIDS,
-            afr_stoich=14.7,
         )
 
 
@@ -703,7 +693,6 @@ def test_comparison_flags_whether_both_sides_share_a_revision(tmp_path: Path) ->
         revisions=registry,
         bindings_path=BINDINGS,
         dids_path=DIDS,
-        afr_stoich=14.7,
     )
     payload = result.as_dict()
     assert payload["tune_revisions"] == ["ZS44A-k105", "ZS44A-k106"]
@@ -746,7 +735,6 @@ def test_floor_conditions_travel_with_the_sigma_figures(tmp_path: Path) -> None:
         conditions="WOT: throttle>=85, 3000-5000 rpm",
         bindings_path=BINDINGS,
         dids_path=DIDS,
-        afr_stoich=14.7,
     )
     assert result.floor_refusal is None
     assert result.cells["delta_sigma"].notna().all()
@@ -773,7 +761,6 @@ def test_a_floor_object_without_a_named_channel_is_refused(tmp_path: Path) -> No
             noise_floor=floor,
             bindings_path=BINDINGS,
             dids_path=DIDS,
-            afr_stoich=14.7,
         )
 
 
@@ -831,7 +818,7 @@ def test_an_all_fuel_cut_session_is_gates_removed_everything(tmp_path: Path) -> 
 
 def test_commanded_afr_series_maps_fuel_cut_to_nan() -> None:
     """The vectorised conversion never raises on a zero ratio."""
-    out = PHI.commanded_afr_series(pd.Series([0.0, 1.2, -1.0]), afr_stoich=14.7)
+    out = PHI.commanded_afr_series(pd.Series([0.0, 1.2, -1.0]))
     assert np.isnan(out.iloc[0]) and np.isnan(out.iloc[2])
     assert out.iloc[1] == pytest.approx(14.7 / 1.2)
 
@@ -850,7 +837,6 @@ def test_auto_edges_keep_the_minimum_sample(tmp_path: Path) -> None:
         axes=("obd:RPM",),
         bindings_path=BINDINGS,
         dids_path=DIDS,
-        afr_stoich=14.7,
     )
     assert result.n_cells == 2
     assert sorted(result.cells["n_a"].tolist()) == [5, 5]
@@ -868,7 +854,6 @@ def test_explicit_edges_still_exclude_out_of_range_samples(tmp_path: Path) -> No
         bins=((1000.0, 2000.0),),
         bindings_path=BINDINGS,
         dids_path=DIDS,
-        afr_stoich=14.7,
     )
     assert result.n_cells == 1
     assert result.cells["n_a"].tolist() == [5]

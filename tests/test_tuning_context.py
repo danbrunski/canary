@@ -4,15 +4,19 @@ Before: ``append_flash`` wrote the *operational* flash registry, while the
 trip-end digest and the MCP tuning tools read the tracked *source* file beside
 the profile data, so a flash recorded from the dashboard never reached their
 revision resolution. And ``afr_stoich`` was a literal 14.7 default no caller
-overrode, so a diesel profile's workbench AFR was a gasoline AFR.
+overrode; it then came from the configured fuel, which is the wrong quantity
+too (M01.3): the ECM's AFR is λ x its own constant whatever the fuel, so the
+context now carries no stoichiometry at all.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
 import pytest
 import yaml
 
@@ -34,6 +38,7 @@ from src.vehicle.profiles import (
 )
 from src.vehicle.tune_revisions import TuneRevision, load_tune_revisions
 from src.yaml_load import load_yaml
+from tests.afr_voltage_chain import SEA_LEVEL_KPA
 
 _TRACKED = load_tune_revisions(Path("data/nissan-xterra-2008/tune_revisions.yaml"))
 assert _TRACKED is not None
@@ -135,33 +140,71 @@ def test_a_dashboard_flash_resolves_in_the_mcp_tuning_tools(tmp_path: Path) -> N
     assert tuple(compared["tune_revisions"]) == (FLASH.revision, FLASH.revision)
 
 
-def test_stoichiometry_comes_from_the_configured_fuel(tmp_path: Path) -> None:
-    diesel = _scoped(_raw_config(tmp_path, fuel_type="diesel"))
-    assert TuningContext.from_config(diesel).afr_stoich == 14.5
-    gasoline = _scoped(_raw_config(tmp_path))
-    assert TuningContext.from_config(gasoline).afr_stoich == 14.7
+def test_the_context_carries_no_fuel_stoichiometry(tmp_path: Path) -> None:
+    """M01.3(a): an AFR is λ times its producer's constant, not the fuel's stoich.
+
+    The context once carried ``afr_stoich`` from the configured fuel, and the
+    voltage route divided the ECM's AFR by it. It has no such field now, and
+    the scale the ECM's AFRs are in comes from its calibration, the same for
+    every fuel.
+    """
+    assert "afr_stoich" not in {f.name for f in dataclasses.fields(TuningContext)}
+    scales = set()
+    for fuel in ("gasoline", "e85", "diesel"):
+        context = TuningContext.from_config(_scoped(_raw_config(tmp_path, fuel_type=fuel)))
+        assert context.calibration is not None
+        scales.add(context.calibration.afr_scale)
+    assert scales == {14.7}
 
 
-def test_a_diesel_profiles_workbench_afr_uses_its_stoich(tmp_path: Path) -> None:
-    """The dashboard's workbench and the serve path agree for a non-gasoline fuel."""
+def _voltage_route_lambda(context: TuningContext, volts: list[float]) -> np.ndarray:
+    """Voltage-route λ through the route's own declaration, at sea-level baro
+    (the ECM's gain is exactly 1 there)."""
+    from src.analysis.lambda_delivery import measured_side_from_arrays
+
+    assert context.lambda_delivery is not None and context.calibration is not None
+    times = np.arange(len(volts), dtype=float)
+    side = measured_side_from_arrays(
+        times,
+        np.asarray(volts, dtype=float),
+        instrument=context.lambda_delivery.measured("af_voltage_b1"),
+        calibration=context.calibration,
+        baro_times=times,
+        baro_kpa=np.full(len(volts), SEA_LEVEL_KPA),
+    )
+    assert not side.calibration_missing and not side.baro_missing.any()
+    return side.lam
+
+
+def test_a_non_gasoline_fuel_does_not_move_the_voltage_route_lambda(tmp_path: Path) -> None:
+    """M01.3(a): the A/F voltage table is λ × 7350 = AFR × 500 whatever is in
+    the tank. Converting its AFR with E85's stoich (9.8) read λ 1.5x lean; E10
+    (14.08) 4.3 % lean."""
+    volts = [2.2, 1.6075, 2.0425, 2.53]  # the stoich knot (x2 = 880) and others
+    gasoline = TuningContext.from_config(_scoped(_raw_config(tmp_path)))
+    e85 = TuningContext.from_config(_scoped(_raw_config(tmp_path, fuel_type="e85")))
+    lam = _voltage_route_lambda(gasoline, volts)
+    assert np.array_equal(lam, _voltage_route_lambda(e85, volts))
+    # Known answer: table 0xE644 at x2 = 880 holds 7387 = AFR x 500, and the
+    # ECM's AFR is lambda x 14.7.
+    assert lam[0] == pytest.approx(7387 / 500 / 14.7)
+
+
+def test_a_non_gasoline_profiles_workbench_afr_is_the_ecms_afr(tmp_path: Path) -> None:
+    """The workbench's commanded AFR is PID 0x44 in the ECM's AFR scale, so a
+    diesel profile reads what the ECM commands (14.7 / φ), not 14.5 / φ."""
     from src.analysis.workbench import session_frame
 
     config = _scoped(_raw_config(tmp_path, fuel_type="diesel"))
     inputs = workbench_jobs.workbench_inputs(
         config, bindings_path=Path("data/bindings.yaml"), dids_path=Path("data/dids.yaml")
     )
-    assert inputs.afr_stoich == 14.5
+    assert inputs.calibration is not None
+    assert inputs.calibration.commanded_equiv_ratio_convention == "phi"
     session = _capture(config.collection.storage_path, STAMP)
     frame = session_frame(session, ["obd:RPM", "obd:COMMANDED_AFR"], inputs=inputs)
     afr = set(frame["values"]["obd:COMMANDED_AFR"])
-    ratio = 1.2
-    expected = (
-        14.5 / ratio
-        if inputs.calibration is not None
-        and inputs.calibration.commanded_equiv_ratio_convention == "phi"
-        else 14.5 * ratio
-    )
-    assert afr and all(value == pytest.approx(expected) for value in afr)
+    assert afr and all(value == pytest.approx(14.7 / 1.2) for value in afr)
 
 
 @pytest.mark.usefixtures("no_running_revision_leak")

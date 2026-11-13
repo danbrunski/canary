@@ -203,7 +203,6 @@ def build_tuning_frame(
     providers_path: Path,
     calibration: AfrCalibration | None = None,
     allow_candidates: bool = False,
-    afr_stoich: float,
     dids_path: Path = DIDS_YAML,
 ) -> TuningFrame:
     """Resolve semantic roles without embedding vehicle DID names in callers.
@@ -229,7 +228,6 @@ def build_tuning_frame(
             registry,
             calibration=calibration,
             allow_candidates=allow_candidates,
-            afr_stoich=afr_stoich,
             dids_path=dids_path,
         )
 
@@ -240,7 +238,6 @@ def _build_tuning_frame(
     *,
     calibration: AfrCalibration | None,
     allow_candidates: bool,
-    afr_stoich: float,
     dids_path: Path,
 ) -> TuningFrame:
     manifest = read_capture_manifest(session_dir)
@@ -267,7 +264,6 @@ def _build_tuning_frame(
                 [provider.spec],
                 acquired_time=True,
                 calibration=calibration,
-                afr_stoich=afr_stoich,
             )
         except ChannelSpecError as exc:
             capability[role] = {"available": False, "provider": provider.spec, "reason": str(exc)}
@@ -336,7 +332,21 @@ def _build_tuning_frame(
                 role
             ].ge(transfer.censored_ceiling_afr)
         elif provider.transform == "equiv_ratio_afr":
-            # phi is fuel/air, so AFR = stoich / phi. No convention flag is
+            # phi is fuel/air, so AFR = scale / phi, at the calibration's
+            # afr_scale (M01.3): this column is compared with the voltage
+            # route's AFR and the target maps, both in the ECM's scale, so the
+            # fuel's stoich would put the two sides on different scales.
+            if calibration is None:
+                capability[role] = {
+                    "available": False,
+                    "provider": provider.spec,
+                    "reason": (
+                        "needs the vehicle's AFR calibration: its afr_scale is the AFR "
+                        "the ECM states at lambda = 1, the scale this AFR is in (M01.3)"
+                    ),
+                }
+                continue
+            # No convention flag is
             # consulted here, unlike Mode 01 PID 0x44: this channel's
             # direction is pinned by its own known-answer chain (word 0x4A80
             # -> phi 1.1640625 -> 12.63 AFR, reproducing the PID 0x44 value
@@ -350,7 +360,7 @@ def _build_tuning_frame(
             # is no longer load-bearing for excluding cut samples.
             phi = pd.to_numeric(values[role], errors="coerce")
             values[f"{role}_equiv_ratio"] = phi
-            values[role] = afr_stoich / phi.where(phi > 0)
+            values[role] = calibration.afr_scale / phi.where(phi > 0)
         elif provider.transform == "target_present":
             # True wherever a target was commanded at all. This is not a
             # threshold on the value: fuel cut produces no row on this

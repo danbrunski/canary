@@ -22,7 +22,11 @@ profiles:
       = full fuel, no occupants or cargo (usual_payload_kg). Weigh it (H07.10).'
     wheel_tire_assembly_kg: 40.3
     usual_payload_kg: 127.0
-    fuel_type: gasoline
+    # Standard pump gasoline, usually E10 (operator, 2026-11-12; M01.3(b)).
+    # The blend varies E0-E10, so fuel, economy and CO2 carry up to 4 %;
+    # lambda does not. 91 octane once supercharged: same constants, but a
+    # grade change is a vehicle event; don't compare spark/knock across it.
+    fuel_type: e10
     displacement_l: 4.0
     volumetric_efficiency: 0.85
     drivetrain_loss_fraction: 0.15

@@ -713,9 +713,9 @@ def test_a_design_refuses_what_it_was_not_told(
     prof = _profile_args(world)
     payload = _refused(
         capsys, "argument_missing", "design", "drives", *prof, "--base-revision", BASE,
-        "--sessions", FIXTURE_SLICE, "--out", tmp_path,
+        "--out", tmp_path,
     )  # fmt: skip
-    assert "--fuel-type" in payload["message"]
+    assert "--sessions" in payload["message"]
     # The grid's own refusals come through by their library names.
     keep = {"--rpm-edges", "--load-edges"}
     for flag, reason in (
@@ -748,17 +748,17 @@ def test_a_drive_design_refuses_by_the_librarys_names(
     _refused(
         capsys, "drive_not_on_base_revision", "design", "drives",
         "--base-revision", "ZS44A-k106", "--sessions", FIXTURE_SLICE,
-        "--fuel-type", "gasoline", "--out", tmp_path,
+        "--out", tmp_path,
     )  # fmt: skip
     _refused(
         capsys, "session_missing", "design", "drives",
         "--base-revision", "ZS44A-20260920", "--sessions", tmp_path / "nope",
-        "--fuel-type", "gasoline", "--out", tmp_path,
+        "--out", tmp_path,
     )  # fmt: skip
     _refused(
         capsys, "base_revision_unknown", "design", "drives",
         "--base-revision", "no-such-revision", "--sessions", FIXTURE_SLICE,
-        "--fuel-type", "gasoline", "--out", tmp_path,
+        "--out", tmp_path,
     )  # fmt: skip
     assert not any(tmp_path.iterdir())
 
@@ -797,7 +797,7 @@ def test_every_writing_subcommand_checks_out_before_it_does_any_work(
     )  # fmt: skip
     _refused(
         capsys, "inside_checkout", "design", "drives", "--base-revision", "ZS44A-20260920",
-        "--sessions", FIXTURE_SLICE, "--fuel-type", "gasoline", "--out", out,
+        "--sessions", FIXTURE_SLICE, "--out", out,
     )  # fmt: skip
     # A parent of the checkout is refused too: the run would write around it.
     _refused(
@@ -955,7 +955,7 @@ def test_the_command_line_imports_nothing_that_talks_to_the_ecu(
         # design drives, on the committed slice and the real profile.
         [
             "design", "drives", "--base-revision", "ZS44A-20260920",
-            "--sessions", str(FIXTURE_SLICE), "--fuel-type", "gasoline",
+            "--sessions", str(FIXTURE_SLICE),
             "--battery-v-when-unmeasured", "14.0", "--out", str(tmp_path / "drive_designs"),
         ],
     ]  # fmt: skip
@@ -1026,7 +1026,6 @@ def test_the_command_line_imports_nothing_that_talks_to_the_ecu(
                 "--base-revision",
                 "--sessions",
                 "--sessions-root",
-                "--fuel-type",
                 "--battery-v-when-unmeasured",
                 "--rom-dir",
                 "--out",
@@ -1141,7 +1140,7 @@ def test_the_out_directory_is_refused_inside_or_around_a_rom_directory(
         )  # fmt: skip
         _refused(
             capsys, "inside_rom_library", "design", "drives", "--base-revision", "ZS44A-20260920",
-            "--sessions", FIXTURE_SLICE, "--fuel-type", "gasoline", "--rom-dir", library,
+            "--sessions", FIXTURE_SLICE, "--rom-dir", library,
             "--out", out,
         )  # fmt: skip
     # By environment, with no flag at all.
@@ -1242,9 +1241,7 @@ def test_a_missing_required_argument_is_json_not_usage_text(
         del args[i:j]
         payload = _refused(capsys, "argument_missing", "design", "grid", *prof, *args)
         assert flag in payload["message"]
-    payload = _refused(
-        capsys, "argument_missing", "design", "drives", *prof, "--fuel-type", "gasoline"
-    )
+    payload = _refused(capsys, "argument_missing", "design", "drives", *prof)
     assert "--base-revision" in payload["message"] and "--sessions" in payload["message"]
     assert "--out" in payload["message"]
     run = _run_args(world, grid_design, tmp_path / "o", "--edits", world["spec"])

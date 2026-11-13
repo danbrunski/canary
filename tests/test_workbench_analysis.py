@@ -52,7 +52,7 @@ BINDINGS = Path("data/bindings.yaml")
 RPM_BANDS = (2500.0, 3000.0, 3500.0, 4000.0, 4500.0, 5000.0, 6500.0)
 DIDS = Path("data/dids.yaml")
 T0 = datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC)
-PHI = AfrCalibration(commanded_equiv_ratio_convention="phi")
+PHI = AfrCalibration(afr_scale=14.7, commanded_equiv_ratio_convention="phi")
 FLOOR = NoiseFloor(
     channels={
         "delivery_error_pct": ChannelFloor(
@@ -71,7 +71,6 @@ INPUTS = WorkbenchInputs(
     providers=load_provider_registry(PROFILE / "tuning_providers.yaml"),
     noise_floor=FLOOR,
     idle_spec={"rpm_min": 400.0, "rpm_max": 900.0, "speed_max": 0.0},
-    afr_stoich=14.7,
 )
 
 
@@ -190,9 +189,7 @@ def test_frame_carries_tags_and_revision_boundary(tmp_path: Path) -> None:
             TuneRevision(revision="B", flashed_at=T0 + timedelta(seconds=5)),
         ]
     )
-    inputs = WorkbenchInputs(
-        bindings_path=BINDINGS, dids_path=DIDS, registry=registry, afr_stoich=14.7
-    )
+    inputs = WorkbenchInputs(bindings_path=BINDINGS, dids_path=DIDS, registry=registry)
     frame = session_frame(session, ["obd:RPM"], inputs=inputs)
     assert frame["tags"][0]["label"] == "pull_start"
     assert frame["revision"]["revision"] == "A"
@@ -229,9 +226,7 @@ def test_a_session_named_before_its_data_is_bounded_by_its_data(tmp_path: Path) 
     storage = tmp_path / "storage"
     storage.mkdir()
     session = _write(storage, named, [_closed()] * 10)
-    inputs = WorkbenchInputs(
-        bindings_path=BINDINGS, dids_path=DIDS, registry=registry, afr_stoich=14.7
-    )
+    inputs = WorkbenchInputs(bindings_path=BINDINGS, dids_path=DIDS, registry=registry)
 
     frame = session_frame(session, ["obd:RPM"], inputs=inputs)
     assert frame["revision"]["revision"] == "k106"
@@ -409,7 +404,7 @@ def _config(tmp_path: Path) -> CanaryConfig:
     profile = tmp_path / "profile"
     profile.mkdir(exist_ok=True)
     (profile / "afr_calibration.yaml").write_text(
-        yaml.safe_dump({"commanded_equiv_ratio_convention": "phi"})
+        yaml.safe_dump({"afr_scale": 14.7, "commanded_equiv_ratio_convention": "phi"})
     )
     storage = tmp_path / "storage"
     storage.mkdir(exist_ok=True)
@@ -609,9 +604,7 @@ def test_frame_fuel_cut_comes_from_the_sentinel_channel(tmp_path: Path) -> None:
             )
         ]
     )
-    inputs = WorkbenchInputs(
-        bindings_path=BINDINGS, dids_path=DIDS, providers=providers, afr_stoich=14.7
-    )
+    inputs = WorkbenchInputs(bindings_path=BINDINGS, dids_path=DIDS, providers=providers)
     cut = session_frame(session, ["obd:RPM"], inputs=inputs, regime="fuel_cut")
     rich = session_frame(session, ["obd:RPM"], inputs=inputs, regime="enrichment")
     assert cut["rows_total"] == 2

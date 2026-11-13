@@ -12,7 +12,7 @@ vehicle:
   # reproducible from the captured data alone.
   parameters:
     mass_kg: 1980.0
-    fuel_type: gasoline          # gasoline | diesel | e85
+    fuel_type: gasoline          # gasoline (E0) | e10 | diesel | e85
     displacement_l: 4.0
     volumetric_efficiency: 0.85
     drivetrain_loss_fraction: 0.15

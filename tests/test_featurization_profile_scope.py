@@ -241,6 +241,36 @@ def test_the_feature_cache_key_hashes_the_calibration_featurization_reads(
     assert len({absent, present, edited}) == 3
 
 
+def test_the_feature_cache_key_hashes_the_speed_ratio_the_trip_channels_read(
+    tmp_path: Path,
+) -> None:
+    """M01.2: road speed is ``obd:SPEED`` over the profile ``dyno.yaml``'s
+    measured ratio, so a re-measured ratio must not reuse cached frames."""
+    session = tmp_path / "2026-09-20T152758"
+    session.mkdir()
+    vehicle = tmp_path / "vehicle"
+    vehicle.mkdir()
+    base = profiles_disabled(_unscoped())
+    config = base.model_copy(
+        update={
+            "daemon": base.daemon.model_copy(
+                update={"afr_calibration": vehicle / "afr_calibration.yaml"}
+            )
+        }
+    )
+    dyno = vehicle / "dyno.yaml"
+    body = (
+        "schema_version: 1\nmotion_sources:\n  speed:\n    - channel: obd:SPEED\n"
+        "      ratio_to_gps: {}\n      evidence: test\n"
+    )
+    absent = build_feature_frame_cache_key([session], config)
+    dyno.write_text(body.format(0.9203))
+    measured = build_feature_frame_cache_key([session], config)
+    dyno.write_text(body.format(0.9250))
+    remeasured = build_feature_frame_cache_key([session], config)
+    assert len({absent, measured, remeasured}) == 3
+
+
 def test_the_feature_spec_records_the_calibration_by_content() -> None:
     """A manifest says which calibration its derived AFR channels were built
     with; ``sha256: None`` is the "without one" every pre-P02.11 frame had."""

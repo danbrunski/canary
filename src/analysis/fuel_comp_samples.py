@@ -292,7 +292,6 @@ def _read_long(
     specs: Sequence[str],
     *,
     calibration: AfrCalibration | None,
-    afr_stoich: float,
     bindings_path: Path,
     dids_path: Path,
 ) -> dict[str, pd.DataFrame]:
@@ -316,7 +315,6 @@ def _read_long(
             wanted,
             acquired_time=True,
             calibration=calibration,
-            afr_stoich=afr_stoich,
             bindings_path=bindings_path,
             dids_path=dids_path,
         )
@@ -761,7 +759,6 @@ def _fuel_cuts(
     declaration: FuelCompDeclaration,
     delivery: LambdaDeliveryDeclaration,
     afr_calibration: AfrCalibration | None,
-    afr_stoich: float,
 ) -> tuple[np.ndarray, bool]:
     """Every fuel-cut observation on any declared commanded source (B06's
     signatures: the RAM word's sentinel, PID 0x44's cut value), sorted."""
@@ -778,7 +775,6 @@ def _fuel_cuts(
             sentinel.times,
             commanded=source,
             quantity=resolve_quantity(source, afr_calibration),
-            afr_stoich=afr_stoich,
         )
         found.append(side.times[side.cut])
     if not found:
@@ -798,9 +794,7 @@ class _OpenLoop:
     bank2: pd.DataFrame | None
 
 
-def _open_loop_rows(
-    ctx: _Session, afr_calibration: AfrCalibration | None, afr_stoich: float
-) -> _OpenLoop:
+def _open_loop_rows(ctx: _Session, afr_calibration: AfrCalibration | None) -> _OpenLoop:
     """B06's delivery rows for the first declared commanded source captured,
     against bank 1's measured source and, where captured, bank 2's."""
     rules = ctx.declaration.samples.open_loop
@@ -825,7 +819,6 @@ def _open_loop_rows(
             target_source=name,
             measured_source=measured_source,
             calibration=afr_calibration,
-            afr_stoich=afr_stoich,
             # The declared measured sources are PID-only and carry no baro
             # gain (B06.7), so none is passed.
             baro=None,
@@ -1314,7 +1307,6 @@ def session_samples(
     declaration: FuelCompDeclaration,
     delivery: LambdaDeliveryDeclaration,
     afr_calibration: AfrCalibration | None,
-    afr_stoich: float,
     registry: TuneRevisionRegistry,
     resolver: RevisionImageResolver | Callable[[str], FuelCompCalibration],
     session_name: str | None = None,
@@ -1337,13 +1329,12 @@ def session_samples(
         session,
         _wanted_specs(declaration, delivery),
         calibration=afr_calibration,
-        afr_stoich=afr_stoich,
         bindings_path=bindings_path,
         dids_path=dids_path,
     )
     coolant_spec, coolant = _first_captured(long, rules.gates.coolant.sources)
     purge_spec, purge = _first_captured(long, inputs.purge.sources)
-    cuts, cut_captured = _fuel_cuts(long, declaration, delivery, afr_calibration, afr_stoich)
+    cuts, cut_captured = _fuel_cuts(long, declaration, delivery, afr_calibration)
     ctx = _Session(
         name=name,
         declaration=declaration,
@@ -1384,7 +1375,7 @@ def session_samples(
             f"{ctx.throttle.did_unusable}: samples without a co-observed PID 0x11 read "
             "stay unpaired"
         )
-    open_loop = _open_loop_rows(ctx, afr_calibration, afr_stoich)
+    open_loop = _open_loop_rows(ctx, afr_calibration)
     anchors = {
         "closed_loop": ctx.series(rules.closed_loop.trims["stft_b1"]).times,
         "open_loop": (

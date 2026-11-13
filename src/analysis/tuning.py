@@ -413,7 +413,6 @@ def read_delivery_inputs(
     declaration: LambdaDeliveryDeclaration,
     *,
     calibration: AfrCalibration | None,
-    afr_stoich: float,
     bindings_path: Path = BINDINGS_YAML,
     dids_path: Path = DIDS_YAML,
     mode01_exclusion_note: str | None = None,
@@ -455,7 +454,6 @@ def read_delivery_inputs(
                 [spec],
                 acquired_time=True,
                 calibration=calibration,
-                afr_stoich=afr_stoich,
                 bindings_path=bindings_path,
                 dids_path=dids_path,
             )
@@ -635,7 +633,6 @@ def gate_delivery_samples(
     *,
     declaration: LambdaDeliveryDeclaration,
     calibration: AfrCalibration | None,
-    afr_stoich: float,
     rpm_bands: tuple[float, ...],
     min_load: float | None,
     session: Path | pd.DataFrame | None = None,
@@ -683,7 +680,6 @@ def gate_delivery_samples(
         target_source=route.target_source,
         measured_source=route.measured_source,
         calibration=calibration,
-        afr_stoich=afr_stoich,
         regime_delays_s=None if enrichment_delay_s is None else {"enrichment": enrichment_delay_s},
         baro=inputs.baro,
     )
@@ -730,12 +726,16 @@ def gate_delivery_samples(
         values = values[keep(values)]
         report.drop(gate, before, len(values))
     report.remaining = len(values)
+    # The residual is in lambda and needs no scale. These two columns present
+    # it as AFR at the ECM's afr_scale (M01.3), the scale of the target maps
+    # they are read against; without a calibration there is none, so NaN.
+    afr_scale = np.nan if calibration is None else calibration.afr_scale
     out = pd.DataFrame(
         {
             "timestamp": values["timestamp"],
             "rpm": values["rpm"].astype(float),
-            "commanded_afr": values["target_lambda"].astype(float) * afr_stoich,
-            "measured_afr": values["measured_lambda"].astype(float) * afr_stoich,
+            "commanded_afr": values["target_lambda"].astype(float) * afr_scale,
+            "measured_afr": values["measured_lambda"].astype(float) * afr_scale,
             "error_pct": values["residual_pct"].astype(float),
             "separation_s": values["separation_s"].astype(float),
         }
@@ -803,7 +803,6 @@ def delivery_error(
     *,
     declaration: LambdaDeliveryDeclaration | None,
     calibration: AfrCalibration | None,
-    afr_stoich: float,
     rpm_bands: tuple[float, ...],
     min_load: float | None,
     measured_spec: str = "obd:O2_WR_LAMBDA_S1",
@@ -840,7 +839,6 @@ def delivery_error(
         chosen,
         declaration,
         calibration=calibration,
-        afr_stoich=afr_stoich,
         bindings_path=bindings_path,
         dids_path=dids_path,
         mode01_exclusion_note=mode01_exclusion_note,
@@ -852,7 +850,6 @@ def delivery_error(
             chosen,
             declaration=declaration,
             calibration=calibration,
-            afr_stoich=afr_stoich,
             rpm_bands=rpm_bands,
             min_load=min_load,
             session=session,
@@ -971,7 +968,6 @@ def compare_sessions(
     unsafe_axes: bool = False,
     grid: str = "1s",
     calibration: AfrCalibration | None = None,
-    afr_stoich: float,
     bindings_path: Path = BINDINGS_YAML,
     dids_path: Path = DIDS_YAML,
     noise_floor: NoiseFloor | None = None,
@@ -1012,7 +1008,6 @@ def compare_sessions(
         grid=grid,
         require_all=True,
         calibration=calibration,
-        afr_stoich=afr_stoich,
         bindings_path=bindings_path,
         dids_path=dids_path,
     )

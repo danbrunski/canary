@@ -622,6 +622,7 @@ def _profile(tmp_path: Path, *, verified: bool) -> Path:
     (profile / "afr_calibration.yaml").write_text(
         yaml.safe_dump(
             {
+                "afr_scale": 14.7,
                 "commanded_equiv_ratio_convention": "phi",
                 "target_maps": [
                     {

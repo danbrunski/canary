@@ -44,6 +44,8 @@ const SUMMARY: TripSummaryResponse = {
     zero_to_60_mph_s: 9.5,
     quarter_mile_s: 17.1,
     quarter_mile_trap_kph: 130.0,
+    speed_basis: "obd:SPEED / 0.9203 (measured ratio to GPS speed, dyno.yaml motion_sources)",
+    fuel_basis: "e10: stoich 14.08, 0.749 kg/L, 2.28 kg CO2/L, LHV 41.3 MJ/kg",
   },
 };
 

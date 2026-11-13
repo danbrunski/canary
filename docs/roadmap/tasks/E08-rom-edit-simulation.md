@@ -356,7 +356,9 @@ refusal carries a stable `reason` string that tests assert by name.
     - **Further refusals:** `no_sessions`, `duplicate_session`,
       `session_missing`, `session_undated`, `base_revision_unknown`,
       `base_image_unknown`, `fuel_type_unknown`, and `synthetic_as_observed`
-      (from `check_origin`).
+      (from `check_origin`). (2026-11-12, M01.3(a): `fuel_type` and
+      `fuel_type_unknown` were removed; the fuel's stoich only ever fed the
+      AFR-to-λ conversion, which now uses the ECM's AFR scale.)
   - **Grid design.** `load_edges` are in Fuel Comp's column axis's own
     decode (`fuel_comp_flow_axis`, %, found through
     `fuel_comp_fit.yaml` `rom.fuel_comp_kind`), refused outside 0–100 %
@@ -954,7 +956,8 @@ refusal carries a stable `reason` string that tests assert by name.
     but argument handling, the run mapping and the file writing. Every
     refusal of any layer prints `{"refused": <reason>, "message": ...}` and
     exits 2. No `src/` module was edited.
-  - **Required, no default.** `--draws`, `--seed`, `--design`, `--fuel-type`
+  - **Required, no default** (`--fuel-type` removed 2026-11-12 by M01.3(a)).
+    `--draws`, `--seed`, `--design`, `--fuel-type`
     (drives), `--out`, and the grid environment (the library's own
     `environment_unstated` / `load_basis_unstated`) were asked for. Missing,
     these are `argument_missing` naming the flag (argparse is permissive so
@@ -1072,7 +1075,7 @@ refusal carries a stable `reason` string that tests assert by name.
   - **Real case** (laptop, scratch only, `.../scratchpad/e085/`; ROM dir =
     the parent of `OPERATOR_ROMS["r20260920"]`):
     - `design drives --base-revision ZS44A-20260920 --sessions
-      _capture-tuning-2026-09-23T142926 --fuel-type gasoline
+      _capture-tuning-2026-09-23T142926
       --battery-v-when-unmeasured 14.0`: design `322e4cab...` (the same
       sha256 E08.2 and E08.4 recorded), 298 points, 10.9 s on a quiet laptop.
     - `inspect --edits tests/fixtures/rom_edit_spec/fuel_comp_light_load.yaml`:
@@ -1534,7 +1537,7 @@ refusal carries a stable `reason` string that tests assert by name.
       ```
       .venv/bin/python -m tools.rom_sim design drives \
         --base-revision ZS44A-20260920 --sessions _capture-tuning-2026-09-23T142926 \
-        --sessions-root ~/canary-data/sessions/nissan-xterra-2008 --fuel-type gasoline \
+        --sessions-root ~/canary-data/sessions/nissan-xterra-2008 \
         --battery-v-when-unmeasured 14.0 --rom-dir "/mnt/c/Users/thebo/Desktop/Uprev/Tuned ROMs" \
         --out ~/canary-data/sim/predictions/fuel-comp-restore-2026-10-04/designs
       .venv/bin/python -m tools.rom_sim run --base --revision ZS44A-20260920 \

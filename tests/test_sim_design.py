@@ -198,7 +198,7 @@ def _drive(sessions: list[Path], **kw: object) -> SimDesign:
     # E08.2's evidence on the committed slice is fuel-mv-1's; the builders'
     # default is the simulator's declared plant (E08.11, tested below).
     kw.setdefault("plant_version", "fuel-mv-1")
-    return build_drive_design(sessions, PROFILE, BASE, fuel_type="gasoline", **kw)  # type: ignore[arg-type]
+    return build_drive_design(sessions, PROFILE, BASE, **kw)  # type: ignore[arg-type]
 
 
 def _grid(**over: object) -> SimDesign:
@@ -336,16 +336,12 @@ def test_a_drive_after_the_base_revisions_successor_flash_is_refused_by_name() -
     # The slice is 2026-09-23; ZS44A-k106's successor, ZS44A-20260920, was
     # flashed 2026-09-21T03:08:45Z (tune_revisions.yaml).
     with pytest.raises(SimDesignRefusalError) as caught:
-        build_drive_design(
-            [FIXTURE], PROFILE, "ZS44A-k106", fuel_type="gasoline", resolver=_resolver
-        )
+        build_drive_design([FIXTURE], PROFILE, "ZS44A-k106", resolver=_resolver)
     assert caught.value.reason == "drive_not_on_base_revision"
     assert FIXTURE.name in str(caught.value) and BASE in str(caught.value)
     # A drive before the base revision's flash is refused the same way.
     with pytest.raises(SimDesignRefusalError) as caught:
-        build_drive_design(
-            [FIXTURE], PROFILE, "ZS44A-20261004", fuel_type="gasoline", resolver=_resolver
-        )
+        build_drive_design([FIXTURE], PROFILE, "ZS44A-20261004", resolver=_resolver)
     assert caught.value.reason == "drive_not_on_base_revision"
 
 
@@ -363,7 +359,6 @@ def test_drive_inputs_are_refused_by_name(tmp_path: Path) -> None:
     def reason(**kw: object) -> str:
         sessions = kw.pop("sessions", [FIXTURE])
         base = kw.pop("base", BASE)
-        kw.setdefault("fuel_type", "gasoline")
         kw.setdefault("resolver", _resolver)
         with pytest.raises(SimDesignRefusalError) as caught:
             build_drive_design(sessions, PROFILE, base, **kw)  # type: ignore[arg-type]
@@ -374,7 +369,6 @@ def test_drive_inputs_are_refused_by_name(tmp_path: Path) -> None:
     assert reason(sessions=[tmp_path / "2026-09-23T150000"]) == "session_missing"
     assert reason(base="ZS44A-nope") == "base_revision_unknown"
     assert reason(base="ZS44A-k105") == "base_image_unknown"
-    assert reason(fuel_type="kerosene") == "fuel_type_unknown"
     synthetic = tmp_path / "_sim-0123456789ab"
     shutil.copytree(FIXTURE, synthetic)
     assert reason(sessions=[synthetic]) == "synthetic_as_observed"
@@ -670,7 +664,7 @@ def test_building_and_writing_designs_loads_no_ecu_facing_package(tmp_path: Path
             raise FuelCompRomRefusalError("image_not_found", name)
 
         drive = build_drive_design(
-            [Path({str(FIXTURE)!r})], profile, {BASE!r}, fuel_type="gasoline", resolver=refuse
+            [Path({str(FIXTURE)!r})], profile, {BASE!r}, resolver=refuse
         )
         grid = build_grid_design(
             [800, 1600], [0, 50], profile_dir=profile, base_revision={BASE!r},
@@ -714,7 +708,6 @@ def test_the_real_base_image_reconstructs_fill_bytes_on_the_augmented_slice(
         [_augmented(tmp_path)],
         PROFILE,
         BASE,
-        fuel_type="gasoline",
         rom_dirs=[OPERATOR_ROMS["r20260920"].parent],
     )
     assert design.points

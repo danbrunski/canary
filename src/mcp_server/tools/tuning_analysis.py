@@ -35,7 +35,6 @@ def _capability_payload(session_dir: Path, context: TuningContext) -> dict[str, 
         session_dir,
         providers_path=context.providers_path,
         calibration=context.calibration,
-        afr_stoich=context.afr_stoich,
     )
     return {"roles": frame.capability, "sections": section_capabilities(frame.capability)}
 
@@ -102,7 +101,6 @@ def get_delivery_error(
             measured_spec=measured_spec,
             min_load=floor,
             revisions=context.registry,
-            afr_stoich=context.afr_stoich,
             mode01_exclusion_note=context.mode01_exclusion_note,
             rpm_bands=context.rpm_bands,
         )
@@ -167,7 +165,6 @@ def compare_tuning_sessions(
             floor_channel=floor_channel,
             conditions=conditions,
             revisions=context.registry,
-            afr_stoich=context.afr_stoich,
         )
     except (GateError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}

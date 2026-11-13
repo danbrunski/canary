@@ -102,7 +102,6 @@ from src.analysis.lambda_delivery import load_lambda_delivery
 from src.paths import REPO_ROOT
 from src.session import SessionKind, is_synthetic_session, iter_sessions
 from src.signals.afr import load_afr_calibration
-from src.signals.derived import FUEL_PROPERTIES
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.storage.sessions import session_started_at
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry, session_dated_at
@@ -2043,14 +2042,10 @@ def fill_samples(
     profile_dir: Path,
     registry: TuneRevisionRegistry,
     resolver: RevisionImageResolver | Callable[[str], FuelCompCalibration],
-    *,
-    fuel_type: str,
 ) -> pd.DataFrame:
     """N02's samples (:func:`src.analysis.fuel_comp_samples.session_samples`)
     of one recording, the fill byte reconstructed on the revision in force at
     each sample, as the design reconstructed its own."""
-    if fuel_type not in FUEL_PROPERTIES:
-        raise FuelPlantRefusalError("fuel_type_unknown", f"{fuel_type!r} is not a known fuel")
     providers = profile_dir / "tuning_providers.yaml"
     samples = session_samples(
         session,
@@ -2060,7 +2055,6 @@ def fill_samples(
             providers_path=providers if providers.exists() else None,
         ),
         afr_calibration=load_afr_calibration(profile_dir / "afr_calibration.yaml"),
-        afr_stoich=FUEL_PROPERTIES[fuel_type].afr_stoich,
         registry=registry,
         resolver=resolver,
     )
@@ -2718,7 +2712,6 @@ def score_ecu_outputs(
     sessions_root: Path,
     predictions_root: Path,
     resolver: RevisionImageResolver | Callable[[str], FuelCompCalibration],
-    fuel_type: str,
     amendment: int | None = None,
     block: str | None = None,
     recordings: Sequence[str] | None = None,
@@ -2752,7 +2745,7 @@ def score_ecu_outputs(
     post: dict[str, list[pd.DataFrame]] = {o.id: [] for o in rules.outputs}
     for name in scope:
         path = sessions_root / name
-        fill = fill_samples(path, profile_dir, registry, resolver, fuel_type=fuel_type)
+        fill = fill_samples(path, profile_dir, registry, resolver)
         for spec in rules.outputs:
             post[spec.id].append(
                 ecu_output_reads(
@@ -2799,7 +2792,6 @@ def ecu_null_control(
     sessions_root: Path,
     predictions_root: Path,
     resolver: RevisionImageResolver | Callable[[str], FuelCompCalibration],
-    fuel_type: str,
 ) -> dict[str, Any]:
     """A prediction block's null control: each of its ``null_control`` drives,
     pre-flash on the base image (no ROM change), scored as if post-change
@@ -2834,7 +2826,7 @@ def ecu_null_control(
                 "null_drive_not_on_base",
                 f"{name} ran on {None if rev is None else rev.revision}, not {case.base_revision}",
             )
-        fill = fill_samples(path, profile_dir, registry, resolver, fuel_type=fuel_type)
+        fill = fill_samples(path, profile_dir, registry, resolver)
         drives[name] = {
             spec.id: _ecu_test(
                 inputs.points,

@@ -1430,7 +1430,7 @@
      "loc": [
       "fuel_type"
      ],
-     "msg": "Input should be 'gasoline', 'diesel' or 'e85'",
+     "msg": "Input should be 'gasoline', 'e10', 'diesel' or 'e85'",
      "type": "literal_error"
     }
    ],
@@ -8200,7 +8200,7 @@
     },
     {
      "alias": null,
-     "annotation": "Literal['gasoline', 'diesel', 'e85']",
+     "annotation": "Literal['gasoline', 'e10', 'diesel', 'e85']",
      "constraints": [],
      "default": "gasoline",
      "description": null,
@@ -22247,7 +22247,7 @@
    "AlertsConfig": "40d2a25efded30311c3a2781c21f2d566f7c0c729af3e365be5c783a60281588",
    "AutoTagConfig": "854532402701043c94e3fbcbeabfcb4c55bf4dbe98e490628def8a6eddbf6879",
    "CanBusConfig": "bd87c3879adcff6ddc4a06b2ed1ae7f1a20625abca1fa40bf2b60e631c36053f",
-   "CanaryConfig": "c5c54259f9a55370a7608bc8694981d210dad537e60396ef26578bc02a007457",
+   "CanaryConfig": "37c70f6350998aab295ac6ebdb63dd3131fcc7d78b43eaa33168f5d199ac59f3",
    "CollectionConfig": "98e6c84db424d868397ad5603fb9ae205cdc9d715bb6eca63d8fb498a1d38f80",
    "CommitteesConfig": "9eb7046514943dd0444615e211830127965478958085f3db5e1691964eab8cbc",
    "CompanionConfig": "8002ff2c0312e9cc9801f7b06f1928332bfec8e3df86d0e4cebded3ea1f5f9f9",
@@ -22280,8 +22280,8 @@
    "TuningReadinessConfig": "839b6f3ee87a1d1ea4b72442ee5958ee8fcddfa39f0767da8261b7b430cbdb6a",
    "TwinLiveConfig": "6fb1ec2278c8adef87836892a9c23024fbe2ff6142d02e8e4ac1c5c6cda532a3",
    "UsbAdcConfig": "c7fa292a4742dea6f0e5f06a2f4f85ce49b80c8b3f5b0212488b2df8cc208e4f",
-   "VehicleConfig": "d68f8889f16f97a7a4095e14e5d267015a52a17c31f9529435b56bbb77097d8a",
-   "VehicleParameters": "e056734ba01276bdeebee123191224ac70f4eeabc16805ed5bb50206ebda17f4",
+   "VehicleConfig": "c7486cd0d3741a2bc25ffbbde395c5923ff0f68948e168ac2beef18ca1786784",
+   "VehicleParameters": "2ea141ff53ce635ac3cd2b35634a22c7e69851d4e068c71fdbe59f4fa0bc770f",
    "_SequenceTrainingConfig": "0988a624379bede82300b1e03531c5a3fc9c9bb97b24ae541aafc869697cbcf8",
    "_Strict": "9baae85784c31246938da4c293fd86ea7b2a425fad8d5e4bff2477c4afd24c49"
   },
@@ -24719,6 +24719,7 @@
        "default": "gasoline",
        "enum": [
         "gasoline",
+        "e10",
         "diesel",
         "e85"
        ],
@@ -27438,6 +27439,7 @@
        "default": "gasoline",
        "enum": [
         "gasoline",
+        "e10",
         "diesel",
         "e85"
        ],

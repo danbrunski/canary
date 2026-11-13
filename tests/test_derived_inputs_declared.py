@@ -88,6 +88,7 @@ from src.signals.derived import (
     compute_anomaly_signals,
     compute_derived_channels,
 )
+from src.signals.speed_correction import SpeedCorrection
 from src.vehicle.tune_revisions import load_tune_revisions
 
 REPO = Path(__file__).resolve().parents[1]
@@ -107,6 +108,9 @@ VEHICLE = VehicleParameters(
 )
 #: Committee outputs whose first group is "any ``min_members`` of these".
 MIN_MEMBERS = {committee.output: committee.min_members for committee in COMMITTEES}
+
+#: These frames test channel inputs, not the speed scale (M01.2).
+UNCORRECTED_SPEED = SpeedCorrection.unmeasured("test frame: no measured ratio")
 
 
 # ---------------------------------------------------------------------------
@@ -417,7 +421,9 @@ class _Chain:
                 flash_history=self.flash,
             ),
             lambda frame: compute_anomaly_signals(frame, VEHICLE),
-            lambda frame: compute_derived_channels(frame, VEHICLE, calibration=self.calibration),
+            lambda frame: compute_derived_channels(
+                frame, VEHICLE, speed_correction=UNCORRECTED_SPEED, calibration=self.calibration
+            ),
             append_committee_residuals,
         )
 

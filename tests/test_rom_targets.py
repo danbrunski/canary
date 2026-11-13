@@ -271,6 +271,7 @@ def test_cli_dry_run_and_exclusive_bundle(editor, tmp_path, monkeypatch, capsys)
     (tmp_path / "calibration.yaml").write_text(
         yaml.safe_dump(
             {
+                "afr_scale": 14.7,
                 "target_maps": [editor.target.model_dump(mode="json")],
             }
         )

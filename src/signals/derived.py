@@ -36,6 +36,8 @@ from src.config import VehicleParameters
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.signals import vehicle_signals
 from src.signals.committees import COMMITTEES, MEMBER_TRANSFORMS, committee_channel_reason
+from src.signals.fuel_cut import COMMANDED_EQUIV_RATIO_COLUMN, fuel_cut_rows
+from src.signals.speed_correction import TRIP_SPEED_CHANNEL, SpeedCorrection
 
 if TYPE_CHECKING:
     # `src.signals.afr` imports `fuel_properties` from this module, so the
@@ -57,10 +59,12 @@ __all__ = [
     "VE_MANIFOLD_CHANNEL",
     "DerivedDeclarationError",
     "FuelProperties",
+    "SpeedCorrection",
     "TripSummary",
     "compute_anomaly_signals",
     "compute_derived_channels",
     "compute_instantaneous_channels",
+    "fuel_basis",
     "fuel_properties",
     "resolved_dependencies",
     "summarize_trip",
@@ -213,7 +217,7 @@ DERIVED_CHANNEL_OPTIONAL_INPUTS: dict[str, tuple[str, ...]] = {
         "decoded:IAT",
     ),
     # P02.15: the target map has no value while the ECM commands fuel cut
-    # (commanded equivalence ratio exactly 0, src.signals.afr.fuel_cut_rows).
+    # (commanded equivalence ratio exactly 0, src.signals.fuel_cut.fuel_cut_rows).
     "derived:TARGET_AFR": ("obd:COMMANDED_EQUIV_RATIO",),
     **_VEHICLE_OPTIONAL_INPUTS,
 }
@@ -246,18 +250,74 @@ class FuelProperties:
     co2_kg_per_l: float  # tailpipe CO2 per litre burned
     lhv_mj_per_kg: float  # lower heating value
 
+    def describe(self) -> str:
+        """The constants, as a trip figure's ``fuel_basis`` states them."""
+        return (
+            f"stoich {self.afr_stoich:g}, {self.density_kg_per_l:g} kg/L, "
+            f"{self.co2_kg_per_l:g} kg CO2/L, LHV {self.lhv_mj_per_kg:g} MJ/kg"
+        )
 
-#: Standard values; gasoline/diesel/E85 cover the configured fuel types.
+
+#: Per-fuel constants, keyed by ``VehicleParameters.fuel_type``.
+#:
+#: ``gasoline`` is E0. Pump fuel in the US is usually E10, and ``e10`` is the
+#: 10 %-ethanol-by-volume blend (M01.3(b), operator 2026-11-12): stoich 14.08,
+#: 0.749 kg/L, 2.28 kg CO2/L, LHV 41.3 MJ/kg. The CO2 and LHV are the blend
+#: arithmetic below with the same components: 0.0789 kg ethanol + 0.6705 kg
+#: E0 per litre carry 0.6218 kg carbon (2.28 kg CO2) and 30.95 MJ, over
+#: 0.7494 kg = 41.3 MJ/kg (41.7 was first written, which this arithmetic does
+#: not give; it fed only the fuel-energy power estimate). Burning E10 with E0 constants
+#: reads fuel volume 3.7 % low (MAF / (stoich * density): 14.7 * 0.745 against
+#: 14.08 * 0.749) and mpg 3.8 % high. The blend at the pump is not constant:
+#: stoich lies between 14.1 (E10) and 14.7 (E0), so a fuel-mass, economy or
+#: CO2 figure carries up to 4 % from the blend alone; lambda does not.
+#:
+#: Octane does not enter: 87 and 91 are both ethanol blends with these
+#: constants. A grade change moves knock margin, so it is recorded as a vehicle
+#: event, and spark or knock data are not compared across it without saying so.
+#:
+#: ``e85`` CO2 and LHV (M01.3(b), 2026-11-12; were 1.56 kg/L and 28.5 MJ/kg) by
+#: the same blend arithmetic as ``e10``, by volume: 85 % ethanol by volume (0.789 kg/L,
+#: 52.14 % carbon by mass from C2H5OH, LHV 26.8 MJ/kg) with 15 % gasoline
+#: (0.745 kg/L, 86.6 % carbon, LHV 43.0 MJ/kg). Carbon 0.4465 kg/L x 44.01/12.01
+#: = 1.64 kg CO2/L, which also matches the volume blend of EPA's emission
+#: factors (ethanol 5.75 and motor gasoline 8.78 kg CO2/gal: 6.20 kg/gal =
+#: 1.64 kg/L). LHV by mass, 22.78 MJ/L over 0.7825 kg/L = 29.1 MJ/kg. The
+#: component figures are handbook values, quoted from memory rather than a
+#: fetched data sheet; the arithmetic is the part checked here. Its stoich and
+#: density are unchanged.
 FUEL_PROPERTIES: dict[str, FuelProperties] = {
     "gasoline": FuelProperties(14.7, 0.745, 2.31, 43.0),
+    "e10": FuelProperties(14.08, 0.749, 2.28, 41.3),
     "diesel": FuelProperties(14.5, 0.832, 2.68, 42.6),
-    "e85": FuelProperties(9.765, 0.781, 1.56, 28.5),
+    "e85": FuelProperties(9.765, 0.781, 1.64, 29.1),
 }
 
 
 def fuel_properties(vehicle: VehicleParameters) -> FuelProperties:
     """Resolve fuel constants for the configured fuel type (gasoline default)."""
     return FUEL_PROPERTIES.get(vehicle.fuel_type, FUEL_PROPERTIES["gasoline"])
+
+
+def fuel_basis(vehicle: VehicleParameters, wide: pd.DataFrame) -> str:
+    """One line naming the fuel constants and fuel-cut handling a trip used.
+
+    Says which kind of fuel-cut answer it is: zeroed where PID 0x44 marked it,
+    or undetectable because the frame never carried PID 0x44 (then every
+    fuel-cut row still counts fuel, M01.4).
+    """
+    fuel = fuel_properties(vehicle)
+    if COMMANDED_EQUIV_RATIO_COLUMN in wide.columns:
+        cut = (
+            f"zero in decel fuel cut ({COMMANDED_EQUIV_RATIO_COLUMN} = 0 on "
+            f"{int(fuel_cut_rows(wide).sum())} rows)"
+        )
+    else:
+        cut = (
+            f"decel fuel cut not detectable (no {COMMANDED_EQUIV_RATIO_COLUMN}), "
+            "so fuel-cut rows count fuel"
+        )
+    return f"{vehicle.fuel_type}: {fuel.describe()}; {cut}"
 
 
 def _series(wide: pd.DataFrame, *names: str) -> pd.Series | None:
@@ -431,7 +491,7 @@ def _commanded_afr_from_pid_44(
 def _instant_fuel_g_s(
     wide: pd.DataFrame,
     vehicle: VehicleParameters,
-    fuel: FuelProperties,
+    fuel_props: FuelProperties,
     calibration: AfrCalibration | None = None,
 ) -> pd.Series | None:
     """Instantaneous fuel mass flow (g/s), best available method.
@@ -444,7 +504,31 @@ def _instant_fuel_g_s(
        stoich.
     3. Speed-density: ideal-gas air mass from MAP/IAT/RPM/displacement/VE,
        then ÷ stoich AFR — the last resort when only MAP-style data exists.
+
+    Whatever the method, a row the ECM marks as decel fuel cut
+    (:func:`~src.signals.fuel_cut.fuel_cut_rows`, PID 0x44 = 0) is 0 g/s: the
+    injectors are off. MAF still reads a few g/s then and the wideband sits at
+    its lean limit, so the division above counted fuel that was never
+    injected; the commanded-ratio route gave NaN there, which the trip
+    integrator bridged with the fuelled samples either side (M01.4). Measured
+    2026-11-12 on the 1 Hz grid: 2.1 % of 2026-09-20T152758's fuel and 12.4 %
+    of its 467 m descent; 0.9 % of 2026-10-10T153117, an ordinary drive. A
+    row without a fresh PID 0x44 is not known to be in fuel cut and still
+    counts, so those are lower bounds.
     """
+    fuel = _fuel_g_s_by_method(wide, vehicle, fuel_props, calibration)
+    if fuel is None:
+        return None
+    return fuel.where(~fuel_cut_rows(wide), 0.0)
+
+
+def _fuel_g_s_by_method(
+    wide: pd.DataFrame,
+    vehicle: VehicleParameters,
+    fuel: FuelProperties,
+    calibration: AfrCalibration | None,
+) -> pd.Series | None:
+    """:func:`_instant_fuel_g_s` before the fuel-cut rows are zeroed."""
     rate_lph = _series(wide, "obd:ENGINE_FUEL_RATE", "decoded:ENGINE_FUEL_RATE")
     if rate_lph is not None:
         return rate_lph * fuel.density_kg_per_l * 1000.0 / 3600.0
@@ -526,9 +610,11 @@ def _gear_estimate(
     loaded tire circumference, never hardcoded here (this platform is meant to
     generalize to any vehicle). Until all three are known the vehicle simply
     never gets this channel — same absent-input contract as every other
-    channel here, not a special case. ``speed`` is the ECU's, which may read
-    under true speed (the Xterra's reads ~8 % low); adjacent gears differ by
-    far more, so the nearest match holds.
+    channel here, not a special case. ``speed`` is *road* speed (the caller's
+    :class:`~src.signals.speed_correction.SpeedCorrection` applied, M01.2),
+    because the table is rpm per km/h of true speed. The Xterra's ECU reads
+    8 % under; against 30 % between its 5th and 6th that still picked the
+    right gear, but a close-ratio box would have been marginal.
 
     There is no TCM on this (manual-transmission) vehicle's bus, so this
     ratio clustering is the *only* gear source available, not a fallback for
@@ -554,6 +640,7 @@ def compute_instantaneous_channels(
     wide: pd.DataFrame,
     vehicle: VehicleParameters,
     *,
+    speed_correction: SpeedCorrection,
     calibration: AfrCalibration | None = None,
 ) -> pd.DataFrame:
     """Append the row-local (non-integrated) ``derived:<NAME>`` channels.
@@ -571,15 +658,19 @@ def compute_instantaneous_channels(
     ``INSTANT_ECONOMY_MPG``, ``BOOST_VACUUM_KPA``, ``ESTIMATED_POWER_HP``,
     ``ESTIMATED_TORQUE_NM``, ``GEAR_ESTIMATE`` (Task 4.6 — only when the
     profile's gearbox ratios, final drive and tire are all known, H07.1).
+
+    Speed is road speed: ``speed_correction`` (M01.2) is applied to the ECM's
+    reading before the economy and gear channels use it. Required, so no caller
+    can integrate or divide by the uncorrected reading by forgetting it; a
+    vehicle with no measured ratio passes
+    :meth:`SpeedCorrection.unmeasured`, which says so.
     """
     if wide.empty or "timestamp" not in wide.columns:
         return wide.copy()
     out = wide.copy()
     fuel = fuel_properties(vehicle)
 
-    # No broadcast fallback for speed: the `decoded:VEHICLE_SPEED` that used to
-    # sit here names no binding, so it never resolved (removed 2026-09-18).
-    speed = _series(out, "obd:SPEED")
+    speed = _road_speed(out, speed_correction)
     rpm = _series(out, "obd:RPM", "decoded:ECM_RPM")
     fuel_g_s = _instant_fuel_g_s(out, vehicle, fuel, calibration)
 
@@ -625,10 +716,21 @@ def compute_instantaneous_channels(
     return out
 
 
+def _road_speed(wide: pd.DataFrame, speed_correction: SpeedCorrection) -> pd.Series | None:
+    """Road speed (km/h) from the trip speed channel, or ``None`` when absent.
+
+    No broadcast fallback: the ``decoded:VEHICLE_SPEED`` that used to sit here
+    named no binding, so it never resolved (removed 2026-09-18).
+    """
+    indicated = _series(wide, TRIP_SPEED_CHANNEL)
+    return None if indicated is None else speed_correction.road_speed(indicated)
+
+
 def compute_derived_channels(
     wide: pd.DataFrame,
     vehicle: VehicleParameters,
     *,
+    speed_correction: SpeedCorrection,
     calibration: AfrCalibration | None = None,
 ) -> pd.DataFrame:
     """Append ``derived:<NAME>`` columns. Returns a copy; input untouched.
@@ -642,12 +744,15 @@ def compute_derived_channels(
     *complete* session frame (the offline batch path). A live ring-buffer
     window must not cumsum through this function; see
     ``LiveFeatureSource``'s session-scoped accumulators (Task 1.3) instead.
+    Distance integrates road speed (``speed_correction``, M01.2).
     """
     if wide.empty or "timestamp" not in wide.columns:
         return wide.copy()
-    out = compute_instantaneous_channels(wide, vehicle, calibration=calibration)
+    out = compute_instantaneous_channels(
+        wide, vehicle, speed_correction=speed_correction, calibration=calibration
+    )
 
-    speed = _series(out, "obd:SPEED")
+    speed = _road_speed(out, speed_correction)
     rpm = _series(out, "obd:RPM", "decoded:ECM_RPM")
 
     if "derived:FUEL_RATE_LPH" in out.columns:
@@ -1335,7 +1440,15 @@ def compute_anomaly_signals(
 
 @dataclass(frozen=True)
 class TripSummary:
-    """Scalar trip metrics. ``None`` = inputs absent / event never occurred."""
+    """Scalar trip metrics. ``None`` = inputs absent / event never occurred.
+
+    Distance and every speed are road speed through the vehicle's
+    :class:`~src.signals.speed_correction.SpeedCorrection`; ``speed_basis`` and
+    ``fuel_basis`` say which correction and which fuel constants were used.
+    Both are required: a vehicle with no measured ratio integrates the ECM's
+    speed as reported and says so there, so a figure never reads as corrected
+    when it was not (M01.2, M01.3(b)).
+    """
 
     duration_s: float
     distance_km: float | None
@@ -1355,6 +1468,11 @@ class TripSummary:
     zero_to_60_mph_s: float | None
     quarter_mile_s: float | None
     quarter_mile_trap_kph: float | None
+    #: :attr:`SpeedCorrection.basis`: the speed the distance, the speeds and
+    #: the acceleration figures were computed on.
+    speed_basis: str
+    #: :func:`fuel_basis`: the fuel constants and the fuel-cut handling.
+    fuel_basis: str
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1438,6 +1556,7 @@ def summarize_trip(
     wide: pd.DataFrame,
     vehicle: VehicleParameters,
     *,
+    speed_correction: SpeedCorrection,
     calibration: AfrCalibration | None = None,
 ) -> TripSummary:
     """Reduce a wide telemetry frame to a :class:`TripSummary`.
@@ -1462,8 +1581,12 @@ def summarize_trip(
             zero_to_60_mph_s=None,
             quarter_mile_s=None,
             quarter_mile_trap_kph=None,
+            speed_basis=speed_correction.basis,
+            fuel_basis=fuel_basis(vehicle, wide),
         )
-    enriched = compute_derived_channels(wide, vehicle, calibration=calibration)
+    enriched = compute_derived_channels(
+        wide, vehicle, speed_correction=speed_correction, calibration=calibration
+    )
     ts = pd.to_datetime(enriched["timestamp"], utc=True)
     duration_s = float((ts.iloc[-1] - ts.iloc[0]).total_seconds()) if len(ts) > 1 else 0.0
     fuel = fuel_properties(vehicle)
@@ -1482,7 +1605,7 @@ def summarize_trip(
     if fuel_used_l is not None and fuel_used_l > 0 and distance_km is not None and distance_km > 0:
         avg_l100 = fuel_used_l / distance_km * 100.0
         avg_mpg = (distance_km * _MI_PER_KM) / (fuel_used_l * _GAL_PER_L)
-    speed = _series(enriched, "obd:SPEED")
+    speed = _road_speed(enriched, speed_correction)
     max_speed = float(speed.max()) if speed is not None and speed.notna().any() else None
     avg_speed = (
         distance_km / (duration_s / 3600.0) if distance_km is not None and duration_s > 0 else None
@@ -1511,4 +1634,6 @@ def summarize_trip(
         zero_to_60_mph_s=zero_60,
         quarter_mile_s=qm,
         quarter_mile_trap_kph=qm_trap,
+        speed_basis=speed_correction.basis,
+        fuel_basis=fuel_basis(vehicle, wide),
     )

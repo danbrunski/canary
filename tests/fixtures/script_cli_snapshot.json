@@ -3667,22 +3667,6 @@
         "required": false,
         "type": null
       },
-      "--fuel-type": {
-        "action": "_StoreAction",
-        "choices": [
-          "diesel",
-          "e85",
-          "gasoline"
-        ],
-        "default": "gasoline",
-        "dest": "fuel_type",
-        "nargs": null,
-        "option_strings": [
-          "--fuel-type"
-        ],
-        "required": false,
-        "type": null
-      },
       "--noise-floor": {
         "action": "_StoreAction",
         "choices": null,

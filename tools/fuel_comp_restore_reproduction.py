@@ -56,7 +56,6 @@ from src.analysis.lambda_delivery import load_lambda_delivery
 from src.analysis.plant_validation import load_interventions, resolve_boundary
 from src.analysis.rom_map import load_rom_map
 from src.signals.afr import load_afr_calibration
-from src.signals.derived import FUEL_PROPERTIES
 from src.vehicle.tune_revisions import load_tune_revisions
 
 REPO = Path(__file__).resolve().parents[1]
@@ -84,9 +83,6 @@ def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
         "--reconstructed",
         action="store_true",
         help="also place N02's reconstructed byte intervals (needs the images' curves)",
-    )
-    parser.add_argument(
-        "--fuel-type", choices=sorted(FUEL_PROPERTIES), default="gasoline", help="for stoich AFR"
     )
     parser.add_argument("--out", type=Path, required=True)
     return parser.parse_args(argv)
@@ -146,7 +142,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 declaration=declaration,
                 delivery=load_lambda_delivery(profile / "lambda_delivery.yaml"),
                 afr_calibration=load_afr_calibration(profile / "afr_calibration.yaml"),
-                afr_stoich=FUEL_PROPERTIES[args.fuel_type].afr_stoich,
                 registry=registry,
                 resolver=resolver,
             )

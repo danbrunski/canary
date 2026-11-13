@@ -321,7 +321,7 @@ def test_every_vehicle_parameter_has_a_display_entry() -> None:
     assert schema["mass_kg"]["evidence_field"] == "mass_evidence"
     assert schema["driveline_evidence"]["evidence_for"] == ["final_drive", "gearbox_ratios"]
     assert schema["tire_loaded_circumference_m"]["evidence_field"] is None
-    assert schema["fuel_type"]["choices"] == ["gasoline", "diesel", "e85"]
+    assert schema["fuel_type"]["choices"] == ["gasoline", "e10", "diesel", "e85"]
 
 
 # ---------------------------------------------------------------------------

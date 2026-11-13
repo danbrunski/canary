@@ -148,7 +148,6 @@ def test_the_workbench_and_featurization_read_the_same_ms_on_a_real_slice() -> N
         SLICE,
         providers_path=PROVIDERS,
         calibration=load_afr_calibration(AFR_CALIBRATION),
-        afr_stoich=14.7,
     )
     workbench = frame.values.dropna(subset=["base_fuel_schedule"])
     assert len(workbench) > 100
