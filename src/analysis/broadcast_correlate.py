@@ -41,6 +41,10 @@ class ByteProbe:
     byte_length: int = 1
     byte_order: Literal["big", "little"] = "big"
     label: str = ""  # human label, e.g. the bindings signal name
+    #: Two's-complement, as the binding's :attr:`Signal.signed`. A signed
+    #: byte read unsigned jumps from 255 to 0 as its value crosses zero, and
+    #: a straight line fitted across the jump is wrong at both ends.
+    signed: bool = False
 
     @property
     def display(self) -> str:
@@ -48,9 +52,17 @@ class ByteProbe:
             rng = f"byte {self.byte_start}"
         else:
             rng = f"bytes {self.byte_start}-{self.byte_start + self.byte_length - 1}"
-        order = "" if self.byte_order == "big" else " LE"
+        order = ("" if self.byte_order == "big" else " LE") + (" signed" if self.signed else "")
         name = f"  ({self.label})" if self.label else ""
         return f"0x{self.can_id:X} {rng}{order}{name}"
+
+    def raw_from(self, data: bytes) -> int:
+        """The probe's integer in ``data`` (long enough for the slice)."""
+        return int.from_bytes(
+            data[self.byte_start : self.byte_start + self.byte_length],
+            self.byte_order,
+            signed=self.signed,
+        )
 
     @classmethod
     def from_signal(cls, signal: Signal) -> ByteProbe:
@@ -60,6 +72,7 @@ class ByteProbe:
             byte_length=signal.byte_length,
             byte_order=signal.byte_order,
             label=signal.name,
+            signed=signal.signed,
         )
 
 
@@ -97,9 +110,7 @@ def byte_timeseries(frames_path: Path, probe: ByteProbe) -> list[tuple[float, in
     for frame in iter_frames(frames_path):
         if frame.can_id != probe.can_id or len(frame.data) < end:
             continue
-        out.append(
-            (frame.timestamp, int.from_bytes(frame.data[probe.byte_start : end], probe.byte_order))
-        )
+        out.append((frame.timestamp, probe.raw_from(frame.data)))
     out.sort()
     return out
 
@@ -146,8 +157,7 @@ def correlate_broadcast(
             end = probe.byte_start + probe.byte_length
             if len(frame.data) < end:
                 continue
-            value = int.from_bytes(frame.data[probe.byte_start : end], probe.byte_order)
-            raw_samples[probe].append((frame.timestamp, value))
+            raw_samples[probe].append((frame.timestamp, probe.raw_from(frame.data)))
     for samples in raw_samples.values():
         samples.sort()
 

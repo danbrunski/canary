@@ -91,7 +91,12 @@ def _slice_column(
     signal: Signal,
 ) -> np.ndarray[Any, np.dtype[Any]]:
     column: np.ndarray[Any, np.dtype[Any]] = slice_raw_column(
-        values, lengths, signal.byte_start, signal.byte_length, signal.byte_order
+        values,
+        lengths,
+        signal.byte_start,
+        signal.byte_length,
+        signal.byte_order,
+        signed=signal.signed,
     )
     return column
 

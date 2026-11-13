@@ -69,6 +69,15 @@ class Signal(ByteSlice, LinearScale, PlausibleRange, SentinelState, _Strict):
     byte_start: int = Field(ge=0, le=63)
     byte_length: int = Field(ge=1, le=8)
     byte_order: Literal["big", "little"] = "big"
+    #: Two's-complement slice: the raw count is negative when the top bit is
+    #: set, everywhere the binding is decoded (live, on read, in SQL, the DBC).
+    #: The Xterra ECM codes torque as a signed byte, (byte + 50) x 3 N·m, and
+    #: read unsigned -2 became 254: the decode wrapped at 150 N·m, mid light
+    #: cruise (F01.14). Changing it on an existing binding changes what its
+    #: stored rows decode to, so a binding that turns out to be signed gets a
+    #: new name and ``superseded_by`` on the old one. ``sentinel_raw`` is then
+    #: stated in the signed range.
+    signed: bool = False
     scale: float | None = None
     offset: float | None = None
     unit: str = UNKNOWN_UNIT
@@ -175,7 +184,11 @@ class Signal(ByteSlice, LinearScale, PlausibleRange, SentinelState, _Strict):
     @model_validator(mode="after")
     def _check_sentinel(self) -> Signal:
         check_sentinel(
-            self.name, self.sentinel_raw, self.sentinel_meaning, byte_length=self.byte_length
+            self.name,
+            self.sentinel_raw,
+            self.sentinel_meaning,
+            byte_length=self.byte_length,
+            signed=self.signed,
         )
         return self
 

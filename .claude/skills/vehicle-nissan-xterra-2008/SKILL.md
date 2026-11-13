@@ -177,8 +177,10 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
   2026-11-12). The names stay for compatibility, so read the notes in
   `data/bindings.yaml`:
   - `ECM_THROTTLE_SENSOR_V` (`0x23D` b2) is the ECM's *target* opening.
-  - `ECM_ENGINE_STATE_A`/`_B` (`0x231` b0/b3) are signed torques,
-    (byte + 50) × 3 N·m.
+  - `ECM_ENGINE_STATE_A`/`_B`/`_C` (`0x231` b0/b3, `0x29E` b0) are signed
+    torques, (byte + 50) × 3 N·m. Read them as `ECM_TORQUE_ARBITRATED`,
+    `ECM_TORQUE_DRIVER_DEMAND` and `VDC_TORQUE_29E` (signed bindings in N·m).
+    The old names decode unsigned and jump 255 → 0 at 150 N·m.
   - `0x233` b1–2 are commanded fuel flow (`ECM_FUEL_FLOW_233`), not airflow.
   - `0x551` b1 is the ECM's own fuel-used counter.
 

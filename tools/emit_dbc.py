@@ -60,7 +60,7 @@ def _to_signal(b: Binding) -> Signal:
         start=start,
         length=b.byte_length * 8,
         byte_order=order,
-        is_signed=False,
+        is_signed=b.signed,
         conversion=BaseConversion.factory(scale=scale, offset=offset, is_float=False),
         minimum=b.plausible_min,
         maximum=b.plausible_max,

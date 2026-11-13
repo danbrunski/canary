@@ -85,6 +85,8 @@ def slice_raw_column(
     byte_start: int,
     byte_length: int,
     byte_order: ByteOrder,
+    *,
+    signed: bool = False,
 ) -> Any:
     """:func:`slice_raw` for a column of payloads, as ``float64``; NaN where
     :func:`slice_raw` would give ``None`` or there is no payload.
@@ -92,9 +94,9 @@ def slice_raw_column(
     ``payloads`` is an object array, ``lengths`` its :func:`payload_lengths`
     (computed once per column and shared by every slice of it). Payloads are
     grouped by length and each group is sliced as one ``uint8`` matrix, so a
-    frame costs no Python call. Unsigned only, at most 8 bytes: ``uint64``
-    holds any such slice exactly, and its ``float64`` rounds as ``float(int)``
-    does. (No catalog that decodes a column declares a signed slice.)
+    frame costs no Python call. At most 8 bytes: ``uint64`` holds any such
+    slice exactly, ``int64`` its two's-complement reading when ``signed``,
+    and either one's ``float64`` rounds as ``float(int)`` does.
     """
     import numpy as np
 
@@ -102,6 +104,7 @@ def slice_raw_column(
         raise ValueError(f"a column slice is 1-8 bytes, not {byte_length}")
     out = np.full(len(payloads), np.nan, dtype=np.float64)
     end = byte_start + byte_length
+    bits = 8 * byte_length
     for length in np.unique(lengths[lengths >= end]):
         rows = np.flatnonzero(lengths == length)
         matrix = np.frombuffer(b"".join(payloads[rows]), dtype=np.uint8).reshape(
@@ -113,7 +116,15 @@ def slice_raw_column(
         raw = np.zeros(rows.size, dtype=np.uint64)
         for column in range(byte_length):
             raw = (raw << np.uint64(8)) | window[:, column]
-        out[rows] = raw.astype(np.float64)
+        if not signed:
+            out[rows] = raw.astype(np.float64)
+        elif bits == 64:
+            out[rows] = raw.view(np.int64).astype(np.float64)
+        else:
+            value = raw.astype(np.int64)
+            out[rows] = np.where(value >= 1 << (bits - 1), value - (1 << bits), value).astype(
+                np.float64
+            )
     return out
 
 
@@ -194,7 +205,15 @@ def check_sentinel(
 
 
 class ByteSlice:
-    """Mixin: decode the raw integer from ``byte_start``/``byte_length``/``byte_order``."""
+    """Mixin: decode the raw integer from ``byte_start``/``byte_length``/
+    ``byte_order``/``signed``.
+
+    Every model using it declares all four as fields, ``signed`` included
+    (``tests/test_decode_slices.py`` checks each subclass). The flag used to
+    exist on RAM channels only, so a signed broadcast byte had no way to say
+    so: the Xterra's torque bytes on 0x231 and 0x29E read 254 for -2, and
+    every decode wrapped at 150 N·m in the middle of light cruise.
+    """
 
     # Declared for type checking only: a runtime annotation here would make
     # pydantic collect these as fields of the model and reorder its schema.
@@ -202,9 +221,13 @@ class ByteSlice:
         byte_start: int
         byte_length: int
         byte_order: ByteOrder
+        signed: bool
 
     def raw_from(self, data: bytes) -> int | None:
-        return slice_raw(data, self.byte_start, self.byte_length, self.byte_order)
+        """The slice's integer, two's-complement when ``signed``."""
+        return slice_raw(
+            data, self.byte_start, self.byte_length, self.byte_order, signed=self.signed
+        )
 
 
 class LinearScale:

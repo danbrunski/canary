@@ -548,7 +548,8 @@ def _decoded_select(signal: Signal, scan: str) -> list[str]:
     """``signal``'s ``decoded`` rows, decoded from its raw CAN frames in SQL.
 
     The storage decoder's rule (``src.preprocessing.decode.decode_on_read``):
-    the unsigned slice of the payload as a float, no row for a payload too
+    the slice of the payload as a float (two's-complement when the binding is
+    ``signed``), no row for a payload too
     short for the slice, and the ``<NAME>_SENTINEL`` state row (value text =
     the stated meaning, no number) for the declared sentinel word; ``unit``
     and ``metadata_json`` as the stored rows had them. The frames are matched
@@ -562,6 +563,16 @@ def _decoded_select(signal: Signal, scan: str) -> list[str]:
     if signal.byte_order == "little":
         pairs.reverse()
     raw = f"CAST('0x' || {' || '.join(pairs)} AS UBIGINT)"
+    if signal.signed:
+        # Subtracted in HUGEINT (an 8-byte slice's 2^64 does not fit BIGINT),
+        # then held as BIGINT, which every signed slice fits: HUGEINT ->
+        # DOUBLE rounds differently from the int64 -> float64 the session
+        # decoder does, so a large 8-byte value would differ in its last bit.
+        bits = 8 * length
+        raw = (
+            f"CAST(CAST({raw} AS HUGEINT) - CASE WHEN {raw} >= {1 << (bits - 1)} "
+            f"THEN '{1 << bits}'::HUGEINT ELSE 0::HUGEINT END AS BIGINT)"
+        )
     spellings = ", ".join(_sql_text(c) for c in can_channel_spellings([signal.can_id]))
     meta = json.dumps(
         {"can_id": signal.can_id, "binding_confidence": signal.confidence}, sort_keys=True

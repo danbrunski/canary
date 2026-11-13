@@ -625,6 +625,7 @@ signals:
     offset: null
     unit: unknown
     confidence: low  # demoted 2026-08-08 — the "burst" was an averaging artifact
+    superseded_by: ECM_TORQUE_NET_23D
     evidence:
       - session: 2026-08-08T214218 (capture idle_rev_ac_loadstep)
         method: instantaneous_trace_vs_pedal
@@ -687,9 +688,10 @@ signals:
     notes: |
       WHAT THE BYTE IS (firmware, 2026-11-12): the high byte of a signed
       16-bit torque word in bytes 5-6, little-endian. See the evidence
-      above. The bindings schema cannot declare a signed field yet, so the
-      16-bit word is not bound. Notes below this line predate the firmware
-      trace.
+      above. SUPERSEDED by ECM_TORQUE_NET_23D, the whole word decoded signed
+      (2026-11-12). This name keeps decoding the unsigned high byte so stored
+      telemetry and older manifests still resolve. Notes below this line
+      predate the firmware trace.
 
 
       Three physical-action sessions agree, including a full engine-off
@@ -713,6 +715,8 @@ signals:
     offset: 0.0
     unit: enum
     confidence: high
+    superseded_by: ECM_TORQUE_ARBITRATED
+    model_feature: false  # read unsigned it wraps at 150 N·m; the signed decode trains instead
     evidence:
       - session: 2026-05-11T152858
         method: byte_vs_tag_differential
@@ -744,10 +748,11 @@ signals:
       WHAT THE BYTE IS (firmware, 2026-11-12): signed arbitrated engine
       torque demand, (byte + 50) x 3 N·m (units inferred). See the evidence.
       254 "engine off" is -2, i.e. 144 N·m. With the engine stopped the
-      demand words hold no meaning, so the value is not a state code. An
-      unsigned decode wraps at 150 N·m (byte 0), and the bindings schema has
-      no signed flag yet, so the engineering decode is not applied here.
-      Name, unit and scale are kept because model manifests may read them.
+      demand words hold no meaning, so the value is not a state code.
+      SUPERSEDED by ECM_TORQUE_ARBITRATED, the same byte decoded signed in
+      N·m (2026-11-12). This unsigned raw decode wraps at 150 N·m, mid light
+      cruise, so it no longer trains (`model_feature: false`). Name, unit and
+      scale are kept because stored telemetry and model manifests read them.
       The notes below predate the firmware trace.
 
 
@@ -774,6 +779,8 @@ signals:
     offset: 0.0
     unit: enum
     confidence: high
+    superseded_by: ECM_TORQUE_DRIVER_DEMAND
+    model_feature: false  # read unsigned it wraps at 150 N·m; the signed decode trains instead
     evidence:
       - session: 2026-05-11T152858
         method: cross_broadcast_pairing
@@ -788,6 +795,7 @@ signals:
       Signed driver-demand torque, (byte + 50) x 3 N·m (units inferred),
       before the limiters and the arbitration. Not an enum and not a
       duplicate; the name is kept for compatibility (firmware, 2026-11-12).
+      SUPERSEDED by ECM_TORQUE_DRIVER_DEMAND, the signed decode.
 
   - name: ECM_ENGINE_STATE_C
     module: ECM
@@ -799,6 +807,8 @@ signals:
     offset: 0.0
     unit: enum
     confidence: high
+    superseded_by: VDC_TORQUE_29E
+    model_feature: false  # read unsigned it wraps at 150 N·m; the signed decode trains instead
     evidence:
       - session: 2026-05-11T152858
         method: cross_broadcast_pairing
@@ -819,7 +829,200 @@ signals:
       0) when no request is active, and a ceiling when byte 2 bit 4 is set.
       It is a signed byte, so unsigned decoding wraps. Sent by the ABS/VDC
       and received by the ECM; `module: ECM` is wrong, but the field is kept
-      for compatibility (firmware, 2026-11-12).
+      for compatibility (firmware, 2026-11-12). SUPERSEDED by VDC_TORQUE_29E,
+      the signed decode in N·m.
+
+  # --------------------------------------------------------------------------
+  # Engine torque: signed bytes (F01.14, 2026-11-12)
+  #
+  # The firmware codes torque on the bus as a SIGNED byte, internal / 30 - 50,
+  # where the internal word is the torque map's unit (0.1 N·m, inferred). So
+  # N·m = (signed byte + 50) x 3 = 3 x byte + 150. These replace the unsigned
+  # ECM_ENGINE_STATE_A/B/C and ECM_THROTTLE_TRANSIENT reads of the same bytes,
+  # which wrapped at 150 N·m (and 0 for the 16-bit word) in the middle of the
+  # operating range.
+  # --------------------------------------------------------------------------
+
+  - name: ECM_TORQUE_ARBITRATED
+    module: ECM
+    can_id: 0x231
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    signed: true
+    scale: 3.0
+    offset: 150.0
+    unit: Nm
+    confidence: high
+    evidence:
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          0x0CD41C builds byte 0 as the arbitrated torque demand 0xFFFF1C74 /
+          30 - 50, clamped to a signed byte (-128..127). It is the inverse of
+          the coding the ECM applies to 0x29E byte 0 (byte x 30 + 1500,
+          0x0C24E8). The internal unit is the torque map's (0.1 N·m), which is
+          inferred, not read from a label.
+        constant: 3.0
+        constant_unit: Nm per count (offset +150 Nm)
+        conditions: >
+          the coding, at every operating point; the N·m unit is inferred from
+          the torque map's scale, not measured on a dyno
+      - session: _capture-tuning-2026-11-11T174602 + _capture-tuning-2026-11-12T034249
+        method: signed_decode_range
+        finding: >
+          Read signed, the byte ran -76..71 over 136,832 frames on 11-11 and
+          -75..71 over 119,416 frames on 11-12, i.e. -78 to 363 N·m against
+          the VQ40DE's 381 N·m rating, with no wrap. Read unsigned the same
+          frames span 0..255, jumping from 255 to 0 at 147/150 N·m.
+    notes: >
+      The ECM's arbitrated engine torque demand, after the limiters, in N·m
+      (unit inferred). 144 N·m with the engine stopped is a held demand word,
+      not a torque. Equals ECM_TORQUE_DRIVER_DEMAND in 83 % of frames; the
+      two differ only while a limit acts. The VDC repeats it on 0x29E byte 0
+      (VDC_TORQUE_29E).
+
+  - name: ECM_TORQUE_DRIVER_DEMAND
+    module: ECM
+    can_id: 0x231
+    byte_start: 3
+    byte_length: 1
+    byte_order: big
+    signed: true
+    scale: 3.0
+    offset: 150.0
+    unit: Nm
+    confidence: high
+    evidence:
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          0x0CD41C builds byte 3 as the driver-demand torque 0xFFFF2812 / 30
+          - 50, a signed byte, the same coding as byte 0. 2812 is the pedal's
+          torque request before the limiters and the arbitration.
+      - session: _capture-tuning-2026-11-12T034249
+        method: signed_decode_range
+        finding: >
+          -75..71 signed over 119,416 frames (-75 to 363 N·m), median 90 N·m,
+          no wrap.
+    notes: >
+      Driver-demand engine torque in N·m (unit inferred), before the limiters.
+      The gap to ECM_TORQUE_ARBITRATED is what a limiter took away; in first
+      gear that is the calibrated torque cap (docs/ecu-firmware-analysis.md,
+      "What limits first gear").
+
+  - name: ECM_TORQUE_231_B4
+    module: ECM
+    can_id: 0x231
+    byte_start: 4
+    byte_length: 1
+    byte_order: big
+    signed: true
+    scale: 3.0
+    offset: 150.0
+    unit: Nm
+    confidence: medium
+    evidence:
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          0x0CD41C builds byte 4 from 0xFFFF1C82 with the same / 30 - 50
+          signed coding as bytes 0 and 3. What 1C82 is has not been traced;
+          the coding is verified, the meaning is not.
+      - session: _capture-tuning-2026-11-12T034249
+        method: signed_decode_range
+        finding: -73..71 signed (-69 to 363 N·m), median 87 N·m.
+    notes: >
+      A third torque word on 0x231, meaning unidentified (F01.14). `medium`
+      until 1C82 is traced, so it is not a model feature.
+
+  - name: ECM_TORQUE_MINIMUM
+    module: ECM
+    can_id: 0x231
+    byte_start: 5
+    byte_length: 1
+    byte_order: big
+    signed: true
+    scale: 3.0
+    offset: 150.0
+    unit: Nm
+    confidence: medium
+    evidence:
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          0x0CD41C builds byte 5 from 0xFFFF1C6A with the same signed coding.
+          1C6A is read as the minimum (closed-throttle) torque by where the
+          code uses it; that reading is inferred.
+      - session: _capture-tuning-2026-11-12T034249
+        method: signed_decode_range
+        finding: >
+          -83..-50 signed, i.e. -99 to 0 N·m, median -48 N·m: always at or
+          below zero, as a friction and pumping torque would be.
+    notes: >
+      Inferred minimum engine torque (the engine's own drag) in N·m. Read
+      unsigned it sat at 173..206 and never wrapped, which is why it looked
+      unremarkable.
+
+  - name: ECM_TORQUE_NET_23D
+    module: ECM
+    can_id: 0x23D
+    byte_start: 5
+    byte_length: 2
+    byte_order: little
+    signed: true
+    scale: 0.1
+    offset: 0.0
+    unit: Nm
+    confidence: medium
+    evidence:
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          0x0CD1F2 writes bytes 5-6 as the little-endian word 0xFFFF27DE =
+          0xFFFF1AFA - 0xFFFF1B8A, clamped to signed 16-bit (0x0663A8). 1B8A is
+          one of the two loss-torque words in 0xFFFF3C44, so 27DE is a torque
+          net of that loss (inferred), in the torque map's 0.1 N·m (inferred).
+      - session: _capture-tuning-2026-11-12T034249
+        method: same_instant_pairing
+        finding: >
+          -934..3355 signed (-93 to 336 N·m). Paired with ECM_TORQUE_ARBITRATED
+          within 20 ms (119,416 pairs) it correlates at r = 0.967 and sits a
+          median 24 N·m below it (p5 -16, p95 +53): a torque less a loss
+          term, consistent with the firmware reading.
+    notes: >
+      Torque net of a loss term, in N·m (both inferred). Its high byte is the
+      old ECM_THROTTLE_TRANSIENT, the "small signed demand/error term". Not a
+      model feature at `medium`.
+
+  - name: VDC_TORQUE_29E
+    module: ABS
+    can_id: 0x29E
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    signed: true
+    scale: 3.0
+    offset: 150.0
+    unit: Nm
+    confidence: high
+    evidence:
+      - session: firmware ZS44A-20260920 (F01.13)
+        method: firmware_receive_handler
+        finding: >
+          The ECM reads 0x29E byte 0 as a signed torque, byte x 30 + 1500 in
+          0.1 N·m (0x0C24E8), and applies it as a ceiling only while byte 2
+          bit 4 is set (0x0C254C). That bit was never set in 329,698 stored
+          frames. With no request active the VDC echoes the ECM's
+          0x231 byte 0 here (identical in 70 % of same-instant pairs).
+      - session: _capture-tuning-2026-11-12T034249
+        method: signed_decode_range
+        finding: -75..71 signed over 60,822 frames (-75 to 363 N·m), no wrap.
+    notes: >
+      The VDC's torque field in N·m (unit inferred): an echo of
+      ECM_TORQUE_ARBITRATED while no request is active, a ceiling the ECM
+      obeys while byte 2 bit 4 is set. Sent by the ABS/VDC, received by the
+      ECM.
 
   # --------------------------------------------------------------------------
   # Motion-correlated candidates from the partial drive session.

@@ -1723,7 +1723,8 @@ F01.14 corrected them:
 - `BRAKE_ACTIVITY_29E_7` is the checksum, which moves with the brake because
   byte 3 moves.
 - `BRAKE_PRESSURE_29E_3` is a single flag, bit 6, not a pressure.
-- `ECM_ENGINE_STATE_C` is the VDC's signed torque field.
+- `ECM_ENGINE_STATE_C` is the VDC's signed torque field, now bound signed
+  as `VDC_TORQUE_29E`.
 
 **CAN receive table.** The table sits in ROM at `0x095F1`: 30 slots of 4
 bytes each (a flag, a byte, and the ID word = CAN ID << 5).
@@ -1855,11 +1856,30 @@ Names, scales and trainability of existing entries were left as they were,
 because deployed model manifests and `sequence_roles.yaml` read them. The
 new entries are `model_feature: false` until a retrain takes them up.
 
-**Not closed here:** the bindings schema has no signed field. The signed
-torque bytes (`0x231` b0/b3/b4/b5, `0x23D` b5–6, `0x29E` b0) are corrected
-in notes but still decode unsigned and wrap at 150 N·m. Decoding them as
-torque needs a `signed` flag on `Signal`, plus the column decoder and the
-DBC emit, which is shared-code work.
+**Signed torque bindings (2026-11-12).** The bindings schema now has a
+`signed` flag, on the shared `ByteSlice` that every catalog uses. The live
+decoder, the session decode on read, the SQL `telemetry` view, the broadcast
+correlator and the DBC emit all read it, and `tests/test_signed_bindings.py`
+holds them to the same values. The torque bytes are bound signed, in N·m:
+
+| Binding | Bytes | Decode | Confidence | Model feature |
+|---|---|---|---|---|
+| `ECM_TORQUE_ARBITRATED` | `0x231` b0 | 3 × b + 150 | high | yes |
+| `ECM_TORQUE_DRIVER_DEMAND` | `0x231` b3 | 3 × b + 150 | high | yes |
+| `ECM_TORQUE_231_B4` | `0x231` b4 (`1C82`, unidentified) | 3 × b + 150 | medium | no |
+| `ECM_TORQUE_MINIMUM` | `0x231` b5 (`1C6A`, inferred) | 3 × b + 150 | medium | no |
+| `ECM_TORQUE_NET_23D` | `0x23D` b5–6 LE | 0.1 × w | medium | no |
+| `VDC_TORQUE_29E` | `0x29E` b0 | 3 × b + 150 | high | yes |
+
+`ECM_ENGINE_STATE_A`/`_B`/`_C` and `ECM_THROTTLE_TRANSIENT` are
+`superseded_by` these and stay in the file, because stored telemetry and
+model manifests read the names. The three that trained are now
+`model_feature: false`, so a model trained before this logs them as policy
+violations until its next retrain, and the retrain takes up the signed
+torques instead. On `_capture-tuning-2026-11-12T034249` the signed bytes run
+−75 to 363 N·m with no wrap. `ECM_TORQUE_NET_23D` runs −93 to 336 N·m and
+correlates with `ECM_TORQUE_ARBITRATED` at r = 0.967, a median 24 N·m below
+it (119,416 pairs within 20 ms), as a torque less a loss term would.
 
 ### Misfire monitor (F01.15, 2026-11-12)
 

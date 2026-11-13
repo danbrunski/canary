@@ -450,8 +450,10 @@ Same conventions as the other task files: task-level truth is the checkboxes,
       `0x23E` is automatic-only and all zeros here.
     - Existing names, scales and trainability were kept, because manifests
       read them.
-    - The signed decode is owed as shared-code work; see "Not disassembly"
-      below.
+    - The signed decode followed the same day: a `signed` flag on the
+      shared `ByteSlice` and six signed torque bindings in N·m that
+      supersede the unsigned reads (firmware doc, "Signed torque
+      bindings").
 
 - [ ] **F01.15 Misfire monitor.** Only its DTC items and MIL blink routine
   are noted.
@@ -530,12 +532,13 @@ tracked where it is named; listed here so they are not mistaken for F01 items.
   bytes sit near 0x80, and that the cylinder phase rule in the firmware doc
   holds (each cylinder's value stays steady when its slot is re-labelled).
   Only then add a `memory:` channel.
-- Signed bindings (from F01.14), which is code work, not a truck read. The
-  bindings `Signal` schema has no `signed` flag, so the signed torque bytes
-  (`0x231` b0/b3/b4/b5, `0x23D` b5–6, `0x29E` b0) still decode unsigned and
-  wrap at 150 N·m. To fix it, add the flag, a signed column decode and the
-  DBC sign, then bind `0x231` b0 as torque. That last step is a feature-set
-  change, so it needs the operator's call on retraining.
+- Done 2026-11-12: signed bindings (from F01.14). The flag sits on the
+  shared `ByteSlice`, and every decode path honours it
+  (`tests/test_signed_bindings.py`). `ECM_TORQUE_ARBITRATED`,
+  `ECM_TORQUE_DRIVER_DEMAND` and `VDC_TORQUE_29E` are model features; the
+  unsigned `ECM_ENGINE_STATE_A`/`_B`/`_C` are superseded and no longer
+  train. A model trained before this keeps serving, logs the three as
+  policy violations, and takes up the signed torques at its next retrain.
 
 ## Order
 

@@ -160,6 +160,9 @@ class DidEntry(ByteSlice, LinearScale, PlausibleRange, _Strict):
     response_length: int | None = Field(default=None, ge=1, le=64)
     response_length_source: str | None = None
     byte_order: Literal["big", "little"] = "big"
+    #: Two's-complement slice (the shared :class:`~src.decode.slices.ByteSlice`
+    #: field; see :attr:`MemoryChannel.signed`).
+    signed: bool = False
     scale: float | None = None
     offset: float | None = None
     unit: str = "unknown"
@@ -427,12 +430,6 @@ class MemoryChannel(ByteSlice, LinearScale, PlausibleRange, _Strict):
                     "it cannot vouch for this address; declare it on a channel it tests"
                 )
         return self
-
-    def raw_from(self, data: bytes) -> int | None:
-        """The slice's integer, two's-complement when ``signed``."""
-        return slices.slice_raw(
-            data, self.byte_start, self.byte_length, self.byte_order, signed=self.signed
-        )
 
 
 def decode_memory_raw(channel: MemoryChannel, payload: bytes) -> int | None:
