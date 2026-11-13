@@ -397,8 +397,22 @@ session-name parser.
   `frame_to_record(msg)`. R02.1 made `can_bus.receive_frame` and
   `FRAME_PARSE_ERRORS` the one place a parse error is caught;
   `can_collector.py` still spells `except (ValueError, IndexError)` twice.
-  - [ ] One `broadcast_tap(power, push)` factory; the two catches use
-    `FRAME_PARSE_ERRORS`.
+  - [x] One `broadcast_tap(power, push)` factory; the two catches use
+    `FRAME_PARSE_ERRORS`. Done 2026-11-13. `can_bus.broadcast_tap` (beside
+    `frame_to_record`, the one layer both collectors already import);
+    `CanReader` and `collect_can_obd_from_config`'s `on_frame` both build
+    their tap from it, and both `except (ValueError, IndexError)` in
+    `can_collector.py` are `except FRAME_PARSE_ERRORS`. `CanReader.frames`
+    still excludes private traffic (counted in its `push`, after the tap's
+    private skip). `grep -rn "private_traffic.exclude\|is_tester_request"
+    src/collection` finds the tap and `vehicle_probe`/`listen_until_awake`
+    only. Pinned by `tests/test_broadcast_tap.py` (3 tests): private skipped,
+    tester requests (0x7E0, 0x7DF) handed off but not noted, an engine frame
+    noted once, for the sniffer, the CAN-OBD `on_frame`, and the factory; the
+    two site tests pass on the HEAD code. The parse-error counting was
+    already pinned by `test_record_skips_malformed_frames_without_aborting`,
+    `test_record_skips_index_error_from_truncated_slcan` and
+    `test_collect_can_counts_malformed_frames_without_aborting`.
 
 - [ ] **R23.10 The K-line collector writes its session lifecycle twice.**
   `KlineCollector._session` and `_run_action` each carry about thirty lines of
@@ -406,8 +420,27 @@ session-name parser.
   record wakes, release. `_run` and `obd_collector.supervise_obd_capture`
   hand-track a reconnect `delay` that `run_with_reconnect` hides for the other
   nine collectors.
-  - [ ] An `@asynccontextmanager _module_session(address, profile)`; a small
-    `Backoff` on `ReconnectPolicy`.
+  - [x] An `@asynccontextmanager _module_session(address, profile)`; a small
+    `Backoff` on `ReconnectPolicy`. Done 2026-11-13.
+    `KlineCollector._module_session(address, profile, queue)` yields
+    `(transport, start reply)`; `_session` and `_run_action` both use it (the
+    `_run_action` claim/open/start/stop/close/wakes/release block is gone).
+    `reconnect.Backoff` (`ReconnectPolicy.backoff()`; `delay`, `reset()`,
+    `grow()`, `async wait(stop)`) replaces the hand-tracked `delay` in
+    `KlineCollector._run` and `obd_collector.supervise_obd_capture`.
+    Pinned by `tests/test_kline_session_lifecycle.py` (8 tests: claim held
+    while open, failed wake still closes/records wake/releases, refused `82`
+    swallowed, no queue, for the polling session and the action; 7 pass on
+    HEAD) and `tests/test_reconnect.py` (2 Backoff tests). One edge differs,
+    by design: a queued action now skips the `82` once passive is armed, the
+    same guard `_session` had. On the real transport nothing changes on the
+    wire: `_require_command` already refused that stop before sending a byte,
+    and `PassiveArmedError` (a `KlineTransportError`) was swallowed by the
+    stop's catch. Only a fake transport that does not refuse saw an `82` at
+    HEAD, which is the one lifecycle test that fails there. The claim release
+    now precedes `action.finish`, not follows it; the only waiter on the
+    action's future (`routes/control/diagnostics.py` `run()`) issues nothing
+    under the claim.
 
 - [ ] **R23.11 `evaluate_capture_quality` re-parses a loose profile dict that
   two other modules also re-parse.** The first thirty of its 181 lines

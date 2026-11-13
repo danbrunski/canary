@@ -31,8 +31,7 @@ from collections.abc import Callable
 
 import can
 
-from src.collection import private_traffic
-from src.collection.can_bus import bus_factory, frame_to_record
+from src.collection.can_bus import broadcast_tap, bus_factory
 from src.collection.can_obd_client import (
     PID_DECODERS,
 )
@@ -316,14 +315,7 @@ async def collect_can_obd_from_config(
         # workers have returned so a late callback can never touch the queue.
         enqueue = threadsafe_enqueue(loop, queue, on_drop=drop_counter, name="canable-obd")
 
-        def on_frame(msg: can.Message) -> None:
-            if private_traffic.exclude(msg):
-                # W08.7: acquired while another exchange in this process held
-                # its id (the ECU backup's flash read); not telemetry.
-                return
-            if not is_tester_request(msg.arbitration_id):
-                power.note_bus_frame()
-            enqueue(frame_to_record(msg))
+        on_frame = broadcast_tap(power, enqueue)
 
         def on_reading(reading: ObdReading) -> None:
             enqueue(reading_to_record(reading))

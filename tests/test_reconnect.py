@@ -16,6 +16,7 @@ import time
 import pytest
 
 from src.collection.reconnect import (
+    Backoff,
     BusReconnector,
     RebuildOutcome,
     ReconnectPolicy,
@@ -215,3 +216,28 @@ async def test_run_with_reconnect_no_policy_propagates_first_failure() -> None:
             ),
             timeout=2.0,
         )
+
+
+def test_backoff_follows_the_policys_schedule_and_resets() -> None:
+    policy = ReconnectPolicy(initial_delay_seconds=2.0, max_delay_seconds=7.0, multiplier=2.0)
+    backoff = policy.backoff()
+    assert isinstance(backoff, Backoff) and backoff.delay == 2.0
+    seen = []
+    for _ in range(4):
+        seen.append(backoff.delay)
+        backoff.grow()
+    assert seen == [2.0, 4.0, 7.0, 7.0]  # capped at the policy's maximum
+    backoff.reset()
+    assert backoff.delay == 2.0
+    # An independent schedule per loop: growing one does not move another.
+    assert policy.backoff().delay == 2.0
+
+
+async def test_backoff_wait_waits_then_grows_and_reports_a_stop() -> None:
+    backoff = ReconnectPolicy(initial_delay_seconds=0.01, max_delay_seconds=0.04).backoff()
+    stop = asyncio.Event()
+    assert await backoff.wait(stop) is False
+    assert backoff.delay == pytest.approx(0.02)
+    stop.set()
+    assert await backoff.wait(stop) is True
+    assert backoff.delay == pytest.approx(0.04)

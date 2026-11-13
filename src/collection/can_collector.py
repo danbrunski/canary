@@ -21,10 +21,9 @@ from dataclasses import dataclass, replace
 
 import can
 
-from src.collection import private_traffic
-
 # Bus construction and the shared frame primitives moved to can_bus
 # (R02.12); these names stay importable from here.
+from src.collection.can_bus import FRAME_PARSE_ERRORS, broadcast_tap
 from src.collection.can_bus import bus_factory as bus_factory
 from src.collection.can_bus import frame_to_record as frame_to_record
 from src.collection.queueing import (
@@ -47,7 +46,7 @@ from src.collection.recording import (
     RecorderRun,
     RecordingResult,
 )
-from src.collection.vehicle_power import VEHICLE_POWER, is_tester_request
+from src.collection.vehicle_power import VEHICLE_POWER
 from src.config import CanBusConfig, VehicleConfig
 from src.session import SessionPaths
 from src.telemetry import TelemetryRecord
@@ -120,13 +119,20 @@ class CanReader(threading.Thread):
         self.frames = 0
         self.parse_errors = 0
         self.error: BaseException | None = None
+        self._tap = broadcast_tap(VEHICLE_POWER, self._push)
+
+    def _push(self, record: TelemetryRecord) -> None:
+        # Counted here, after the tap has dropped private traffic: ``frames``
+        # is what the reader took off the bus as telemetry.
+        self.frames += 1
+        self._handoff.push(record)
 
     def run(self) -> None:
         try:
             while not self._stop_event.is_set():
                 try:
                     msg = self._bus.recv(timeout=self._poll_interval)
-                except (ValueError, IndexError) as exc:
+                except FRAME_PARSE_ERRORS as exc:
                     self.parse_errors += 1
                     log_dropped_can_frame(exc, owner=self.name)
                     time.sleep(0.001)
@@ -134,16 +140,7 @@ class CanReader(threading.Thread):
                 if msg is None:
                     continue
                 flush_dropped_can_frame_log(owner=self.name)
-                if private_traffic.exclude(msg):
-                    # W08.7: acquired while an exchange in this process held
-                    # its id (the ECU backup's flash read); not telemetry.
-                    continue
-                self.frames += 1
-                if not is_tester_request(msg.arbitration_id):
-                    # Another module talking: the bus is awake (the OBD
-                    # collector sleeps while it is not, vehicle_power).
-                    VEHICLE_POWER.note_bus_frame()
-                self._handoff.push(frame_to_record(msg))
+                self._tap(msg)
         except Exception as exc:  # noqa: BLE001 — bus-level failure, owner decides
             self.error = exc
         finally:
@@ -422,7 +419,7 @@ def record(
                 continue
             try:
                 msg = current_bus.recv(timeout=poll_interval)
-            except (ValueError, IndexError) as exc:
+            except FRAME_PARSE_ERRORS as exc:
                 # Frame-level parser error from python-can's slcan parser:
                 # slcan.py:282 (ValueError) and slcan.py:304 (IndexError).
                 # Drop the bad line, keep recording. We DO NOT trap

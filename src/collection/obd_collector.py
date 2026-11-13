@@ -427,7 +427,7 @@ def supervise_obd_capture(
         last_reading_at[0] = time.monotonic()
         on_reading(reading)
 
-    delay = reconnect_policy.initial_delay_seconds if reconnect_policy is not None else 0.0
+    backoff = reconnect_policy.backoff() if reconnect_policy is not None else None
 
     while not stop_event.is_set():
         if not _wait_for_obd_device(spec.port, stop_event, port_exists, health_poll_seconds):
@@ -439,8 +439,8 @@ def supervise_obd_capture(
             conn.start()
             connected_at = last_reading_at[0] = time.monotonic()
             log.info("obd capture connected", extra={"port": spec.port})
-            if reconnect_policy is not None:
-                delay = reconnect_policy.initial_delay_seconds  # reset backoff on success
+            if backoff is not None:
+                backoff.reset()  # reset backoff on success
             reason = _run_obd_health_loop(
                 conn,
                 spec.port,
@@ -475,12 +475,12 @@ def supervise_obd_capture(
 
         if stop_event.is_set():
             return
-        if reconnect_policy is None:
+        if backoff is None:
             log.info("obd reconnect disabled; giving up on OBD capture", extra={"port": spec.port})
             return
-        if stop_event.wait(delay):
+        if stop_event.wait(backoff.delay):
             return
-        delay = reconnect_policy.next_delay(delay)
+        backoff.grow()
 
 
 def _wait_for_obd_device(

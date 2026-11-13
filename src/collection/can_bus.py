@@ -20,8 +20,10 @@ from typing import Any
 
 import can
 
+from src.collection import private_traffic
 from src.collection.frame_time import frame_arrival
 from src.collection.queueing import flush_dropped_can_frame_log, log_dropped_can_frame
+from src.collection.vehicle_power import VehiclePower, is_tester_request
 from src.config import CanBusConfig
 from src.telemetry import CanFrameKind, TelemetryRecord
 
@@ -87,6 +89,31 @@ def frame_to_record(msg: can.Message) -> TelemetryRecord:
     )
 
 
+def broadcast_tap(power: VehiclePower, push: Callable[[TelemetryRecord], object]) -> FrameTap:
+    """What a raw-capture path does with every frame it hears (R23.9).
+
+    Private traffic is skipped (W08.7: acquired while an exchange in this
+    process held its id, the ECU backup's flash read; not telemetry). Any other
+    frame that is not a tester request tells ``power`` the bus is awake, because
+    another module talking is the only evidence of that (the OBD collector
+    sleeps while none is, ``vehicle_power``); a tester request says nothing
+    about the modules. Then the frame's record is handed to ``push``.
+
+    The passive sniffer (``can_collector.CanReader``) and the CAN-OBD
+    collector's ``on_frame`` both build their tap here, so the two cannot
+    disagree about which frames count.
+    """
+
+    def tap(msg: can.Message) -> None:
+        if private_traffic.exclude(msg):
+            return
+        if not is_tester_request(msg.arbitration_id):
+            power.note_bus_frame()
+        push(frame_to_record(msg))
+
+    return tap
+
+
 def receive_frame(
     bus: can.BusABC,
     *,
@@ -130,6 +157,7 @@ __all__ = [
     "FRAME_PARSE_ERRORS",
     "FrameTap",
     "ParseErrorTap",
+    "broadcast_tap",
     "bus_factory",
     "bus_kwargs",
     "frame_to_record",

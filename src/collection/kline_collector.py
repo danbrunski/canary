@@ -61,7 +61,8 @@ import asyncio
 import logging
 import threading
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, SimpleQueue
@@ -381,7 +382,7 @@ class KlineCollector:
             self._actions.detach()
 
     async def _run(self, queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
-        delay = self._policy.initial_delay_seconds
+        backoff = self._policy.backoff()
         while not stop.is_set():
             action = self._actions.take()
             if action is not None:
@@ -397,15 +398,14 @@ class KlineCollector:
                     continue
                 try:
                     await self._sniff(queue, stop)
-                    delay = self._policy.initial_delay_seconds
+                    backoff.reset()
                 except (KlineTransportError, OSError) as exc:
                     log.warning(
                         "K-line sniffing failed; retrying in %.0f s",
-                        delay,
-                        extra={"error": str(exc), "retry_seconds": delay},
+                        backoff.delay,
+                        extra={"error": str(exc), "retry_seconds": backoff.delay},
                     )
-                    await wait_for_stop_or_timeout(stop, delay)
-                    delay = self._policy.next_delay(delay)
+                    await backoff.wait(stop)
                 continue
             prepared = self._prepare(entries)
             if prepared is None:
@@ -414,7 +414,7 @@ class KlineCollector:
             profile, plan = prepared
             try:
                 await self._session(profile, plan, entries, queue, stop)
-                delay = self._policy.initial_delay_seconds
+                backoff.reset()
             except PassiveArmedError:
                 # Armed mid-exchange: the transport refused the next byte.
                 # Not a failure and not a reason to back off; the next pass
@@ -438,11 +438,10 @@ class KlineCollector:
                     )
                 log.warning(
                     "K-line session failed; retrying in %.0f s",
-                    delay,
-                    extra={"error": str(exc), "retry_seconds": delay},
+                    backoff.delay,
+                    extra={"error": str(exc), "retry_seconds": backoff.delay},
                 )
-                await wait_for_stop_or_timeout(stop, delay)
-                delay = self._policy.next_delay(delay)
+                await backoff.wait(stop)
 
     def _prepare(self, entries: tuple[str, ...]) -> tuple[KlineProfile, ModulePlan] | None:
         """Load the vehicle profile and resolve the plan, or say why not (once).
@@ -477,32 +476,53 @@ class KlineCollector:
             # W08.7: the ECU backup claimed the ECM since _wants_command; the
             # next pass waits there (sniffing, if configured) until it ends.
             return
-        is_ecm = plan.address == profile.ecm_address
-        MODULE_SESSIONS.claim(plan.address, "kline")
+        async with self._module_session(plan.address, profile, queue) as (transport, reply):
+            self.sessions += 1
+            log.info(
+                "K-line session started",
+                extra={
+                    "module": plan.label,
+                    "key_bytes": reply.key_bytes.hex(),
+                    "channels": list(entries),
+                },
+            )
+            if plan.local is not None:
+                await self._poll_local_id(transport, profile, plan, entries, queue, stop)
+            else:
+                await self._poll_common_ids(transport, profile, plan, entries, queue, stop)
+
+    @asynccontextmanager
+    async def _module_session(
+        self,
+        address: int,
+        profile: KlineProfile,
+        queue: asyncio.Queue[TelemetryRecord] | None,
+    ) -> AsyncIterator[tuple[KlineTransport, kp.StartCommunicationReply]]:
+        """One StartCommunication session with a module, however it was asked
+        for (R23.10): a polling pass and a queued diagnostic function share it.
+
+        Claims the module (and, for the ECM, the ECM session, so CAN
+        diagnostics step aside), opens the transceiver, wakes the module and
+        yields ``(transport, start reply)``. A clean exit from the block ends
+        the session with StopCommunication, unless passive mode was armed
+        meanwhile: that hands the wire to another tool, a late ``82`` could
+        garble its wake-up, so the module times out at P3max instead (the
+        transport refuses it anyway). A module that refuses the stop is not a
+        failure; the session ends either way. However the block ends, the
+        transceiver is closed, this collector's own wake-ups are recorded as
+        rows, and the claims are released.
+        """
+        is_ecm = address == profile.ecm_address
+        MODULE_SESSIONS.claim(address, "kline")
         if is_ecm:
             tx_gate.claim_ecm_session("kline")
         transport = self._factory(profile, Mode.COMMAND)
         try:
             await asyncio.to_thread(transport.open)
             try:
-                reply = await asyncio.to_thread(transport.start_communication, plan.address)
-                self.sessions += 1
-                log.info(
-                    "K-line session started",
-                    extra={
-                        "module": plan.label,
-                        "key_bytes": reply.key_bytes.hex(),
-                        "channels": list(entries),
-                    },
-                )
-                if plan.local is not None:
-                    await self._poll_local_id(transport, profile, plan, entries, queue, stop)
-                else:
-                    await self._poll_common_ids(transport, profile, plan, entries, queue, stop)
+                reply = await asyncio.to_thread(transport.start_communication, address)
+                yield transport, reply
                 if not tx_gate.passive_armed():
-                    # Armed passive hands the wire to another tool: a late 82
-                    # could garble its wake-up, so the module times out at
-                    # P3max instead (the transport refuses it anyway).
                     try:
                         await asyncio.to_thread(transport.stop_communication)
                     except (KlineTransportError, kp.KlineProtocolError, kp.NegativeResponseError):
@@ -511,7 +531,7 @@ class KlineCollector:
                 await asyncio.to_thread(transport.close)
                 self._record_wakes(transport, profile, queue)
         finally:
-            MODULE_SESSIONS.release(plan.address, "kline")
+            MODULE_SESSIONS.release(address, "kline")
             if is_ecm:
                 tx_gate.release_ecm_session("kline")
 
@@ -549,7 +569,6 @@ class KlineCollector:
         except (KlineNotConfiguredError, ValueError) as exc:
             action.finish(ok=False, started=started, detail=f"refused: {exc}")
             return
-        is_ecm = action.address == profile.ecm_address
         if self._ecm_held_by_backup(action.address, profile):
             holder = _ecm_exclusive_holder() or "rom_backup"
             action.finish(
@@ -558,22 +577,9 @@ class KlineCollector:
                 detail=f"refused: {_holder_words(holder)} holds the ECM session",
             )
             return
-        MODULE_SESSIONS.claim(action.address, "kline")
-        if is_ecm:
-            tx_gate.claim_ecm_session("kline")
-        transport = self._factory(profile, Mode.COMMAND)
         try:
-            await asyncio.to_thread(transport.open)
-            try:
-                await asyncio.to_thread(transport.start_communication, action.address)
+            async with self._module_session(action.address, profile, queue) as (transport, _):
                 outcome = await self._perform(transport, action)
-                try:
-                    await asyncio.to_thread(transport.stop_communication)
-                except (KlineTransportError, kp.KlineProtocolError, kp.NegativeResponseError):
-                    pass  # the function is done; the module times the session out
-            finally:
-                await asyncio.to_thread(transport.close)
-                self._record_wakes(transport, profile, queue)
         except kp.NegativeResponseError as exc:
             action.finish(ok=False, started=started, detail=f"{action.module} refused: {exc}")
         except (KlineTransportError, kp.KlineProtocolError) as exc:
@@ -589,10 +595,6 @@ class KlineCollector:
                 codes=outcome.codes,
                 raw=outcome.raw,
             )
-        finally:
-            MODULE_SESSIONS.release(action.address, "kline")
-            if is_ecm:
-                tx_gate.release_ecm_session("kline")
         result = action.future.result()
         log.info(
             "K-line %s on %s: %s",

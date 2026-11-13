@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import TypeVar
 
@@ -30,6 +30,42 @@ class ReconnectPolicy:
 
     def next_delay(self, current_delay: float) -> float:
         return min(self.max_delay_seconds, current_delay * self.multiplier)
+
+    def backoff(self) -> Backoff:
+        """A fresh :class:`Backoff` at this policy's initial delay."""
+        return Backoff(self)
+
+
+@dataclass
+class Backoff:
+    """One retry loop's place on a :class:`ReconnectPolicy` schedule.
+
+    ``run_with_reconnect`` keeps this for the collectors it wraps; a loop that
+    cannot be expressed as one attempt (the K-line collector's idle, sniff and
+    command passes, the ELM327 supervisor's health loop) holds a ``Backoff``
+    instead of tracking a ``delay`` by hand: ``delay`` is what to wait now,
+    :meth:`grow` moves to the next step, :meth:`reset` goes back to the start
+    after a success.
+    """
+
+    policy: ReconnectPolicy
+    delay: float = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.delay = self.policy.initial_delay_seconds
+
+    def reset(self) -> None:
+        self.delay = self.policy.initial_delay_seconds
+
+    def grow(self) -> None:
+        self.delay = self.policy.next_delay(self.delay)
+
+    async def wait(self, stop_event: asyncio.Event) -> bool:
+        """Wait the current delay (or until ``stop_event``), then grow.
+        True when the stop event ended the wait."""
+        stopped = await wait_for_stop_or_timeout(stop_event, self.delay)
+        self.grow()
+        return stopped
 
 
 #: The reconnect schedule every collector uses unless the config overrides
