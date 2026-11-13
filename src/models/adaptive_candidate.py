@@ -50,8 +50,6 @@ Per block: one small covariance update and one window eigenvalue.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 from collections import deque
 from collections.abc import Iterable, Sequence
@@ -62,6 +60,7 @@ from typing import Any, Literal
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
+from src.artifact_hash import sha256_json
 from src.evidence.ledger import MemoryLedger, MemoryQuery
 from src.evidence.records import Evidence, Intervention, Investigation
 from src.models.change_detection import Block, BlockVerdict, ChangeMonitor, FrozenReference
@@ -158,10 +157,7 @@ class CandidateSpec(_Strict):
         return self
 
     def sha256(self) -> str:
-        text = json.dumps(
-            self.model_dump(mode="json", by_alias=True), sort_keys=True, separators=(",", ":")
-        )
-        return hashlib.sha256(text.encode()).hexdigest()
+        return sha256_json(self.model_dump(mode="json", by_alias=True))
 
 
 #: Identity-compared validation context for minting a fingerprint.
@@ -170,9 +166,7 @@ _SEALING: dict[str, bool] = {"sealing": True}
 
 def _hash(payload: dict[str, Any]) -> str:
     body = {k: v for k, v in payload.items() if k != "fingerprint"}
-    return hashlib.sha256(
-        json.dumps(body, sort_keys=True, separators=(",", ":"), default=str).encode()
-    ).hexdigest()
+    return sha256_json(body, default=str)
 
 
 class CandidateCheckpoint(_Strict):

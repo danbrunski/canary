@@ -26,8 +26,6 @@ during RE; auto-written by the refit CLI (4.E.8) once it exists.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
@@ -45,6 +43,7 @@ from pydantic import (
     model_validator,
 )
 
+from src.artifact_hash import sha256_json
 from src.operating import (
     ENGINE_RUNNING_MIN_RPM,
     FUEL_STATUS_STATES,
@@ -1314,8 +1313,7 @@ def contract_fingerprint_payload(
 
 def fingerprint(payload: object) -> str:
     """``sha256:`` of canonical JSON — the one hashing rule for B02 identities."""
-    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return "sha256:" + hashlib.sha256(blob.encode()).hexdigest()
+    return "sha256:" + sha256_json(payload, default=str)
 
 
 def contract_fingerprint(model: BehaviorModel1D | BehaviorModel2D) -> str:

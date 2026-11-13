@@ -55,6 +55,7 @@ from typing import Any
 
 import pandas as pd
 
+from src.artifact_hash import sha256_json
 from src.paths import REPO_ROOT
 from src.preprocessing.derived_store import refuse_on_the_pi
 
@@ -80,8 +81,7 @@ STALE_STAGING_SECONDS = 24 * 3600
 
 def digest(*parts: Any) -> str:
     """A stable sha256 over JSON-able ``parts`` (``str()`` for the rest)."""
-    text = json.dumps(parts, sort_keys=True, default=str, separators=(",", ":"))
-    return hashlib.sha256(text.encode()).hexdigest()
+    return sha256_json(parts, default=str)
 
 
 def code_version(extra_files: Iterable[Path] = ()) -> str:

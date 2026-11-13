@@ -9,10 +9,11 @@ uncommitted edits either).
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+
+from src.artifact_hash import sha256_json
 
 __all__ = ["code_version", "hash_json", "hash_session_files"]
 
@@ -33,8 +34,7 @@ def code_version(*modules: ModuleType) -> str:
 
 def hash_json(payload: Any) -> str:
     """sha256 of a JSON-able payload in canonical form."""
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(text.encode()).hexdigest()
+    return sha256_json(payload, default=str)
 
 
 def hash_session_files(fingerprint: dict[str, Any]) -> str:

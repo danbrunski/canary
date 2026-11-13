@@ -53,7 +53,6 @@ evaluate -- an unresolved active slot among them.
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import re
 from pathlib import Path
@@ -62,6 +61,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.ecu_application import ApplicationModel
+from src.artifact_hash import sha256_json
 from src.refusal import ReasonedRefusal
 from src.yaml_load import load_yaml
 
@@ -1314,12 +1314,9 @@ class Scenario(_Strict):
     boundaries: dict[str, SuppliedValue] = Field(default_factory=dict)
     initial_state: dict[str, SuppliedValue] = Field(default_factory=dict)
 
-    def canonical(self) -> str:
-        return json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-
     def scenario_hash(self) -> str:
         """sha256 of the canonical scenario: computed, never supplied."""
-        return hashlib.sha256(self.canonical().encode()).hexdigest()
+        return sha256_json(self.model_dump(mode="json"))
 
     def provenance(self) -> dict[str, Any]:
         return {

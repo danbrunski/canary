@@ -62,8 +62,6 @@ Pure numpy + pydantic (layer 4), small state and O(window) per block.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 from collections import deque
 from collections.abc import Iterable, Sequence
@@ -73,6 +71,8 @@ from typing import Any, Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
+
+from src.artifact_hash import sha256_json
 
 __all__ = [
     "CHANGE_POLICY_SCHEMA",
@@ -317,8 +317,7 @@ class ChangePolicy(_Strict):
 
     def sha256(self) -> str:
         payload = self.model_dump(mode="json", by_alias=True)
-        text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(text.encode()).hexdigest()
+        return sha256_json(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -497,8 +496,7 @@ def reference_fingerprint(payload: dict[str, Any]) -> str:
         for k, v in payload.items()
         if k != "fingerprint" and not (k in _UNHASHED_WHEN_NONE and v is None)
     }
-    text = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(text.encode()).hexdigest()
+    return sha256_json(body, default=str)
 
 
 class FrozenReference(_Strict):

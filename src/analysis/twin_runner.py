@@ -77,8 +77,6 @@ Nothing here, or anything it imports, can reach the ECU
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -157,6 +155,7 @@ from src.analysis.target_phi import (
     x_from_bfs,
 )
 from src.analysis.target_phi import predict as predict_phi
+from src.artifact_hash import sha256_json
 from src.paths import DIDS_YAML
 from src.preprocessing.loader import read_session
 from src.refusal import ReasonedRefusal
@@ -1676,7 +1675,8 @@ def run_digest(run: TwinRun) -> str:
         .to_dict(orient="records"),
         "accounting": run.accounting(),
     }
-    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+    # compact=False: the flavor run digests were made with (compared run to run)
+    return sha256_json(payload, compact=False, default=str)
 
 
 __all__ = [

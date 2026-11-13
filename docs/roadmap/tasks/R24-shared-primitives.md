@@ -220,19 +220,77 @@ a fixture per caller proves it.
     µs rounding boundaries, negative epochs, numpy scalars) gave 0 diffs
     from the HEAD bodies. No stored suffix changed.
 
-- [ ] **R24.5 Canonical-JSON hashing.** An AST scan found 38 sites that hash
+- [x] **R24.5 Canonical-JSON hashing.** An AST scan found 38 sites that hash
   `json.dumps(…, sort_keys=True)` with sha256, in four flavors: compact
   separators with `default=str` (9, identical to
   `evidence/provenance.hash_json`), compact without (10), default separators
   without (15) and with (4). Stored manifests, cache keys and `meta.json`
   files pin which flavor each site must keep. `plausibility/limits.py`
   records what a hash that silently changes costs: 1 GB of orphaned streams.
-  - [ ] `sha256_json(payload, *, compact=True, default=None)` and
+  - [x] `sha256_json(payload, *, compact=True, default=None)` and
     `sha256_bytes` in `src/artifact_hash.py`, which is already "the one
     sha256 function". Migrate the nine `hash_json`-identical sites first: no
     stored hash changes.
-  - [ ] The rest move with explicit flags and a one-line comment naming the
+    Evidence: both added; `ensure_ascii`/`allow_nan`/encoding stay at
+    `json.dumps`/`.encode()` defaults (no flag for them). The nine
+    compact+`default=str` sites now call `sha256_json(..., default=str)`:
+    `evidence/provenance.hash_json` (now a one-line wrapper),
+    `behavior_models.fingerprint` (keeps its `sha256:` prefix outside the
+    call), `evidence/records._digest`, `feature_cache._stable_hash`,
+    `adaptive_candidate._hash`, `candidate_store._key`,
+    `change_detection.reference_fingerprint`, `evaluation_cache.digest`,
+    `vehicle/interventions.source_digest`.
+  - [x] The rest move with explicit flags and a one-line comment naming the
     stored artifact that fixes the flavor, with a fixture per caller.
+    Evidence: 32 call sites in 25 files migrated in all. Compact, no default
+    (9): `adaptive_candidate` and `change_detection` `.sha256()`,
+    `twin_command_change`, `rom_effects` (`digest` and `edit_set_sha256`),
+    `rom_edit_spec.sha256`, `brain_jobs_store.job_id_for` (`bj-` + 20 hex),
+    `limits.fingerprint`, `sim_contract.Scenario.scenario_hash` (its public
+    `canonical()` had no other caller and went). Default separators, no
+    default (11, `compact=False`, each with a comment naming the stored
+    artifact): `operating_context.contract`, `paired_scenarios` (x2),
+    `plant_validation` rules hashes (x4), `fuel_plant` baseline,
+    `capture_profile_model.profile_digest`, `decode.on_read_hash` and
+    `imu_stream.key` (both `[:16]`). Default separators with `default=str`
+    (3): `datasets/export.config_hash`, `derived_store._hash` (a `str` payload
+    still hashes as raw text), `twin_runner.run_digest`.
+    No hash moved. `tests/test_artifact_hash.py` (37 tests) keeps the deleted
+    bodies verbatim as oracles in all four flavors and compares digest
+    strings over 15 payloads (nested dicts, -0.0, NaN/inf, 1e-7, 5e-324,
+    2**70, non-ASCII keys and values, tuples vs lists, int keys, datetime and
+    Path and a custom `__str__` through `default=str`, key order; both sides
+    must raise `TypeError` together without a default). The nine
+    payload-level sites plus `job_id_for` and `derived_store._hash` are called
+    for real against those oracles; the model-backed sites are called on real
+    data with `sha256_json` spied and checked against the oracle on the
+    payload they built, and against stored values: the `fuel_plant.yaml`
+    baseline sha256 (`6aec1db5...`, also `plant_baseline_sha256` in the stored
+    sim design under `~/canary-data/sim/predictions`),
+    `plant_interventions.yaml` frozen rules sha256 (`f522ff53...`), and all 10
+    `contract_fingerprint`s stored in `data/nissan-xterra-2008/behavior_models.yaml`.
+    A flavor table over every `sha256_json(` call in `src/` (AST) fails if a
+    site's flavor changes. Separate before/after run of the same inputs at
+    HEAD source vs the tree: baseline, interventions rules, EditSpec fixture
+    sha, `on_read_hash`, 5 capture profile digests and all 41 stored
+    behavior `contract_fingerprint`s (4 `_candidates/` files + the live one)
+    were byte-identical. `config_hash` was checked in-process against its
+    oracle (it embeds tree-relative paths, so two trees cannot be compared).
+    Pins held: `test_feature_pipeline_golden` (cache key), the behavior
+    fingerprint tests, and the 101 test files that import a touched module
+    (fast tier 2,338 passed, `slow` tier 244 passed, `ml_training` 125 passed;
+    `tests/test_adaptive_candidate.py::test_the_learning_kernels_cannot_reach_the_twin`
+    now allows the stdlib-only leaf `src.artifact_hash` beside `src.evidence.*`).
+    Left alone, not migrated (a different canonical form, or not a whole-
+    payload hash): `sim_design.SimDesign.sha256` (`allow_nan=False`, stored
+    design ids, `canonical_json()` is public); `plant_validation._digest`
+    (an HMAC over `default=list`); `isolation_forest._training_data_hash`,
+    `sequence_dataset.training_data_hash`, `sim_montecarlo.digest` and
+    `tools/bench_ecu_twin._digest` (each feeds a JSON header into a streaming
+    digest with more parts, so there is no single payload to hash);
+    `sim_cells` (a dedupe key, not a hash). Nothing sat in `rom_editor*` or
+    `tools/rom_sim.py`. No `ensure_ascii`/`allow_nan` flag was added: the
+    one site that needs `allow_nan=False` keeps its own encoder.
   - Must not change: any stored hash. `test_feature_pipeline_golden` (cache
     key) and the behavior-fingerprint tests are the pins.
 

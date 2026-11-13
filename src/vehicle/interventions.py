@@ -27,12 +27,11 @@ What is unknown stays unknown:
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, time
 from typing import Any, Literal
 
+from src.artifact_hash import sha256_json
 from src.timefmt import assume_utc
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
 from src.vehicle.vehicle_ledger import VehicleEvent
@@ -53,8 +52,7 @@ _PHYSICAL_CHANGE_KINDS = frozenset({"mod", "repair"})
 
 def source_digest(payload: dict[str, Any]) -> str:
     """sha256 of a source entry's identity, canonical JSON."""
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(text.encode()).hexdigest()
+    return sha256_json(payload, default=str)
 
 
 @dataclass(frozen=True)

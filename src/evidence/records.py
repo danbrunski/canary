@@ -59,8 +59,6 @@ the workbench (``analysis``) and the interfaces can all use one contract
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 from datetime import UTC, datetime, time
 from typing import Annotated, Any, Literal
@@ -74,6 +72,7 @@ from pydantic import (
     model_validator,
 )
 
+from src.artifact_hash import sha256_json
 from src.evidence.text import no_numerals
 
 __all__ = [
@@ -865,8 +864,7 @@ _UNHASHED = frozenset({"id", "recorded_at", "supersedes", "supersession_reason"}
 
 
 def _digest(payload: dict[str, Any]) -> str:
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(text.encode()).hexdigest()
+    return sha256_json(payload, default=str)
 
 
 def content_key(record: AnyRecord) -> str:

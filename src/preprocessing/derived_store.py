@@ -47,6 +47,7 @@ from typing import Any
 
 import pandas as pd
 
+from src.artifact_hash import sha256_bytes, sha256_json
 from src.can_ids import parse_can_channel
 from src.decode.on_read import on_read_catalog
 from src.decode.slices import sentinel_channel
@@ -727,8 +728,10 @@ def _limits_hash() -> str:
 
 
 def _hash(payload: Any) -> str:
-    text = payload if isinstance(payload, str) else json.dumps(payload, sort_keys=True, default=str)
-    return hashlib.sha256(text.encode()).hexdigest()
+    if isinstance(payload, str):
+        return sha256_bytes(payload.encode())
+    # compact=False: hashes in each stored frame's meta.json were made so
+    return sha256_json(payload, compact=False, default=str)
 
 
 def _raw_pairs(meta: Mapping[str, Any]) -> list[tuple[str, str]]:

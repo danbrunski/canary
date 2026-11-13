@@ -58,8 +58,6 @@ names it. Nothing here, or anything it imports, can reach the ECU: see
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal
@@ -89,6 +87,7 @@ from src.analysis.rom_effects import (
 )
 from src.analysis.rom_image import ImageFormatError, compare_images, load_image, sha256_hex
 from src.analysis.rom_map import DTYPE_BYTES, RomMap, Table
+from src.artifact_hash import sha256_json
 from src.yaml_load import load_yaml
 
 #: Bump when resolution or the provenance changes meaning.
@@ -260,8 +259,7 @@ class EditSpec(_Strict):
 
     def sha256(self) -> str:
         """Over the validated content: comments and layout do not change it."""
-        canonical = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(canonical.encode()).hexdigest()
+        return sha256_json(self.model_dump(mode="json"))
 
 
 def parse_edit_spec(data: Any) -> EditSpec:

@@ -58,8 +58,6 @@ What it makes impossible rather than documented:
 from __future__ import annotations
 
 import functools
-import hashlib
-import json
 import math
 import re
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
@@ -166,6 +164,7 @@ from src.analysis.twin_runner import (
     stated_plant_samples,
     stated_pulse,
 )
+from src.artifact_hash import sha256_json
 from src.session import SYNTHETIC_SESSION_PREFIX
 
 _F = TypeVar("_F", bound=Callable[..., Any])
@@ -396,7 +395,8 @@ class PairedScenario:
             payload["boundary_sources"] = [
                 [p.map_kpa_source, p.rail_kpa_source, p.battery_v_source] for p in self.points
             ]
-        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        # compact=False: scenario_sha256 in stored result.json and synthetic session names
+        return sha256_json(payload, compact=False)
 
 
 # -- affected cells -----------------------------------------------------------------------
@@ -1345,12 +1345,11 @@ def run_paired(
     scenario_sha = scenario.scenario_hash(kit.contract, kit.contract_sha256)
     if overrides:
         # A run on drawn parameters is a different run: its own hash and session.
-        scenario_sha = hashlib.sha256(
-            json.dumps(
-                {"scenario": scenario_sha, "plant_overrides": dict(sorted(overrides.items()))},
-                sort_keys=True,
-            ).encode()
-        ).hexdigest()
+        # compact=False: as scenario_hash above; stored with every drawn-parameter run
+        scenario_sha = sha256_json(
+            {"scenario": scenario_sha, "plant_overrides": dict(sorted(overrides.items()))},
+            compact=False,
+        )
     provenance = {
         "tool": "paired_scenarios",
         "tool_version": TOOL_VERSION,

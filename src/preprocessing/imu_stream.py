@@ -99,8 +99,6 @@ The training chain (``derived.reduce_session``) does not run through here.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 from collections.abc import Collection, Iterator
 from dataclasses import dataclass
@@ -110,6 +108,7 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
+from src.artifact_hash import sha256_json
 from src.decode.bindings import Bindings
 from src.decode.engineering import is_decoded_column, physical_series
 from src.decode.on_read import on_read_catalog
@@ -229,8 +228,8 @@ class ImuFramePlan:
             "linear_accel": linear.model_dump(mode="json"),
             "speed_decode": [signal.model_dump(mode="json") for signal in speed],
         }
-        text = json.dumps(payload, sort_keys=True)
-        return hashlib.sha256(text.encode()).hexdigest()[:16]
+        # compact=False: the imu key in each stored frame's meta.json was made so
+        return sha256_json(payload, compact=False)[:16]
 
     def use(self, channels: Collection[str]) -> ImuFrameUse:
         """The outcome, given the channels the session's reduced frame holds."""

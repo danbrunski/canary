@@ -36,8 +36,6 @@ either ``"checked"`` or why not — a channel with no stated limit reports
 from __future__ import annotations
 
 import dataclasses
-import hashlib
-import json
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -47,6 +45,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.artifact_hash import sha256_json
 from src.config import DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS
 from src.storage.broadcast_storage import is_broadcast_channel
 from src.yaml_load import load_yaml
@@ -391,8 +390,7 @@ class LimitsCatalog:
         every run and the cache never hit (1 GB of orphaned streams by
         2026-09-26).
         """
-        text = json.dumps(_canonical(self), sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(text.encode()).hexdigest()
+        return sha256_json(_canonical(self))
 
     def get(self, channel: str) -> ChannelLimits:
         """Limits for ``channel``; an all-unchecked record when none are known."""

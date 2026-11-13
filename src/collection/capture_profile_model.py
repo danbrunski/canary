@@ -8,8 +8,6 @@ touches a file: ``capture_profile_files`` layers and persists catalogs,
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import math
 import re
@@ -17,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from src.artifact_hash import sha256_json
 from src.collection.bus_budget import (
     MAX_BUDGET_REQUESTS_PER_SECOND,
     MIN_BUDGET_REQUESTS_PER_SECOND,
@@ -709,8 +708,8 @@ def profile_digest(profile: CaptureProfile) -> str:
     for key in _DIGEST_OMIT_WHEN_EMPTY:
         if not dumped.get(key):
             dumped.pop(key, None)
-    payload = json.dumps(dumped, sort_keys=True)
-    return hashlib.sha256(payload.encode()).hexdigest()
+    # compact=False: saved profile overrides record the base digest, made so
+    return sha256_json(dumped, compact=False)
 
 
 def channel_satisfied(channel: str, profile: CaptureProfile, seen: frozenset[str]) -> bool:

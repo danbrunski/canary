@@ -38,7 +38,6 @@ What it makes impossible rather than documented:
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
@@ -57,6 +56,7 @@ from src.analysis.ecu_application import (
 from src.analysis.rom_image import map_applies, read_calibration_id, sha256_hex
 from src.analysis.rom_map import DTYPE_BYTES, RomMap, Table
 from src.analysis.sim_contract import SUPPLIED, SimContract
+from src.artifact_hash import sha256_json
 from src.atomic_write import atomic_write_text
 from src.paths import REPO_ROOT
 from src.refusal import ReasonedRefusal
@@ -230,9 +230,7 @@ class LoadedRom:
             "reads": self.reads,
             "outside_decode": list(self.outside_decode),
         }
-        return hashlib.sha256(
-            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        return sha256_json(payload)
 
 
 def _outside_decode(image: bytes, model: ApplicationModel) -> list[str]:
@@ -723,7 +721,7 @@ def make_candidate(
                 "new": edit.raw,
             }
         )
-    edit_set = json.dumps(applied, sort_keys=True, separators=(",", ":"))
+    edit_set_sha256 = sha256_json(applied)
     image = bytes(out)
     return Candidate(
         image=image,
@@ -735,7 +733,7 @@ def make_candidate(
             "base_sha256": sha256_hex(base_image),
             "base_label": base_label,
             "candidate_sha256": sha256_hex(image),
-            "edit_set_sha256": hashlib.sha256(edit_set.encode()).hexdigest(),
+            "edit_set_sha256": edit_set_sha256,
             "edits": applied,
         },
     )

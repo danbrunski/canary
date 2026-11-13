@@ -47,7 +47,6 @@ from __future__ import annotations
 
 import functools
 import hashlib
-import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -59,6 +58,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.artifact_hash import sha256_json
 from src.refusal import ReasonedRefusal
 from src.yaml_load import load_yaml
 
@@ -491,8 +491,8 @@ class BaselineParameterSet(_Strict):
         data = self.model_dump(mode="json")
         if self.ve_curve is None:
             del data["ve_curve"]
-        canonical = json.dumps(data, sort_keys=True)
-        return hashlib.sha256(canonical.encode()).hexdigest()
+        # compact=False: fuel_plant.yaml's baseline_sha256 and every design's plant_baseline_sha256
+        return sha256_json(data, compact=False)
 
 
 # -- profile -----------------------------------------------------------------------

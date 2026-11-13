@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -12,7 +11,7 @@ from typing import Any
 
 import pandas as pd
 
-from src.artifact_hash import sha256_file
+from src.artifact_hash import sha256_file, sha256_json
 from src.config import CanaryConfig, require_profile_scoped
 from src.decode.dbc import DEFAULT_DBC_DIR
 from src.paths import BINDINGS_YAML, DIDS_YAML
@@ -185,13 +184,7 @@ def _stable_path(path: Path) -> str:
 
 
 def _stable_hash(payload: Mapping[str, Any]) -> str:
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return sha256_json(payload, default=str)
 
 
 def _write_feature_frame_cache(

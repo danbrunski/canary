@@ -10,13 +10,13 @@ shares one of each.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from src.artifact_hash import sha256_json
 from src.config import CanaryConfig
 from src.control.brain_state import brain_dir
 from src.control.status_error import StatusError
@@ -54,8 +54,7 @@ def _now() -> datetime:
 
 def job_id_for(kind: str, params: dict[str, Any]) -> str:
     """The job's identity: its kind and canonical parameters, nothing else."""
-    text = json.dumps({"kind": kind, "params": params}, sort_keys=True, separators=(",", ":"))
-    return "bj-" + hashlib.sha256(text.encode()).hexdigest()[:20]
+    return "bj-" + sha256_json({"kind": kind, "params": params})[:20]
 
 
 @dataclass(frozen=True)

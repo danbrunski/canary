@@ -19,7 +19,6 @@ companion (6.36) and a control endpoint can both call ``export_dataset``.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import zipfile
@@ -31,6 +30,7 @@ from typing import Any
 
 import pandas as pd
 
+from src.artifact_hash import sha256_json
 from src.config import CanaryConfig
 from src.preprocessing.loader import read_session, to_wide
 from src.preprocessing.resampler import resample_config_for, resample_wide
@@ -111,8 +111,8 @@ class DatasetExportResult:
 
 def config_hash(config: CanaryConfig) -> str:
     """Stable sha256 of the loaded config — the reproducibility handle."""
-    payload = json.dumps(config.model_dump(mode="json"), sort_keys=True, default=str)
-    return hashlib.sha256(payload.encode()).hexdigest()
+    # compact=False: DatasetManifest.config_hash in exported manifests was made so
+    return sha256_json(config.model_dump(mode="json"), compact=False, default=str)
 
 
 def _session_window_filter(

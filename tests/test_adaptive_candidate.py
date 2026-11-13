@@ -464,8 +464,10 @@ def test_the_learning_kernels_cannot_reach_the_twin():
             for alias in node.names
         }
         src = {name for name in imported if name.startswith("src.")}
+        # ``src.artifact_hash`` is a stdlib-only leaf (R24.5): it cannot reach the twin.
         assert all(
-            name == "src.models.change_detection" or name.startswith("src.evidence.")
+            name in ("src.models.change_detection", "src.artifact_hash")
+            or name.startswith("src.evidence.")
             for name in src
         ), src
 

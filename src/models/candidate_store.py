@@ -35,7 +35,6 @@ JSON + stdlib + the kernels' pydantic models (layer ``models``).
 from __future__ import annotations
 
 import fcntl
-import hashlib
 import json
 import re
 from collections.abc import Iterator
@@ -44,6 +43,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from src.artifact_hash import sha256_json
 from src.atomic_write import atomic_write_text
 from src.models.adaptive_candidate import CandidateCheckpoint, CandidateSpec
 from src.models.change_detection import ChangePolicy, FrozenReference
@@ -75,8 +75,7 @@ def _dump(payload: dict[str, Any]) -> str:
 
 
 def _key(payload: dict[str, Any]) -> str:
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(text.encode()).hexdigest()
+    return sha256_json(payload, default=str)
 
 
 class CandidateStore:

@@ -99,6 +99,7 @@ from src.analysis.fuel_plant_eval import (
     plant_inputs,
 )
 from src.analysis.lambda_delivery import load_lambda_delivery
+from src.artifact_hash import sha256_json
 from src.paths import REPO_ROOT
 from src.session import SessionKind, is_synthetic_session, iter_sessions
 from src.signals.afr import load_afr_calibration
@@ -525,7 +526,8 @@ class EcuAmendment(_Strict):
         rules = self.model_dump(
             mode="json", exclude={"frozen_rules", "evidence"}, exclude_none=True
         )
-        return hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()
+        # compact=False: frozen_rules.sha256 in plant_interventions.yaml was made so
+        return sha256_json(rules, compact=False)
 
 
 class PostAppend(_Strict):
@@ -623,7 +625,8 @@ class EcuPredictionBlock(_Strict):
     def rules_sha256(self) -> str:
         """Over every rule field: all but ``frozen_rules`` and ``evidence``."""
         rules = self.model_dump(mode="json", exclude={"frozen_rules", "evidence"})
-        return hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()
+        # compact=False: frozen_rules.sha256 in plant_interventions.yaml was made so
+        return sha256_json(rules, compact=False)
 
 
 class InterventionCase(_Strict):
@@ -682,7 +685,8 @@ class InterventionCase(_Strict):
         if self.ecu_outputs is None:
             raise ValueError(f"case {self.id} declares no ecu_outputs")
         rules = self.ecu_outputs.model_dump(mode="json", exclude={"frozen_rules", "evidence"})
-        return hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()
+        # compact=False: frozen_rules.sha256 in plant_interventions.yaml was made so
+        return sha256_json(rules, compact=False)
 
     def rules_sha256(self) -> str:
         """sha256 over everything that decides a score: the prediction's bands,
@@ -698,7 +702,8 @@ class InterventionCase(_Strict):
             "acceptance": self.acceptance.model_dump(mode="json"),
             "floor": self.floor.model_dump(mode="json"),
         }
-        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        # compact=False: frozen_rules.sha256 in plant_interventions.yaml was made so
+        return sha256_json(payload, compact=False)
 
     @model_validator(mode="after")
     def _rules_frozen_before_post(self) -> InterventionCase:

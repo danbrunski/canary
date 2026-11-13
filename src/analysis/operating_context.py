@@ -51,7 +51,6 @@ same contract (:func:`contract`) and its fingerprint.
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -77,6 +76,7 @@ from src.analysis.ecu_state_models import (
 from src.analysis.rom_image import map_applies, read_calibration_id, sha256_hex, table_values
 from src.analysis.rom_map import Decode, RomMap, check_program_constants, read_program_constant
 from src.analysis.target_phi import MapIdentity, TwinDefinition, load_twin_definition, resolve_slot
+from src.artifact_hash import sha256_json
 from src.columns import ARRIVED_SUFFIX, GAP_SUFFIX
 from src.decode.dids import DidMap, load_did_map
 from src.decode.ecm_lookup import (
@@ -855,7 +855,8 @@ def contract(
             for name, r in definition.retained.items()
         },
     }
-    digest = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+    # compact=False: context fingerprints stored in evidence and manifests were made so
+    digest = sha256_json(body, compact=False)
     return {"role": role, **body, "fingerprint": f"sha256:{digest}"}
 
 

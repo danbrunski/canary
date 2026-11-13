@@ -49,7 +49,6 @@ resolving.
 
 from __future__ import annotations
 
-import hashlib
 import importlib
 import json
 from collections.abc import Iterable
@@ -59,6 +58,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 
+from src.artifact_hash import sha256_json
 from src.can_ids import parse_can_channel
 from src.decode.bindings import Bindings, Signal
 from src.decode.on_read import can_channel_spellings
@@ -311,7 +311,8 @@ def on_read_hash(catalog: Bindings | None) -> str:
     (the derived store's ``value_number`` frame): the on-read signals' specs,
     in order. Any edit to one of them changes it."""
     specs = [] if catalog is None else [s.model_dump(mode="json") for s in catalog.signals]
-    return hashlib.sha256(json.dumps(specs, sort_keys=True).encode()).hexdigest()[:16]
+    # compact=False: on_read_hash in each stored frame's meta.json was made so
+    return sha256_json(specs, compact=False)[:16]
 
 
 def on_read_can_ids(catalog: Bindings | None) -> set[int]:

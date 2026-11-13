@@ -43,8 +43,6 @@ What it makes impossible rather than documented:
 
 from __future__ import annotations
 
-import hashlib
-import json
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -62,6 +60,7 @@ from src.analysis.target_phi import (
     TwinDefinition,
     predict,
 )
+from src.artifact_hash import sha256_json
 from src.decode.ecm_lookup import KERNEL_VERSION
 from src.evidence.ledger import MemoryLedger, PredictionOrder
 from src.evidence.provenance import code_version
@@ -303,9 +302,7 @@ def change_from_cell_edits(
             )
         cells[edit.row][edit.column] = edit.new_raw
     canonical = patch.model_dump(mode="json")
-    digest = hashlib.sha256(
-        json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    digest = sha256_json(canonical)
     target = ResolvedTable(
         **{**base.__dict__, "cells": tuple(tuple(row) for row in cells)},
     )
