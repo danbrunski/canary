@@ -7,13 +7,15 @@ vehicle:
   year: 2008
   vin: ""
   # Physical parameters for derived trip/fuel/performance channels (Task 6.6).
-  # All optional; shown with the 2008 Xterra 4.0 V6 defaults. These are
-  # carried into every session manifest so a trip's numbers stay
-  # reproducible from the captured data alone.
+  # All optional; shown with the 2008 Xterra's values (VQ40DE, 3,954 cc).
+  # mass_kg and displacement_l have no default: unset, what needs them refuses
+  # by name rather than assume a truck (M01.20). These are carried into every
+  # session manifest so a trip's numbers stay reproducible from the captured
+  # data alone.
   parameters:
     mass_kg: 1980.0
     fuel_type: gasoline          # gasoline (E0) | e10 | diesel | e85
-    displacement_l: 4.0
+    displacement_l: 3.954
     volumetric_efficiency: 0.85
     drivetrain_loss_fraction: 0.15
     thermal_efficiency: 0.30

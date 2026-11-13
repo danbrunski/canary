@@ -58,7 +58,7 @@ from src.analysis.workbench import (
     WorkbenchInputs,
     conditions_block,
 )
-from src.config import VehicleParameters
+from src.config import MASS_NOT_SET, VehicleParameters
 from src.storage.sessions import session_started_at
 from src.vehicle.tune_revisions import resolve_session_revision, session_dated_at
 
@@ -216,7 +216,18 @@ def prerequisites(
                 owed_by="H07.6 two-gear pulls (H07.12)" if estimated else None,
             )
         )
-    if vehicle.mass_evidence:
+    if vehicle.mass_kg is None:
+        rows.append(
+            _prerequisite(
+                "mass",
+                "missing",
+                f"{MASS_NOT_SET}: record mass_kg in the profile and how it was arrived at "
+                "(mass_evidence)",
+                blocks=True,
+                owed_by="a weighed or itemised mass in the profile (H07.10)",
+            )
+        )
+    elif vehicle.mass_evidence:
         rows.append(
             _prerequisite(
                 "mass",
@@ -230,8 +241,8 @@ def prerequisites(
             _prerequisite(
                 "mass",
                 "missing",
-                f"mass_kg {vehicle.mass_kg:g} carries no mass_evidence, so it may be the code "
-                "default; record the vehicle's mass and how it was arrived at",
+                f"mass_kg {vehicle.mass_kg:g} carries no mass_evidence, so nothing says how "
+                "it was arrived at; record the vehicle's mass and how it was arrived at",
                 blocks=True,
                 owed_by="a weighed or itemised mass in the profile (H07.10)",
             )
@@ -615,7 +626,7 @@ def _session_runs(
         if isinstance(offset, DynoRefusal):
             runs.append(_refused_run(session, gear, offset))
             continue
-        assert request.payload_kg is not None
+        assert request.payload_kg is not None and vehicle.mass_kg is not None
         power = compute_power(
             pulls,
             driveline=driveline,

@@ -88,5 +88,7 @@ from src.config.scoping import _daemon_path_fields as _daemon_path_fields
 from src.config.scoping import _mentions_path as _mentions_path
 from src.config.scoping import rebase_state_paths as rebase_state_paths
 from src.config.scoping import require_profile_scoped as require_profile_scoped
+from src.config.vehicle import DISPLACEMENT_NOT_SET as DISPLACEMENT_NOT_SET
+from src.config.vehicle import MASS_NOT_SET as MASS_NOT_SET
 from src.config.vehicle import VehicleConfig as VehicleConfig
 from src.config.vehicle import VehicleParameters as VehicleParameters

@@ -53,7 +53,7 @@ def test_the_registry_is_derived_from_the_table() -> None:
 
 def test_every_declared_signal_is_produced_with_its_gap_in_table_order() -> None:
     frame = _every_input_frame()
-    out = compute_anomaly_signals(frame, VehicleParameters())
+    out = compute_anomaly_signals(frame, VehicleParameters(displacement_l=4.0))
     produced = [c for c in out.columns if c.startswith("derived:") and "__" not in c]
     assert produced == [signal.name for signal in ANOMALY_SIGNALS]
     for signal in ANOMALY_SIGNALS:
@@ -62,7 +62,7 @@ def test_every_declared_signal_is_produced_with_its_gap_in_table_order() -> None
 
 def test_a_signal_missing_an_input_is_skipped_not_nan_filled() -> None:
     frame = _every_input_frame().drop(columns=["obd:SHORT_FUEL_TRIM_2"])
-    out = compute_anomaly_signals(frame, VehicleParameters())
+    out = compute_anomaly_signals(frame, VehicleParameters(displacement_l=4.0))
     assert "derived:STFT_BANK_BALANCE" not in out.columns
     assert "derived:TOTAL_TRIM_B2" not in out.columns
     assert "derived:TOTAL_TRIM_B1" in out.columns

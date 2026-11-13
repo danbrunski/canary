@@ -101,6 +101,7 @@ Registry = Mapping[str, tuple[tuple[str, ...], ...]]
 Optional = Mapping[str, tuple[str, ...]]
 
 VEHICLE = VehicleParameters(
+    displacement_l=4.0,
     final_drive=3.357,
     gearbox_ratios=(3.79, 2.28, 1.45, 1.0, 0.82),
     tire_loaded_circumference_m=2.4,

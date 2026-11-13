@@ -16,6 +16,7 @@ from src.vehicle.profiles import (
     VehicleInfoProbe,
     VehicleProfile,
     load_registry,
+    read_registry_file,
     resolve_active_profile,
     resolve_profile_for_tooling,
     save_registry,
@@ -121,6 +122,71 @@ def test_a_later_laptop_edit_to_parameters_still_reaches_the_pi(tmp_path: Path) 
     (merged,) = load_registry(registry)
     assert merged.name == "The Truck"
     assert merged.parameters.mass_kg == 2200.0
+
+
+def test_an_overlay_written_before_mass_and_displacement_lost_their_defaults_loads(
+    tmp_path: Path,
+) -> None:
+    """M01.20: ``mass_kg`` and ``displacement_l`` default to ``None``. A Pi's
+    overlay predates that: its tracked-profile rows hold only the parameters it
+    changed, and a machine-only profile's row holds every parameter, with the
+    old defaults written out as numbers. Both load; a stored number is kept
+    (nothing can tell an old default from a real 4.0 L), and a profile saved
+    without the facts round-trips them as unset."""
+    registry = _registry(tmp_path)
+    _write_tracked(
+        registry,
+        VehicleProfile(
+            slug="xterra",
+            vin="",
+            name="Xterra",
+            parameters=VehicleParameters(displacement_l=3.954, mass_kg=2184.4),
+        ),
+    )
+    registry.registry_overlay_path.parent.mkdir(parents=True)
+    old_defaults = {
+        "mass_kg": 1900.0,
+        "mass_evidence": None,
+        "fuel_type": "gasoline",
+        "displacement_l": 4.0,
+        "volumetric_efficiency": 0.85,
+        "drivetrain_loss_fraction": 0.15,
+        "thermal_efficiency": 0.3,
+        "tire_diameter_m": None,
+    }
+    registry.registry_overlay_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "profiles": [
+                    {
+                        "slug": "xterra",
+                        "parameters": {"mass_kg": 2230.0, "mass_evidence": "scale ticket"},
+                    },
+                    {"slug": "vin999", "vin": "VIN999", "parameters": old_defaults},
+                ],
+            }
+        )
+    )
+    tracked, machine_only = load_registry(registry)
+    assert tracked.parameters.displacement_l == 3.954  # the laptop's fact still reaches it
+    assert tracked.parameters.mass_kg == 2230.0
+    assert machine_only.parameters.displacement_l == 4.0
+    assert machine_only.parameters.mass_kg == 1900.0
+
+    save_registry(registry, [tracked, machine_only, VehicleProfile(slug="new", vin="VIN000")])
+    *_, fresh = load_registry(registry)
+    assert fresh.parameters.displacement_l is None and fresh.parameters.mass_kg is None
+
+
+def test_both_xterra_profiles_state_the_vq40de_displacement() -> None:
+    """M01.20: 95.5 x 92.0 mm x 6 = 3,954 cc, as ``fuel_plant.yaml`` has it."""
+    profiles = {p.slug: p for p in read_registry_file(REPO_ROOT / "profiles.yaml")}
+    bore_mm, stroke_mm = 95.5, 92.0
+    swept_l = 6 * 3.141592653589793 / 4 * bore_mm**2 * stroke_mm / 1e6
+    assert round(swept_l, 3) == 3.954
+    for slug in ("nissan-xterra-2008", "nissan-xterra-2013"):
+        assert profiles[slug].parameters.displacement_l == 3.954
 
 
 def test_read_vin_noop_when_not_canable(tmp_path: Path) -> None:

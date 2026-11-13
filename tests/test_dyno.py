@@ -1484,6 +1484,7 @@ def test_xterra_profile_builds_a_driveline_with_estimated_inertia() -> None:
     # The file's own evidence: ~119 kg wheel side + ~65 kg engine side (η·I_e,
     # η = 0.85 from the profile's drivetrain_loss_fraction) in 3rd, at the
     # 2.559 m rolling circumference (H07.11; ~62 kg at the old 2.609 m).
+    assert xterra.parameters.mass_kg is not None
     test_mass = xterra.parameters.mass_kg + (xterra.parameters.usual_payload_kg or 0.0)
     rotating = built.effective_mass(test_mass, 3) - test_mass
     assert rotating == pytest.approx(184.0, abs=2.0)

@@ -1155,6 +1155,12 @@ so the two can differ, visibly, until the restart. `fuel_plant.yaml` and the
 engine simulator carry their own displacement in the profile directory and do
 not read `parameters.displacement_l`.
 
+`parameters.mass_kg` and `parameters.displacement_l` are `null` until a profile
+states them (M01.20; they used to default to a 1,900 kg, 4.0 L truck). Unset,
+the dyno refuses with "mass not set for this vehicle", and the VE channels and
+the speed-density fuel and power (no MAF) are absent, logged once each with
+"displacement not set for this vehicle". Nothing else changes.
+
 **`POST /control/profiles/{slug}/revert`** — `{fields?: [...]}`: `name`,
 `make`, `model`, `year`, `parameters.<name>` (reverts its whole evidence unit).
 Omitted reverts every override and keeps the VIN, calibration ID and CVN, which

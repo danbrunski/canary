@@ -9,12 +9,15 @@ so the recipe layer skips cleanly rather than fitting to NaN.
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any
 
 import pandas as pd
+import pytest
 
-from src.config import VehicleParameters
+from src.config import DISPLACEMENT_NOT_SET, VehicleParameters
+from src.signals import derived
 from src.signals.derived import (
     LEGACY_VE_CHANNEL,
     VE_AMBIENT_CHANNEL,
@@ -113,7 +116,7 @@ def test_ve_percent_computed_from_measured_over_theoretical() -> None:
 
 
 def test_ve_percent_falls_back_to_baro_without_map() -> None:
-    vehicle = VehicleParameters()
+    vehicle = VehicleParameters(displacement_l=4.0)
     frame = _base(2).assign(
         **{
             "obd:MAF": [5.0] * 2,
@@ -137,10 +140,39 @@ def test_ve_percent_skipped_without_vehicle_param() -> None:
 
 
 def test_ve_percent_skipped_without_pressure() -> None:
-    vehicle = VehicleParameters()
+    vehicle = VehicleParameters(displacement_l=4.0)
     frame = _base(2).assign(**{"obd:MAF": [5.0] * 2, "obd:RPM": [1200.0] * 2})
     out = compute_anomaly_signals(frame, vehicle)
     assert "derived:VE_PERCENT" not in out.columns
+
+
+def test_ve_channels_refuse_by_name_without_displacement(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M01.20: displacement has no default. A profile that does not state it
+    gets no VE channel, not a 4.0 L engine's, and the log names the missing
+    fact once per channel; the channels that do not need it are unaffected."""
+    monkeypatch.setattr(derived, "_REFUSALS_LOGGED", set())
+    assert VehicleParameters().displacement_l is None
+    frame = _base(3).assign(
+        **{
+            "obd:MAF": [5.0] * 3,
+            "obd:RPM": [1200.0] * 3,
+            "obd:INTAKE_PRESSURE": [35.0] * 3,
+            "obd:BAROMETRIC_PRESSURE": [80.0] * 3,
+            "obd:INTAKE_TEMP": [20.0] * 3,
+        }
+    )
+    with caplog.at_level(logging.WARNING, logger=derived.log.name):
+        out = compute_anomaly_signals(frame, VehicleParameters())
+        compute_anomaly_signals(frame, VehicleParameters())  # a second tick
+    for channel in (LEGACY_VE_CHANNEL, VE_MANIFOLD_CHANNEL, VE_AMBIENT_CHANNEL):
+        assert channel not in out.columns
+        named = [r for r in caplog.records if r.getMessage().startswith(f"{channel} refused")]
+        assert len(named) == 1 and DISPLACEMENT_NOT_SET in named[0].getMessage()
+    assert "derived:AIR_MASS_PER_CYCLE" in out.columns
+    stated = compute_anomaly_signals(frame, VehicleParameters(displacement_l=3.954))
+    assert {LEGACY_VE_CHANNEL, VE_MANIFOLD_CHANNEL, VE_AMBIENT_CHANNEL} <= set(stated.columns)
 
 
 # --------------------------------------------------------------------------- #

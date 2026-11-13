@@ -10,17 +10,31 @@ from pydantic import Field, model_validator
 
 from src.config.base import _Strict
 
+#: The refusal every channel needing ``displacement_l`` gives when the profile
+#: does not state it (M01.20).
+DISPLACEMENT_NOT_SET = "displacement not set for this vehicle"
+#: The same for ``mass_kg``.
+MASS_NOT_SET = "mass not set for this vehicle"
+
 
 class VehicleParameters(_Strict):
     """Physical parameters needed for derived trip/fuel/performance channels
-    (Task 6.6). All optional with defaults so existing ``canary.yaml`` files
-    keep loading; ``VehicleConfig.model_dump()`` carries them into every
-    session manifest, so a trip's calculations stay reproducible from the
-    captured data alone.
+    (Task 6.6). All optional so existing ``canary.yaml`` files keep loading;
+    ``VehicleConfig.model_dump()`` carries them into every session manifest, so
+    a trip's calculations stay reproducible from the captured data alone.
+
+    A fact about *this* vehicle has no default (M01.20): ``mass_kg`` and
+    ``displacement_l`` are ``None`` until a profile states them, and what needs
+    them refuses by name. ``volumetric_efficiency``, ``drivetrain_loss_fraction``
+    and ``thermal_efficiency`` keep defaults: they are modelling assumptions of
+    the estimates that use them, not measurements of a vehicle.
     """
 
-    #: Curb/test mass in kg — used for acceleration-derived power sanity.
-    mass_kg: float = 1900.0
+    #: Curb mass in kg (the dyno's test mass is this plus the run's payload).
+    #: No default (M01.20): it was 1,900 kg, a truck's, so a vehicle whose
+    #: profile omitted it was weighed as one and nothing said so. Unset, every
+    #: result that needs it refuses, naming it ("mass not set for this vehicle").
+    mass_kg: float | None = Field(default=None, gt=0.0)
     #: How ``mass_kg`` was arrived at (a scale ticket, or an itemised estimate
     #: with its range), and what it includes. Occupants, cargo and fuel below
     #: full are *test conditions*, not vehicle facts: the dyno records them
@@ -37,8 +51,13 @@ class VehicleParameters(_Strict):
     #: (``src.signals.derived.FUEL_PROPERTIES``). Most US pump gasoline is E10.
     #: Not the ECM's AFR display scale: that belongs to the ECM (M01.3(a)).
     fuel_type: Literal["gasoline", "e10", "diesel", "e85"] = "gasoline"
-    #: Engine displacement in litres (volumetric-efficiency fuel estimate).
-    displacement_l: float = 4.0
+    #: Engine displacement in litres: the 100 %-VE fill behind the VE channels
+    #: and the speed-density air (fuel and power without a MAF). No default
+    #: (M01.20): it was 4.0, so every vehicle was a 4.0 L engine unless its
+    #: profile said otherwise, and the 3,954 cc VQ40DE read VE 1.15 % low.
+    #: Unset, each channel that needs it is absent and says why
+    #: (:data:`DISPLACEMENT_NOT_SET`); no other channel is affected.
+    displacement_l: float | None = Field(default=None, gt=0.0)
     #: ``naturally_aspirated`` | ``forced`` (a supercharger or turbo), or
     #: ``undeclared``. Whether manifold pressure can rise above ambient, which
     #: decides whether a rail *gauge* pressure is the pressure across the

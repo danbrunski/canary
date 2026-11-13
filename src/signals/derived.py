@@ -32,7 +32,7 @@ import numpy as np
 import pandas as pd
 
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, arrived_column, gap_column
-from src.config import VehicleParameters
+from src.config import DISPLACEMENT_NOT_SET, VehicleParameters
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.signals import vehicle_signals
@@ -574,17 +574,50 @@ def _fuel_g_s_by_method(
     return None if air_g_s is None else air_g_s / fuel.afr_stoich
 
 
+#: (consumer, reason) refusals already logged by this process. The live path
+#: recomputes every tick and a profile's missing fact does not change between
+#: ticks, so each is said once, not 1 Hz.
+_REFUSALS_LOGGED: set[tuple[str, str]] = set()
+
+#: What :func:`_speed_density_air_g_s` is called in a refusal: the air behind
+#: fuel flow, economy and the power cap when no MAF or fuel-rate PID exists.
+SPEED_DENSITY_AIR = "speed-density air (fuel and power without a MAF)"
+
+
+def _displacement_l(vehicle: VehicleParameters, consumer: str) -> float | None:
+    """``vehicle.displacement_l``, or ``None`` after naming the refusal (M01.20).
+
+    The one place a derived calculation reads the displacement, so none can
+    fall back to a number: unset, the consumer is absent, as for any missing
+    input, and the log says which fact is missing rather than leaving an
+    absent channel to look like an absent sensor.
+    """
+    if vehicle.displacement_l is not None:
+        return vehicle.displacement_l
+    if (consumer, DISPLACEMENT_NOT_SET) not in _REFUSALS_LOGGED:
+        _REFUSALS_LOGGED.add((consumer, DISPLACEMENT_NOT_SET))
+        log.warning(
+            f"{consumer} refused: {DISPLACEMENT_NOT_SET} (vehicle parameters.displacement_l)",
+            extra={"channel": consumer, "parameter": "displacement_l"},
+        )
+    return None
+
+
 def _speed_density_air_g_s(wide: pd.DataFrame, vehicle: VehicleParameters) -> pd.Series | None:
     """Ideal-gas air mass flow (g/s) from MAP/IAT/RPM/displacement/VE, or ``None``
-    without rpm and MAP. IAT defaults to 25 degC when absent."""
+    without rpm and MAP, or without the vehicle's displacement (M01.20). IAT
+    defaults to 25 degC when absent."""
     rpm = _series(wide, "obd:RPM", "decoded:ECM_RPM")
     mapp = _series(wide, "obd:INTAKE_PRESSURE", "decoded:MAP")
     if rpm is None or mapp is None:
         return None
+    displacement_l = _displacement_l(vehicle, SPEED_DENSITY_AIR)
+    if displacement_l is None:
+        return None
     iat = _series(wide, "obd:INTAKE_TEMP", "decoded:IAT")
     iat_k = (iat if iat is not None else pd.Series(25.0, index=wide.index)) + 273.15
     air_density = (mapp * 1000.0) / (287.05 * iat_k)  # kg/m^3
-    disp_m3 = vehicle.displacement_l / 1000.0
+    disp_m3 = displacement_l / 1000.0
     flow_m3_s = vehicle.volumetric_efficiency * disp_m3 * (rpm / 2.0 / 60.0)
     return flow_m3_s * air_density * 1000.0
 
@@ -907,19 +940,22 @@ def _theoretical_air_mass_per_cycle_g(
         pressure_kpa = _series(wide, "obd:BAROMETRIC_PRESSURE")
     if pressure_kpa is None:
         return None
+    displacement_l = _displacement_l(vehicle, LEGACY_VE_CHANNEL)
+    if displacement_l is None:
+        return None
     iat = _series(wide, "obd:INTAKE_TEMP", "decoded:IAT")
     iat_c = iat if iat is not None else pd.Series(25.0, index=wide.index)
-    return _ideal_gas_fill_g(pressure_kpa, iat_c, vehicle)
+    return _ideal_gas_fill_g(pressure_kpa, iat_c, displacement_l)
 
 
 def _ideal_gas_fill_g(
-    pressure_kpa: pd.Series, iat_c: pd.Series, vehicle: VehicleParameters
+    pressure_kpa: pd.Series, iat_c: pd.Series, displacement_l: float
 ) -> pd.Series:
-    """Ideal-gas air mass (g/cycle) filling the configured displacement at
+    """Ideal-gas air mass (g/cycle) filling ``displacement_l`` at
     ``pressure_kpa`` and ``iat_c`` — the 100 %-VE reference."""
     iat_k = iat_c + 273.15
     air_density = (pressure_kpa * 1000.0) / (287.05 * iat_k)  # kg/m^3
-    disp_m3 = vehicle.displacement_l / 1000.0
+    disp_m3 = displacement_l / 1000.0
     return (air_density * disp_m3 * 1000.0).astype(float)  # g/cycle at 100% VE
 
 
@@ -931,13 +967,17 @@ def _referenced_ve_percent(
 ) -> pd.Series | None:
     """B04.5 — VE against exactly one measured pressure reference and a
     measured intake temperature; ``None`` when either is absent (never a
-    fallback reference, never a default temperature)."""
+    fallback reference, never a default temperature) or the vehicle's
+    displacement is not set (M01.20)."""
     _air, pressure_group, iat_group = DERIVED_CHANNEL_INPUTS[output]
     pressure_kpa = _series(wide, *pressure_group)
     iat_c = _series(wide, *iat_group)
     if pressure_kpa is None or iat_c is None:
         return None
-    fill = _ideal_gas_fill_g(pressure_kpa, iat_c, vehicle)
+    displacement_l = _displacement_l(vehicle, output)
+    if displacement_l is None:
+        return None
+    fill = _ideal_gas_fill_g(pressure_kpa, iat_c, displacement_l)
     return (air_mass_measured / fill.where(fill > 0) * 100.0).astype(float)
 
 
@@ -1437,7 +1477,8 @@ def compute_anomaly_signals(
       while spiking VE can mean MAF over-reporting or a pressure/IAT bias).
       A restriction changes both measured flow and manifold pressure, so this
       ratio alone does not identify it. Inputs: ``obd:MAF``, ``obd:RPM``, MAP-or-baro,
-      ``vehicle.displacement_l``. There is no DID pressure cross-check:
+      ``vehicle.displacement_l`` (absent, with the refusal logged, when the
+      profile does not state it: M01.20). There is no DID pressure cross-check:
       the dev vehicle's engine has no MAP sensor, and its DIDs 0x1206/0x1207
       (once catalogued as intake pressure) are the injected pulse.
       **Legacy** (B04.5): its reference is MAP-or-baro depending on what the

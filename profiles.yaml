@@ -27,7 +27,9 @@ profiles:
     # lambda does not. 91 octane once supercharged: same constants, but a
     # grade change is a vehicle event; don't compare spark/knock across it.
     fuel_type: e10
-    displacement_l: 4.0
+    # VQ40DE: 95.5 x 92.0 mm x 6 = 3,954 cc (EM-134; as fuel_plant.yaml). Was
+    # 4.0 until 2026-11-13, which read every VE channel 1.15 % low (M01.20).
+    displacement_l: 3.954
     # Stock VQ40DE, no MAP sensor. Becomes forced with the supercharger build
     # (docs/roadmap/supercharger-build.md): fuel-pressure evidence then refuses
     # without a manifold-pressure channel (M01.14).
@@ -68,7 +70,8 @@ profiles:
       Stock vehicle, full fuel, no occupants or cargo; aftermarket additions, if any, not
       counted. GVWR 5,399 lb. Weigh it (H07.10).'
     fuel_type: gasoline
-    displacement_l: 4.0
+    # VQ40DE, as the 2008 (M01.20).
+    displacement_l: 3.954
     # Not stated by the owner (another operator's truck; published curb weight
     # does not establish a stock engine). Fuel-pressure evidence refuses
     # until it is (M01.14).

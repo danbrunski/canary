@@ -1187,18 +1187,78 @@ them; absolute and "corrected" figures do not.
 
 ## Part E — Vehicle facts in shared code
 
-- [ ] **M01.20 (Vehicle fact) `VehicleParameters` defaults describe a
+- [~] **M01.20 (Vehicle fact) `VehicleParameters` defaults describe a
   truck.** `src/config/vehicle.py`: `mass_kg = 1900.0`,
   `displacement_l = 4.0`, `volumetric_efficiency = 0.85`,
   `drivetrain_loss_fraction = 0.15`, `thermal_efficiency = 0.30`. A vehicle
   whose profile omits them computes power, VE and speed-density fuel as a
   4.0 L, 1,900 kg truck and says nothing.
-  - [ ] `None` defaults for mass and displacement and a named refusal in the
+  - [x] `None` defaults for mass and displacement and a named refusal in the
     channels that need them ("displacement not set for this vehicle"), as the
     dyno already does for mass without `mass_evidence`. Sweep the readers.
-  - [ ] `profiles.yaml` has `displacement_l: 4.0` for both Xterras. The
+    *Done 2026-11-13:* both are `float | None = Field(default=None, gt=0)`;
+    the refusal texts are `DISPLACEMENT_NOT_SET` / `MASS_NOT_SET`
+    (`src.config`). Sweep (`displacement_l`, `mass_kg`, `.parameters.` over
+    `src/`, `scripts/`, `tools/`, the dashboard and the MCP): the only
+    `VehicleParameters.displacement_l` readers are in `src/signals/derived.py`
+    (speed-density air: fuel rate, economy, trip fuel/CO2 and the power cap
+    without a MAF or fuel-rate PID; the 100 %-VE fill of `VE_PERCENT`,
+    `VE_MANIFOLD_PERCENT`, `VE_AMBIENT_PERCENT`). All now go through one
+    `_displacement_l`, which returns `None` (the channel is absent, as for a
+    missing input, per channel, never a raise) and logs
+    "`<channel>` refused: displacement not set for this vehicle" once per
+    channel per process. `fuel_plant.yaml`, `engine_dynamics`,
+    `torque_plant` and the simulator carry their own displacement and do not
+    read the profile's. The only `mass_kg` reader is `dyno_workbench`: unset,
+    the `mass` prerequisite is `missing` ("mass not set for this vehicle"),
+    blocking power, before the existing no-`mass_evidence` row. Scripts,
+    tools and the MCP read neither. The dashboard needs no change:
+    `parameterText(null)` shows "—", an empty field saves `null`, and
+    `DynoView`'s `finiteMass(null)` is `null`. The Pi overlay merges
+    parameter by parameter, and a pre-change row loads: a tracked-profile row
+    holds only what the machine changed, and a machine-only row holds every
+    parameter with the old defaults as numbers, which are kept (nothing can
+    tell an old default from a real 4.0 L). Tests:
+    `test_ve_channels_refuse_by_name_without_displacement`,
+    `test_speed_density_refuses_without_displacement` (absent channels, one
+    named log line; 3.954 vs 4.0 fuel ratio exactly 0.9885),
+    `test_a_mass_without_evidence_blocks_power_rather_than_using_the_default`,
+    `test_an_overlay_written_before_mass_and_displacement_lost_their_defaults_loads`.
+    Test reader of `mass_kg` as a number:
+    `tests/test_dyno.py::test_xterra_profile_builds_a_driveline_with_estimated_inertia`
+    (asserts it is set before adding the payload).
+    `volumetric_efficiency`, `drivetrain_loss_fraction` and
+    `thermal_efficiency` keep their defaults: they are assumptions of the
+    estimates that use them (speed-density air, fuel-energy power, the dyno's
+    crank estimate), not measurements of a vehicle; the docstring says so.
+  - [x] `profiles.yaml` has `displacement_l: 4.0` for both Xterras. The
     VQ40DE is 3,954 cc (95.5 × 92.0 mm × 6), which `fuel_plant.yaml` and the
     vehicle skill use. VE channels read 1.15 % low. Set 3.954.
+    *Done 2026-11-13:* both profiles (and `canary.example.yaml`,
+    `canary.sim.example.yaml`) say 3.954;
+    `test_both_xterra_profiles_state_the_vq40de_displacement` computes it
+    from bore and stroke. `config_golden.json` regenerated (its `imports`
+    section kept at HEAD's); `feature_pipeline_golden.json` regenerated, and
+    only `VE_PERCENT`, `VE_AMBIENT_PERCENT`, `deviation:ve_vs_rpm_load` and
+    their rolling features move (and the `fallback_decisions` sums that
+    include them). Feature-frame cache: no bump; its key already hashes the
+    vehicle parameters. Trip-summary sidecar: no bump; the Xterra has MAF and
+    no MAP, so its fuel never takes speed-density air.
+    - Model impact, deployed IF + sequence + fused (laptop
+      `models/nissan-xterra-2008`), scored with 3.954 vs 4.0 on the same
+      frames: per sample VE_PERCENT and VE_AMBIENT_PERCENT are ×1.011634
+      (4.0/3.954) on every row; **0 verdict flips** in any detector.
+      2026-10-10T153117 (1,850 rows, 1,462 with VE): max |Δscore| IF 0.0,
+      sequence 0.0019. 2026-09-20T152758 (8,570 rows, 4,706 with VE): IF
+      0.0041, sequence 0.0011. 2026-11-11T173212: no VE rows, Δ 0. Max IF
+      move 0.004 against per-mode IF thresholds of 0.026–0.105. The deployed IF and
+      LSTM manifests consume `VE_PERCENT` (LSTM also `VE_AMBIENT_PERCENT`),
+      and the laptop `behavior_models.yaml` has a `ve_vs_rpm_load` surface
+      fitted on the 4.0 L numbers, so its deviation now carries a +1.16 %
+      VE offset: refit/retrain owed for exactness, not urgent.
+  - [ ] Refit `ve_vs_rpm_load` (data/nissan-xterra-2008/behavior_models.yaml)
+    and retrain the IF/LSTM that consume VE on 3.954 L. 0 verdict flips
+    measured, so do it at the next scheduled retrain, together with M01.6's.
 
 ## What is not modeled
 

@@ -16,7 +16,7 @@ vehicle:
   parameters:
     mass_kg: 1980.0
     fuel_type: gasoline
-    displacement_l: 4.0
+    displacement_l: 3.954
 
 hardware:
   elm327_port: /dev/null

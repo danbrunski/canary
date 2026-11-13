@@ -32,7 +32,7 @@ from src.analysis.dyno_workbench import DynoRequest, dyno_runs, prerequisites
 from src.analysis.tuning_frame import WotCriterion
 from src.analysis.workbench import WorkbenchInputs
 from src.collection import tuning_profile
-from src.config import CanaryConfig, VehicleParameters
+from src.config import MASS_NOT_SET, CanaryConfig, VehicleParameters
 from src.control import child_pool, workbench_jobs
 from src.dashboard.routes import workbench as workbench_routes
 from src.storage.parquet_writer import write_records_to_parquet
@@ -263,11 +263,17 @@ def test_the_committed_xterra_profile_owes_road_load_and_squat_to_h07_12() -> No
 
 
 def test_a_mass_without_evidence_blocks_power_rather_than_using_the_default() -> None:
-    """``mass_kg`` defaults to 1,900 kg in code; without its evidence it may be
-    that default, so it is refused rather than quoted."""
+    """``mass_kg`` has no default (M01.20; it was a 1,900 kg truck's): unset, the
+    dyno refuses by name. A mass without its evidence is refused too: nothing
+    says how it was arrived at."""
     profile = load_dyno_profile(XTERRA / "dyno.yaml")
+    assert VehicleParameters().mass_kg is None
     rows = _facts(prerequisites(profile, None, VehicleParameters(), WOT, "x"))
     assert rows["mass"]["status"] == "missing" and rows["mass"]["blocks_power"] is True
+    assert rows["mass"]["detail"].startswith(MASS_NOT_SET)
+    stated = _facts(prerequisites(profile, None, VehicleParameters(mass_kg=2000.0), WOT, "x"))
+    assert stated["mass"]["status"] == "missing" and stated["mass"]["blocks_power"] is True
+    assert "no mass_evidence" in stated["mass"]["detail"]
     assert _facts(prerequisites(None, None, VehicleParameters(), WOT, "x")).keys() == {
         "dyno_profile"
     }

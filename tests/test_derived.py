@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from src.config import VehicleParameters
+from src.config import DISPLACEMENT_NOT_SET, VehicleParameters
+from src.signals import derived
 from src.signals.afr import AfrCalibration
 from src.signals.derived import (
     FUEL_PROPERTIES,
+    SPEED_DENSITY_AIR,
     FuelProperties,
     TripSummary,
     _accel_metrics,
@@ -23,7 +26,7 @@ from src.signals.derived import (
 )
 from src.signals.speed_correction import SpeedCorrection
 
-GASOLINE = VehicleParameters()
+GASOLINE = VehicleParameters(displacement_l=4.0)
 #: Most tests here are about the integrals, not the speed scale: integrate the
 #: speed column as given.
 UNCORRECTED = SpeedCorrection.unmeasured("test frame: no measured ratio")
@@ -120,6 +123,46 @@ def test_speed_density_fallback() -> None:
     out = compute_derived_channels(df, GASOLINE, speed_correction=UNCORRECTED)
     assert "derived:FUEL_RATE_LPH" in out.columns
     assert out["derived:FUEL_RATE_LPH"].iloc[0] > 0
+
+
+def test_speed_density_refuses_without_displacement(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M01.20: without the vehicle's displacement there is no speed-density
+    air, so no fuel flow and no power from it, never a 4.0 L engine's; the
+    refusal is named in the log. A fuel-rate PID's fuel still stands."""
+    monkeypatch.setattr(derived, "_REFUSALS_LOGGED", set())
+    df = _frame(
+        2,
+        **{
+            "obd:RPM": [2000.0, 2000.0],
+            "obd:INTAKE_PRESSURE": [100.0, 100.0],
+            "obd:INTAKE_TEMP": [25.0, 25.0],
+        },
+    )
+    unset = VehicleParameters()
+    with caplog.at_level(logging.WARNING, logger=derived.log.name):
+        out = compute_instantaneous_channels(df, unset, speed_correction=UNCORRECTED)
+        with_pid = compute_instantaneous_channels(
+            df.assign(**{"obd:ENGINE_FUEL_RATE": [10.0, 10.0]}),
+            unset,
+            speed_correction=UNCORRECTED,
+        )
+    assert "derived:FUEL_RATE_LPH" not in out.columns
+    assert "derived:ESTIMATED_POWER_HP" not in out.columns
+    assert with_pid["derived:FUEL_RATE_LPH"].tolist() == pytest.approx([10.0, 10.0])
+    # The power's air cap is speed-density here, so it refuses too (M01.6).
+    assert "derived:ESTIMATED_POWER_HP" not in with_pid.columns
+    named = [r.getMessage() for r in caplog.records if DISPLACEMENT_NOT_SET in r.getMessage()]
+    assert named == [
+        f"{SPEED_DENSITY_AIR} refused: {DISPLACEMENT_NOT_SET} (vehicle parameters.displacement_l)"
+    ]
+    stated = compute_instantaneous_channels(
+        df, VehicleParameters(displacement_l=3.954), speed_correction=UNCORRECTED
+    )
+    four = compute_instantaneous_channels(df, GASOLINE, speed_correction=UNCORRECTED)
+    ratio = stated["derived:FUEL_RATE_LPH"] / four["derived:FUEL_RATE_LPH"]
+    assert ratio.tolist() == pytest.approx([3.954 / 4.0] * 2, rel=1e-12)
 
 
 def test_boost_vacuum_uses_baro_when_present() -> None:
