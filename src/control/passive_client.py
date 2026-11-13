@@ -27,6 +27,8 @@ DEFAULT_TOKEN_PATH = Path("/etc/canary/control.token")
 DEFAULT_DAEMON_URL = "http://127.0.0.1:8000"
 #: The token environment variable (``daemon.control_token_env``'s default).
 TOKEN_ENV = "CANARY_CONTROL_TOKEN"
+#: Overrides the token file's path, as in ``install_pi.sh`` and ``scripts/canaryctl.py``.
+TOKEN_FILE_ENV = "CANARY_CONTROL_TOKEN_FILE"
 
 
 @dataclass(frozen=True)
@@ -39,14 +41,63 @@ class PassiveStatus:
 PassiveChecker = Callable[[], PassiveStatus]
 
 
-def resolve_token(path: Path = DEFAULT_TOKEN_PATH) -> str | None:
-    """The control token: ``$CANARY_CONTROL_TOKEN``, else the Pi's token file."""
-    token = os.environ.get(TOKEN_ENV)
-    if token:
-        return token.strip()
+def _env_file_values() -> dict[str, str]:
+    """``KEY=VALUE`` pairs of ``$CANARY_ENV_FILE`` / ``~/.canary/env``; ``{}`` if unreadable.
+
+    Parsed as ``scripts/canaryctl.py``'s ``_load_env_file`` does (blank lines,
+    ``#`` comments, a leading ``export``, one pair of quotes), minus its
+    permissions warning. ``tests/test_daemon_http_token.py`` feeds both the
+    same files.
+    """
+    override = os.environ.get("CANARY_ENV_FILE")
+    env_file = Path(override).expanduser() if override else Path.home() / ".canary" / "env"
     try:
-        return path.read_text().strip() or None
-    except OSError:
+        text = env_file.read_text()
+    except (OSError, UnicodeDecodeError, RuntimeError):
+        return {}
+    values: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].lstrip()
+        key, _, val = line.partition("=")
+        key, val = key.strip(), val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+            val = val[1:-1]
+        if key:
+            values[key] = val
+    return values
+
+
+def resolve_token(path: Path | None = None) -> str | None:
+    """The control token, in the order ``scripts/canaryctl.py`` uses.
+
+    1. ``$CANARY_CONTROL_TOKEN``, then ``$CANARY_TOKEN`` (the legacy alias);
+    2. the same two names in ``$CANARY_ENV_FILE`` (default ``~/.canary/env``);
+    3. the token file: ``path``, else ``$CANARY_CONTROL_TOKEN_FILE``, else
+       the Pi's ``/etc/canary/control.token``.
+
+    A blank value at any tier falls through to the next. R30.13: ``canaryctl``
+    honored the file override, the alias and the env file and this did not, so
+    two tools could authenticate differently against one Pi;
+    ``tests/test_daemon_http_token.py`` pins the whole table.
+    """
+    names = (TOKEN_ENV, "CANARY_TOKEN")
+    for name in names:
+        token = (os.environ.get(name) or "").strip()
+        if token:
+            return token
+    file_values = _env_file_values()
+    for name in names:
+        token = file_values.get(name, "").strip()
+        if token:
+            return token
+    token_file = path or Path(os.environ.get(TOKEN_FILE_ENV) or DEFAULT_TOKEN_PATH)
+    try:
+        return token_file.read_text().strip() or None
+    except (OSError, UnicodeDecodeError):
         return None
 
 
@@ -104,6 +155,7 @@ __all__ = [
     "DEFAULT_DAEMON_URL",
     "DEFAULT_TOKEN_PATH",
     "TOKEN_ENV",
+    "TOKEN_FILE_ENV",
     "PassiveChecker",
     "PassiveStatus",
     "http_passive_checker",

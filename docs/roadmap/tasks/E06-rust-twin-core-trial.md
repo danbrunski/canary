@@ -320,6 +320,13 @@ does no bus, disk or network I/O, and has no dependency on Python objects.
   and E04 collection-isolation evidence. A defer/reject decision names its
   measured reason and revisit trigger; conditional Rust rollout work is then
   explicitly inapplicable, and qualified Python operation continues.
+  *Gate status (2026-11-13, R30.12):* `rust/` is outside every gate: CI and
+  the push gate have no Rust toolchain, and the wheel is built by hand. Until
+  this item decides, the one automatic drift check is
+  `tests/test_ecu_twin_rust_constants.py`, a pure-Python comparison of the
+  crate's `pub const` lines with the Python attributes they were copied from
+  (it also fails on a new, unmapped constant). It does not replace the shared
+  vector files, which only run when someone builds the wheel.
 
 ## Sources and limits
 

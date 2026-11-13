@@ -80,15 +80,20 @@ def _resolve_default(file_env: dict[str, str], *names: str) -> str | None:
 
     A real environment variable always wins over the file, so an inline
     ``CANARY_CONTROL_TOKEN=... canaryctl ...`` or an explicit export still overrides.
+
+    A blank value falls through to the next name or tier. The token precedence
+    (``--token``, then env var, alias, env file, ``CANARY_CONTROL_TOKEN_FILE``,
+    ``/etc/canary/control.token``) is the one ``passive_client.resolve_token``
+    implements; ``tests/test_daemon_http_token.py`` pins that they agree.
     """
     for name in names:
-        value = os.environ.get(name)
-        if value:
-            return value
+        from_env = (os.environ.get(name) or "").strip()  # as passive_client.resolve_token does
+        if from_env:
+            return from_env
     for name in names:
-        value = file_env.get(name)
-        if value:
-            return value
+        from_file = (file_env.get(name) or "").strip()
+        if from_file:
+            return from_file
     return None
 
 

@@ -128,16 +128,35 @@ they started.
   - [ ] `[tool.ruff] target-version` is `py311`; `requires-python` and mypy
     say 3.12. Set `py312`, run one `ruff check --fix`, commit that alone.
 
-- [ ] **R30.7 Dead or one-shot tools.**
+- [~] **R30.7 Dead or one-shot tools.**
   - `tools/decode_uprev_rom_research.py` (116 lines, untyped, untested, no
     reference anywhere) re-implements `src/analysis/osiris.py`: its `mask` is
     byte-identical, `read_sections` is `Container.parse`, and
     `decode_rom` / `encode_rom` are `transform(encode=)`. Delete it.
+    **Done 2026-11-13: deleted** (tracked file). Grep of the whole tree
+    (`src scripts tools tests docs .claude` incl. commands, skills, hooks and
+    agents; systemd units and `install_*` scripts; `pyproject.toml`) for
+    `decode_uprev_rom_research` found only this doc line, so no reference
+    needed updating; `test_source_rules` (allowlists untouched),
+    `test_script_imports` and `test_layering` still pass.
   - Operator question, each: `tools/watch_uprev_logs.py` (only an archived
     roadmap mentions it); `scripts/migrate_to_profiles.py` (a migration
     applied in July); `scripts/decode_flash.py` (440 lines, no test; its own
     docstring says it cannot decode this platform's flash channel, and
     `decode_uprev_flash.py` superseded it).
+    **Not deleted (operator question stays open; checked 2026-11-13):**
+    `scripts/decode_flash.py` is named as an operator procedure in
+    `docs/data-architecture.md:312` (watching another tool own a diagnostic
+    session: passive mode + `candump`, decoded by it) and in the docstring of
+    `scripts/decode_uprev_flash.py:33`, and has a CLI snapshot entry in
+    `tests/fixtures/script_cli_snapshot.json`; `scripts/migrate_to_profiles.py`
+    is cited by `scripts/backfill_vehicle_ledger.sh:52` (ledger provenance
+    text), has a `tests/test_source_rules.py` allowlist entry and a snapshot
+    entry; `tools/watch_uprev_logs.py` has only archived-roadmap mentions
+    (`docs/roadmap/archive/tuning-analysis-toolkit.md:255,258`, R06 archive)
+    and its own docstring, but the item is an operator question, not an agent
+    call. Remainder: operator keep/delete for these three; deleting any also
+    shrinks the `test_source_rules.py` allowlist and the CLI snapshot.
   - Not dead: `tools/migrate_channel_names.py` (D03 still drives it).
 
 - [ ] **R30.8 Test scaffolding for config, repo root and the app client is
@@ -231,7 +250,7 @@ they started.
     random token, `mktemp` names and bash's own `line N:` prefix on one
     redirect-error message are normalized.
 
-- [ ] **R30.12 Guards that cost a few lines.**
+- [x] **R30.12 Guards that cost a few lines.**
   - `rust/` is outside every gate and its constants are hand-copied from
     Python (`X_SPLIT`, `AREA_TERM_SHIFT`, `PURGE_TERM_SHIFT`, … in
     `fuel_comp_load.rs`; `MAX_FLAG_BIT`, `MAX_CELL_TO_WORD_SHIFT` in
@@ -239,26 +258,75 @@ they started.
     someone builds the wheel. A pure-Python test that reads the `pub const`
     lines and compares them with the Python attributes; record in E06 that
     the crate is ungated. E06.4 (adopt, defer or reject) is still open.
+    **Done 2026-11-13:** `tests/test_ecu_twin_rust_constants.py` (25 tests):
+    parses every `pub const` in `rust/ecu_twin_core/src/*.rs`, compares each
+    with its Python attribute (`src.decode.fuel_comp_load`,
+    `target_phi_command`, `ecm_lookup`, `src.analysis.ecu_state_models`) and
+    `CONTRACT_VERSION` with `data/ecu_twin_contract.yaml`; a new unmapped Rust
+    constant also fails. Checked it fails: `X_SPLIT 0x3C00 -> 0x3C01` in the
+    Rust file and an added `pub const` each turned it red (reverted). E06.4
+    now carries the "crate is ungated" note.
   - `tests/slow_tests.txt` (437 ids) has no staleness check: a renamed test
     silently rejoins the one-minute gate. A static test (file and function
     exist, sorted, no duplicates) naming `scripts/mark_slow_tests.py`. Zero
     stale ids today. That file has another session's edits; add the test
     after they land.
+    **Done 2026-11-13:** `tests/test_slow_tests_list.py` (3 tests, AST-only:
+    file exists, function exists in its class when named, sorted, no
+    duplicates, plus a test of the checker itself). It found ONE stale id,
+    contrary to "zero today":
+    `test_rom_levers_parity.py::test_a_timing_trim_and_the_maf_curve_are_the_clis_alone`
+    was renamed in `e8a669be` to `..._an_unmapped_byte_...`, so that 3.2 s
+    test had been in the one-minute gate. Fixed by renaming that one id in
+    `tests/slow_tests.txt` (one-line edit, timing kept; the file was clean).
   - The three example configs are about 75 % copies of `canary.example.yaml`
     (pi: 74 of 96 keys equal). A test that shared keys equal the base or sit
     on a named override list.
+    **Done 2026-11-13:** `tests/test_example_configs.py` (4 tests): flattens
+    each variant against `canary.example.yaml`; the set of shared keys whose
+    value differs must equal the variant's named `OVERRIDES` set exactly (12
+    for pi, 7 dev, 13 sim), so a stale override and an unlisted drift both fail.
 
-- [ ] **R30.13 Small duplicates.**
+- [~] **R30.13 Small duplicates.**
   - Three stdlib HTTP clients (`scripts/canaryctl.py`,
     `src/control/passive_client.py`, three `urlopen` sites in
     `scripts/canary_desk.py`) and two token resolvers:
     `canaryctl` honors `CANARY_CONTROL_TOKEN_FILE`, `passive_client` does
     not, so two tools can authenticate differently against one Pi. Grow
     `passive_client` into a stdlib-only `control/daemon_http.py`.
+    **Partly done 2026-11-13:** the authentication split is fixed, the client
+    merge is not. I took the "add the tiers" option: `passive_client.resolve_token`
+    now has `canaryctl`'s exact precedence: `$CANARY_CONTROL_TOKEN`, then the
+    `$CANARY_TOKEN` alias, then both names in `$CANARY_ENV_FILE` /
+    `~/.canary/env` (its own small stdlib parser, minus canaryctl's
+    permissions warning, because canaryctl cannot import `src`), then
+    `path` / `$CANARY_CONTROL_TOKEN_FILE` / `/etc/canary/control.token`; a blank
+    value at any tier falls through. `canaryctl` strips env and env-file
+    values to match (a padded or whitespace-only token failed in one tool and
+    not the other). `tests/test_daemon_http_token.py` (15 tests) asserts the
+    same answer across that whole table, a whitespace-only env case, and the
+    same parsed pairs from one tricky env file. Behaviour changes:
+    `resolve_token(path)` now defaults to `None` (was
+    `DEFAULT_TOKEN_PATH`; an explicit path still wins), a `UnicodeDecodeError`
+    reading the token file now reads as no token, and a laptop with the token
+    only in `~/.canary/env` now authenticates via `tools/_bus_tool.py`. NOT done: a shared `daemon_http.py`
+    and the `canary_desk.py` `urlopen` sites. `canaryctl` imports nothing
+    from `src`, and `import src.control.<anything>` runs `src/control/__init__`
+    (capture controller, pandas via `storage.sessions`: measured 1.1 s) on
+    every CLI call; sharing code needs `src.control` made lazy or a package
+    outside it first.
   - `_base_url` is byte-identical in `canaryctl.py` and
     `companion/services.py`; `venv_python` in `install_deps.py` and
     `venv_launch.py`.
+    **Not merged, now pinned equal (2026-11-13):** each pair sits on one side
+    of a bootstrap/stdlib boundary (`canaryctl` for the reason above;
+    `install_deps` / `venv_launch` run before any project import). Parity
+    tests in `tests/test_daemon_http_token.py` (`_base_url` on 5 inputs;
+    `venv_python` on linux/win32/darwin). Remainder: the merge itself.
   - Thirty-two of 57 scripts open with the same double `_cli` import list.
+    Not attempted 2026-11-13: a 32-script mechanical change tied to R30.6's
+    one-ignore decision for the same `try/except ImportError` dance; do it
+    with R30.6.
   - Library functions living in scripts that tests import by name
     (`lambda_delivery_evidence.py`'s six checks, `timing_compare.py`): move
     one only when a second caller appears. `ups_shutdown_watch.py` stays
