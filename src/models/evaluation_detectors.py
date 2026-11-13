@@ -205,8 +205,8 @@ class BatchedSequenceScorer:
         scaler_block = trained.manifest.scaler
         if scaler_block is None:
             raise ValueError("sequence artifact has no scaler; it cannot be scored")
-        scaler = ZScoreScaler.from_dict(dict(scaler_block))
-        self._means, self._stds = scaler.vectors(self.feature_columns)
+        # R27.5: serve's and the training dataset's own scaling.
+        self._scaler = ZScoreScaler.from_dict(dict(scaler_block))
         self._torch = importlib.import_module("torch")
 
     def _windows(
@@ -324,7 +324,7 @@ class BatchedSequenceScorer:
         for start in range(0, len(rows), self.batch_size):
             stop = start + self.batch_size
             take = rows[start:stop, None] + offsets[None, :]
-            scaled = (values[take] - self._means) / self._stds
+            scaled = self._scaler.apply_block(values[take], self.feature_columns)
             scaled = np.where(np.isfinite(scaled), scaled, 0.0).astype(np.float32)
             mask = masks[take]
             score_mask = mask * self._score_keep

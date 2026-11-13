@@ -4,6 +4,7 @@ rule's parity with the engine, and the A02.5 baselines."""
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -127,6 +128,118 @@ def test_batched_sequence_scoring_matches_the_served_engine() -> None:
     scores = scorer.score(features)
     flagged = [v for v in scores.is_anomaly if v is not None]
     assert any(flagged) and not all(flagged)  # the check has teeth
+
+
+def test_training_windows_equal_the_windows_serve_and_evaluation_score() -> None:
+    """R27.5: the training dataset (``build_sequence_dataset``), the served
+    engine (``score_window``) and the batched evaluation scorer feed the model
+    the *same float32 values* for the same rows -- bitwise, not ``allclose``.
+
+    All three scale through ``ZScoreScaler.apply_block`` from the same float32
+    raw values, so equality is exact. Before R27.5 the training path computed
+    ``(x - mean) / denom`` in float32 and serve in float64 rounded once, which
+    differs in the last float32 bit on some cells; the values here are chosen
+    so that difference shows up (and the old float32 loop fails this test).
+    """
+    pytest.importorskip("torch")
+    from src.features.feature_pipeline import sequence_feature_columns
+    from src.models.evaluation_detectors import BatchedSequenceScorer
+    from src.models.inference import SequenceInferenceEngine
+    from src.models.lstm_training import train_lstm_autoencoder
+    from src.models.sequence_dataset import MASK_FRESH_WITHIN_MAX_GAP
+    from src.models.sequence_registry import LSTM_TRAINING_BACKEND
+    from src.models.training_entry import build_sequence_dataset
+    from src.preprocessing.normalization import ZScoreScaler
+
+    config = _config()
+    raw = _resampled(seed=5, gap_after=100)
+    # Large, non-round magnitudes: float32 arithmetic and float64-then-round
+    # disagree on a share of these cells.
+    raw["obd:RPM"] = raw["obd:RPM"] + 1234.567
+    features = featurize_wide_frame(
+        raw, config, behavior_models=None, did_map=load_repo_did_map()
+    ).features
+    float32_columns = [c for c in features.columns if features[c].dtype == np.float32]
+    assert float32_columns  # the served dtype, so the float32 path is exercised
+    columns = sequence_feature_columns(features)
+    scaler = ZScoreScaler.fit(features, columns=columns)
+    dataset = build_sequence_dataset(
+        LSTM_TRAINING_BACKEND,
+        [],
+        config,
+        feature_frame=features,
+        sequence_length=4,
+        stride=1,
+        scaler=scaler,
+        observation_mask=MASK_FRESH_WITHIN_MAX_GAP,  # this frame has no __arrived flags
+    )
+    lstm_config = config.models.lstm_autoencoder.model_copy(
+        update={
+            "sequence_length": 4,
+            "hidden_size": 6,
+            "num_layers": 1,
+            "latent_dim": 2,
+            "batch_size": 8,
+            "max_epochs": 1,
+            "validation_fraction": 0.0,
+            "random_state": 3,
+        }
+    )
+    trained = train_lstm_autoencoder(
+        dataset,
+        lstm_config,
+        trained_at="2026-05-12T00:00:00Z",
+        allow_in_sample_calibration=True,
+        scaler=scaler,
+    )
+
+    def stamp(value: object) -> pd.Timestamp:
+        return pd.Timestamp(value).tz_convert("UTC")  # type: ignore[arg-type]
+
+    training: dict[pd.Timestamp, np.ndarray] = {}
+    for index in range(len(dataset)):
+        window = dataset.window_metadata(index)
+        values = dataset._values[window.start_row : window.end_row]
+        training[stamp(window.end_timestamp)] = values
+
+    # What the model's forward receives is what was scaled; record it.
+    seen: list[np.ndarray] = []
+    model = trained.model
+    original_forward = model.forward
+
+    def recording_forward(value: Any, mask: Any, delta: Any) -> Any:
+        seen.append(value.detach().cpu().numpy().copy())
+        return original_forward(value, mask, delta)
+
+    model.forward = recording_forward
+    try:
+        engine = SequenceInferenceEngine(trained)
+        served: dict[pd.Timestamp, np.ndarray] = {}
+        for _, row in features.iterrows():
+            seen.clear()
+            result = engine.observe(row)
+            if result is not None and seen:
+                served[stamp(row[TIMESTAMP_COLUMN])] = seen[0][0]
+
+        scorer = BatchedSequenceScorer(trained, batch_size=7)
+        rows = scorer._windows(features)[0]
+        seen.clear()
+        scorer.score(features)
+        evaluated: dict[pd.Timestamp, np.ndarray] = {}
+        batches = np.concatenate(seen, axis=0)
+        assert len(batches) == len(rows)
+        for position, row_index in enumerate(rows):
+            evaluated[stamp(features[TIMESTAMP_COLUMN].iloc[row_index])] = batches[position]
+    finally:
+        del model.forward
+
+    assert len(training) > 100
+    assert set(served) == set(training) == set(evaluated)
+    for end, values in training.items():
+        assert values.dtype == np.float32
+        assert served[end].dtype == np.float32 and evaluated[end].dtype == np.float32
+        assert values.tobytes() == served[end].tobytes(), end
+        assert values.tobytes() == evaluated[end].tobytes(), end
 
 
 def _baseline_frame(rows: int = 400, seed: int = 0) -> pd.DataFrame:

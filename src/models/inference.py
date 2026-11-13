@@ -850,22 +850,23 @@ class SequenceInferenceEngine:
         self._device = self._torch.device(device)
         self.trained.model.to(device=self._device, dtype=getattr(self._torch, dtype))
         self.trained.model.eval()
-        # Materialize the per-column (means, stds) arrays once so each
-        # ``score_window`` is a single broadcast subtract+divide instead of
-        # building Python dicts per call. ``manifest.scaler`` is required
-        # when thresholds are present (the load-time guard enforces it),
-        # but allow ``None`` here so test doubles without a scaler keep
-        # working as long as they also don't provide thresholds.
-        self._scaler_means: np.ndarray[Any, np.dtype[np.float64]] | None
-        self._scaler_stds: np.ndarray[Any, np.dtype[np.float64]] | None
-        if trained.manifest.scaler is not None:
-            scaler = ZScoreScaler.from_dict(dict(trained.manifest.scaler))
-            # R04.15: the scaler's own denominator rule (std, or 1.0 under the
-            # floor), never a re-derivation of it.
-            self._scaler_means, self._scaler_stds = scaler.vectors(self.feature_columns)
-        else:
-            self._scaler_means = None
-            self._scaler_stds = None
+        # ``manifest.scaler`` is required when thresholds are present (the
+        # load-time guard enforces it), but allow ``None`` here so test doubles
+        # without a scaler keep working as long as they also don't provide
+        # thresholds. R27.5: windows are scaled by ``ZScoreScaler.apply_block``,
+        # the training dataset's own scaling (its per-column vectors are cached
+        # on the scaler, so a tick is one broadcast subtract+divide).
+        self._scaler: ZScoreScaler | None = (
+            ZScoreScaler.from_dict(dict(trained.manifest.scaler))
+            if trained.manifest.scaler is not None
+            else None
+        )
+        if self._scaler is not None:
+            # A scaler missing a feature column refuses here, at load, not at
+            # the first full window.
+            self._scaler.apply_block(
+                np.empty((0, len(self.feature_columns)), dtype=np.float32), self.feature_columns
+            )
 
     def reset(self) -> None:
         """Drop the current window; scoring resumes once it refills."""
@@ -975,10 +976,8 @@ class SequenceInferenceEngine:
         # error is in the same scale as the calibrated threshold. Mask and Δt are
         # model-structure inputs and pass through unscaled.
         scaled_window: np.ndarray[Any, np.dtype[np.float32]] = window
-        if self._scaler_means is not None and self._scaler_stds is not None:
-            scaled_window = (
-                (window.astype(np.float64) - self._scaler_means) / self._scaler_stds
-            ).astype(np.float32)
+        if self._scaler is not None:
+            scaled_window = self._scaler.apply_block(window, self.feature_columns)
         # Impute unobserved (non-finite) cells to 0 in z-scored space — the
         # channel mean — exactly as the offline dataset does (`where(isfinite,
         # value, 0)`), so a masked GPS-less cell never feeds the model a NaN.

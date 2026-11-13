@@ -266,6 +266,7 @@ class ZScoreScaler:
         """Pickle the fitted parameters, never the per-layout plan cache."""
         state = dict(self.__dict__)
         state.pop(_BLOCK_PLANS_ATTR, None)
+        state.pop(_BLOCK_VECTORS_ATTR, None)
         return state
 
     def _block_key(self, label: Any, dtype: Any) -> _BlockKey | None:
@@ -298,14 +299,85 @@ class ZScoreScaler:
     ) -> tuple[np.ndarray[Any, np.dtype[np.float64]], np.ndarray[Any, np.dtype[np.float64]]]:
         """``(means, denominators)`` as float64 arrays in ``columns`` order.
 
-        For callers that z-score a numpy block -- serve's per-tick window, the
-        batched scorer, the IF fit -- so they apply the same denominator rule
-        as :meth:`transform` instead of re-deriving it.
+        For callers that z-score a numpy block (the IF fit) so they apply the
+        same denominator rule as :meth:`transform` instead of re-deriving it.
+        The sequence model's three paths use :meth:`apply_block`, which reads
+        these.
         """
         ordered = list(columns)
         means = np.array([self.means[column] for column in ordered], dtype=np.float64)
         denominators = np.array([self.denominator(column) for column in ordered], dtype=np.float64)
         return means, denominators
+
+    def apply_block(
+        self,
+        values: np.ndarray[Any, Any],
+        columns: Iterable[str],
+        *,
+        out: np.ndarray[Any, np.dtype[np.float32]] | None = None,
+    ) -> np.ndarray[Any, np.dtype[np.float32]]:
+        """z-score a numpy block whose last axis is ``columns``, as float32 (R27.5).
+
+        The one sequence-model scaling: the training dataset
+        (``training_entry.build_sequence_dataset``), serve's per-tick window
+        (``SequenceInferenceEngine.score_window``) and the batched evaluation
+        scorer all call it, so train and serve cannot drift apart. Every
+        element is ``(float64(x) - mean) / denom`` rounded once to float32, the
+        expression serve always used; non-finite values stay non-finite (the
+        callers impute them, and the mask is built from them).
+
+        Computed in chunks along the first axis so the float64 temporaries stay
+        bounded on a corpus-sized block; ``out`` (may be ``values`` itself when
+        that is float32) receives the result in place. Not the IF's path: its
+        :meth:`transform` scales float32 features *in float32*, per dtype block,
+        to stay bit-identical to the scores it has always served (R27.4).
+        """
+        means, denominators = self._block_vectors(tuple(columns))
+        if values.ndim == 0 or values.shape[-1] != means.shape[0]:
+            raise SchemaMismatchError(
+                f"block's last axis has {values.shape[-1] if values.ndim else 0} columns; "
+                f"{means.shape[0]} named"
+            )
+        if out is None:
+            out = np.empty(values.shape, dtype=np.float32)
+        elif out.shape != values.shape or out.dtype != np.float32:
+            raise ValueError("out must be a float32 array shaped like values")
+        if values.size == 0:
+            return out
+        if values.ndim == 1:  # one row: axis 0 is the columns, never chunked
+            with np.errstate(all="ignore"):
+                out[:] = (values.astype(np.float64) - means) / denominators
+            return out
+        per_row = max(1, values.size // values.shape[0])
+        step = max(1, _APPLY_BLOCK_CHUNK_ELEMENTS // per_row)
+        with np.errstate(all="ignore"):
+            for start in range(0, values.shape[0], step):
+                chunk = values[start : start + step].astype(np.float64)
+                chunk -= means
+                chunk /= denominators
+                out[start : start + step] = chunk
+        return out
+
+    def _block_vectors(
+        self, columns: tuple[str, ...]
+    ) -> tuple[np.ndarray[Any, np.dtype[np.float64]], np.ndarray[Any, np.dtype[np.float64]]]:
+        """:meth:`vectors`, cached per column tuple for :meth:`apply_block`'s
+        per-tick caller (same bounded, unpickled cache as the block plans)."""
+        cache: dict[tuple[str, ...], tuple[Any, Any]] = self.__dict__.setdefault(
+            _BLOCK_VECTORS_ATTR, {}
+        )
+        cached = cache.get(columns)
+        if cached is not None:
+            return cast(
+                tuple[np.ndarray[Any, np.dtype[np.float64]], np.ndarray[Any, np.dtype[np.float64]]],
+                cached,
+            )
+        means, denominators = self.vectors(columns)
+        pair = (_readonly(means), _readonly(denominators))
+        if len(cache) >= _MAX_BLOCK_PLANS:
+            cache.clear()
+        cache[columns] = pair
+        return pair
 
     def fit_transform(
         self,
@@ -354,6 +426,11 @@ _BlockKey = tuple[np.dtype[Any], np.dtype[Any]] | str
 #: ``__getstate__`` keeps it out of every pickle.
 _BLOCK_PLANS_ATTR = "_block_plans"
 _MAX_BLOCK_PLANS = 8
+#: :meth:`ZScoreScaler.apply_block`'s ``(means, denominators)`` per column
+#: tuple, kept the same way as the block plans.
+_BLOCK_VECTORS_ATTR = "_block_vector_cache"
+#: Elements per float64 chunk in :meth:`ZScoreScaler.apply_block` (32 MB).
+_APPLY_BLOCK_CHUNK_ELEMENTS = 1 << 22
 
 
 @dataclass(frozen=True)

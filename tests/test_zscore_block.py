@@ -284,3 +284,59 @@ def test_block_plan_cache_is_bounded() -> None:
         rotated = row[columns[shift:] + columns[:shift]]
         scaler.transform_fitted(rotated)
         assert len(scaler.__dict__[_BLOCK_PLANS_ATTR]) <= _MAX_BLOCK_PLANS
+
+
+def test_apply_block_is_float64_rounded_once_whatever_the_shape_or_chunking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R27.5: the sequence model's one scaling. Each element is
+    ``float32((float64(x) - mean) / denom)`` -- serve's expression -- for a
+    1-D row, a 2-D block, a 3-D batch of windows, in place, and when the block
+    is cut into chunks; NaN and ±inf stay non-finite, a below-floor std
+    centres. Unlike :meth:`transform` it never computes float32 in float32."""
+    import pickle
+
+    import src.preprocessing.normalization as normalization
+
+    columns = ("a", "b", "c", "d")
+    scaler = ZScoreScaler(
+        means={"a": 1234.567, "b": -0.1, "c": 3.0, "d": 98765.4321},
+        stds={"a": 17.3, "b": 1e-12, "c": 0.7, "d": 1234.5},
+        columns=columns,
+    )
+    rng = np.random.default_rng(7)
+    block = (
+        rng.normal(size=(37, 4)) * [20.0, 1.0, 1.0, 2000.0] + [1234.5, 0.0, 3.0, 98765.0]
+    ).astype(np.float32)
+    block[3, 0] = np.nan
+    block[5, 1] = np.inf
+    block[6, 2] = -np.inf
+    means = np.array([scaler.means[c] for c in columns])
+    denoms = np.array([scaler.denominator(c) for c in columns])
+    assert denoms[1] == 1.0
+    with np.errstate(all="ignore"):
+        expected = ((block.astype(np.float64) - means) / denoms).astype(np.float32)
+        in_float32 = (block - means.astype(np.float32)) / denoms.astype(np.float32)
+    assert expected.tobytes() != in_float32.tobytes()  # the check has teeth
+
+    whole = scaler.apply_block(block, columns)
+    assert whole.dtype == np.float32
+    assert whole.tobytes() == expected.tobytes()
+    assert scaler.apply_block(block[2], list(columns)).tobytes() == expected[2].tobytes()
+    windows = np.stack([block[i : i + 5] for i in range(30)])
+    batched = scaler.apply_block(windows.astype(np.float64), columns)
+    assert batched.tobytes() == np.stack([expected[i : i + 5] for i in range(30)]).tobytes()
+
+    monkeypatch.setattr(normalization, "_APPLY_BLOCK_CHUNK_ELEMENTS", 9)  # two rows a chunk
+    in_place = block.copy()
+    assert scaler.apply_block(in_place, columns, out=in_place) is in_place
+    assert in_place.tobytes() == expected.tobytes()
+
+    with pytest.raises(SchemaMismatchError, match="3 named"):
+        scaler.apply_block(block, columns[:3])
+    with pytest.raises(ValueError, match="out must be"):
+        scaler.apply_block(block, columns, out=block.astype(np.float64))
+    # The cached vectors are not state, as with the block plans.
+    restored = pickle.loads(pickle.dumps(scaler))
+    assert normalization._BLOCK_VECTORS_ATTR not in restored.__dict__
+    assert restored == scaler

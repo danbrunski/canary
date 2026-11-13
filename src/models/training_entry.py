@@ -182,7 +182,10 @@ def build_sequence_dataset(
     if scaler is not None:
         # Keep only columns sequence construction/metadata needs and scale the
         # numeric matrix as float32. ZScoreScaler.transform copies the entire
-        # wide feature frame and commonly doubles multi-GB corpus RSS.
+        # wide feature frame and commonly doubles multi-GB corpus RSS. The
+        # scaling itself is serve's (R27.5: ``apply_block``, in place and in
+        # bounded float64 chunks), so a training window and the window serve
+        # scores from the same rows are the same float32 values.
         structural = [
             column
             # DRIVE_COLUMN: the calibration drive floor counts physical drives.
@@ -194,12 +197,7 @@ def build_sequence_dataset(
         keep = list(dict.fromkeys([*structural, *columns, *flags]))
         compact = features.loc[:, keep].copy()
         values = compact.loc[:, columns].to_numpy(dtype="float32", copy=True)
-        for index, column in enumerate(columns):
-            denom = scaler.stds[column]
-            if denom < scaler.std_floor:
-                denom = 1.0
-            values[:, index] = (values[:, index] - scaler.means[column]) / denom
-        compact.loc[:, columns] = values
+        compact.loc[:, columns] = scaler.apply_block(values, columns, out=values)
         features = compact
     return SequenceWindowDataset(
         features,

@@ -226,7 +226,7 @@ not measured.
     grouper `ValueError`; `reconcile_feature_frame_to_spec` already refuses
     duplicates, so no real caller reaches it.
 
-- [ ] **R27.5 The z-score rule is applied by three code paths and nothing
+- [x] **R27.5 The z-score rule is applied by three code paths and nothing
   pins train equal to serve.** `training_entry.build_sequence_dataset`
   hand-copies the std-floor rule R04.15 made "the one statement"
   (`ZScoreScaler.denominator`) and does the arithmetic in float32;
@@ -240,10 +240,65 @@ not measured.
   loop. `apply_block` must not silently move the IF onto float64 (that changes
   served scores); either keep the IF on its own block path or make the switch
   an explicit, measured change.
-  - [ ] `ZScoreScaler.apply_block(values, columns)` beside `vectors`, used by
+  - [x] `ZScoreScaler.apply_block(values, columns)` beside `vectors`, used by
     all three. Keep the compact-frame memory trick in the training path.
-  - [ ] One test: training-dataset values equal serve-scaled values for the
-    same rows.
+    *Done 2026-11-13:* `apply_block` returns float32
+    `(float64(x) - mean) / denom`, rounded once: serve's expression, kept so
+    served scores do not move. It takes any shape whose last axis is the
+    columns, computes in float64 chunks of at most 2^22 elements (32 MB), and
+    writes in place when `out=values`. Its `(means, denoms)` are cached per
+    column tuple, and the cache stays out of pickles and equality, like
+    R27.13's plans. `build_sequence_dataset` still copies only the structural,
+    feature and flag columns (the compact frame) and scales the float32 matrix
+    in place (`out=values`), so the only extra memory is the 32 MB chunk.
+    `score_window` and `BatchedSequenceScorer.score` call it on the window or
+    batch. The IF stays on `transform` / `transform_fitted` (float32 in
+    float32, `_block_plan`), and `isolation_forest` still uses `vectors` for
+    its fit. **The training dataset changes; served scores do not.** Run on the
+    two cached real feature frames (24,043 rows, 1,563,658 finite cells, the
+    deployed LSTM's 254 columns and scaler), the old float32 loop and
+    `apply_block` differ on 790,628 cells (50.6 %). The largest |Δz| is
+    5.96e-6, not the 4.8e-7 quoted above. Under NumPy 2's weak-scalar
+    promotion (NEP 50) the old float32 loop rounded the mean itself to
+    float32 before subtracting, and that rounding dominates. The
+    worst case relative to |z| is 7.9 %, on a near-zero z. No finiteness
+    changed. A retrain on the same data is therefore not bit-identical to one
+    before R27.5. Score impact: the deployed `lstm_autoencoder_2026-09-24T035125.284392Z`
+    scored the stored drives `2026-09-21T201836` (segments 001 and 002) and
+    `2026-09-22T163415` (5,622 rows from the cached frame, 5,535 windows),
+    once at HEAD in a worktree and once in this tree. Both the batched scorer
+    and the live engine, row by row through `observe`, gave bit-identical
+    `global_score` (max |Δscore| 0.0) and 0 verdict flips (133 flagged either
+    way). Per-tick scaling of a 30 × 254 window: 16 µs → 26 µs (the column
+    tuple and cache lookup), against a forward of about 13 ms.
+  - [x] One test: training-dataset values equal serve-scaled values for the
+    same rows. *Done:*
+    `tests/test_evaluation_detectors.py::test_training_windows_equal_the_windows_serve_and_evaluation_score`.
+    It builds the dataset with `build_sequence_dataset` (scaler given), trains
+    a tiny LSTM on it, and records what `model.forward` receives from
+    `SequenceInferenceEngine.observe` and from `BatchedSequenceScorer.score`.
+    For every window (more than 100, across a 60 s gap) it asserts the
+    dataset's float32 values equal both **bitwise** (`tobytes`). The equality
+    is exact because all three paths now take the same float32 raw values
+    through `apply_block`. With the old float32 training loop put back, the
+    test fails on the first window (one float32 ulp, `\x97` against `\x98`).
+    `tests/test_zscore_block.py::test_apply_block_is_float64_rounded_once_whatever_the_shape_or_chunking`
+    pins the expression for 1-D, 2-D, 3-D and chunked in-place input,
+    including NaN, ±inf and the std floor. It asserts the float32-in-float32
+    result differs, so the test can fail. It also covers the width and `out`
+    refusals and that the cache is never pickled. Gate: `pytest -m
+    ml_training -n 4` on `test_lstm_training`, `test_train_lstm`,
+    `test_tcn_training`, `test_sequence_autoencoder_training`,
+    `test_sequence_bakeoff`, `test_false_positive_benchmark` and
+    `test_budget_level`: 80 passed. `pytest -m ""` on `test_scoring_continuity`,
+    `test_zscore_block`, `test_preprocessing_normalization`,
+    `test_evaluation_detectors`, `test_lstm_inference` and
+    `test_sequence_dataset`: 106 passed, 1 skipped (the no-torch case). On
+    `test_lstm_inference`, `test_tcn`, `test_train_tcn`, `test_train_sequence_columns` and
+    `test_behavior_deviations_reach_training`: 58 passed.
+  - Side effect: `training_data_hash` (sequence manifest and calibration)
+    hashes the scaled frame, so it changes for identical input data. Nothing
+    compares sequence-model hashes (verifier, 2026-11-13).
 
 - [x] **R27.6 `LiveFeatureSource` is five state groups with a hand-written
   19-assignment `reset()`.** 847 lines, 43 fields, 27 methods: ingest and

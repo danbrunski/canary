@@ -350,16 +350,15 @@ def test_score_window_applies_scaler_before_forward_pass() -> None:
     trained = _trained()
     assert trained.manifest.scaler is not None
     engine = SequenceInferenceEngine(trained)
-    # Materialized scaler attributes exist and are populated for the
-    # feature columns in order.
-    assert engine._scaler_means is not None
-    assert engine._scaler_stds is not None
-    assert engine._scaler_means.shape == (len(engine.feature_columns),)
-    assert engine._scaler_stds.shape == (len(engine.feature_columns),)
+    # The manifest's scaler is loaded and covers the feature columns in order.
+    assert engine._scaler is not None
+    means, stds = engine._scaler.vectors(engine.feature_columns)
+    assert means.shape == (len(engine.feature_columns),)
+    assert stds.shape == (len(engine.feature_columns),)
     # Per-column means roughly match the training data (mean ≈ 700 for rpm).
-    assert 698.0 < float(engine._scaler_means[0]) < 702.0
+    assert 698.0 < float(means[0]) < 702.0
     # Per-column std is non-zero and used as the divisor (not floored to 1).
-    assert engine._scaler_stds[0] > 0.0
+    assert stds[0] > 0.0
 
     # End-to-end: feeding raw values (close to the training distribution)
     # produces a small reconstruction error.
