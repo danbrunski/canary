@@ -67,13 +67,12 @@ from src.analysis.fuel_plant import (
     plant_files,
     plant_qualification,
     plant_reads,
-    resolve_parameters,
 )
+from src.analysis.paired_run import check_run_inputs, learned_state, plant_unresolved
 from src.analysis.paired_scenarios import (
-    _LOAD_BYTE,
-    _PLANT_OUTPUTS,
     OUTPUTS,
     PLANT_ASSUMPTION_PREFIX,
+    PLANT_OUTPUTS,
     BatterySource,
     FuelFn,
     GateReason,
@@ -81,20 +80,17 @@ from src.analysis.paired_scenarios import (
     OperatingPoint,
     PairedResult,
     PairedScenario,
+    PairSide,
     RailSource,
     ReasonScope,
     SimKit,
-    _ecu_chain,
-    _fuel_side,
-    _pair_loop,
-    _refuse_recorded_sources,
-    _resets,
-    _Side,
-    _side,
-    _with_contract_mode,
     compare_scenario_roms,
+    ecu_chain,
+    fuel_side,
     load_kit,
     output_reasons,
+    pair_loop,
+    pair_side,
     plant_assumption_lines,
     plant_parameters,
     plant_rail_kpa,
@@ -104,7 +100,7 @@ from src.analysis.paired_scenarios import (
     stated_sample,
 )
 from src.analysis.paired_scenarios import TOOL_VERSION as PAIRED_TOOL_VERSION
-from src.analysis.rom_image import sha256_hex
+from src.analysis.paired_steady import FILL_BYTE
 from src.analysis.sim_contract import SimulationRefusalError
 from src.analysis.sim_design import MAF_FROM_MANIFOLD_MODEL, SimDesign
 from src.analysis.sim_kit import SIM_KIT_FILE, load_sim_kit_declaration
@@ -128,8 +124,6 @@ UNCERTAINTY_FILE = "sim_uncertainty.yaml"
 STRUCTURAL_ERROR_NOT_SAMPLED = "structural_error_not_sampled"
 #: The lumped identified scale: drawn inside the baseline's measured interval.
 LUMPED_SCALE = "stoich_air_per_open_ms"
-#: The fill byte every design point carries as an interval.
-FILL_BYTE = _LOAD_BYTE
 #: How many (point, fill byte) combinations each run re-checks against run_paired.
 SELF_CHECK_COMBOS = 8
 #: The mode a paired Monte Carlo runs (the only one run_paired computes).
@@ -743,7 +737,7 @@ def _gate(
 
 def _pulses(
     kit: SimKit,
-    side: _Side,
+    side: PairSide,
     ecus: Sequence[dict[str, Any]],
     points: Sequence[OperatingPoint],
     stft_pct: float,
@@ -773,13 +767,13 @@ def _build_cache(
 ) -> tuple[_Cache, IntArray, list[tuple[str, ...]]]:
     """Every (point, fill byte) the draws visit, and the (point, draw) ->
     combination index. Every piece is run_paired's own, none a copy (E09.2c):
-    the ECU stages per combination through ``paired_scenarios._ecu_chain``
+    the ECU stages per combination through ``paired_scenarios.ecu_chain``
     (the twin runner's ``stated_ecu``), the pulse stage once per ROM over
     every combination (``twin_runner.stated_pulse``), the loop through
-    ``_pair_loop`` and the reasons through ``output_reasons``; the assembled
+    ``pair_loop`` and the reasons through ``output_reasons``; the assembled
     result is still re-checked against ``run_paired`` on every run."""
-    base_side = _side(kit, base_image, template.base, learned["base"]["ltft_pct"], "base")
-    cand_side = _side(
+    base_side = pair_side(kit, base_image, template.base, learned["base"]["ltft_pct"], "base")
+    cand_side = pair_side(
         kit, candidate_image, template.candidate, learned["candidate"]["ltft_pct"], "candidate"
     )
     stfts = (learned["base"]["stft_pct"], learned["candidate"]["stft_pct"])
@@ -787,7 +781,7 @@ def _build_cache(
     gate = sorted({r for r, _ in gated})
     scope = ReasonScope.of(kit, gated)
     withheld = {name: bool(scope.keep(name, gate)) for name in OUTPUTS}
-    plant_withheld = all(withheld[name] for name in _PLANT_OUTPUTS)
+    plant_withheld = all(withheld[name] for name in PLANT_OUTPUTS)
     n_points, n_draws = draws.fill_bytes.shape
     combo_of = np.empty((n_points, n_draws), dtype=np.int64)
     at: list[int] = []
@@ -800,8 +794,8 @@ def _build_cache(
     n = len(at)
     points = [_with_byte(design.points[at[c]].point, bytes_[c]) for c in range(n)]
     stages = stage_order(kit.model)
-    b_ecus = [_ecu_chain(kit, stages, base_side, p) for p in points]
-    c_ecus = [_ecu_chain(kit, stages, cand_side, p) for p in points]
+    b_ecus = [ecu_chain(kit, stages, base_side, p) for p in points]
+    c_ecus = [ecu_chain(kit, stages, cand_side, p) for p in points]
     pulses = (
         _pulses(kit, base_side, b_ecus, points, stfts[0]),
         _pulses(kit, cand_side, c_ecus, points, stfts[1]),
@@ -820,15 +814,15 @@ def _build_cache(
 
     def fuel_at(c: int) -> FuelFn:
         def fuel(s: int, ecu: dict[str, Any], hold: tuple[int, int] | None) -> dict[str, Any]:
-            return _fuel_side(sides[s], ecu, pulses[s], c, stfts[s], hold)
+            return fuel_side(sides[s], ecu, pulses[s], c, stfts[s], hold)
 
         return fuel
 
     for c in range(n):
         point = points[c]
 
-        # _pair_point's loop, with the plant deferred to the per-draw pass.
-        pair = _pair_loop(kit, b_ecus[c], c_ecus[c], fuel_at(c))
+        # run_paired's loop (pair_loop), with the plant deferred to the per-draw pass.
+        pair = pair_loop(kit, b_ecus[c], c_ecus[c], fuel_at(c))
         b, cd, loop = pair.base, pair.candidate, pair.loop
         loops.append(loop or "open_loop")
         # run_paired's per-output reasons.
@@ -839,7 +833,7 @@ def _build_cache(
                 interned[key] = len(reason_sets)
                 reason_sets.append(key)
             reason_id[name][c] = interned[key]
-            if name in _PLANT_OUTPUTS:
+            if name in PLANT_OUTPUTS:
                 continue
             if b[name] is not None:
                 base[name][c] = float(b[name])
@@ -905,7 +899,7 @@ def _plant(
     sides, where = np.nonzero(cache.computed[:, flat])
     idx = flat[where]
     at = cache.point[idx]
-    result = {name: np.full((2, flat.size), np.nan) for name in _PLANT_OUTPUTS}
+    result = {name: np.full((2, flat.size), np.nan) for name in PLANT_OUTPUTS}
     model = points.map_from_model[at]
     for group in (~model, model):
         if not group.any():
@@ -1072,7 +1066,7 @@ def _inert(
         lo, hi = uncertainty.parameters[pid].bracket
         at_lo = _plant(kit, cache, points, combos, plant_parameters(kit, {pid: lo}))
         at_hi = _plant(kit, cache, points, combos, plant_parameters(kit, {pid: hi}))
-        if all(np.array_equal(at_lo[o], at_hi[o], equal_nan=True) for o in _PLANT_OUTPUTS):
+        if all(np.array_equal(at_lo[o], at_hi[o], equal_nan=True) for o in PLANT_OUTPUTS):
             inert.append(pid)
     return inert
 
@@ -1128,37 +1122,12 @@ def run_monte_carlo(
             f"design {design.sha256[:12]} was built on plant {design.plant_version}; the run's "
             f"is {kit.plant.plant_version}",
         )
-    for label, image, identity in (
-        ("base", base_image, template.base),
-        ("candidate", candidate_image, template.candidate),
-    ):
-        if sha256_hex(image) != identity.image_sha256:
-            raise SimulationRefusalError(
-                "image_hash_mismatch", f"{label} bytes are not image {identity.image_sha256}"
-            )
-    sampled = sample_draws(uncertainty.declaration, design, draws=draws, seed=seed, vary=vary)
-    # The contract's and run_paired's per-point refusals, on every point.
+    # run_paired's own run-input refusals (paired_run), the contract's per
+    # point on every point.
     full = _scenario(template, [_with_byte(dp.point, dp.fill_byte_lo) for dp in design.points])
-    _refuse_recorded_sources(full)
-    _with_contract_mode(kit.contract, full, kit.contract_sha256)
-    if (template.plant.version, template.plant.hardware_configuration) != (
-        kit.plant.plant_version,
-        kit.plant.hardware_configuration,
-    ):
-        raise SimulationRefusalError(
-            "plant_mismatch",
-            f"the scenario names plant {template.plant.version}; the kit's is "
-            f"{kit.plant.plant_version}",
-        )
-    resets = _resets(kit.contract, template.candidate_events)
-    base_ltft = template.learned.ltft_pct
-    learned = {
-        "base": {"stft_pct": template.learned.stft_pct, "ltft_pct": base_ltft},
-        "candidate": {
-            "stft_pct": 0.0 if "stft_b1" in resets else template.learned.stft_pct,
-            "ltft_pct": 0.0 if "ltft_b1" in resets else base_ltft,
-        },
-    }
+    resets = check_run_inputs(kit, full, base_image, candidate_image)
+    sampled = sample_draws(uncertainty.declaration, design, draws=draws, seed=seed, vary=vary)
+    learned = learned_state(full, resets)
     gated = _gate(kit, template, base_image, candidate_image)
     gate = sorted({r for r, _ in gated})
     scope = ReasonScope.of(kit, gated)
@@ -1171,17 +1140,17 @@ def run_monte_carlo(
     base = {name: np.empty((n_points, n_draws)) for name in OUTPUTS}
     cand = {name: np.empty((n_points, n_draws)) for name in OUTPUTS}
     for name in OUTPUTS:
-        if name not in _PLANT_OUTPUTS:
+        if name not in PLANT_OUTPUTS:
             base[name][:] = cache.base[name][combo_of]
             cand[name][:] = cache.candidate[name][combo_of]
     for d in range(n_draws):
         params = plant_parameters(kit, sampled.overrides(d))
         _refuse_manifold_refusal(kit, points, params, d, sampled)
         plant = _plant(kit, cache, points, combo_of[:, d], params)
-        for name in _PLANT_OUTPUTS:
+        for name in PLANT_OUTPUTS:
             base[name][:, d] = plant[name][0]
             cand[name][:, d] = plant[name][1]
-    for name in _PLANT_OUTPUTS:
+    for name in PLANT_OUTPUTS:
         if scope.keep(name, gate):
             # A gate that reaches this output withholds the candidate, as run_paired.
             cand[name][:] = np.nan
@@ -1232,12 +1201,7 @@ def run_monte_carlo(
     unresolved = set(gate)
     for k in used:
         unresolved.update(reason_sets[k])
-    resolved = resolve_parameters(kit.plant, kit.delay)
-    unresolved.update(f"plant:{e}" for e in resolved.effects)
-    if any(dp.point.rail_kpa_source == "working_assumption" for dp in design.points):
-        unresolved.add(f"plant:{resolved.rail_effect}")
-    if qualification.reason is not None:
-        unresolved.add(qualification.reason)
+    unresolved.update(plant_unresolved(kit, [dp.point for dp in design.points], qualification))
     provenance = {
         "tool": "sim_montecarlo",
         "tool_version": TOOL_VERSION,

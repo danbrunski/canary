@@ -893,7 +893,7 @@ def test_a_zero_base_is_counted_out_of_the_relative_quantiles(
 def test_a_points_row_is_the_word_the_paired_run_read(
     kit_and_image: tuple[SimKit, bytes], axes: CellAxes, monkeypatch: pytest.MonkeyPatch, rpm: float
 ) -> None:
-    """The row comes from paired_scenarios.rpm_word, the conversion _ecu_chain
+    """The row comes from paired_scenarios.rpm_word, the conversion ecu_chain
     itself uses: recorded at the steady-BFS call, never re-derived. 2193.75
     and 2206.25 are words 175.5 and 176.5, both rounding to 176 (half-even),
     which is row 4's tie edge."""

@@ -886,17 +886,17 @@ def test_a_refusing_manifold_model_names_its_refusal_and_is_refused_where_a_draw
     a model-MAP point refused at any draw is refused outright
     (``manifold_refusal_varies_by_draw``, the backstop); a run whose every
     draw stays below ambient runs. The contract admits fuel-mv-2 (E08.11)."""
-    from src.analysis.paired_scenarios import _ecu_chain, _fuel_chain, _side
+    from src.analysis.paired_scenarios import _fuel_chain, ecu_chain, pair_side
     from src.analysis.twin_runner import stage_order
 
     kit, image = kit_and_image
     mv2, declared = _mv2(kit)
-    side = _side(mv2, image, _identity(image), 0.0, "base")
+    side = pair_side(mv2, image, _identity(image), 0.0, "base")
     stages = stage_order(mv2.model)
     for maf, reasons in ((150.0, ["plant:manifold_above_ambient"]), (20.0, [])):
         point = dataclasses.replace(P_MODEL, maf_gps=maf, conditioned={FILL_BYTE: 200.0})
         out = _fuel_chain(
-            mv2, side, point, _ecu_chain(mv2, stages, side, point), stft_pct=0.0, overrides={}
+            mv2, side, point, ecu_chain(mv2, stages, side, point), stft_pct=0.0, overrides={}
         )
         assert out["reasons"] == reasons
         assert np.isnan(out["delivered_lambda"]) == bool(reasons)
@@ -1164,3 +1164,168 @@ def test_run_paired_and_the_fast_path_run_the_twin_runners_one_ecu_path(
             mc_after.base["base_fuel_schedule"][i] == mc_before.base["base_fuel_schedule"][i] + 64
         ).all()
         assert (mc_after.base["delivered_lambda"][i] != mc_before.base["delivered_lambda"][i]).all()
+
+
+# -- R25.1 / R25.2: one ECU chain per point, one prologue --------------------------------------
+
+
+def _paired_scenario(template: PairedScenario, design: MonteCarloDesign) -> PairedScenario:
+    points = tuple(
+        dataclasses.replace(dp.point, conditioned={FILL_BYTE: float(dp.fill_byte_lo)})
+        for dp in design.points
+    )
+    return dataclasses.replace(template, points=points)
+
+
+def test_run_paired_runs_each_ecu_side_once_per_point_and_reruns_only_the_plant(
+    kit_and_image: tuple[SimKit, bytes], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R25.1: the ECU stages and the pulse stage read no plant parameter, so the
+    sensitivity cases behind ``relative_delta_range_over_assumptions`` rerun
+    only the plant. Each side's ECU chain and pulse stage run once per point;
+    the plant runs once per side per case. The range is the one the
+    per-case full chain (``_fuel_chain``, which rebuilds everything) gives,
+    exactly."""
+    from src.analysis import paired_scenarios, twin_runner
+    from src.analysis.fuel_plant import sensitivity_cases
+    from src.analysis.paired_scenarios import _fuel_chain, ecu_chain, pair_loop, pair_side
+    from src.analysis.twin_runner import stage_order
+
+    kit, image = kit_and_image
+    candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
+    design = _design(image, (P_WOT, 190, 200), (P_SHORT, 120, 130), (P_MODEL, 190, 200))
+    scenario = _paired_scenario(_template(kit, image, candidate), design)
+    calls = dict.fromkeys(("stated_ecu", "stated_pulse", "plant_predict_inputs"), 0)
+
+    def counted(name: str, real: Any) -> Any:
+        def wrapper(*args: Any, **kw: Any) -> Any:
+            calls[name] += 1
+            return real(*args, **kw)
+
+        return wrapper
+
+    for name, real in (
+        ("stated_ecu", twin_runner.stated_ecu),
+        ("stated_pulse", twin_runner.stated_pulse),
+        ("plant_predict_inputs", twin_runner.plant_predict_inputs),
+    ):
+        monkeypatch.setattr(paired_scenarios, name, counted(name, real))
+    result = run_paired(kit, scenario, image, candidate)
+    monkeypatch.undo()
+
+    cases = {
+        n: c
+        for n, c in sensitivity_cases(kit.plant, kit.delay).items()
+        if "lambda_observation_delay" not in c
+    }
+    n = len(scenario.points)
+    ranged = [
+        p
+        for p in result.points
+        if "relative_delta_range_over_assumptions" in p["outputs"]["delivered_lambda"]
+    ]
+    assert len(cases) >= 2 and len(ranged) == n
+    assert calls["stated_ecu"] == 2 * n
+    assert calls["stated_pulse"] == 2 * n
+    assert calls["plant_predict_inputs"] == 2 * n * (1 + len(cases))
+
+    stages = stage_order(kit.model)
+    learned = result.learned_state
+    sides = tuple(
+        pair_side(kit, img, ident, learned[label]["ltft_pct"], label)
+        for label, img, ident in (
+            ("base", image, scenario.base),
+            ("candidate", candidate, scenario.candidate),
+        )
+    )
+    stfts = (learned["base"]["stft_pct"], learned["candidate"]["stft_pct"])
+    for point, record in zip(scenario.points, result.points, strict=True):
+        lam = record["outputs"]["delivered_lambda"]
+        spread = []
+        for case in cases.values():
+
+            def fuel(
+                s: int, ecu: dict[str, Any], hold: Any, case: Any = case, at: Any = point
+            ) -> dict[str, Any]:
+                return _fuel_chain(
+                    kit, sides[s], at, ecu, stft_pct=stfts[s], overrides=case, hold=hold
+                )
+
+            b_ecu = ecu_chain(kit, stages, sides[0], point)
+            c_ecu = ecu_chain(kit, stages, sides[1], point)
+            cp = pair_loop(kit, b_ecu, c_ecu, fuel)
+            spread.append(cp.candidate["delivered_lambda"] / cp.base["delivered_lambda"] - 1.0)
+        ratio = lam["relative_delta"]
+        assert lam["relative_delta_range_over_assumptions"] == (
+            min([ratio, *spread]),
+            max([ratio, *spread]),
+        )
+
+
+def test_both_paired_entry_points_refuse_a_plant_mismatch_in_the_same_words(
+    kit_and_image: tuple[SimKit, bytes], uncertainty: LoadedUncertainty
+) -> None:
+    """R25.2: run_paired and run_monte_carlo share one prologue
+    (``paired_run.check_run_inputs``). Monte Carlo's plant refusal used to
+    omit the hardware configuration; both now name it, in one message. The
+    scenario names the contract's own rig; the kit's plant names another."""
+    kit, image = kit_and_image
+    stated = kit.plant.hardware_configuration
+    other = dataclasses.replace(
+        kit, plant=kit.plant.model_copy(update={"hardware_configuration": "other-rig"})
+    )
+    design = _design(image, (P_WOT, 190, 200))
+    template = _template(kit, image, bytes(image))
+    messages = []
+    for call in (
+        lambda: run_paired(other, _paired_scenario(template, design), image, bytes(image)),
+        lambda: run_monte_carlo(
+            other, template, design, image, bytes(image), uncertainty, draws=2, seed=1
+        ),
+    ):
+        with pytest.raises(SimulationRefusalError) as err:
+            call()
+        assert err.value.reason == "plant_mismatch"
+        messages.append(str(err.value))
+    assert messages[0] == messages[1]
+    assert "other-rig" in messages[0] and stated in messages[0]
+
+
+def test_the_monte_carlo_learned_state_is_run_paireds(
+    kit_and_image: tuple[SimKit, bytes], uncertainty: LoadedUncertainty
+) -> None:
+    """R25.2: one ``paired_run.learned_state`` for both: a reset trim is
+    ``NEUTRAL_TRIM_PCT`` on both paths (Monte Carlo wrote a literal 0.0)."""
+    from src.analysis.paired_run import NEUTRAL_TRIM_PCT, check_run_inputs, learned_state
+
+    kit, image = kit_and_image
+    design = _design(image, (P_WOT, 190, 200))
+    template = _template(kit, image, bytes(image), candidate_events=("ecu_reflash",))
+    scenario = _paired_scenario(template, design)
+    resets = check_run_inputs(kit, scenario, image, bytes(image))
+    assert resets, "the reflash resets a learned trim"
+    learned = learned_state(scenario, resets)
+    for trim in resets:
+        assert learned["candidate"][f"{trim.split('_')[0]}_pct"] == NEUTRAL_TRIM_PCT
+    assert run_paired(kit, scenario, image, bytes(image)).learned_state == learned
+    mc = run_monte_carlo(kit, template, design, image, bytes(image), uncertainty, draws=2, seed=1)
+    assert mc.learned_state == learned
+
+
+def test_monte_carlo_imports_no_private_name_from_the_paired_modules() -> None:
+    """R25.2: every name ``sim_montecarlo`` takes from ``paired_scenarios`` or
+    ``paired_run`` is public, so each has one owner that publishes it."""
+    import ast
+
+    from src.paths import REPO_ROOT
+
+    tree = ast.parse((REPO_ROOT / "src" / "analysis" / "sim_montecarlo.py").read_text())
+    private = [
+        f"{node.module}.{alias.name}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module in {"src.analysis.paired_scenarios", "src.analysis.paired_run"}
+        for alias in node.names
+        if alias.name.startswith("_")
+    ]
+    assert private == []

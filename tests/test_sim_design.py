@@ -31,11 +31,8 @@ import pytest
 from src.analysis.fuel_comp_rom import FuelCompCalibration, FuelCompRomRefusalError
 from src.analysis.fuel_plant import load_b06, load_fuel_plant, predict, resolve_parameters
 from src.analysis.fuel_plant_eval import apply_manifold_refusals, build_samples, plant_inputs
-from src.analysis.paired_scenarios import (
-    LearnedState,
-    PairedScenario,
-    _refuse_recorded_sources,
-)
+from src.analysis.paired_run import refuse_recorded_sources
+from src.analysis.paired_scenarios import LearnedState, PairedScenario
 from src.analysis.sim_contract import EcuIdentity, PlantIdentity, SimulationRefusalError
 from src.analysis.sim_design import (
     SimDesign,
@@ -604,14 +601,14 @@ def test_design_sources_pass_the_recording_guard_and_a_session_source_is_still_r
     points = design.operating_points([p.fill_byte_lo for p in design.points])
     assert {p.source for p in points} == {f"design:{design.sha256()}"}
     assert points[0].conditioned == {"fuel_comp_load_byte": float(design.points[0].fill_byte_lo)}
-    _refuse_recorded_sources(_scenario(tuple(points)))  # the E07.6 guard, unchanged
+    refuse_recorded_sources(_scenario(tuple(points)))  # the E07.6 guard, unchanged
     grid = _grid()
-    _refuse_recorded_sources(
+    refuse_recorded_sources(
         _scenario(tuple(grid.operating_points([p.fill_byte_hi for p in grid.points])))
     )
     named = dataclasses.replace(points[0], source=f"design: from {FIXTURE.name}")
     with pytest.raises(SimulationRefusalError) as caught:
-        _refuse_recorded_sources(_scenario((named,)))
+        refuse_recorded_sources(_scenario((named,)))
     assert caught.value.reason == "recorded_value_refused"
 
 

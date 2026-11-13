@@ -102,6 +102,7 @@ from src.analysis.fuel_plant import (
     B06Rules,
     FuelPlantProfile,
     FuelPlantRefusalError,
+    PlantInputs,
     Qualification,
     ResolvedParameters,
     VeCurve,
@@ -113,6 +114,11 @@ from src.analysis.fuel_plant import (
     sensitivity_cases,
 )
 from src.analysis.injector_pulse import PULSE_COUNT_MS
+from src.analysis.paired_run import (
+    check_run_inputs,
+    learned_state,
+    plant_unresolved,
+)
 from src.analysis.paired_steady import (
     BFS_OUTPUT,
     COMPUTED_HERE,
@@ -132,18 +138,15 @@ from src.analysis.paired_steady import (
 )
 from src.analysis.plant_validation import InterventionVerdict
 from src.analysis.rom_effects import EffectReport, _ancestors, compare_roms
-from src.analysis.rom_image import sha256_hex
 from src.analysis.rom_map import DTYPE_BYTES, RomMap, load_rom_map
 from src.analysis.rom_trace import ViewerDefinition, load_viewer_definition
 from src.analysis.sim_contract import (
-    SCENARIO_ONLY_MODES,
     EcuIdentity,
     PlantIdentity,
     Scenario,
     SimContract,
     SimulationRefusalError,
     SuppliedValue,
-    check_scenario,
     load_contract,
 )
 from src.analysis.target_phi import TwinDefinition, load_twin_definition
@@ -155,7 +158,8 @@ from src.analysis.twin_runner import (
     StatedPulse,
     StatedSample,
     TwinRunnerRefusalError,
-    plant_predict,
+    plant_predict_inputs,
+    plant_stage_inputs,
     resolve_image,
     stage_order,
     stated_ecu,
@@ -191,14 +195,6 @@ _BFS_OUTPUT = BFS_OUTPUT
 _COMPUTED_TWIN_OUTPUTS: frozenset[str] = frozenset({_TWIN_OUTPUT, _BFS_OUTPUT})
 #: The stated fill byte BFS's Fuel Comp lookup reads.
 _LOAD_BYTE = FILL_BYTE
-#: The value a trim is reset to by an event that resets it: its neutral value.
-NEUTRAL_TRIM_PCT = 0.0
-#: Learned ECU states this slice carries, by contract quantity id.
-LEARNED_TRIMS: tuple[str, ...] = ("stft_b1", "ltft_b1")
-
-# A session-directory stamp inside a value's stated source: a number copied
-# out of a recording.
-_RECORDING = re.compile(r"\d{4}-\d{2}-\d{2}T\d{6}")
 
 
 @dataclass(frozen=True)
@@ -403,67 +399,6 @@ class PairedScenario:
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
-def _with_contract_mode(
-    contract: SimContract, scenario: PairedScenario, contract_sha256: str
-) -> None:
-    """The contract's refusals, per point, then the mode this slice runs.
-
-    A point prescribes rpm, airflow and the trims; in a coupled rollout those
-    are computed, so the contract refuses the point itself
-    (``boundary_not_supplied_here``): recorded or stated, they cannot be fed
-    back into a rollout's prediction of them."""
-    mode = contract.mode(scenario.mode)
-    for sc in scenario.contract_scenarios(contract, contract_sha256):
-        check_scenario(contract, contract_sha256, sc)
-    if mode.kind not in SCENARIO_ONLY_MODES:
-        raise SimulationRefusalError(
-            "not_a_paired_mode", f"{mode.id} replays a recording; a paired run states its inputs"
-        )
-    if mode.kind == "coupled_rollout":
-        raise SimulationRefusalError(
-            "dynamic_plant_unbuilt",
-            "a coupled rollout recomputes airflow, rpm, BFS and the trims from driver demand; "
-            "that needs E07.5's dynamic plant, so this slice runs the steady comparison only",
-        )
-
-
-def _refuse_recorded_sources(scenario: PairedScenario) -> None:
-    named = [p.source for p in scenario.points if _RECORDING.search(p.source)]
-    if _RECORDING.search(scenario.learned.source):
-        named.append(scenario.learned.source)
-    for value in (*scenario.extra_boundaries.values(), *scenario.initial_state.values()):
-        if _RECORDING.search(value.source):
-            named.append(value.source)
-    if named:
-        raise SimulationRefusalError(
-            "recorded_value_refused",
-            f"stated values whose source is a recording {sorted(set(named))}: a number copied "
-            "from a drive recorded under one calibration is that recording, not a scenario",
-        )
-
-
-def _resets(contract: SimContract, events: Sequence[str]) -> dict[str, str]:
-    """Learned trims each event resets, from the contract's declared inits."""
-    declared = {e.id for e in contract.events}
-    unknown = [e for e in events if e not in declared]
-    if unknown:
-        raise SimulationRefusalError("event_undeclared", f"the contract declares no {unknown}")
-    out: dict[str, str] = {}
-    for mode in contract.modes:
-        for q, assignment in mode.roles.items():
-            if assignment.init is None:
-                continue
-            for event in assignment.init.reset_on:
-                if event in events:
-                    if q not in LEARNED_TRIMS:
-                        raise SimulationRefusalError(
-                            "reset_unmodelled",
-                            f"{event} resets {q}, which this slice does not carry",
-                        )
-                    out[q] = event
-    return out
-
-
 # -- affected cells -----------------------------------------------------------------------
 
 
@@ -543,7 +478,7 @@ def plant_parameters(
 
 
 @dataclass(frozen=True)
-class _Side:
+class PairSide:
     """One ROM of the pair: its ECU as the twin runner resolves it, the paired
     reasons its refusals carry, and the LTFT it runs at."""
 
@@ -556,7 +491,9 @@ class _Side:
 _SIDE_CALIBRATIONS: tuple[str, ...] = ("target_table", "pulse_chain", "air_charge")
 
 
-def _side(kit: SimKit, image: bytes, identity: EcuIdentity, ltft_pct: float, label: str) -> _Side:
+def pair_side(
+    kit: SimKit, image: bytes, identity: EcuIdentity, ltft_pct: float, label: str
+) -> PairSide:
     """One ROM by the twin runner's own constructor
     (:func:`~src.analysis.twin_runner.resolve_image`); a refusal is named
     ``<label>_<calibration>:<reason>``, the paired result's name for it."""
@@ -565,7 +502,7 @@ def _side(kit: SimKit, image: bytes, identity: EcuIdentity, ltft_pct: float, lab
     reasons = tuple(
         f"{label}_{cal}:{ecu.refusals[cal]}" for cal in _SIDE_CALIBRATIONS if cal in ecu.refusals
     )
-    return _Side(ecu, reasons, ltft_pct)
+    return PairSide(ecu, reasons, ltft_pct)
 
 
 def _rpm_quantum(contract: SimContract) -> float:
@@ -618,8 +555,8 @@ def _paired_reason(stage: str, reason: str) -> str | None:
     return f"{_STAGE_REASON_PREFIX[stage]}:{reason}"
 
 
-def _ecu_chain(
-    kit: SimKit, stages: tuple[Stage, ...], side: _Side, point: OperatingPoint
+def ecu_chain(
+    kit: SimKit, stages: tuple[Stage, ...], side: PairSide, point: OperatingPoint
 ) -> dict[str, Any]:
     """One ROM at one point, ECU side: the twin runner's ECU stages on the
     point (:func:`~src.analysis.twin_runner.stated_ecu`), steady BFS, X and
@@ -649,8 +586,8 @@ def _ecu_chain(
     return out
 
 
-def _fuel_side(
-    side: _Side,
+def fuel_side(
+    side: PairSide,
     ecu: dict[str, Any],
     pulses: StatedPulse | None,
     c: int,
@@ -692,9 +629,27 @@ def _fuel_side(
     return out
 
 
+def _point_pulse(
+    kit: SimKit, side: PairSide, point: OperatingPoint, ecu: dict[str, Any], stft_pct: float
+) -> StatedPulse | None:
+    """One ROM's pulse stage at one point (the twin runner's
+    :func:`~src.analysis.twin_runner.stated_pulse`); None where the side has
+    no target phi word or no pulse chain. It reads no plant parameter."""
+    if ecu["target_phi_word"] is None or side.ecu.pulse is None:
+        return None
+    return stated_pulse(
+        side.ecu,
+        [stated_sample(kit, point, point.conditioned[_LOAD_BYTE])],
+        bfs=[ecu["base_fuel_schedule"]],
+        phi_q14=[ecu["target_phi_word"]],
+        stft_pct=stft_pct,
+        ltft_pct=side.ltft_pct,
+    )
+
+
 def _fuel_chain(
     kit: SimKit,
-    side: _Side,
+    side: PairSide,
     point: OperatingPoint,
     ecu: dict[str, Any],
     *,
@@ -704,24 +659,21 @@ def _fuel_chain(
 ) -> dict[str, Any]:
     """Pulse, total trim, lambda and fuel for one ROM at one point (a copy of
     ``ecu`` with them filled in): the twin runner's pulse stage on the point
-    (:func:`~src.analysis.twin_runner.stated_pulse`), :func:`_fuel_side`, and
-    its plant stage on the predicted pulse in the replay's sample columns
-    (:func:`~src.analysis.twin_runner.plant_predict`)."""
-    if ecu["target_phi_word"] is None or side.ecu.pulse is None:
-        out = dict(ecu)
-        out["reasons"] = list(ecu["reasons"])
+    (:func:`_point_pulse`), :func:`fuel_side`, and its plant stage on the
+    predicted pulse (:func:`_plant_side`)."""
+    pulses = _point_pulse(kit, side, point, ecu, stft_pct)
+    out = fuel_side(side, ecu, pulses, 0, stft_pct, hold)
+    if pulses is None:
         return out
-    sample = stated_sample(kit, point, point.conditioned[_LOAD_BYTE])
-    pulses = stated_pulse(
-        side.ecu,
-        [sample],
-        bfs=[ecu["base_fuel_schedule"]],
-        phi_q14=[ecu["target_phi_word"]],
-        stft_pct=stft_pct,
-        ltft_pct=side.ltft_pct,
-    )
-    out = _fuel_side(side, ecu, pulses, 0, stft_pct, hold)
-    plant = plant_predict(
+    return _plant_side(kit, out, _plant_inputs(point, out), plant_parameters(kit, overrides))
+
+
+def _plant_inputs(point: OperatingPoint, out: dict[str, Any]) -> PlantInputs:
+    """The plant stage's inputs for one ROM's predicted pulse (``out``, a
+    :func:`fuel_side` result) at one point, in the replay's sample columns
+    (:func:`~src.analysis.twin_runner.plant_stage_inputs`). They read no plant
+    parameter."""
+    return plant_stage_inputs(
         stated_plant_samples(
             pulse_ms=[out["injector_pulse_ms"]],
             ecu_dead_time_ms=[out["dead_ms"]],
@@ -731,10 +683,17 @@ def _fuel_chain(
             iat_c=[point.iat_c],
             rail_kpa=[plant_rail_kpa(point)],
         ),
-        plant_parameters(kit, overrides),
-        kit.plant,
         map_kpa=None if point.map_kpa_source == "plant_model" else np.array([point.map_kpa]),
     )
+
+
+def _plant_side(
+    kit: SimKit, out: dict[str, Any], inputs: PlantInputs, params: ResolvedParameters
+) -> dict[str, Any]:
+    """The plant stage on ``inputs`` (:func:`_plant_inputs` of ``out``) at
+    ``params`` (:func:`~src.analysis.twin_runner.plant_predict_inputs`),
+    written into ``out`` (a fresh :func:`fuel_side` result)."""
+    plant = plant_predict_inputs(inputs, params, kit.plant)
     out["delivered_lambda"] = float(plant.lambda_delivered[0])
     out["fuel_per_event_g"] = float(plant.fuel_g[0])
     if plant.manifold_refusal is not None and plant.manifold_refusal[0]:
@@ -756,12 +715,12 @@ class _PairPoint:
     loop: str | None
 
 
-#: One side's fuel chain for :func:`_pair_loop`: side 0 (base) or 1
+#: One side's fuel chain for :func:`pair_loop`: side 0 (base) or 1
 #: (candidate), its ECU values, and the base's ``(G, k)`` hold or None.
 FuelFn = Callable[[int, dict[str, Any], "tuple[int, int] | None"], dict[str, Any]]
 
 
-def _pair_loop(
+def pair_loop(
     kit: SimKit, b_ecu: dict[str, Any], c_ecu: dict[str, Any], fuel: FuelFn
 ) -> _PairPoint:
     """Both ROMs' fuel sides at one point. A closed-loop point holds the base's
@@ -781,24 +740,53 @@ def _pair_loop(
     return _PairPoint(b, fuel(1, c_ecu, hold), "closed_loop")
 
 
-def _pair_point(
-    kit: SimKit,
-    stages: tuple[Stage, ...],
-    sides: tuple[_Side, _Side],
-    point: OperatingPoint,
-    stfts: tuple[float, float],
-    overrides: Mapping[str, float],
-) -> _PairPoint:
-    """Both ROMs at one point: the ECU stages, then :func:`_pair_loop`."""
-    b_ecu = _ecu_chain(kit, stages, sides[0], point)
-    c_ecu = _ecu_chain(kit, stages, sides[1], point)
+class _PointChain:
+    """Both ROMs at one point, the ECU side computed once (R25.1).
 
-    def fuel(s: int, ecu: dict[str, Any], hold: tuple[int, int] | None) -> dict[str, Any]:
-        return _fuel_chain(
-            kit, sides[s], point, ecu, stft_pct=stfts[s], overrides=overrides, hold=hold
-        )
+    The ECU stages (:func:`ecu_chain`) and each side's pulse stage
+    (:func:`_point_pulse`) read no plant parameter, so a sensitivity case
+    reruns only the plant: :meth:`pair` is :func:`pair_loop` with a fuel
+    closure on the parameters it is given. A side's pulse stage runs the
+    first time :func:`pair_loop` asks for that side, as it always has."""
 
-    return _pair_loop(kit, b_ecu, c_ecu, fuel)
+    def __init__(
+        self,
+        kit: SimKit,
+        stages: tuple[Stage, ...],
+        sides: tuple[PairSide, PairSide],
+        point: OperatingPoint,
+        stfts: tuple[float, float],
+    ) -> None:
+        self.kit = kit
+        self.sides = sides
+        self.point = point
+        self.stfts = stfts
+        self.b_ecu = ecu_chain(kit, stages, sides[0], point)
+        self.c_ecu = ecu_chain(kit, stages, sides[1], point)
+        self._pulses: dict[int, StatedPulse | None] = {}
+        #: Plant inputs per (side, hold): a side's pulse is the same in every case.
+        self._inputs: dict[tuple[int, tuple[int, int] | None], PlantInputs] = {}
+
+    def _pulse(self, s: int, ecu: dict[str, Any]) -> StatedPulse | None:
+        if s not in self._pulses:
+            self._pulses[s] = _point_pulse(self.kit, self.sides[s], self.point, ecu, self.stfts[s])
+        return self._pulses[s]
+
+    def pair(self, params: Callable[[], ResolvedParameters]) -> _PairPoint:
+        """:func:`pair_loop` with the plant on ``params()`` (resolved only
+        when a side's plant runs)."""
+
+        def fuel(s: int, ecu: dict[str, Any], hold: tuple[int, int] | None) -> dict[str, Any]:
+            pulses = self._pulse(s, ecu)
+            out = fuel_side(self.sides[s], ecu, pulses, 0, self.stfts[s], hold)
+            if pulses is None:
+                return out
+            key = (s, hold)
+            if key not in self._inputs:
+                self._inputs[key] = _plant_inputs(self.point, out)
+            return _plant_side(self.kit, out, self._inputs[key], params())
+
+        return pair_loop(self.kit, self.b_ecu, self.c_ecu, fuel)
 
 
 Status = Literal["supported", "unsupported"]
@@ -870,7 +858,7 @@ def _plant_regime(phi: float | None, kit: SimKit) -> str | None:
 
 
 #: Outputs computed by the plant: gated on the regimes it qualified in.
-_PLANT_OUTPUTS: frozenset[str] = frozenset({"delivered_lambda", "fuel_per_event_g"})
+PLANT_OUTPUTS: frozenset[str] = frozenset({"delivered_lambda", "fuel_per_event_g"})
 
 
 def _regime(point: OperatingPoint, kit: SimKit) -> str | None:
@@ -1297,7 +1285,7 @@ def output_reasons(
                 reasons.append(SETPOINT_MOVED)
             elif pair.loop == "closed_loop" and closed_loop_trim_pending(kit.model):
                 reasons.append(TRIM_AUTHORITY_UNDECODED)
-            if name in _PLANT_OUTPUTS:
+            if name in PLANT_OUTPUTS:
                 reasons.extend(f"regime_not_qualified:{r}" for r in unqualified_regimes)
             eff = [s["effective_ms"] for s in (b, c) if s.get("effective_ms") is not None]
             if any(e < kit.plant.steady.min_effective_pulse_ms for e in eff):
@@ -1347,39 +1335,13 @@ def run_paired(
     overrides = dict(plant_overrides or {})
     if overrides:
         plant_parameters(kit, overrides)
-    _refuse_recorded_sources(scenario)
-    _with_contract_mode(kit.contract, scenario, kit.contract_sha256)
-    for label, image, identity in (
-        ("base", base_image, scenario.base),
-        ("candidate", candidate_image, scenario.candidate),
-    ):
-        if sha256_hex(image) != identity.image_sha256:
-            raise SimulationRefusalError(
-                "image_hash_mismatch", f"{label} bytes are not image {identity.image_sha256}"
-            )
-    if (scenario.plant.version, scenario.plant.hardware_configuration) != (
-        kit.plant.plant_version,
-        kit.plant.hardware_configuration,
-    ):
-        raise SimulationRefusalError(
-            "plant_mismatch",
-            f"the scenario names plant {scenario.plant.version}/"
-            f"{scenario.plant.hardware_configuration}; the kit's is {kit.plant.plant_version}/"
-            f"{kit.plant.hardware_configuration}",
-        )
-    resets = _resets(kit.contract, scenario.candidate_events)
+    resets = check_run_inputs(kit, scenario, base_image, candidate_image)
     report = compare_scenario_roms(kit, scenario, base_image, candidate_image)
     qualification = plant_qualification(kit.plant)
-    base_ltft = scenario.learned.ltft_pct
-    cand_ltft = NEUTRAL_TRIM_PCT if "ltft_b1" in resets else base_ltft
-    stft = NEUTRAL_TRIM_PCT if "stft_b1" in resets else scenario.learned.stft_pct
-    learned = {
-        "base": {"stft_pct": scenario.learned.stft_pct, "ltft_pct": base_ltft},
-        "candidate": {"stft_pct": stft, "ltft_pct": cand_ltft},
-        "resets": resets,
-        "relearning": "not modelled: the candidate's trims stay at their reset values",
-        "source": scenario.learned.source,
-    }
+    learned = learned_state(scenario, resets)
+    base_ltft = learned["base"]["ltft_pct"]
+    cand_ltft = learned["candidate"]["ltft_pct"]
+    stft = learned["candidate"]["stft_pct"]
     scenario_sha = scenario.scenario_hash(kit.contract, kit.contract_sha256)
     if overrides:
         # A run on drawn parameters is a different run: its own hash and session.
@@ -1443,8 +1405,8 @@ def run_paired(
     withheld = {name: bool(scope.keep(name, gate)) for name in OUTPUTS}
 
     stages = stage_order(kit.model)
-    base_side = _side(kit, base_image, scenario.base, base_ltft, "base")
-    cand_side = _side(kit, candidate_image, scenario.candidate, cand_ltft, "candidate")
+    base_side = pair_side(kit, base_image, scenario.base, base_ltft, "base")
+    cand_side = pair_side(kit, candidate_image, scenario.candidate, cand_ltft, "candidate")
     sides = (base_side, cand_side)
     stfts = (scenario.learned.stft_pct, stft)
     s_val = s_lo = s_hi = math.nan
@@ -1457,11 +1419,19 @@ def run_paired(
         for name, case in sensitivity_cases(kit.plant, kit.delay).items()
         if "lambda_observation_delay" not in case
     }
+
+    @functools.cache
+    def params(case: str | None) -> ResolvedParameters:
+        # One parameter vector per sensitivity case (None: the run's own),
+        # resolved the first time a plant runs on it.
+        return plant_parameters(kit, overrides if case is None else {**overrides, **cases[case]})
+
     points_out: list[dict[str, Any]] = []
     supported_counts = dict.fromkeys(OUTPUTS, 0)
     loops: set[str] = set()
     for index, point in enumerate(scenario.points):
-        pair = _pair_point(kit, stages, sides, point, stfts, overrides)
+        chain = _PointChain(kit, stages, sides, point, stfts)
+        pair = chain.pair(functools.partial(params, None))
         b, c = pair.base, pair.candidate
         if pair.loop is not None:
             loops.add(pair.loop)
@@ -1493,8 +1463,8 @@ def run_paired(
             # The lumped scale's interval moves lambda as 1/s on both sides.
             lam["parameter_band"] = (lam["base"] * s_val / s_hi, lam["base"] * s_val / s_lo)
             spread = []
-            for case in cases.values():
-                cp = _pair_point(kit, stages, sides, point, stfts, {**overrides, **case})
+            for case in cases:
+                cp = chain.pair(functools.partial(params, case))
                 cb, cc = cp.base["delivered_lambda"], cp.candidate["delivered_lambda"]
                 if cb is not None and cc is not None:
                     spread.append(cc / cb - 1.0)
@@ -1533,14 +1503,7 @@ def run_paired(
     for p in points_out:
         for o in p["outputs"].values():
             unresolved.update(o["reasons"])
-    resolved = resolve_parameters(kit.plant, kit.delay)
-    unresolved.update(f"plant:{e}" for e in resolved.effects)
-    if any(p.rail_kpa_source == "working_assumption" for p in scenario.points):
-        # No rail reading at the point: the plant ran its rail working value.
-        unresolved.add(f"plant:{resolved.rail_effect}")
-    if not qualification.qualified:
-        assert qualification.reason is not None
-        unresolved.add(qualification.reason)
+    unresolved.update(plant_unresolved(kit, scenario.points, qualification))
     traced = {
         o.output: {"status": o.status, "reasons": list(o.reasons)}
         for o in report.outputs
@@ -2379,9 +2342,12 @@ __all__ = [
     "OUTPUTS",
     "OVERRIDES_NOT_FROZEN",
     "PLANT_ASSUMPTION_PREFIX",
+    "PLANT_OUTPUTS",
+    "FuelFn",
     "GateReason",
     "LearnedState",
     "OperatingPoint",
+    "PairSide",
     "PairedResult",
     "PairedScenario",
     "PlantAssumption",
@@ -2390,13 +2356,17 @@ __all__ = [
     "affected_cells",
     "compare_scenario_roms",
     "computed_node",
+    "ecu_chain",
     "format_plant_assumption",
+    "fuel_side",
     "held_ve_fit",
     "load_kit",
     "plant_assumption_lines",
     "plant_assumptions",
     "optimise",
     "output_reasons",
+    "pair_loop",
+    "pair_side",
     "plant_parameters",
     "plant_rail_kpa",
     "rank_as_improvement",

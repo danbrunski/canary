@@ -111,6 +111,7 @@ from src.analysis.fuel_plant import (
     B06Rules,
     FuelPlantProfile,
     FuelPlantRefusalError,
+    PlantInputs,
     PlantOutput,
     ResolvedParameters,
     load_b06,
@@ -1170,9 +1171,24 @@ def plant_predict(
     replay run's eligible reads, or a stated caller's predicted pulses.
     ``map_kpa`` states the manifold pressure per sample; ``None`` runs the
     plant's own manifold model (a replay always does: MAP is not read)."""
+    return plant_predict_inputs(plant_stage_inputs(samples, map_kpa=map_kpa), params, plant)
+
+
+def plant_stage_inputs(samples: pd.DataFrame, *, map_kpa: np.ndarray | None = None) -> PlantInputs:
+    """The plant stage's inputs from a sample frame (:func:`plant_predict`'s
+    first half): they read no plant parameter, so a caller running one sample
+    frame on several parameter vectors builds them once (R25.1)."""
     inputs = plant_inputs(samples)
     if map_kpa is not None:
         inputs = replace(inputs, map_kpa=np.asarray(map_kpa, dtype=float))
+    return inputs
+
+
+def plant_predict_inputs(
+    inputs: PlantInputs, params: ResolvedParameters, plant: FuelPlantProfile
+) -> PlantOutput:
+    """The plant stage's kernel on inputs from :func:`plant_stage_inputs`
+    (:func:`plant_predict`'s second half)."""
     return predict(inputs, params, plant.geometry)
 
 
@@ -1688,6 +1704,8 @@ __all__ = [
     "load_twin_kit",
     "node_order",
     "plant_predict",
+    "plant_predict_inputs",
+    "plant_stage_inputs",
     "plant_state_kinds",
     "resolve_ecu",
     "resolve_image",

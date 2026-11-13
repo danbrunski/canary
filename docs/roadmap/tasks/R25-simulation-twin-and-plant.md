@@ -26,7 +26,7 @@ load-YAML-and-hash, canonical hashing, `_aware`) are in
 Any item that moves a model or a serializer needs a fixture proving the hash
 did not change.
 
-- [ ] **R25.1 `run_paired` runs the whole ECU chain eleven times per point.**
+- [x] **R25.1 `run_paired` runs the whole ECU chain eleven times per point.**
   `paired_scenarios.run_paired`: inside the loop over points, each point with
   a λ delta runs
   `for case in cases.values(): cp = _pair_point(kit, stages, sides, point, stfts, {**overrides, **case})`.
@@ -35,15 +35,42 @@ did not change.
   ECU chain does not depend on plant overrides, so ten of the eleven ECU
   evaluations per side repeat the first. `sim_montecarlo._build_cache` already
   has the right shape (ECU once per combination, plant vectorized per draw).
-  - [ ] Profile `run_paired` on a 100-point grid design first; record the
-    split between ECU chain and plant.
-  - [ ] Compute the two ECU sides once per point and vary only the fuel
-    closure per case (`_pair_loop` already takes one).
+  - [x] Profile `run_paired` on a 100-point grid design first; record the
+    split between ECU chain and plant. *(2026-11-13, HEAD a154a241, cProfile,
+    10x10 `design grid` 91169e3b… on ZS44A-20260920 → 20261004, 99 of 100
+    points carry a λ delta, 1,090 `_pair_point` calls = 1 + 10 cases per
+    point.)* Of 4.13 s profiled: ECU chain (`_ecu_chain`, 2,180 calls) 0.41 s
+    (10 %); pulse stage (`stated_pulse`, 2,178) 0.45 s (11 %);
+    `plant_parameters` (2,178) 0.24 s (6 %); the plant the remaining ~72 %,
+    and most of that is not the kernel: per call, building the one-row sample
+    frame (`stated_plant_samples`) and turning it into inputs (`plant_inputs`)
+    took ~1.7–1.9 ms against ~0.17–0.29 ms for `fuel_plant.predict`, and
+    neither reads a plant parameter.
+  - [x] Compute the two ECU sides once per point and vary only the fuel
+    closure per case (`_pair_loop` already takes one). `paired_scenarios.
+    _PointChain`: both `ecu_chain`s once per point, each side's pulse stage
+    and plant inputs once (lazily, as before), one `plant_parameters` per case
+    per run (`functools.cache`, resolved on first use); a case reruns only
+    `twin_runner.plant_predict_inputs`. `twin_runner.plant_predict` is split
+    into `plant_stage_inputs` + `plant_predict_inputs` (same arithmetic, still
+    the runner's stage). Pinned by
+    `test_run_paired_runs_each_ecu_side_once_per_point_and_reruns_only_the_plant`
+    (call counts 2n ECU / 2n pulse / 2n(1+cases) plant, and the range equals
+    the per-case full `_fuel_chain` recomputation exactly). Measured, HEAD vs
+    tree, best of 3, shared laptop: 100-point grid 2.10–2.40 s → 0.64 s
+    (~21 → 6.4 ms/point); 200 points of the WOT drive design f4332b8d… 4.15 s
+    → 0.89 s (20.7 → 4.4 ms/point). `run_monte_carlo` (20 draws) only gains
+    in its `run_paired` self-check: grid 0.50 → 0.41 s, 917-point drive design
+    2.55 → 2.58 s (noise; `_build_cache`'s per-combination ECU dominates).
   - Must not change: `relative_delta_range_over_assumptions`, bit for bit.
     Monte Carlo's `_verify_assembled` self-check compares against `run_paired`
-    and will say so.
+    and will say so. *Held:* `run_paired(...).to_dict()` (plain, and on draw 1's
+    overrides) byte-identical HEAD vs tree on the grid design and on 200 drive
+    points; `tools.rom_sim run` (20 draws, seed 1) `result.json`,
+    `traces.parquet` and `report.html` byte-identical HEAD vs tree on both
+    designs, and across two HEAD runs of one seed.
 
-- [ ] **R25.2 `run_monte_carlo` copies `run_paired`'s prologue, and the copies
+- [x] **R25.2 `run_monte_carlo` copies `run_paired`'s prologue, and the copies
   have drifted.** Both carry the `image_hash_mismatch` loop, the
   plant-identity check (Monte Carlo's message omits `hardware_configuration`),
   the `learned = {…}` derivation (Monte Carlo writes a literal `0.0` where
@@ -52,8 +79,31 @@ did not change.
   (`_LOAD_BYTE`, `_PLANT_OUTPUTS`, `_ecu_chain`, `_fuel_side`, `_pair_loop`,
   `_refuse_recorded_sources`, `_resets`, `_Side`, `_side`,
   `_with_contract_mode`).
-  - [ ] A `paired_run.py` with public `check_run_inputs`, `learned_state` and
+  - [x] A `paired_run.py` with public `check_run_inputs`, `learned_state` and
     `plant_unresolved`, used by both; publish the ten names from one owner.
+    `src/analysis/paired_run.py` owns the prologue (`check_run_inputs`:
+    recorded sources, contract and mode, image hashes, plant identity with
+    hardware configuration, then the resets; `learned_state`;
+    `plant_unresolved`), plus `refuse_recorded_sources`,
+    `check_contract_mode`, `candidate_resets`, `NEUTRAL_TRIM_PCT` and
+    `LEARNED_TRIMS`. `paired_scenarios` publishes `PLANT_OUTPUTS`, `PairSide`,
+    `pair_side`, `ecu_chain`, `fuel_side`, `pair_loop` (and `FuelFn` in
+    `__all__`); `_LOAD_BYTE` is replaced by `paired_steady.FILL_BYTE`, its
+    owner. Tests: `test_both_paired_entry_points_refuse_a_plant_mismatch_in_the_same_words`,
+    `test_the_monte_carlo_learned_state_is_run_paireds`,
+    `test_monte_carlo_imports_no_private_name_from_the_paired_modules`
+    (AST, no `_` name from either module).
+    Behaviour change, deliberate: Monte Carlo now runs the whole
+    `check_run_inputs` before `sample_draws`. With several faults at once,
+    the argument refusals (`draws_invalid`, `parameter_unknown`) therefore
+    come after the contract, image, plant and event refusals rather than
+    before (for example, image + recorded source was `image_hash_mismatch`
+    and is now `recorded_value_refused`). Every single-fault input gives the
+    same reason and text as before, and nothing pinned the old order.
+    Verified 2026-11-13: `run_paired` dumps and `rom_sim run` outputs
+    (result.json, traces.parquet, report.html) were byte-identical to HEAD on
+    a new 68-point grid, the 917-point drive design, seeds 2/7/13 and nonzero
+    trims. `run_paired` was 5.4–6.9x faster, and Monte Carlo was no slower.
 
 - [ ] **R25.3 Two drivers of the simulate pipeline.** `rom_editor._simulate`
   and `tools/rom_sim.py` `cmd_run` (153 lines) both run design →

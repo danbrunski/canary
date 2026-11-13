@@ -4,7 +4,7 @@ A :class:`SimDesign` is a frozen, hashed table of steady operating points,
 each with a weight. Paired runs (:mod:`src.analysis.paired_scenarios`) take
 their :class:`~src.analysis.paired_scenarios.OperatingPoint` s from it, and
 every one carries ``source: design:<sha256>`` -- a design, not a recording, so
-E07.6's ``_refuse_recorded_sources`` passes it unchanged and still refuses a
+E07.6's ``paired_run.refuse_recorded_sources`` passes it unchanged and still refuses a
 source that names a session.
 
 Two kinds:
