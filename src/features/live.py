@@ -71,18 +71,15 @@ from src.decode.dids import (
 )
 from src.decode.engineering import physical_value
 from src.decode.frame_decoder import FrameDecoder
+from src.features.bus_freshness import BusFreshness
 from src.features.feature_transform import FeaturizedFrame, featurize_wide_frame
+from src.features.trip_integrals import TripIntegrals, TripSample
 from src.preprocessing.features import FeatureConfig
 from src.preprocessing.imu_live import IMU_FRAME_INPUTS, LiveImuFrame
 from src.preprocessing.quality_gate import is_physically_valid
 from src.preprocessing.resampler import ResampleConfig, resample_config_for
 from src.signals.afr import FlashHistory, RecordedClockFlashHistory
-from src.signals.derived import (
-    IDLE_RPM_FLOOR,
-    IDLE_SPEED_CEIL_KPH,
-    MAX_INTEGRATION_DT_S,
-    fuel_properties,
-)
+from src.signals.derived import fuel_properties
 from src.storage.broadcast_storage import CanChangeFilter, is_broadcast_channel
 from src.telemetry import (
     DBC_SOURCE,
@@ -264,9 +261,9 @@ class LiveFeatureSource:
     _can_filter: CanChangeFilter = field(init=False)
     #: Newest raw CAN frame that decodes to a binding or DBC signal, kept by
     #: the filter or not: ``can_freshness_seconds`` reads it, because freshness
-    #: is about the bus, not about what storage keeps.
-    _last_broadcast_frame_at: datetime | None = field(init=False, default=None)
-    _decodable_can_ids: frozenset[int] = field(init=False, default=frozenset())
+    #: is about the bus, not about what storage keeps (R27.6: its own object,
+    #: a fresh one on :meth:`reset`).
+    _bus_freshness: BusFreshness = field(init=False, default_factory=BusFreshness)
     #: Replay/session reset generation. A feature process can finish after a
     #: reset because the loop remains responsive while it works; tagging the
     #: snapshot makes that stale result impossible to apply to the new run.
@@ -303,31 +300,13 @@ class LiveFeatureSource:
     #: information that tick), same as ``latest_operating_point``.
     last_segmenter_fallback: bool = field(init=False, default=False)
 
-    #: Session-scoped trip-integral accumulators (Task 1.3). A live tick's
-    #: ring-buffer window (``_buffer``) evicts old rows continuously, so a
-    #: ``cumsum`` over that window (what ``compute_derived_channels`` does
-    #: for a *complete* offline session) would reset every time the buffer
-    #: slides, not just at a session boundary. These instead accumulate
-    #: incrementally across ticks, using each tick's real wall-clock ``dt``
-    #: (mirroring ``compute_derived_channels``'s own ``_MAX_DT_S``-capped
-    #: per-row dt) — reset only by :meth:`reset` (the same replay-isolation
-    #: boundary Phase 7.1 already uses), so they read "since this session
-    #: started" the way the batch cumsum reads "since the recording started".
-    _trip_distance_km: float = field(init=False, default=0.0)
-    _fuel_used_l: float = field(init=False, default=0.0)
-    _co2_kg: float = field(init=False, default=0.0)
-    _idle_time_s: float = field(init=False, default=0.0)
-    #: Per-quantity last-accrual markers: wall-clock time and value of the
-    #: last tick on which each integrand was actually observed. A tick where
-    #: the input is stale/absent must NOT advance the marker — the elapsed
-    #: time is bridged (``MAX_INTEGRATION_DT_S``-capped) at the next fresh
-    #: sample instead of being dropped, mirroring the batch integral's
-    #: valid-sample dt (``_cumulative_time_integral``). A single shared
-    #: last-tick timestamp discarded every stale tick's dt and halved the
-    #: live trip odometer on a contended bus.
-    _speed_marker: tuple[datetime, float] | None = field(init=False, default=None)
-    _fuel_marker: tuple[datetime, float] | None = field(init=False, default=None)
-    _idle_marker: tuple[datetime, float] | None = field(init=False, default=None)
+    #: Session-scoped trip integrals (Task 1.3): accumulated tick by tick, not
+    #: ``cumsum``-ed over the ring buffer (whose window slides), and replaced
+    #: by a fresh instance on :meth:`reset` — the replay-isolation boundary —
+    #: so they read "since this session started" the way the batch cumsum
+    #: reads "since the recording started". See
+    #: :class:`~src.features.trip_integrals.TripIntegrals` (R27.6).
+    _trip: TripIntegrals = field(init=False, default_factory=TripIntegrals)
     #: Last tick's session-scoped trip integrals (Task 1.3), keyed the same
     #: as ``compute_derived_channels``'s cumulative columns
     #: (``derived:TRIP_DISTANCE_KM`` etc.) so a downstream consumer can merge
@@ -380,8 +359,11 @@ class LiveFeatureSource:
                 self._dbc_message_by_id[msg.frame_id] = msg
         # DID map indexed by 4-char hex so a raw "DID_1208" reading resolves
         # to its DidEntry in O(1).
-        self._decodable_can_ids = frozenset(self._dbc_message_by_id) | frozenset(
-            signal.can_id for signal in (self.bindings.signals if self.bindings else ())
+        self._bus_freshness = BusFreshness(
+            decodable_can_ids=frozenset(self._dbc_message_by_id)
+            | frozenset(
+                signal.can_id for signal in (self.bindings.signals if self.bindings else ())
+            )
         )
         self._did_by_hex = {}
         if self.did_map is not None:
@@ -450,11 +432,7 @@ class LiveFeatureSource:
         if record.source == "can":
             # Freshness reads the raw stream: every frame that decodes, kept
             # or not, is the bus being alive (P02.10).
-            if self._decodes_frame(record):
-                ts = record.timestamp
-                self._last_broadcast_frame_at = (
-                    ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
-                )
+            self._bus_freshness.observe(record)
             # The features read the stream storage keeps (P02.10): a frame
             # repeating its id's payload inside the re-write interval is
             # dropped here exactly as the storage writer drops it, so live,
@@ -500,13 +478,6 @@ class LiveFeatureSource:
         if self._frame_decoder is None:
             return ()
         return self._frame_decoder.decode(record)
-
-    def _decodes_frame(self, record: TelemetryRecord) -> bool:
-        """Whether a raw CAN frame's id has a binding or a DBC message."""
-        if not self._decodable_can_ids:
-            return False
-        can_id = parse_can_channel(record.channel)
-        return can_id is not None and can_id in self._decodable_can_ids
 
     def _apply_can_decode(self, record: TelemetryRecord) -> None:
         for decoded in self.decode_for_telemetry(record):
@@ -686,8 +657,7 @@ class LiveFeatureSource:
         self.latest_operating_point = built.operating_point
         # Session-scoped trip integrals (Task 1.3) — accumulated here, not
         # via a cumsum over ``framed``/``featured`` (those are windows of the
-        # ring buffer, not the whole session; see the docstring on
-        # ``_trip_distance_km`` above).
+        # ring buffer, not the whole session; see ``_trip`` above).
         self.latest_derived_channels = self._accumulate_derived_integrals(
             prepared.now, self.latest_operating_point
         )
@@ -742,67 +712,17 @@ class LiveFeatureSource:
     def _accumulate_derived_integrals(
         self, now: datetime, point: dict[str, Any]
     ) -> dict[str, float]:
-        """Update the session-scoped trip integrals from one tick's operating row.
+        """Advance the session-scoped trip integrals by one tick's operating row.
 
-        Mirrors ``compute_derived_channels``'s cumulative math (same
-        ``MAX_INTEGRATION_DT_S`` cap, same idle gate, same trapezoid between
-        consecutive *observed* samples) but accumulates incrementally across
-        ticks instead of ``cumsum``-ing a frame, so ring-buffer eviction never
-        resets a running total mid-session. Each integrand keeps its own
-        last-observed marker: a tick where that input is stale/absent leaves
-        the marker alone, so the elapsed time is bridged (capped) at the next
-        fresh sample instead of being silently dropped — matching the batch
-        integral's valid-sample dt.
+        :meth:`TripIntegrals.accrue` does the math; the bindings that scale a
+        ``decoded:`` fallback and the fuel constants are read here, per tick,
+        so a hot-reloaded config applies on the next tick.
         """
-        now_utc = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
-
-        def _accrue(
-            marker: tuple[datetime, float] | None, value: float
-        ) -> tuple[float, tuple[datetime, float]]:
-            """Trapezoid increment from the marker to ``(now, value)``."""
-            if marker is None:
-                return 0.0, (now_utc, value)
-            seen_at, seen_value = marker
-            dt = min(max((now_utc - seen_at).total_seconds(), 0.0), MAX_INTEGRATION_DT_S)
-            return (value + seen_value) / 2.0 * dt, (now_utc, value)
-
-        # Same candidates as ``compute_derived_channels`` (``derived._series``).
-        # ``_first_finite`` scales a ``decoded:`` fallback to engineering units
-        # — the broadcast rpm is 8 counts/rpm, and before 2026-09-18 its raw
-        # count went straight into the 200 rpm idle gate.
-        speed = _first_finite(point, channel_key(OBD_SOURCE, "SPEED"), bindings=self.bindings)
-        rpm = _first_finite(
-            point,
-            channel_key(OBD_SOURCE, "RPM"),
-            channel_key(DECODED_SOURCE, "ECM_RPM"),
-            bindings=self.bindings,
+        return self._trip.accrue(
+            now,
+            TripSample.from_point(point, self.bindings),
+            fuel_properties(self.config.vehicle.parameters),
         )
-        fuel_lph = _first_finite(point, "derived:FUEL_RATE_LPH", bindings=self.bindings)
-
-        if fuel_lph is not None:
-            increment, self._fuel_marker = _accrue(self._fuel_marker, fuel_lph / 3600.0)
-            self._fuel_used_l += increment
-            fuel = fuel_properties(self.config.vehicle.parameters)
-            self._co2_kg = self._fuel_used_l * fuel.co2_kg_per_l
-        if speed is not None:
-            increment, self._speed_marker = _accrue(self._speed_marker, speed / 3600.0)
-            self._trip_distance_km += increment
-        if rpm is not None and speed is not None:
-            idling = 1.0 if (rpm > IDLE_RPM_FLOOR and speed < IDLE_SPEED_CEIL_KPH) else 0.0
-            increment, self._idle_marker = _accrue(self._idle_marker, idling)
-            self._idle_time_s += increment
-
-        avg_economy = float("nan")
-        if self._trip_distance_km > 0:
-            avg_economy = self._fuel_used_l / self._trip_distance_km * 100.0
-
-        return {
-            "derived:TRIP_DISTANCE_KM": self._trip_distance_km,
-            "derived:FUEL_USED_L": self._fuel_used_l,
-            "derived:CO2_KG": self._co2_kg,
-            "derived:IDLE_TIME_S": self._idle_time_s,
-            "derived:AVG_ECONOMY_L_PER_100KM": avg_economy,
-        }
 
     def _gap_flags(self, now: datetime) -> dict[str, bool]:
         """Per-channel ``<channel>__gap`` flags for the current tick.
@@ -884,10 +804,7 @@ class LiveFeatureSource:
         restart report "silent for 3 h" instead of "never heard". A frame
         seen since start always wins.
         """
-        if self._last_broadcast_frame_at is None:
-            self._last_broadcast_frame_at = (
-                heard_at if heard_at.tzinfo is not None else heard_at.replace(tzinfo=UTC)
-            )
+        self._bus_freshness.seed(heard_at)
 
     def vehicle_state_inputs(self, now: datetime) -> dict[str, float | None]:
         """Cheap in-memory inputs for ``classify_vehicle_state`` (1.5).
@@ -914,11 +831,7 @@ class LiveFeatureSource:
         # The raw frame stamp, not the decoded channels' observation ages:
         # those follow the change-only stream (P02.10), where an unchanged id
         # is observed once per re-write interval.
-        frame_age = (
-            (now_utc - self._last_broadcast_frame_at).total_seconds()
-            if self._last_broadcast_frame_at is not None
-            else None
-        )
+        frame_age = self._bus_freshness.frame_age_seconds(now_utc)
         supply_key = channel_key(SENSOR_SOURCE, SUPPLY_VOLTAGE_CHANNEL)
         supply_at = self._last_observed_at.get(supply_key)
         can_ages = (
@@ -974,7 +887,7 @@ class LiveFeatureSource:
         """
         self._generation += 1
         self._can_filter.reset()
-        self._last_broadcast_frame_at = None
+        self._bus_freshness = BusFreshness(self._bus_freshness.decodable_can_ids)
         self._current_values = {}
         self._last_observed_at = {}
         self._last_tick_at = None
@@ -991,13 +904,7 @@ class LiveFeatureSource:
         # Trip integrals are session-scoped (Task 1.3) — zero them on the
         # same boundary as everything else so a new session (or a replay
         # run) never inherits the previous session's running totals.
-        self._trip_distance_km = 0.0
-        self._fuel_used_l = 0.0
-        self._co2_kg = 0.0
-        self._idle_time_s = 0.0
-        self._speed_marker = None
-        self._fuel_marker = None
-        self._idle_marker = None
+        self._trip = TripIntegrals()
         self.latest_derived_channels = None
 
     # ------------------------------------------------------------------
@@ -1019,31 +926,15 @@ class LiveFeatureSource:
         :meth:`reset`. A copy — callers can't mutate the running tally."""
         return dict(self._reject_counts)
 
+    @property
+    def _last_broadcast_frame_at(self) -> datetime | None:
+        """Compatibility shim (R27.6): the newest decodable frame's stamp, now
+        held by :class:`~src.features.bus_freshness.BusFreshness`."""
+        return self._bus_freshness.last_frame_at
 
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-
-
-def _first_finite(
-    point: dict[str, Any], *keys: str, bindings: Bindings | None = None
-) -> float | None:
-    """First present, non-NaN value among ``keys`` in a tick's operating row,
-    in engineering units.
-
-    Mirrors ``derived._series``'s "prefer OBD, fall back to decoded" lookup,
-    but over a single-row dict (``LiveFeatureSource.latest_operating_point``)
-    rather than a DataFrame column. A ``decoded:`` key holds raw binding
-    counts, so it is scaled through :func:`src.decode.engineering.
-    physical_value` (``bindings`` or the repo catalog) — never returned as-is.
-    """
-    for key in keys:
-        if key not in point:
-            continue
-        value = finite_float(point[key])
-        if value is not None:
-            return physical_value(value, key, bindings)
-    return None
+    @_last_broadcast_frame_at.setter
+    def _last_broadcast_frame_at(self, at: datetime | None) -> None:
+        self._bus_freshness.last_frame_at = at
 
 
 __all__ = [

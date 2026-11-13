@@ -140,21 +140,72 @@ not measured.
   - [ ] One test: training-dataset values equal serve-scaled values for the
     same rows.
 
-- [ ] **R27.6 `LiveFeatureSource` is five state groups with a hand-written
+- [x] **R27.6 `LiveFeatureSource` is five state groups with a hand-written
   19-assignment `reset()`.** 847 lines, 43 fields, 27 methods: ingest and
   decode; the tick and ring buffer; session trip integrals (eight fields and
   the 64-line `_accumulate_derived_integrals`); cold-start trackers; bus
   freshness. `reset()` re-assigns each attribute by name, so an accumulator
   added later and forgotten there leaks across a replay boundary, and no test
   enumerates the fields.
-  - [ ] First a test that diffs `vars(fresh)` against `vars(after_reset)` for
+  - [x] First a test that diffs `vars(fresh)` against `vars(after_reset)` for
     the non-config fields. It fails the day a field is forgotten.
-  - [ ] Extract `TripIntegrals` (pure, `accrue(now, point)`, a fresh instance
+    *Done 2026-11-12:* `tests/test_live_feature_source_reset.py`. It drives a
+    source through every state group (OBD/CAN/DID/GPS/IMU ingest, a quality-gate
+    reject, replayed-record metadata, 12 ticks, trip integrals, a cold-start
+    tracker, the bus-freshness seed), asserts every compared field moved off
+    its fresh value (so a new field fails until the test drives it), resets,
+    and compares every dataclass field and instance attribute recursively by
+    value against a fresh source. `NOT_RESET` names each exclusion and why
+    (constructor inputs, objects built from them, `_generation`, which reset
+    must advance and is asserted to). Written before the extraction and run
+    against the old `reset()`, it found one field reset leaves as driven:
+    `_start_context_recording` (B07.7). Resetting it is not output-identical,
+    so it stays as it was and is a named exclusion pending a decision. Dropping
+    one assignment from `reset()` fails it, naming the leaf:
+    `self._trip = TripIntegrals()` gives `_trip.trip_distance_km`, `_trip.
+    fuel_used_l` and five more; `self._reject_counts = {}` gives
+    `_reject_counts['obd:RPM']`; the `BusFreshness` line gives
+    `_bus_freshness.last_frame_at`.
+  - [x] Extract `TripIntegrals` (pure, `accrue(now, point)`, a fresh instance
     on reset; its batch twin is pinned by
     `test_live_trip_integrals_match_batch_compute_derived_channels`), then
     `BusFreshness`. M01.2 changes what `TripIntegrals` integrates; do the
     extraction first.
+    *Done 2026-11-12:* `src/features/trip_integrals.py`: `TripSample.from_point
+    (point, bindings)` is the one read of the operating row (the place M01.2's
+    speed correction and M01.4's fuel-cut flag go), and `TripIntegrals.accrue
+    (now, sample, fuel)` takes the fuel constants per call (the config
+    hot-reloads; M01.3 changes them). `src/features/bus_freshness.py`:
+    `BusFreshness` (`observe`, `seed`, `frame_age_seconds`). `reset()` replaces
+    both with fresh instances. Neither needs a `LAYERS` entry (inside
+    `src/features`). Serve-path replay: the first 600 s of
+    `~/canary-data/sessions/nissan-xterra-2008/2026-10-26T003705` (a drive
+    with OBD speed, MAF and CAN), observed on recorded stamps, ticked at 1 Hz
+    session time, with a `seed_bus_last_heard` and a `reset()` halfway,
+    through a `LiveFeatureSource` with the repo bindings, behavior models and
+    DID map, before and after: 601 ticks, 600 feature rows, 399,974 feature
+    cells, every tick's `latest_derived_channels`, operating point,
+    `vehicle_state_inputs`, reject counts and segmenter fallback identical
+    (`assert_frame_equal(check_exact=True)`, floats by `float.hex`): 0 diffs.
+    Tests: the 34 test files importing `features.live`/`LiveFeatureSource`
+    (the new file among them), `pytest -n 4`: 789 passed (the batch twin among
+    them). The verifier's re-run with `test_layering` and `test_source_rules`:
+    824 passed; 48,000 randomized ticks through HEAD's and the new accumulator
+    side by side were identical by `float.hex`, and its own replay of the same
+    window (HEAD import confirmed) gave 0 diffs.
+    Open, its own commit: `reset()` does not clear `_start_context_recording`
+    (found by the new test, excluded there with the reason). Clearing it makes
+    a reset source match a fresh one, which keeps start evidence gathered with
+    no recording that today is dropped; a deliberate behavior change.
+    `pytest -m ml_training tests/test_lstm_inference.py`: 20 passed;
+    `tests/test_train_lstm.py tests/test_tcn_training.py`: 26 passed.
   - Must not change: the public surface (35 test files import the class).
+    Kept: every public name. Compatibility shims for outside readers of
+    private names: `_last_broadcast_frame_at` (a property and setter over
+    `BusFreshness.last_frame_at`; `tests/test_parked_state.py` writes it) and
+    `_accumulate_derived_integrals(now, point)` (`tests/
+    test_decoded_mode_signals.py` calls it; also the method `apply_built_tick`
+    uses). The eight trip fields had no outside reader and are gone.
 
 - [ ] **R27.7 `models/evaluation.py` (1,589 lines) is four unrelated
   clusters.** R15 created twelve `evaluation_*.py` modules and left this file
