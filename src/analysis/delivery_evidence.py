@@ -49,6 +49,8 @@ import numpy as np
 import pandas as pd
 
 import src.analysis.channels as channels_module
+import src.analysis.channels_align as channels_align_module
+import src.analysis.channels_plan as channels_plan_module
 import src.analysis.fault_model as fault_model_module
 import src.analysis.lambda_delivery as lambda_delivery_module
 import src.analysis.tuning as tuning_module
@@ -379,7 +381,12 @@ def mint_delivery_error(
             producer_kind="tool",
             version=DELIVERY_TOOL_VERSION,
             code_version=code_version(
-                sys.modules[__name__], tuning_module, lambda_delivery_module, channels_module
+                sys.modules[__name__],
+                tuning_module,
+                lambda_delivery_module,
+                channels_module,
+                channels_plan_module,
+                channels_align_module,
             ),
         ),
         conditions=Conditions(
@@ -670,7 +677,12 @@ def mint_fuel_pressure_droop(
             producer_kind="tool",
             version=DROOP_TOOL_VERSION,
             code_version=code_version(
-                sys.modules[__name__], channels_module, fault_model_module, tuning_module
+                sys.modules[__name__],
+                channels_module,
+                channels_plan_module,
+                channels_align_module,
+                fault_model_module,
+                tuning_module,
             ),
         ),
         conditions=Conditions(regime=regime, vehicle_state="engine_running", operating_mode=region),

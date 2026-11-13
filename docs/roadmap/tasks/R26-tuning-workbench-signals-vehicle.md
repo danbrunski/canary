@@ -309,23 +309,83 @@ The cross-cutting copies found here (`_aware`, `_iso`,
   - [ ] Move the extraction helpers to `signals/fsm_extract.py` or into the
     tool, so "no pdfplumber at serve time" is structural rather than tested.
 
-- [ ] **R26.7 `analysis/digest.py` (1,056 lines) is a memory-admission gate
+- [x] **R26.7 `analysis/digest.py` (1,056 lines) is a memory-admission gate
   plus digest compute.** About 450 lines (`DigestSkipped`, `DigestBudgets`,
   the three `*_budget` functions, `digest_preflight`,
   `write_digest_skipped`, `_ranked_start`, …) decide whether a digest may run;
   the rest computes and persists one. They meet at one call.
-  - [ ] `analysis/digest_admission.py`, re-exported from `digest.py` until
+  - [x] `analysis/digest_admission.py`, re-exported from `digest.py` until
     callers move. D03.63 touched this region recently; go after it.
+    `digest_admission.py` (600 lines) holds the budgets, `DigestBudgets`,
+    `digest_preflight`, `DigestSkipped`, `write_digest_skipped`,
+    `clear_digest_skipped` and the top-level lock and rank rules
+    (`_TOP_LEVEL_LOCK`, `_ranked_start`, `_top_level_may_take`, ...), 35
+    top-level definitions moved verbatim. `digest.py` is 552 lines and imports
+    them; `SCHEMA_VERSION` moved with `DigestSkipped`, which defaults to it.
+    `ast.dump` of all 55 top-level definitions of HEAD's `digest.py` against
+    the two modules: 55 identical, 0 missing, 0 extra (only `log` is written
+    twice: the admission module's is `getLogger("src.analysis.digest")`, so the
+    refusal warning keeps the logger name the Pi's logs address). One
+    `_TOP_LEVEL_LOCK` object, shared by `write_digest` and
+    `write_digest_skipped`. Repointed `src/control/trip_end.py`'s import of the
+    private `_MIB` to `digest_admission`; every public name and
+    test-imported name still imports from `digest` (`__all__` gained
+    `REASON_INTERRUPTED_AT_SHUTDOWN` and `TOP_LEVEL_RANK_KEY` so mypy sees the
+    re-export). No test patched a moved global of `digest`.
+    `tests/test_analysis_module_splits.py` pins the re-exports to the owner's
+    objects, the logger name and the single lock. Tests importing either
+    module (37 files, plus `test_layering`, `test_source_rules`,
+    `test_cold_start_imports`, and the evidence/droop files below): HEAD
+    1,103 passed 3 skipped, HEAD plus this change 1,103 passed 3 skipped.
 
-- [ ] **R26.8 `analysis/channels.py` (1,414 lines): reading and alignment
+- [~] **R26.8 `analysis/channels.py` (1,414 lines): reading and alignment
   separate cleanly.** Read plan and narrowing (`raw_read_filters`,
   `SharedSessionRead`); series builders and `read_channels`; alignment
   (`read_aligned`, `align_long`, `as_of_*`), which is pure frame code and is
   most of what `workbench` and `tuning` import. `align_long` also filters
   `long[long["spec"] == name]` once per spec; one `groupby("spec")` does it in
   a pass.
-  - [ ] `channels_align.py` and `channels_plan.py`, re-exported. After R26.1
+  - [x] `channels_align.py` and `channels_plan.py`, re-exported. After R26.1
     and R26.3, which touch the same functions.
+    Split by dependency, not only by the three groups named above. `channels.py`
+    is 500 lines: the series builders, `read_channels`, `read_aligned`,
+    `rescale_channel_rows`. `channels_plan.py` (797 lines, 42 definitions) is
+    everything that decides what to read and reads it: the spec grammar and
+    catalogs, `raw_read_filters` and narrowing, `SharedSessionRead`, the
+    acquisition clock and `read_acquisition_frame`. The grammar and the clock
+    had to go with it because `SharedSessionRead` and `parse_spec` sit under
+    both halves; otherwise `channels_align` and `channels_plan` would import
+    each other. `channels_align.py` (232 lines, 10 definitions) is the pure
+    frame code: `AS_OF_ATTR`, `as_of_validity`, `as_of_refusal`,
+    `refuse_as_of`, `concat_channel_frames`, `align_long`. `read_aligned` stays
+    in `channels.py` because it calls `read_channels`; moving it would make
+    `channels_align` import `channels`, which re-exports it. Every public name
+    imports from `channels` unchanged (`__all__` of the 23 re-exports).
+    `ast.dump` of all 65 top-level definitions of HEAD's `channels.py` against
+    the three modules: 65 identical, 0 missing, 0 extra, none defined twice.
+    Facade hazard, swept with `ast` over src, scripts, tools, tests and
+    data/: no string patch target; module-attribute uses were
+    `channels.read_session` (three tests), `channels._on_acquisition_clock` and
+    `channels._Narrowing` (`tests/test_channels_raw_read.py`). Every
+    `read_session` call now lives in `channels_plan`, so those tests
+    (`test_channels_raw_read.py`, `test_tuning_digest.py`,
+    `test_workbench_analysis.py`) patch `channels_plan` (one target, and
+    `test_every_session_read_of_channels_goes_through_one_module` keeps it so).
+    The patches of `channels._raw_read_filters`, `_read_columns` and
+    `_narrowing` stay on `channels`: `read_channels`, their only caller on
+    those paths, is still there. `compare_evidence` and `delivery_evidence`
+    hash `channels.py` into `code_version`; they now hash `channels_plan.py`
+    and `channels_align.py` too, or an edit to the reader would not change the
+    evidence's code version. Tests importing either module (same set as
+    R26.7): HEAD 1,103 passed 3 skipped, HEAD plus this change 1,103 passed 3
+    skipped. `ruff check .`, `ruff format --check .` and bare `mypy` clean;
+    `test_layering` green.
+    Not done: the `align_long` filter `long[long["spec"] == name]` once per spec
+    (one `groupby("spec")`). That is a change of code, not a move, and would
+    break the verbatim comparison above; it is the open sub-item below.
+  - [ ] `align_long` (`channels_align.py`): one `groupby("spec")` in place of
+    the per-spec `long[long["spec"] == name]` filter, with a test that the
+    aligned output is identical.
 
 - [ ] **R26.9 `GpsTracker` is daemon state that lives in `analysis/`.**
   733 lines; `observe` runs per telemetry record and `persist` fsyncs. It is

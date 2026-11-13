@@ -659,19 +659,20 @@ def test_the_digest_reads_its_capture_once_and_says_the_same(
     read per call (what it did before), byte for byte."""
     from contextlib import contextmanager
 
-    import src.analysis.channels as channels
+    import src.analysis.channels_plan as channels_plan
     import src.analysis.tuning_digest as tuning_digest
     import src.analysis.tuning_frame as tuning_frame
+    from src.preprocessing.loader import read_session
 
     capture = Path("tests/fixtures/lambda_delivery/_capture-tuning-2026-09-21T223734")
     calls: list[Path] = []
-    real = channels.read_session  # type: ignore[attr-defined]
+    real = read_session
 
     def counting(path: Path, **kwargs: Any) -> Any:
         calls.append(Path(path))
         return real(path, **kwargs)
 
-    monkeypatch.setattr(channels, "read_session", counting)
+    monkeypatch.setattr(channels_plan, "read_session", counting)
     shared = compute_tuning_digest(capture, config)
     assert shared is not None
     assert calls.count(capture) == 1, calls

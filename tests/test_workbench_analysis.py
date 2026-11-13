@@ -22,7 +22,7 @@ import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.analysis import channels
+from src.analysis import channels_plan
 from src.analysis.channels import ChannelSpecError, concat_channel_frames, read_channels
 from src.analysis.lambda_delivery import load_lambda_delivery
 from src.analysis.noise_floor import ChannelFloor, NoiseFloor
@@ -405,7 +405,7 @@ def scan_count(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
         scans.append(Path(session))
         return real(session, *args, **kwargs)
 
-    monkeypatch.setattr(channels, "read_session", counting)
+    monkeypatch.setattr(channels_plan, "read_session", counting)
     return scans
 
 

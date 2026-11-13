@@ -17,6 +17,7 @@ import pandas as pd
 import pytest
 
 import src.analysis.channels as channels
+import src.analysis.channels_plan as channels_plan
 import src.preprocessing.loader as loader
 from src.analysis.channels import (
     raw_read_filters,
@@ -68,7 +69,7 @@ def _unfiltered(
         return read_channels(session, specs, **kwargs)
 
 
-def _no_narrowing(parsed: object, catalogs: object) -> channels._Narrowing:
+def _no_narrowing(parsed: object, catalogs: object) -> channels_plan._Narrowing:
     return lambda frame: frame.copy()
 
 
@@ -212,7 +213,7 @@ def test_a_shared_read_serves_every_spec_exactly_from_one_read(
         calls.append(path)
         return real(path, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(channels, "read_session", counting)
+    monkeypatch.setattr(channels_plan, "read_session", counting)
     with shared_session_read(session, specs) as shared:
         for (spec, clock), want in expected.items():
             got = read_channels(session, [spec], acquired_time=clock)
@@ -236,7 +237,7 @@ def test_a_spec_the_shared_read_does_not_hold_is_read_from_disk_not_dropped(
         calls.append(path)
         return real(path, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(channels, "read_session", counting)
+    monkeypatch.setattr(channels_plan, "read_session", counting)
     with shared_session_read(DRIVE, ["obd:RPM", "decoded:ECM_RPM"]) as outer:
         with shared_session_read(DRIVE, ["obd:SPEED"]) as inner:
             assert inner is outer
@@ -248,7 +249,7 @@ def test_a_spec_the_shared_read_does_not_hold_is_read_from_disk_not_dropped(
         assert not frames.empty and len(calls) == 3
         other = read_channels(CAPTURE, ["obd:RPM"])  # another session
         assert not other.empty and len(calls) == 4
-    monkeypatch.setattr(channels, "read_session", real)
+    monkeypatch.setattr(channels_plan, "read_session", real)
     pd.testing.assert_frame_equal(gps, read_channels(DRIVE, ["gps:speed"]), check_exact=True)
 
 
@@ -371,13 +372,13 @@ def test_reading_one_frame_spec_by_spec_parses_each_row_once_at_most(
     specs = [spec for spec in _specs(CAPTURE) if not spec.startswith(("decoded:", "can:"))]
     assert len(specs) >= 10
     parsed: list[int] = []
-    clock = channels._on_acquisition_clock
+    clock = channels_plan._on_acquisition_clock
 
     def counting(frame: pd.DataFrame, session: object) -> object:
         parsed.append(len(frame))
         return clock(frame, session)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(channels, "_on_acquisition_clock", counting)
+    monkeypatch.setattr(channels_plan, "_on_acquisition_clock", counting)
     for spec in specs:
         assert not read_channels(rows, [spec], acquired_time=True).empty, spec
     assert len(parsed) == len(specs)

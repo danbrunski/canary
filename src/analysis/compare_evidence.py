@@ -35,6 +35,8 @@ import numpy as np
 import pandas as pd
 
 import src.analysis.channels as channels_module
+import src.analysis.channels_align as channels_align_module
+import src.analysis.channels_plan as channels_plan_module
 import src.analysis.compare as compare_module
 import src.signals.pairing as pairing_module
 from src.analysis.compare import (
@@ -211,7 +213,12 @@ def mint_channel_comparison(
         producer_kind="tool",
         version=COMPARE_TOOL_VERSION,
         code_version=code_version(
-            sys.modules[__name__], compare_module, channels_module, pairing_module
+            sys.modules[__name__],
+            compare_module,
+            channels_module,
+            channels_plan_module,
+            channels_align_module,
+            pairing_module,
         ),
     )
     # A different tolerance or pair floor asks a different question, so it is a

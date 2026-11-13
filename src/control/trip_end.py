@@ -77,7 +77,6 @@ from typing import TYPE_CHECKING, Any
 
 from src.alerts.notifier import format_digest_message
 from src.analysis.digest import (
-    _MIB,
     REASON_CHILD_FAILED,
     REASON_CHILD_OUT_OF_MEMORY,
     REASON_CHILD_TIMED_OUT,
@@ -97,6 +96,7 @@ from src.analysis.digest import (
     write_digest_skipped,
     write_refreshed_tuning,
 )
+from src.analysis.digest_admission import _MIB
 from src.analysis.rolling_circumference import measure_session, write_rolling_circumference
 from src.config import CanaryConfig
 from src.control import child_pool
