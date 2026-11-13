@@ -17,6 +17,14 @@ export interface TelemetryStreamState {
 
 const HISTORY_LENGTH = 120; // 2 minutes at 1 Hz; plenty for sparklines
 
+/** Longest a pending flush may wait when `requestAnimationFrame` does not
+ *  fire. rAF is paused in a background or hidden tab, and the audible alarms
+ *  (`AlarmsPanel` evaluates `channels`) must keep working there, so a timer
+ *  races the frame and whichever fires first flushes. Browsers clamp a hidden
+ *  tab's timers to ~1 Hz, which is enough for an alarm and costs a hidden tab
+ *  one render a second instead of none. */
+export const FLUSH_FALLBACK_MS = 250;
+
 /** Subscribe to `/ws/telemetry` plus seed from `/telemetry/latest?n=…` so the
  *  panel has values immediately instead of waiting for the first message.
  *
@@ -28,13 +36,45 @@ export function useTelemetryStream() {
     channels: new Map(),
     connection: "connecting",
   });
-  // useRef-backed Map lets us mutate without forcing a full re-render of
-  // every column on every message. We bump a counter for React's sake.
+  // useRef-backed Map takes every message. The daemon publishes per record,
+  // per decoded CAN row and per DID (~2,000 messages a second in a tuning
+  // capture), so React state is replaced at most once per animation frame, not
+  // once per message; the last value per channel wins because the ref is
+  // overwritten on each ingest.
   const channelsRef = useRef<Map<string, ChannelSnapshot>>(new Map());
 
   useEffect(() => {
     const controller = new AbortController();
     let cancelled = false;
+    let connection: ConnectionState = "connecting";
+    let dirty = false;
+    let frame: number | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const cancelPending = () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      if (timer !== null) clearTimeout(timer);
+      frame = null;
+      timer = null;
+    };
+
+    // One state update for everything ingested since the last one, carrying
+    // the newest connection state. The Map is only copied when a channel
+    // changed, so a connection-only update keeps its identity.
+    const flush = () => {
+      cancelPending();
+      if (cancelled) return;
+      const channels = dirty ? new Map(channelsRef.current) : null;
+      dirty = false;
+      const next = connection;
+      setState((prev) => ({ channels: channels ?? prev.channels, connection: next }));
+    };
+
+    const schedule = () => {
+      if (frame !== null || timer !== null) return;
+      frame = requestAnimationFrame(flush);
+      timer = setTimeout(flush, FLUSH_FALLBACK_MS);
+    };
 
     const ingest = (row: TelemetryRow) => {
       if (!row || !row.source || !row.channel) return;
@@ -45,6 +85,7 @@ export function useTelemetryStream() {
         history.push(row.value);
       }
       channelsRef.current.set(key, { latest: row, history });
+      dirty = true;
     };
 
     // Seed via the REST snapshot so panels render with real values before
@@ -55,10 +96,7 @@ export function useTelemetryStream() {
       .then((seed) => {
         if (cancelled) return;
         for (const row of seed.rows) ingest(row);
-        setState({
-          channels: new Map(channelsRef.current),
-          connection: "connecting",
-        });
+        flush();
       })
       .catch(() => {
         /* the WebSocket will populate; silent fallback */
@@ -68,19 +106,21 @@ export function useTelemetryStream() {
       url: "/ws/telemetry",
       onMessage: (msg) => {
         ingest(msg);
-        // Cheap: replace the Map reference, share the inner snapshot objects.
-        setState({
-          channels: new Map(channelsRef.current),
-          connection: "open",
-        });
+        connection = "open";
+        schedule();
       },
-      onState: (connection) => {
-        setState((prev) => ({ ...prev, connection }));
+      // A connection change is rare and is shown at once; it also carries any
+      // channels still waiting for their frame, so a reconnect leaves no
+      // pending flush behind.
+      onState: (next) => {
+        connection = next;
+        flush();
       },
     });
 
     return () => {
       cancelled = true;
+      cancelPending();
       controller.abort();
       socket.close();
     };

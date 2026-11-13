@@ -25,18 +25,61 @@ neither earlier review covered.
   re-render too, including the ROM Editor's 500-line `Workspace` while the
   operator is editing. No `requestAnimationFrame`, `startTransition` or
   `useDeferredValue` anywhere in non-test code.
-  - [ ] Measure first: messages per second on a connected tab during a
+  - [~] Measure first: messages per second on a connected tab during a
     `tuning` capture, and commit count from the React Profiler on the
     Pi-served build on a phone. Record both here. The structure is verified;
     the cost is not.
-  - [ ] Coalesce in the hook: keep ingesting into the ref, flush to state at
+    Messages per second, measured offline (2026-11-12) from stored tuning
+    sessions, since `run_telemetry_broadcast_sink` publishes every record plus
+    its decodes and the stored session holds the same rows (`can` raw +
+    `decoded` + `obd` + `gps` + `derived`): `_tuning-2026-08-05T142720`
+    (4,315,958 rows over 52 min) median 2,003 rows/s, p95 2,177, p99 2,231,
+    max 3,238; `_capture-tuning-hybrid-research-2026-09-17T224717`
+    (5,610,717 rows over 45 min) median 2,435 rows/s, p95 2,448, max 2,459
+    (`can` ~1,680/s, `decoded` ~690/s, `obd` ~44/s). That is ~2,000-2,450
+    `setState` calls and Map copies a second before this change, against
+    ~60 a second after it. Upper bound: a tab sees only what the broadcaster
+    delivers, and it drops oldest on backpressure.
+    NOT measured: the live message rate on a connected tab, and the React
+    Profiler commit count on the Pi-served build on a phone (no Pi or phone
+    from this session). Left open for a drive.
+  - [x] Coalesce in the hook: keep ingesting into the ref, flush to state at
     most once per animation frame (or a stated interval). Pin with a
     fake-timer test: N messages inside one window make one state update.
+    `useTelemetryStream.ts`: `ingest` writes the ref and marks it dirty;
+    `schedule()` arms one `requestAnimationFrame` and, racing it, a
+    `FLUSH_FALLBACK_MS` (250 ms) timer, and whichever fires first flushes and
+    cancels the other. The fallback is for a hidden tab, where rAF is paused:
+    the audible alarms in `AlarmsPanel` evaluate `channels`, so a hidden tab
+    must still update (browsers clamp its timer to ~1 Hz). A connection change
+    flushes at once, with any pending channels, and cancels the pending frame;
+    unmount cancels both. The Map is copied only when a channel changed.
+    Pinned in `useTelemetryStream.test.ts` ("frame coalescing", fake timers):
+    1,000 messages in one window give exactly one render and the last value
+    per channel; a spent frame gives no further render; a second window gives a
+    second render; the timer fallback fires at 250 ms with rAF stubbed dead;
+    unmount leaves zero timers and no render; a reconnect state change flushes
+    at once with no frame left behind; a connection-only change keeps the Map
+    identity. Mutation check: flushing per message fails 3 of them.
   - [ ] If the measurement still shows whole-tree commits: expose a
     `useChannel(key)` subscription (`useSyncExternalStore`) so only readers of
     a key re-render, and `memo` the Workbench pages that take no channels.
+    Not done, deliberately. Coalescing bounds commits at one per frame, but the
+    measurement that would justify more (Profiler on the Pi build) is not in.
+    `App` still rebuilds `data` each commit and nothing is memoized, so every
+    Workbench page still re-renders up to 60 times a second; and the ROM
+    Editor `Workspace` takes `channels` itself (for `LiveOverlay`), so `memo`
+    alone would not stop it, only `useChannel` would. That is a wider refactor.
   - Must not change: what is stored per channel, the seed-then-stream order,
     `useTelemetryStream.test.ts`.
+  - [x] Found while verifying: `AlarmsPanel` keyed its 1 s evaluation interval
+    on `channels`, so every telemetry update re-armed it. Per message before
+    this item, and per frame after it, the tick never fired while data
+    flowed, so no threshold alarm could fire during a drive. The tick now
+    reads a `channelsRef`, and the interval depends only on the rules and the
+    audible switch. `AlarmsPanel.test.tsx` (new) streams a fresh Map every
+    50 ms for 5 s and expects a fired event. It fails on the old effect and
+    passes on the new one.
 
 - [ ] **R28.2 API response types are hand-copied from Python and have
   drifted.** `src/types/*.ts` holds 402 exported types in 4,906 lines;

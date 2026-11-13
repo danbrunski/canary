@@ -72,12 +72,20 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
     [channels],
   );
 
+  // The tick reads the newest channels through a ref. Keying the interval on
+  // `channels` re-armed it on every telemetry update (per frame, and per
+  // message before R28.1), so a 1 s interval never fired while data flowed.
+  const channelsRef = useRef(channels);
+  useEffect(() => {
+    channelsRef.current = channels;
+  }, [channels]);
+
   useEffect(() => {
     const tick = () => {
       const now = Date.now();
       for (const rule of rules) {
         if (!rule.enabled) continue;
-        const snap = channels.get(rule.channel);
+        const snap = channelsRef.current.get(rule.channel);
         const v = snap?.latest.value;
         if (typeof v !== "number" || !Number.isFinite(v)) continue;
         const rt = runtime.current.get(rule.id) ?? { streak: 0, mutedUntil: 0 };
@@ -107,7 +115,7 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
     };
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [rules, channels, audible]);
+  }, [rules, audible]);
 
   const addRule = () => {
     const value = Number(draft.value);

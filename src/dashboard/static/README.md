@@ -148,16 +148,19 @@ own:
 * Connection state surfaced through `ConnectionIndicator` in the header
 
 This is intentionally minimal — no Redux, no React Query — because the
-state shape is small and the cost of a render-per-message is low (we'd
-notice in `scripts/benchmark_live_pipeline.py`-style flame graphs before
-anyone notices it in the UI). Revisit when the panel count or the channel
-count outgrows what a single Map can hold cheaply.
+state shape is small. `useTelemetryStream` ingests every message into a ref
+and commits to state at most once per animation frame (a 250 ms timer stands
+in when the tab is hidden), so a 2,000-message/s tuning capture costs about 60
+renders a second, not 2,000 (R28.1). Every sample still lands in the
+channel's `history`; only `latest` is last-wins within a frame. Revisit with a
+per-channel subscription if whole-tree commits show up in the Profiler.
 
 ## Charts
 
 Sparklines render via a tiny canvas component (`components/Sparkline.tsx`).
-Each chart is one canvas node, redrawn on every message — fast enough at
-the daemon's 1 Hz cadence, no chart-lib dep, no SVG-thousand-nodes problem.
+Each chart is one canvas node, redrawn at most once per animation frame (the
+telemetry hook's flush cadence), with no chart-lib dep and no
+SVG-thousand-nodes problem.
 If a richer chart is ever needed (zoom, brushing, multi-series with
 legends), `uPlot` is the recommended choice — also canvas-based, MIT,
 no React dependency.
