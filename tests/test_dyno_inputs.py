@@ -22,9 +22,12 @@ from pydantic import ValidationError
 from src.analysis.dyno import (
     DYNO_FILENAME,
     DynoRefusal,
+    Leg,
     MotionSamples,
     MotionSources,
+    PitchOffset,
     SpeedSource,
+    estimate_pitch_offset,
     load_dyno_profile,
 )
 from src.analysis.dyno_inputs import (
@@ -199,6 +202,40 @@ def test_specific_force_and_acceleration_share_one_filter() -> None:
     static = out.sf_lon_mps2 - out.accel_mps2
     grade_term = G * np.sin(np.arctan(_grade(true_t)))
     assert np.max(np.abs(static - grade_term)) < 0.05
+
+
+def _from_rest_v(t: np.ndarray) -> np.ndarray:
+    # Stopped until t = 8 s, then 2.5 m/s^2: a first-gear launch from rest.
+    return np.where(t < 8.0, 0.0, 2.5 * (t - 8.0))
+
+
+def _from_rest_a(t: np.ndarray) -> np.ndarray:
+    return np.where(t < 8.0, 0.0, 2.5)
+
+
+def test_a_launch_from_rest_reads_no_negative_speed_and_reaches_the_pitch_offset() -> None:
+    # M01.7: the quadratic smoother undershot to -0.022 m/s at the standstill
+    # corner, and estimate_pitch_offset refuses a negative speed, so one
+    # launch from rest among a gear's pulls refused that gear's offset. The
+    # reader clamps speed at zero; acceleration comes from the raw speed.
+    legs = []
+    for seed, heading in ((1, "northbound"), (2, "southbound")):
+        channels, imu = _channels(seed, v=_from_rest_v, a=_from_rest_a)
+        out = _built(_build(channels, imu))
+        assert out.speed_mps.min() == 0.0
+        true_t = out.t_s + 2.0
+        stopped = true_t < 7.5
+        assert np.all(out.speed_mps[stopped] == 0.0)
+        assert np.max(np.abs(out.accel_mps2[stopped])) < 0.05
+        assert np.median(out.accel_mps2[true_t > 9.0]) == pytest.approx(2.5, abs=0.05)
+        motion = out.motion()
+        assert isinstance(motion, MotionSamples), motion
+        legs.append(Leg(heading, motion))
+    offset = estimate_pitch_offset(legs, squat=None)
+    assert isinstance(offset, PitchOffset), offset
+    # 1/2 · 2.5 · 14^2 = 245 m from the launch to the window's end.
+    for heading in ("northbound", "southbound"):
+        assert offset.heading_distance_m[heading] == pytest.approx(245.0, rel=0.01)
 
 
 def test_rpm_is_smoothed_by_the_same_kernel_as_speed() -> None:

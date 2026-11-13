@@ -551,7 +551,12 @@ def build_motion_inputs(
     smooth, derivative = matched_kernels(half, step)
     kmh = _on_grid(speed_channel, grid, step)
     mps = kmh / 3.6 / ratio
-    speed = _apply(mps, smooth)
+    # Speed is absolute and cannot be negative, but the quadratic smoother
+    # undershoots at a standstill corner (about -0.02 m/s on a launch from rest,
+    # M01.7), which estimate_pitch_offset refuses as negative speed. Clamped
+    # here, once, so no reader sees it. Acceleration is the derivative kernel
+    # on the raw speed, not on this series, so the clamp does not touch it.
+    speed = np.maximum(_apply(mps, smooth), 0.0)
     accel = _apply(mps, derivative)
 
     sf: FloatArray | None = None

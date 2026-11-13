@@ -56,6 +56,7 @@ from src.analysis.dyno import (
     record_dyno_floor,
     save_dyno_profile,
 )
+from src.analysis.dyno_motion import distance_m, distance_weights
 from src.analysis.dyno_squat import _grade_with_se
 from src.config import VehicleParameters
 from src.signals.committees import STANDARD_GRAVITY as G
@@ -881,6 +882,193 @@ def test_pitch_offset_separates_from_grade_only_with_both_directions(
     )
     _refused(estimate_pitch_offset(pair[:1], squat=None), "single_direction")
     _refused(estimate_pitch_offset([], squat=None), "inputs_missing")
+
+
+#: The M01.7 road: 1,400 m over a symmetric crest (a parabolic vertical curve).
+#: Either way the truck climbs at the crest grade, crosses the summit at
+#: mid-road and descends at the same grade, so the grade along the direction
+#: of travel is the same function of distance covered for both headings.
+CREST_ROAD_M = 1400.0
+CREST_V0_MPS = 26.0
+
+
+def _crest_coastdown(
+    driveline: Driveline, crest_grade: float, *, hz: float = 10.0, stop_m: float = CREST_ROAD_M
+) -> MotionSamples:
+    """A noise-free neutral coast over the whole crest road, no wind.
+
+    Grade at distance ``s`` from the leg's start is ``c·(1 − 2s/L)`` in the
+    direction of travel. The truck enters at 26 m/s and leaves at ~11 m/s, so
+    it crosses the climb fast and the descent slowly; in the other direction
+    the climb and descent are the other halves of the same road. ``stop_m``
+    ends the run part-way (the road is still the 1,400 m crest).
+    """
+    m_eff = driveline.neutral_effective_mass(MASS)
+    dt_sim, every = 0.01, int(round(1.0 / (hz * 0.01)))
+    v, t, s = CREST_V0_MPS, 0.0, 0.0
+    rows: list[tuple[float, float, float, float]] = []
+    step = 0
+    while s < stop_m:
+        grade = crest_grade * (1.0 - 2.0 * s / CREST_ROAD_M)
+        load = TRUE_A + TRUE_B * v + TRUE_C * v**2
+        accel = -(load + MASS * G * math.sin(math.atan(grade))) / m_eff
+        if step % every == 0:
+            rows.append((t, v, accel, grade))
+        v += accel * dt_sim
+        s += v * dt_sim
+        t += dt_sim
+        step += 1
+    arr = np.array(rows)
+    return MotionSamples(
+        t_s=arr[:, 0],
+        speed_mps=arr[:, 1],
+        accel_mps2=arr[:, 2],
+        sf_lon_mps2=_pitch_sf(arr[:, 2], arr[:, 3], TRUE_SQUAT_DEG_PER_G),
+    )
+
+
+def _time_weighted_offset_deg(legs: list[Leg], squat: SquatCoefficient) -> float:
+    """The estimator before M01.7: each heading's *time* mean of static pitch."""
+    by_heading: dict[str, list[float]] = {}
+    for leg in legs:
+        s = leg.samples
+        static = s.sf_lon_mps2 - G * np.sin(np.radians(squat.deg_per_g * s.accel_mps2 / G))
+        pitch = np.degrees(np.arcsin((static - s.accel_mps2) / G))
+        by_heading.setdefault(leg.heading, []).extend(pitch)
+    return float(np.mean([np.mean(p) for p in by_heading.values()]))
+
+
+@pytest.mark.parametrize(
+    ("crest_grade", "time_weighted_deg"),
+    [(0.0, 0.3000), (0.003, 0.2773), (0.005, 0.2625), (0.010, 0.2271)],
+)
+def test_pitch_offset_is_distance_weighted_over_a_crest(
+    driveline: Driveline, crest_grade: float, time_weighted_deg: float
+) -> None:
+    # M01.7, a known answer: true offset 0.300 deg, 2,311 kg, coast-downs both
+    # ways over a 1,400 m symmetric crest, no noise and no wind. Each heading
+    # crosses the climb fast and the descent slowly, so a time mean leans on
+    # the descent in *both* headings and grade does not cancel: the old
+    # estimator read 0.2773 / 0.2625 / 0.2271 deg at ±0.3 / ±0.5 / ±1.0 %
+    # (asserted below on the same samples), and fit_road_load at HEAD returned
+    # A = 171.0 / 165.2 / 151.1 N for the true 180 N. Weighted by v·dt, every
+    # metre of road counts once in each heading and the grade cancels; what is
+    # left (≤ 1.5e-4 deg) is the last 10 Hz sample stopping short of the road's end.
+    squat = _squat_record()
+    legs = [
+        Leg("northbound", _crest_coastdown(driveline, crest_grade)),
+        Leg("southbound", _crest_coastdown(driveline, crest_grade)),
+    ]
+    assert _time_weighted_offset_deg(legs, squat) == pytest.approx(time_weighted_deg, abs=1e-4)
+    offset = estimate_pitch_offset(legs, squat=squat)
+    assert isinstance(offset, PitchOffset), offset
+    assert offset.deg == pytest.approx(TRUE_MOUNT_OFFSET_DEG, abs=5e-4)
+    for heading in ("northbound", "southbound"):
+        assert offset.heading_distance_m[heading] == pytest.approx(CREST_ROAD_M, abs=3.0)
+    fit = fit_road_load(legs, driveline=driveline, test_mass_kg=MASS, squat=squat)
+    assert isinstance(fit, RoadLoadFit), fit
+    assert fit.imu_pitch_offset_deg == offset.deg
+    assert fit.a_n == pytest.approx(TRUE_A, abs=0.2)
+    assert fit.b_n_per_mps == pytest.approx(TRUE_B, rel=1e-4)
+    assert fit.c_n_per_mps2 == pytest.approx(TRUE_C, rel=1e-4)
+
+
+def test_pitch_offset_gives_a_stop_no_weight(driveline: Driveline) -> None:
+    # A minute parked on a 3 % slope at the end of one heading: time-weighted,
+    # it would be ~40 % of that heading's samples; by distance it weighs nothing.
+    squat = _squat_record()
+    north = _crest_coastdown(driveline, 0.005)
+    south = _crest_coastdown(driveline, 0.005)
+    t_stop = north.t_s[-1] + np.arange(1, 601) * 0.1
+    parked_sf = _pitch_sf(np.zeros(len(t_stop)), 0.03, TRUE_SQUAT_DEG_PER_G)
+    stopped = MotionSamples(
+        t_s=np.concatenate([north.t_s, t_stop]),
+        speed_mps=np.concatenate([north.speed_mps, np.zeros(len(t_stop))]),
+        accel_mps2=np.concatenate([north.accel_mps2, np.zeros(len(t_stop))]),
+        sf_lon_mps2=np.concatenate([north.sf_lon_mps2, parked_sf]),
+    )
+    moving = estimate_pitch_offset([Leg("n", north), Leg("s", south)], squat=squat)
+    with_stop = estimate_pitch_offset([Leg("n", stopped), Leg("s", south)], squat=squat)
+    assert isinstance(moving, PitchOffset) and isinstance(with_stop, PitchOffset)
+    # The only change is the last moving sample's half-interval into the stop.
+    assert with_stop.deg == pytest.approx(moving.deg, abs=1e-4)
+    shifted = _time_weighted_offset_deg([Leg("n", stopped), Leg("s", south)], squat)
+    assert shifted - _time_weighted_offset_deg([Leg("n", north), Leg("s", south)], squat) > 0.3
+    # ... and the trapezoid's half-interval into it, 0.05 s at ~12 m/s.
+    assert with_stop.heading_distance_m["n"] == pytest.approx(
+        moving.heading_distance_m["n"], abs=1.0
+    )
+    assert with_stop.n_samples == moving.n_samples + len(t_stop)
+    # The weights are the trapezoid rule for ∫v dt: they sum to the distance.
+    assert float(distance_weights(stopped).sum()) == pytest.approx(distance_m(stopped)[-1])
+    assert np.all(distance_weights(stopped)[len(north.t_s) :] == 0.0)
+
+
+def test_pitch_offset_pools_a_headings_runs_by_distance(driveline: Driveline) -> None:
+    # Northbound twice: the whole crest road, and a run that stops at the
+    # summit (700 m, all climb). Pooled by distance, the climb is a third of
+    # the heading's road; averaged run by run it would be half.
+    crest = 0.01
+    full = _crest_coastdown(driveline, crest)
+    half = _crest_coastdown(driveline, crest, stop_m=CREST_ROAD_M / 2)
+    south = _crest_coastdown(driveline, crest)
+
+    def northbound(*runs: MotionSamples) -> tuple[float, float]:
+        legs = [Leg("northbound", run) for run in runs] + [Leg("southbound", south)]
+        offset = estimate_pitch_offset(legs, squat=_squat_record())
+        assert isinstance(offset, PitchOffset), offset
+        return offset.heading_pitch_deg["northbound"], offset.heading_distance_m["northbound"]
+
+    (p_full, d_full), (p_half, d_half) = northbound(full), northbound(half)
+    pooled, distance = northbound(full, half)
+    assert distance == pytest.approx(d_full + d_half)
+    assert d_half == pytest.approx(CREST_ROAD_M / 2, abs=3.0)
+    assert pooled == pytest.approx((d_full * p_full + d_half * p_half) / distance, abs=1e-12)
+    # Known answer: a third of the climb's mean grade (crest/2) on top of the
+    # full run (whose crest cancels), up to each run's 10 Hz end.
+    third_of_climb = math.degrees(math.atan(crest / 2)) / 3
+    assert pooled - p_full == pytest.approx(third_of_climb, abs=2e-4)
+    # Run-by-run averaging gives half the climb's grade, not a third.
+    assert abs((p_full + p_half) / 2 - pooled) > 0.04
+
+
+def test_pitch_offset_refuses_a_heading_that_covered_no_distance(driveline: Driveline) -> None:
+    south = _crest_coastdown(driveline, 0.005)
+    t = np.arange(0.0, 60.0, 0.1)
+    zeros = np.zeros(len(t))
+    parked = MotionSamples(t_s=t, speed_mps=zeros, accel_mps2=zeros, sf_lon_mps2=zeros + 0.05)
+    refusal = _refused(
+        estimate_pitch_offset([Leg("n", parked), Leg("s", south)], squat=None), "no_distance"
+    )
+    assert "'n'" in refusal.reason and "no distance" in refusal.reason
+    backwards = replace(south, speed_mps=-south.speed_mps)
+    refusal = _refused(
+        estimate_pitch_offset([Leg("n", backwards), Leg("s", south)], squat=None),
+        "invalid_input",
+    )
+    assert "negative speed" in refusal.reason
+    # Stopped samples do not count towards min_samples either.
+    few = MotionSamples(
+        t_s=t,
+        speed_mps=np.where(t < 2.0, 5.0, 0.0),
+        accel_mps2=zeros,
+        sf_lon_mps2=zeros,
+    )
+    refusal = _refused(
+        estimate_pitch_offset([Leg("n", few), Leg("s", south)], squat=None), "too_few_samples"
+    )
+    assert "moving samples" in refusal.reason
+    # One moving sample spans no interval: too few samples, not "speed zero".
+    single = MotionSamples(
+        t_s=np.array([0.0]),
+        speed_mps=np.array([12.0]),
+        accel_mps2=np.array([0.0]),
+        sf_lon_mps2=np.array([0.0]),
+    )
+    refusal = _refused(
+        estimate_pitch_offset([Leg("n", single), Leg("s", south)], squat=None), "too_few_samples"
+    )
+    assert "speed zero" not in refusal.reason
 
 
 def _in_frame(legs: list[Leg], frame: str | None) -> list[Leg]:

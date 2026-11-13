@@ -381,7 +381,7 @@ The force balance itself is right (see "Checked and correct"). These are
 about its inputs and its corrections. Same-day A/B comparisons cancel most of
 them; absolute and "corrected" figures do not.
 
-- [ ] **M01.7 (Error) The two-heading pitch offset is averaged over time, not
+- [x] **M01.7 (Error) The two-heading pitch offset is averaged over time, not
   distance.** `dyno_motion.estimate_pitch_offset` takes `pitch.mean()` over
   each heading's samples and averages the two headings. Its docstring says
   the result is "exact when both legs cover the same stretch". Grade cancels
@@ -404,11 +404,81 @@ them; absolute and "corrected" figures do not.
   - 0.1° is 39.6 N at this mass: under 1 % of a full-throttle pull, but the
     H07 notes record that 0.3° moves the fitted engine inertia by about 44 %,
     and road-load `A` comes straight from it.
-  - [ ] Distance-weight the per-heading mean. Commit the simulation as the
+  - [x] Distance-weight the per-heading mean. Commit the simulation as the
     regression test (a known-answer case, per `AGENTS.md`). Correct the
     docstring. Re-run the stored offset and road-load fits and record how far
     they move.
 
+    *Done 2026-11-13:* `dyno_motion.distance_weights` gives each sample
+    `v·dt`, `dt` half the interval to each neighbour (the trapezoid rule for
+    `∫v dt`, so the weights sum to `distance_m(...)[-1]`), and
+    `estimate_pitch_offset` takes each heading's weighted mean over all its
+    runs. A stopped sample weighs nothing and does not count towards
+    `min_samples` ("N moving samples (of M)"); a heading that covered no
+    distance is refused `no_distance` (new `RefusalKind`; a moving heading
+    whose runs are single samples is `too_few_samples`), a negative speed
+    `invalid_input`. The motion reader (`dyno_inputs.build_motion_inputs`)
+    now clamps its smoothed speed at 0: the quadratic smoother undershot to
+    about −0.02 m/s at a standstill corner, so a first-gear launch from rest
+    would have refused its gear's offset (found by the verifier). Acceleration
+    is the derivative kernel on the raw speed, so the clamp does not touch
+    it; the refusal stays for a caller's own negative input. Gaps: the motion reader already refuses holes
+    (`inputs_gap`), and a hole that reaches the estimator is bridged by its
+    two bounding samples. `PitchOffset.heading_distance_m` records each
+    heading's distance, since unequal stretches are the leak that remains
+    (the docstring now says so, and drops "exact when both legs cover the
+    same stretch" for a time mean).
+    - Regression test `tests/test_dyno.py::test_pitch_offset_is_distance_weighted_over_a_crest`,
+      built from the repo's functions (`Driveline.neutral_effective_mass`,
+      `_pitch_sf`, `estimate_pitch_offset`, `fit_road_load`): true offset
+      0.300°, 2,311 kg, 1.2°/g squat, A/B/C 180 / 5.0 / 0.55, no wind, no
+      noise, 10 Hz, a 1,400 m parabolic crest (grade `c·(1 − 2s/L)` in the
+      direction of travel), coasts entering at 26 m/s both ways. The review
+      script was not in the repo; this geometry reproduces its table to
+      within 0.001°, not exactly (its `A` column, 170.1 / 163.7 / 147.8 N,
+      is not reproduced):
+
+      | Crest grade | Time-weighted (HEAD) | `A` at HEAD | `v·dt` weighted | `A` now |
+      |---|---|---|---|---|
+      | 0 | 0.3000° | 180.0 N | 0.3000° | 180.0 N |
+      | ±0.3 % | 0.2773° | 171.0 N | 0.30014° | 180.06 N |
+      | ±0.5 % | 0.2625° | 165.2 N | 0.30005° | 180.02 N |
+      | ±1.0 % | 0.2271° | 151.1 N | 0.30009° | 180.03 N |
+
+      The test asserts the new offset within 5e-4° (the residual is the last
+      10 Hz sample stopping short of the road's end: 1e-5° at 100 Hz),
+      `A` within 0.2 N, `B`/`C` within 1e-4 relative, and the old
+      time-weighted formula on the same samples at the HEAD values within
+      1e-4°. Run against HEAD's estimator in a worktree, the three graded
+      cases fail at 0.2773 / 0.2625 / 0.2271.
+      `test_pitch_offset_gives_a_stop_no_weight` (a minute parked on a 3 %
+      slope moves the new offset < 1e-4°, the old one > 0.3°) and
+      `test_pitch_offset_refuses_a_heading_that_covered_no_distance`
+      (`no_distance`, `invalid_input`, stopped samples not counted, a
+      one-sample run is `too_few_samples`).
+      `test_pitch_offset_pools_a_headings_runs_by_distance`: a full-road and a
+      summit-stop (700 m) run northbound pool to 0.39563° (= distance-weighted
+      mean of the runs' 0.30009° and 0.58706°; a third of the climb's grade
+      above the full run, 0.09554° vs 0.09549° analytic); run-by-run
+      averaging would give 0.44357°.
+      `tests/test_dyno_inputs.py::test_a_launch_from_rest_reads_no_negative_speed_and_reaches_the_pitch_offset`:
+      stopped until 8 s then 2.5 m/s² through `build_motion_inputs` →
+      `estimate_pitch_offset`. Without the clamp it fails (min speed
+      −0.0165 m/s on seed 1).
+    - Stored fits: **none to re-run.** `data/nissan-xterra-2008/dyno.yaml`
+      has `road_load: null` and `squat: null` (owed by H07.12), nothing else
+      in `data/` or `models/` stores an offset or `A`/`B`/`C`, and no session
+      in `~/canary-data/sessions/nissan-xterra-2008` (265 entries) has an
+      `imu_frame.json`, so no real window reaches the estimator. Nothing
+      stored moves and no update is owed. What moved are the synthetic pins
+      in `tests/fixtures/dyno_golden.json` (regenerated; constant-grade
+      noisy coasts, where both weightings are unbiased): offset
+      0.29910 → 0.29926°, no-squat offset 0.27835 → 0.27466°, road-load
+      pair `A` 182.812 → 182.781 N (`B`, `C` < 1e-9 relative), no-squat
+      `A` 178.25 → 176.69 N, engine inertia 0.184241 → 0.184276 kg·m²,
+      plus the new `heading_distance_m` field, the reworded
+      `too_few_samples` reason and `no_distance` in the stored refusal
+      kinds.
 - [ ] **M01.8 (Missing condition) Road load stores no air density.**
   `RoadLoadConditions` holds road, date, sessions, payload, tire pressures and
   ambient temperature; its docstring names "air". `C` in `A + B·v + C·v²` is

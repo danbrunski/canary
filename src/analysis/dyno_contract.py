@@ -46,6 +46,8 @@ RefusalKind = Literal[
     "speed_span_too_small",
     "single_direction",
     "too_many_directions",
+    # estimate_pitch_offset (M01.7): a heading weighted by distance that covered none
+    "no_distance",
     "non_physical",
     "same_gear",
     "rpm_overlap_too_small",
