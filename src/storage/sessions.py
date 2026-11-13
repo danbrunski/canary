@@ -60,17 +60,19 @@ def latest_session(root: Path) -> Path | None:
     for the whole duration of a capture, showing frozen data with nothing
     saying so. Two questions, two functions.
     """
-    dated = [
-        child
-        for child in iter_sessions(root, kinds=ALL_SESSION_KINDS)
-        # Must hold data. A session directory exists from the moment the
-        # writer rotates into it, before the first chunk flushes, so without
-        # this the newest directory is briefly an empty one and every live
-        # read returns nothing — the same "shows the wrong session" failure
-        # in a new costume. Mirrors `discover_sessions`' own predicate.
-        if has_telemetry(child)
-    ]
-    return dated[-1] if dated else None
+    # Newest first, by parsed start time (``iter_sessions`` orders oldest first),
+    # and the first one holding data is the answer: the common case is one
+    # ``has_telemetry`` (a glob and a stat) where there used to be one per
+    # session on disk, and ``/status`` is polled (R23.2). A session must hold
+    # data. A session directory exists from the moment the writer rotates into
+    # it, before the first chunk flushes, so without this the newest directory
+    # is briefly an empty one and every live read returns nothing -- the same
+    # "shows the wrong session" failure in a new costume. Mirrors
+    # `discover_sessions`' own predicate.
+    for child in reversed(iter_sessions(root, kinds=ALL_SESSION_KINDS)):
+        if has_telemetry(child):
+            return child
+    return None
 
 
 def last_heard(session: Path, sources: Iterable[str], *, max_chunks: int = 5000) -> datetime | None:
@@ -191,7 +193,14 @@ class SessionSummary:
         }
 
 
-def list_sessions(root: Path, *, captures: bool = False) -> list[SessionSummary]:
+def list_sessions(
+    root: Path,
+    *,
+    captures: bool = False,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    limit: int | None = None,
+) -> list[SessionSummary]:
     """Return timestamp-named session directories under `root`, newest last.
 
     Task 6.4(b) (eval-longitudinal-and-dtc.md): deliberately left reading the
@@ -200,18 +209,47 @@ def list_sessions(root: Path, *, captures: bool = False) -> list[SessionSummary]
     a row for until it's been classified/pinned/fingerprinted/digested at
     least once — so catalog-backing it would need to fall back to a
     filesystem check for exactly the freshest (most operationally relevant)
-    session anyway. ``summarize_session`` per directory is also genuinely
-    cheap (glob + a couple of small file reads), so there's no real perf win
-    being left on the table today. Revisit if this listing's cost becomes a
-    measured problem, not preemptively.
+    session anyway.
+
+    ``since`` / ``until`` (UTC start-time bounds, inclusive; naive means UTC)
+    and ``limit`` (keep the newest ``limit``) are applied to the parsed
+    directory names *before* anything is summarized: ``summarize_session``
+    globs the chunks, walks every file for its size and reads two sidecars,
+    which took 0.4-0.9 s for the 182 live sessions of the dev corpus (laptop,
+    R23.2) where ``GET /control/sessions?limit=20`` wanted twenty. The answer is
+    the one ``filter_sessions(list_sessions(root), since=, until=, limit=)``
+    gives, which stays for a caller that already holds summaries.
     """
     # ``captures`` lists the profile-owned recordings: bounded captures and
     # legacy ``_tuning-*`` (a recorded session since R01.1's decision).
     kinds = {SessionKind.CAPTURE, SessionKind.TUNING} if captures else LIVE_SESSION_KINDS
+    lower = None if since is None else _as_utc(since)
+    upper = None if until is None else _as_utc(until)
     # Ordered by parsed start time (R01.1): with captures, name order sorted
-    # by profile slug first, so ``filter_sessions(limit=N)`` kept the
-    # lexically-last profiles rather than the newest captures.
-    return [summarize_session(child) for child in iter_sessions(root, kinds=kinds)]
+    # by profile slug first, so a limit kept the lexically-last profiles
+    # rather than the newest captures.
+    chosen = [
+        child
+        for child in iter_sessions(root, kinds=kinds)
+        if _within(session_started_at(child), lower, upper)
+    ]
+    if limit is not None:
+        chosen = chosen[-limit:]
+    return [summarize_session(child) for child in chosen]
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _within(started_at: datetime | None, lower: datetime | None, upper: datetime | None) -> bool:
+    """Whether a session start lies inside the (inclusive) bounds. With either
+    bound set, a session with no parseable start is outside them."""
+    if lower is None and upper is None:
+        return True
+    if started_at is None:
+        return False
+    return (lower is None or started_at >= lower) and (upper is None or started_at <= upper)
 
 
 def filter_sessions(
@@ -221,27 +259,25 @@ def filter_sessions(
     until: datetime | None = None,
     limit: int | None = None,
 ) -> list[SessionSummary]:
-    """Apply UTC start-time bounds and keep the newest ``limit`` matches."""
+    """Apply UTC start-time bounds and keep the newest ``limit`` matches.
 
-    def as_utc(value: datetime) -> datetime:
-        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
-
+    For summaries already in hand; :func:`list_sessions` takes the same
+    bounds and applies them before it summarizes anything.
+    """
+    lower = None if since is None else _as_utc(since)
+    upper = None if until is None else _as_utc(until)
     selected = sessions
-    if since is not None:
-        lower = as_utc(since)
+    if lower is not None or upper is not None:
         selected = [
             session
-            for session in selected
-            if session.started_at is not None
-            and as_utc(datetime.fromisoformat(session.started_at)) >= lower
-        ]
-    if until is not None:
-        upper = as_utc(until)
-        selected = [
-            session
-            for session in selected
-            if session.started_at is not None
-            and as_utc(datetime.fromisoformat(session.started_at)) <= upper
+            for session in sessions
+            if _within(
+                None
+                if session.started_at is None
+                else _as_utc(datetime.fromisoformat(session.started_at)),
+                lower,
+                upper,
+            )
         ]
     return selected[-limit:] if limit is not None else selected
 

@@ -6,6 +6,7 @@ import json
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import lru_cache
 from types import MappingProxyType
 from typing import Final, Literal, get_args
 
@@ -204,6 +205,58 @@ require_trainability_classified(
 
 TelemetryValue = bool | int | float | str | None
 MetadataValue = bool | int | float | str | None
+
+#: Entries the metadata-JSON memo keeps (least recently used out). A CAN row's
+#: metadata is ``{"can_id", "dlc"}`` plus an optional ``frame_kind``: a few dozen
+#: distinct values per drive, so this is room for every one.
+METADATA_JSON_CACHE_SIZE: Final = 4096
+
+#: Value types whose equality is JSON equality, the only ones the memo may key
+#: on. ``True == 1`` and ``1.0 == 1`` in a Python key, yet ``true``, ``1`` and
+#: ``1.0`` are three different strings, so a memo that let a ``bool`` or a
+#: ``float`` through would hand one row another row's ``metadata_json``. A
+#: float is also what makes a row's metadata unique (``acquired_at``), which no
+#: memo helps. Anything else is serialized directly, so an unhashable value
+#: (a list in a hand-built record) is an ordinary miss, never an error.
+_MEMOIZABLE_METADATA_TYPES: Final = frozenset({str, int, type(None)})
+
+
+@lru_cache(maxsize=METADATA_JSON_CACHE_SIZE)
+def _memoized_metadata_json(items: tuple[tuple[str, MetadataValue], ...]) -> str:
+    return json.dumps(dict(items), sort_keys=True)
+
+
+def metadata_json(metadata: Mapping[str, MetadataValue]) -> str:
+    """``metadata`` as the ``metadata_json`` column spells it:
+    ``json.dumps(metadata, sort_keys=True)``, byte for byte.
+
+    The one place that spelling lives (R23.1): :meth:`TelemetryRecord.parquet_row`
+    and the chunk writer's column build both call it, so a row stored singly
+    and a row stored in a chunk cannot differ. The dumps was three quarters of
+    a CAN row's ``parquet_row`` (2.15 of 2.84 microseconds, laptop, 2026-11-12),
+    and nearly every CAN row repeats a previous row's metadata, so the result is
+    memoized, keyed by the sorted items, for the metadata that is safe to key
+    (see :data:`_MEMOIZABLE_METADATA_TYPES`).
+    """
+    if not metadata:
+        return "{}"
+    for key, value in metadata.items():
+        if type(key) is not str or type(value) not in _MEMOIZABLE_METADATA_TYPES:
+            return json.dumps(metadata, sort_keys=True)
+    return _memoized_metadata_json(tuple(sorted(metadata.items())))
+
+
+def split_value(value: TelemetryValue) -> tuple[float | None, str | None, bool | None]:
+    """A record's value as the ``(value_number, value_text, value_bool)`` columns:
+    exactly one is set for a value, none for ``None``. ``bool`` is tested first
+    (it is an ``int``)."""
+    if isinstance(value, bool):
+        return None, None, value
+    if isinstance(value, (int, float)):
+        return float(value), None, None
+    if value is not None:
+        return None, str(value), None
+    return None, None, None
 
 
 def channel_key(source: str, channel: str) -> str:
@@ -424,17 +477,14 @@ class TelemetryRecord:
         )
 
     def parquet_row(self) -> dict[str, object]:
-        """Return a stable, columnar row representation for Parquet storage."""
-        value_number: float | None = None
-        value_text: str | None = None
-        value_bool: bool | None = None
-        if isinstance(self.value, bool):
-            value_bool = self.value
-        elif isinstance(self.value, (int, float)):
-            value_number = float(self.value)
-        elif self.value is not None:
-            value_text = str(self.value)
+        """Return a stable, columnar row representation for Parquet storage.
 
+        A one-row view for callers that hold a single record. The chunk writer
+        builds whole columns instead (``storage.parquet_writer.records_to_table``)
+        from the same :func:`split_value` and :func:`metadata_json`, so the two
+        agree by construction (and by a parity test).
+        """
+        value_number, value_text, value_bool = split_value(self.value)
         return {
             "timestamp": self.timestamp,
             "source": self.source,
@@ -444,5 +494,5 @@ class TelemetryRecord:
             "value_bool": value_bool,
             "unit": self.unit,
             "payload": self.payload,
-            "metadata_json": json.dumps(self.metadata, sort_keys=True),
+            "metadata_json": metadata_json(self.metadata),
         }

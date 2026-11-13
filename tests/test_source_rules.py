@@ -318,7 +318,6 @@ RULES: tuple[Rule, ...] = (
                     "src/preprocessing/drives.py": 2,
                     "src/storage/broadcast_storage.py": 2,
                     "src/storage/sidecar.py": 1,
-                    "src/storage/telemetry_query.py": 3,
                     "src/validation/evidence.py": 1,
                     "tools/fuel_comp_fit.py": 2,
                     "tools/fuel_comp_samples.py": 1,

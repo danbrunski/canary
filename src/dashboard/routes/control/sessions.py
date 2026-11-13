@@ -24,7 +24,7 @@ from src.dashboard.routes.stored_sessions import (
     build_stored_session_router,
     sessions_payload,
 )
-from src.storage.sessions import filter_sessions, list_sessions, summarize_session
+from src.storage.sessions import list_sessions, summarize_session
 
 
 def _guard_active_capture(ctx: ControlContext, session_id: str) -> None:
@@ -70,8 +70,9 @@ def build_router(ctx: ControlContext) -> APIRouter:
         limit: int | None = Query(default=None, ge=1, le=1000),
         captures: bool = False,
     ) -> dict[str, Any]:
-        sessions = filter_sessions(
-            list_sessions(config.collection.storage_path, captures=captures),
+        sessions = list_sessions(
+            config.collection.storage_path,
+            captures=captures,
             since=since,
             until=until,
             limit=limit,

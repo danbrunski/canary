@@ -29,16 +29,19 @@ that finds nothing at the ``can:`` decode.
 from __future__ import annotations
 
 import json
+import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
 import duckdb
 
 from src.decode.slices import sentinel_channel
-from src.session import parse_session_timestamp
+from src.session import classify_session_name, parse_session_timestamp
+from src.storage.session_files import PARQUET_PATTERN
 
 if TYPE_CHECKING:
     from src.decode.bindings import Bindings, Signal
@@ -75,6 +78,92 @@ _DEFAULT_ROW_LIMIT = 5_000
 #: is generous rather than the 5k default: a multi-hour drive at 10 Hz across
 #: 3 channels is still well under it.
 _ANALYSIS_ROW_LIMIT = 200_000
+
+
+#: A chunk's name is what :data:`~src.storage.session_files.PARQUET_PATTERN`
+#: matches; the walk below tests names itself (a ``startswith`` and an
+#: ``endswith`` where ``fnmatch`` would cost more than the rest of the loop), so
+#: it splits the one pattern at its one ``*`` rather than spelling it again.
+_CHUNK_PREFIX, _star, _CHUNK_SUFFIX = PARQUET_PATTERN.partition("*")
+
+#: What to do with one directory of the storage tree: ``(collect, descend)``,
+#: its own chunks and/or the directories inside it. ``(False, False)`` skips it
+#: without listing it. Called with the directory's name and whether it is the
+#: storage root.
+_Visit = Callable[[str, bool], tuple[bool, bool]]
+
+
+def _chunk_files(root: Path, visit: _Visit) -> list[str]:
+    """The ``telemetry-*.parquet`` paths :data:`_Visit` selects under ``root``,
+    in :class:`~pathlib.Path` order (what ``sorted`` of the ``Path`` objects
+    gives).
+
+    One listing per directory it enters, none for a directory ``visit`` skips.
+    ``sorted(root.rglob(...))`` listed every directory under the root (every
+    ``_archive`` session, every capture) and built and compared a ``Path`` per
+    chunk, to throw most away (R23.2). A root that is absent or unreadable is
+    an empty tree, as it was for ``rglob``.
+    """
+    groups: list[tuple[Path, list[str]]] = []
+    pending: list[tuple[Path, bool]] = [(root, True)]
+    while pending:
+        directory, is_root = pending.pop()
+        collect, descend = visit(directory.name, is_root)
+        if not (collect or descend):
+            continue
+        names: list[str] = []
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    name = entry.name
+                    if name.startswith(_CHUNK_PREFIX) and name.endswith(_CHUNK_SUFFIX):
+                        names.append(name)
+                    elif descend and entry.is_dir(follow_symlinks=False):
+                        pending.append((directory / name, False))
+        except OSError:
+            continue
+        if collect and names:
+            groups.append((directory, names))
+    return _in_path_order(groups)
+
+
+def _in_path_order(groups: list[tuple[Path, list[str]]]) -> list[str]:
+    """``directory / name`` for every name, ordered as ``Path`` objects order.
+
+    ``Path`` ordering compares part by part, so chunks of one directory sort
+    by name and directories sort by their parts -- unless one directory lies
+    inside another that holds chunks too (``a/telemetry-0.parquet`` against
+    ``a/b/telemetry-0.parquet``: ``b`` sorts before ``telemetry-0.parquet``),
+    when the order depends on the names and the ``Path`` sort is the answer.
+    Sorting 37k ``Path`` objects was most of the walk's time.
+    """
+    keyed = sorted(
+        ((directory.parts, directory, names) for directory, names in groups),
+        key=lambda group: group[0],
+    )
+    nested = any(later[0][: len(earlier[0])] == earlier[0] for earlier, later in pairwise(keyed))
+    if nested:
+        return [
+            str(path)
+            for path in sorted(directory / name for _, directory, names in keyed for name in names)
+        ]
+    paths: list[str] = []
+    for _, directory, names in keyed:
+        prefix = str(directory / "x")[:-1]  # the directory and its separator (none for ".")
+        paths.extend(prefix + name for name in sorted(names))
+    return paths
+
+
+def _named(session: str) -> _Visit:
+    """:data:`_Visit` for one session by directory name, at any depth under the
+    root and under any ``_`` directory (``_archive``): its chunks are collected,
+    and the sessions beside it are never listed. A directory named like a
+    session is a session, not a layer, so nothing below it is searched."""
+
+    def visit(name: str, is_root: bool) -> tuple[bool, bool]:
+        return name == session, is_root or classify_session_name(name) is None
+
+    return visit
 
 
 class QueryValidationError(ValueError):
@@ -236,13 +325,20 @@ class TelemetryQuery:
         ``engine-tuning-support.md`` Phase 2) need that escape hatch; only the
         unscoped sweep excludes them.
 
-        The directory walk itself (``rglob``) always touches every session's
-        directory entries — that's just filesystem metadata, cheap even for a
-        large corpus. The scoping win is downstream: fewer paths handed to
-        DuckDB's ``parquet_scan``, so it never opens/parses parquet content
-        for sessions outside the requested scope. ``session`` matches the
-        immediate parent directory name exactly (works regardless of
-        profile-scoping depth between the storage root and the session dirs).
+        The walk (:func:`_chunk_files`) lists each directory once and only the
+        ones the query needs (R23.2): an unscoped sweep never enters a ``_``
+        directory (its ~54k ``_archive`` chunks on the dev corpus), a
+        date-filtered one never lists a session outside the range, and a named
+        one lists only the layers above the sessions and the session itself.
+        ``rglob`` listed every directory and built a ``Path`` per chunk to
+        discard most of them. The other half of the win is unchanged: fewer
+        paths handed to DuckDB's
+        ``parquet_scan``, so it never opens/parses parquet content for sessions
+        outside the requested scope. ``session`` matches the immediate parent
+        directory name exactly (works regardless of profile-scoping depth
+        between the storage root and the session dirs). A directory named like
+        a session (:func:`src.session.classify_session_name`) holds chunks and
+        is not searched for further sessions below it.
         ``since``/``until`` bound the session's own timestamp (parsed from its
         directory name), inclusive on both ends. A session directory that
         doesn't parse as a timestamp (e.g. stray non-session content) is kept
@@ -267,31 +363,25 @@ class TelemetryQuery:
             if self._catalog is not None:
                 row = self._catalog.get_session(session)
                 if row is not None and Path(row.path).is_dir():
-                    return [str(p) for p in sorted(Path(row.path).glob("telemetry-*.parquet"))]
-            return [
-                str(p)
-                for p in sorted(self._storage_path.rglob("telemetry-*.parquet"))
-                if p.parent.name == session
-            ]
+                    return [str(p) for p in sorted(Path(row.path).glob(PARQUET_PATTERN))]
+            return _chunk_files(self._storage_path, _named(session))
 
-        matches: list[str] = []
-        for p in sorted(self._storage_path.rglob("telemetry-*.parquet")):
-            session_name = p.parent.name
-            relative_dirs = p.relative_to(self._storage_path).parts[:-1]
-            if any(part.startswith("_") for part in relative_dirs):
-                continue
-            if date_filtered:
-                ts = self._catalog_started_at(session_name) if self._catalog is not None else None
-                if ts is None:
-                    ts = _parse_session_timestamp(session_name)
-                if ts is None:
-                    continue
-                if since_dt is not None and ts < since_dt:
-                    continue
-                if until_dt is not None and ts > until_dt:
-                    continue
-            matches.append(str(p))
-        return matches
+        def dated(name: str, is_root: bool) -> tuple[bool, bool]:
+            if not is_root and name.startswith("_"):
+                return False, False
+            if not date_filtered:
+                return True, True
+            ts = self._catalog_started_at(name) if self._catalog is not None else None
+            if ts is None:
+                ts = _parse_session_timestamp(name)
+            if ts is None:
+                # Not a dated session: a layer above the sessions (the profile
+                # directory) is looked through, its own chunks are no session's.
+                return False, True
+            inside = (since_dt is None or ts >= since_dt) and (until_dt is None or ts <= until_dt)
+            return inside, inside or is_root
+
+        return _chunk_files(self._storage_path, dated)
 
     def _catalog_started_at(self, session_name: str) -> datetime | None:
         """``started_at`` for a catalogued session, naive UTC (matching

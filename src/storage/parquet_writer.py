@@ -25,7 +25,7 @@ import json
 import logging
 import os
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -58,7 +58,13 @@ from src.storage.retention import (
 from src.storage.retention import (
     enforce_storage_cap as enforce_storage_cap,
 )
-from src.telemetry import CAN_SOURCE, DECODED_SOURCE, TelemetryRecord
+from src.telemetry import (
+    CAN_SOURCE,
+    DECODED_SOURCE,
+    TelemetryRecord,
+    metadata_json,
+    split_value,
+)
 
 log = logging.getLogger(__name__)
 
@@ -240,6 +246,13 @@ class ParquetTelemetryWriter:
         the arming gate withheld it (a parked Pi, 2026-10-04). A CAN frame
         the change-only filter drops still counts as recorded: the session
         is recording that bus, it just keeps one row per change."""
+        recorded = self._accept(record)
+        return recorded, (self.publish_due() if recorded else None)
+
+    def _accept(self, record: TelemetryRecord) -> bool:
+        """Everything :meth:`write_accepting` does to a record but the periodic
+        publish: session rotation, the arming gate, the change-only filter and
+        the buffer. ``False`` when the arming gate withheld it."""
         if record.source == DECODED_SOURCE:
             raise ValueError(
                 f"refusing to store decoded:{record.channel}: decoded rows are never stored "
@@ -248,23 +261,40 @@ class ParquetTelemetryWriter:
         self._rotate_if_record_gap(record)
         self._rotate_if_engine_run_time_reset(record)
         if self.arming_gate is not None and not self.arming_gate.observe(record):
-            return False, None
+            return False
         if self.can_storage.is_change_only and not self._can_filter.keep_record(record):
             self.can_frames_suppressed += 1
             self.can_frames_suppressed_total += 1
-            return True, self.publish_due()
+            return True
         self._buffer.append(record)
         self.rows_written += 1
-        return True, self.publish_due()
+        return True
 
     def write_many(self, records: Iterable[TelemetryRecord]) -> list[Path]:
-        """Write each record; :attr:`last_accepted` is then the ones recorded."""
+        """Write each record; :attr:`last_accepted` is then the ones recorded.
+
+        The periodic publish (:meth:`publish_due`) runs once for the batch (one
+        that recorded something), not once per record: it reads the clock and
+        walks the in-flight chunk each time, which was a call per stored row
+        (R23.1). The one exception keeps
+        the ``max_rows`` bound exact: the record that fills the buffer to
+        ``max_rows`` publishes it there, so a batch longer than the room left
+        still cuts its chunk at ``max_rows`` as record-by-record writing did.
+        The interval check (``flush_interval_seconds``, seconds) is made at the
+        end of the batch.
+        """
         files: list[Path] = []
         accepted: list[TelemetryRecord] = []
         for record in records:
-            recorded, flushed = self.write_accepting(record)
-            if recorded:
-                accepted.append(record)
+            if not self._accept(record):
+                continue
+            accepted.append(record)
+            if len(self._buffer) == self.max_rows:
+                flushed = self.publish_due()
+                if flushed is not None:
+                    files.append(flushed)
+        if accepted:  # a batch the arming gate withheld never ticked the publish
+            flushed = self.publish_due()
             if flushed is not None:
                 files.append(flushed)
         self.last_accepted = accepted
@@ -594,10 +624,9 @@ def write_records_to_parquet(
         nonlocal chunk_index
         if not buffer:
             return
-        rows = [r.parquet_row() for r in buffer]
-        table = _PA.Table.from_pylist(
-            rows,
-            schema=TELEMETRY_SCHEMA if can_storage is None else chunk_schema(can_storage, buffer),
+        table = records_to_table(
+            buffer,
+            TELEMETRY_SCHEMA if can_storage is None else chunk_schema(can_storage, buffer),
         )
         path = out_dir / f"{chunk_name}-{chunk_index:05d}.parquet"
         _write_table_atomic(table, path, compression=compression)
@@ -613,6 +642,59 @@ def write_records_to_parquet(
             flush()
     flush()  # final partial chunk
     return files
+
+
+def records_to_table(records: Sequence[TelemetryRecord], schema: Any) -> Any:
+    """``records`` as a table of ``schema``, built column by column.
+
+    The table ``pa.Table.from_pylist([r.parquet_row() for r in records],
+    schema=schema)`` builds, equal in values, schema (footer metadata included),
+    nullability, column order and the exact ``metadata_json`` text, from one
+    pass into nine column lists. The row-dict route built a dict per record,
+    then ``from_pylist`` took each column back out of every dict (R23.1; the
+    measurement is in ``docs/roadmap/tasks/R23-collection-and-storage-hot-path.md``).
+    It runs in the publish thread, where it holds the GIL the collector loop
+    needs, so its cost is the collector's. The value split and the metadata
+    spelling are :func:`src.telemetry.split_value` and
+    :func:`src.telemetry.metadata_json`, the same ones ``parquet_row`` uses.
+    A schema column this does not produce is filled with nulls, as
+    ``from_pylist`` fills a key a row lacks.
+    """
+    timestamps: list[datetime] = []
+    sources: list[str] = []
+    channels: list[str] = []
+    numbers: list[float | None] = []
+    texts: list[str | None] = []
+    flags: list[bool | None] = []
+    units: list[str] = []
+    payloads: list[bytes | None] = []
+    metadata: list[str] = []
+    for record in records:
+        number, text, flag = split_value(record.value)
+        timestamps.append(record.timestamp)
+        sources.append(record.source)
+        channels.append(record.channel)
+        numbers.append(number)
+        texts.append(text)
+        flags.append(flag)
+        units.append(record.unit)
+        payloads.append(record.payload)
+        metadata.append(metadata_json(record.metadata))
+    columns: dict[str, list[Any]] = {
+        "timestamp": timestamps,
+        "source": sources,
+        "channel": channels,
+        "value_number": numbers,
+        "value_text": texts,
+        "value_bool": flags,
+        "unit": units,
+        "payload": payloads,
+        "metadata_json": metadata,
+    }
+    missing: list[None] = [None] * len(timestamps)
+    return _PA.Table.from_arrays(
+        [columns.get(name, missing) for name in schema.names], schema=schema
+    )
 
 
 def chunk_schema(can_storage: CanStorage, records: Iterable[TelemetryRecord]) -> Any:
@@ -641,8 +723,7 @@ def _write_records_atomic(
 ) -> None:
     """One session chunk: ``records`` as a table, published by
     :func:`_write_table_atomic`."""
-    rows = [record.parquet_row() for record in records]
-    table = _PA.Table.from_pylist(rows, schema=chunk_schema(can_storage, records))
+    table = records_to_table(records, chunk_schema(can_storage, records))
     _write_table_atomic(table, path, compression="snappy")
 
 

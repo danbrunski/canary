@@ -25,7 +25,7 @@ session-name parser.
 
 ## Performance
 
-- [ ] **R23.1 The parquet chunk is built row by row, with a `json.dumps` per
+- [~] **R23.1 The parquet chunk is built row by row, with a `json.dumps` per
   row.** `TelemetryRecord.parquet_row` (`src/telemetry.py`) builds a dict per
   record and serializes `metadata` with `json.dumps(…, sort_keys=True)`;
   `_write_records_atomic` and `write_records_to_parquet`
@@ -38,18 +38,91 @@ session-name parser.
   (`Table.equals`). `write_accepting` also calls `publish_due()` per record,
   and `write_many` loops it per record instead of once per batch.
   This runs in the publish thread and holds the GIL the collector loop needs.
-  - [ ] Measure on the Pi: stored rows per second in a `tuning` capture and
+  - [~] Measure on the Pi: stored rows per second in a `tuning` capture and
     time per chunk publish (`/status` storage stats, or a py-spy sample).
-  - [ ] `records_to_table(records, schema)` in `parquet_writer.py`: one pass,
-    nine column lists, an `lru_cache` on the metadata JSON keyed by the sorted
-    items. `parquet_row()` stays for one-row callers.
-  - [ ] `write_many` calls `publish_due()` once per batch.
-  - [ ] A parity test: for a mixed batch (CAN, OBD, DID, memory, sensor rows)
-    the new table equals the `from_pylist` one.
+    **Laptop numbers on the real pulled corpus, not Pi numbers** (2026-11-12,
+    no Pi access): the batch is 10,000 records strided from three stored chunks
+    of `_capture-tuning-2026-11-12T034249` (`~/canary-data/sessions/
+    nissan-xterra-2008`; read back into `TelemetryRecord`s: CAN 8,270, sensor
+    748, OBD 522 of which `mem:` 186 and `DID_` 125, GPS 404, derived 56), and a
+    second, sensor-heavy one from `_capture-fuel-pulsation-2026-10-08T210012`
+    (CAN 6,885, sensor 3,002). Medians of 15 repetitions per process, HEAD
+    (`6aecb13c`) and the working tree alternated back to back, 5 rounds (4 for
+    the second batch), machine load ~5. Before, on the tuning batch:
+    `parquet_row` 3.01 µs per row + `from_pylist` 0.76 = **3.77 µs (265k rows/s)**
+    to build the table; the end-to-end chunk (`_write_records_atomic`: build,
+    snappy write, two fsyncs, rename) **4.79 µs per row, 47.9 ms per 10,000-row
+    chunk (209k rows/s)**, the build being 79 % of it. The review's 37 µs per
+    row did not reproduce on this machine and corpus (its dumps share did: the
+    memo below is most of the win). Still to measure on the Pi, not while it
+    collects: stored rows per second in a `tuning` capture and the publish time
+    per chunk from `/status` storage stats, to see what the 3 µs per row (and
+    the GIL it holds against the collector loop) is there.
+  - [x] `records_to_table(records, schema)` in `parquet_writer.py`: one pass,
+    nine column lists; the metadata JSON is memoized (`lru_cache`, 4,096
+    entries, keyed by the sorted items) in `src/telemetry.metadata_json`, the
+    one spelling both `parquet_row()` (which stays) and the column build call,
+    beside `split_value` for the value columns. The memo keys only metadata
+    whose values are `str`, `int` or `None`: `True == 1 == 1.0` as a Python key
+    but `true`, `1` and `1.0` as JSON, so a `bool` or `float` value serializes
+    directly (a float, `acquired_at`, is also unique per row, which no memo
+    helps), and an unhashable value is the same direct path, never an error.
+    Tuning batch: 8,245 memo hits, 25 misses, 1,730 rows direct, of 10,000.
+    After, same conditions: build **2.19 µs per row (457k rows/s)** (3.77
+    before); end-to-end **2.90 µs per row, 29.0 ms per chunk (345k rows/s)**
+    (4.79 / 47.9 ms): **-39 %**. Sensor-heavy batch (30 % float metadata, which
+    never memoizes): end-to-end 8.93 -> 6.05 µs per row (-32 %), build 7.11 ->
+    4.53. `write_table_atomic` (snappy + fsyncs, 7.3 ms per chunk on this disk)
+    is unchanged, as it should be. Scripts and raw runs are the session
+    scratchpad's (`r231_bench.py`, `r231_run.sh`, `r231_ab.txt`,
+    `r231_ab_pulsation.txt`).
+  - [x] `write_many` calls `publish_due()` once per batch (one that recorded
+    something: a batch the arming gate withheld never ticked it, and still does
+    not). One exception, to keep `max_rows` exact: the record that fills the
+    buffer to `max_rows` publishes it there, so a batch longer than the room
+    left still cuts its chunk at `max_rows` (the daemon's batches are up to
+    1,024 records; a strictly-once call would let a chunk overshoot by that
+    much). `write_accepting`/`write` still publish per call. Side effect:
+    `/status` `publishes_deferred` now counts per batch (plus the `max_rows`
+    moment), not per record, so it reads far lower than before for the same
+    stall; don't trend it across this commit. A background-mode chunk can now
+    overshoot `max_rows` by up to one batch while a publish is in flight (the
+    inline path stays exact). Pinned by
+    `tests/test_records_to_table.py::test_write_many_publishes_once_per_batch`,
+    `..._reads_the_clock_once_per_batch_not_per_record`,
+    `..._still_cuts_a_chunk_at_max_rows_inside_a_long_batch`,
+    `..._chunks_like_a_record_at_a_time_writer` (same chunks, row for row, as
+    writing the batch one record at a time), `..._flushes_an_aged_buffer_at_the_end_of_the_batch`.
+  - [x] A parity test: `tests/test_records_to_table.py`. A mixed batch (CAN
+    data, error and remote frames; Mode 01 int, float, bool and no-value rows;
+    `DID_` hex text; `mem:` with payload and float metadata; sensor, GPS, IMU,
+    derived, K-line and UpRev rows; metadata empty, int-only, float-bearing,
+    insertion-order-reversed, unhashable, NaN, non-ASCII) gives a table with
+    `.equals(check_metadata=True)` the `from_pylist` one, equal schema, field
+    nullability and column order, the same `chunk_schema` footer, and the
+    `metadata_json` column equal to `json.dumps(r.metadata, sort_keys=True)` per
+    record (an oracle independent of `parquet_row`, which shares the helper: a
+    mutation that let `bool`/`float` into the memo failed three tests, and only
+    this oracle caught it in the table test). The two written files are
+    byte-identical. Also over **real data**: `r231_realdata_parity.py` re-built
+    72 stored chunks (562,376 rows; 7 sessions; CAN, OBD, GPS, sensor, derived,
+    old `decoded` rows) from their `TelemetryRecord`s, and every column of the
+    new table equals the stored chunk's, `metadata_json` text included (what the
+    old writer produced), with 0 mismatching chunks.
   - Must not change: column order, nullability, the `chunk_schema` footer, the
     `sort_keys=True` spelling of `metadata_json`, the arming gate and rotation.
+    Held by the parity tests above, and by the 128 test files that import
+    the writer, `storage.sessions`, the query, `parquet_row` or `write_many`
+    (`test_parquet_writer.py`, `test_background_chunk_publish.py`,
+    `test_change_only_can_storage.py`, `test_log_to_parquet.py`,
+    `test_parked_state.py`, `test_daemon.py`, ...): 2,266 passed, 1 skipped, 1
+    failed, the failure being `test_source_rules.py::test_the_allowlist_only_shrinks
+    [parquet-glob-literal]`, a rule in the concurrent agent's uncommitted
+    R24.8 work, which now sees `src/storage/telemetry_query.py` without its three
+    `"telemetry-*.parquet"` literals (R23.2 imports `PARQUET_PATTERN`): its
+    allowlist line `"src/storage/telemetry_query.py": 3` is to be removed.
 
-- [ ] **R23.2 Three request paths walk the whole corpus to answer a question
+- [~] **R23.2 Three request paths walk the whole corpus to answer a question
   about the newest session.**
   - `storage.sessions.latest_session` evaluates `has_telemetry` (a glob and
     stats) for every session, then returns the last. `/status`, the dashboard
@@ -64,16 +137,85 @@ session-name parser.
     date-filtered query and parses the parent directory's name once per chunk.
   Locally (37 sessions, 2,002 chunks) `latest_session` takes 10 ms. The Pi
   holds far more.
-  - [ ] Time the three calls against a pulled copy of the Pi's sessions.
-  - [ ] `latest_session`: walk newest first and return the first session with
-    telemetry. Same answer, one `has_telemetry` in the common case.
-  - [ ] `list_sessions`: apply `since` / `until` / `limit` to the parsed
-    directory names, then summarize the survivors.
-  - [ ] `_session_paths`: list the root once, filter directories by name and
-    date, glob inside the matches.
+  - [x] Time the three calls against a pulled copy of the Pi's sessions.
+    **Laptop numbers on the real pulled corpus, not Pi numbers** (2026-11-12):
+    `~/canary-data/sessions/nissan-xterra-2008`, read only: 264 directories (182
+    live sessions, 82 `_` ones), 91,313 chunk files (37,429 in live sessions,
+    15,829 in `_capture-*` / `_tuning-*`, 38,055 under `_archive/`). Warm
+    dentry cache; each figure is the median over 3 alternated rounds (HEAD
+    `6aecb13c` then the working tree, back to back) of the median of 3 calls;
+    load was ~5 in round 1 and ~1 in rounds 2-3, so the per-round figures are
+    shown. (`_session_paths` in the item is `TelemetryQuery._matching_files`.)
+    Script: `r232_bench.py` / `r232_run.sh` in the session scratchpad.
+
+    | call | before ms | after ms | per round, before / after |
+    |---|---|---|---|
+    | `latest_session` | 25.7 | 4.4 (5.9x) | 43.0, 25.7, 22.4 / 4.4, 4.5, 4.1 |
+    | `list_sessions(limit=20)` (route shape: filter after) | 537 | 23.4 (23x) | 867, 537, 440 / 23.4, 24.1, 21.3 |
+    | `list_sessions(captures, limit=20)` | 216 | 82 (2.6x) | 375, 216, 190 / 82, 83, 74 |
+    | `list_sessions(since=2026-11-01)` (26 sessions) | 456 | 24.2 (19x) | 816, 456, 438 / 24.2, 25.0, 23.3 |
+    | `list_sessions()` unbounded (182 sessions) | 438 | 465 (no bound to apply) | 851, 438, 433 / 467, 465, 442 |
+    | `_matching_files()` unscoped (37,429 paths) | 3,570 | 38.9 (92x) | 7,160, 3,570, 3,509 / 38.9, 38.7, 41.1 |
+    | `_matching_files(since, until)` (5,285) | 4,026 | 14.9 (270x) | 8,248, 4,026, 3,943 / 14.5, 14.9, 15.4 |
+    | `_matching_files(since=2026-11-01)` (1,571) | 3,985 | 11.4 (348x) | 7,177, 3,985, 3,913 / 11.7, 11.4, 11.0 |
+    | `_matching_files()` from the parent root | 3,971 | 37.6 (106x) | 3,662, 3,971, 4,223 / 37.8, 37.2, 37.6 |
+
+    Where it went: `latest_session` ran `has_telemetry` for 182 sessions and
+    now runs it once (the empty newest directory `2026-11-12T064649` is
+    skipped to `2026-11-12T040404`, as before). `rglob` listed 91k chunk files
+    to keep 37k and built and sorted a `Path` for each; the sort of 37k `Path`
+    objects was 70 % of the new walk's first version, so chunks are now ordered
+    per directory, and by `Path` only when one directory holds another that
+    holds chunks too. Not measured: the Pi's own figures (its corpus is larger
+    and its disk slower), and the end-to-end `GET /control/sessions?limit=`
+    request (the route still has the old call shape, below).
+  - [x] `latest_session`: walks `iter_sessions` newest first (parsed start
+    time, never name) and returns the first session with data; one
+    `has_telemetry` in the common case
+    (`tests/test_session_walks.py::test_latest_session_asks_once_when_the_newest_holds_data`:
+    30 sessions, 1 call). Old vs new over the **real corpus**: identical at
+    three roots (`r232_equiv.py`).
+  - [x] `list_sessions`: takes `since` / `until` / `limit`, applied to the parsed
+    directory names before `summarize_session` runs, so only the survivors are
+    summarized (`test_list_sessions_summarizes_only_what_it_returns`); the
+    bounds share one predicate (`_within`) with `filter_sessions`, which stays
+    for a caller holding summaries. Same answer as
+    `filter_sessions(list_sessions(root), ...)`: 96 parametrized cases in
+    `test_list_sessions_with_bounds_is_the_old_list_then_filter` against a
+    verbatim copy of the old `filter_sessions`, and over the **real corpus**
+    71 bound / limit / captures cases (1,212 summaries) identical.
+    `GET /control/sessions` (`get_control_sessions`) now passes its bounds to
+    `list_sessions` instead of filtering every summary afterwards
+    (`tests/test_control_api.py`, `tests/test_session.py` pass).
+  - [x] `_session_paths` (`TelemetryQuery._matching_files`): `_chunk_files`
+    lists each directory once and only the ones the query needs: an unscoped
+    sweep never enters a `_` directory, a dated one never lists a session
+    outside the range (catalog lookup once per directory, it was once per
+    chunk), a named one lists the layers above the sessions and the session.
+    Names are parsed once per directory. A directory named like a session is a
+    session: nothing below it is searched for further sessions when it is
+    pruned (a named lookup, a dated sweep outside the range). Unscoped, every
+    non-`_` directory is still listed in full, so a chunk nested below a
+    session directory is still found, as `rglob` found it. 35 scenarios (unscoped, dated
+    with naive / offset / session-id bounds, exact instant, empty, named live /
+    capture / archived / absent, from the vehicle directory and the root above
+    it) over the **real corpus**: 125,048 paths, same order, identical to
+    HEAD's. Over the synthetic tree, 25 scenarios x 2 roots plus 25 with a
+    catalog whose start for one session differs from its name.
   - Must not change: captures count for `latest_session`; an empty newest
     directory is skipped; `_`-prefixed directories stay out of unscoped
     queries. Order by `session_started_at`, never by name.
+    `tests/test_session_walks.py` (189 tests) holds the old answers verbatim
+    and runs them against the new over a tree with a capture newer than every
+    live session (`_capture-aaa-` sorts before `_tuning-` by name), an empty
+    newest directory, a zero-byte chunk, `_archive` and `_replay-*`, chunk
+    lookalikes (`.tmp`, `xtelemetry-...`), a directory holding a directory that
+    holds chunks, and `loose` / `loose-b` (where `-` < `/` as characters but not
+    as path parts). Three mutations were each caught: the nested-directory order
+    fallback removed (5 failed), a bound made exclusive (6), `latest_session`
+    scanning oldest first (2, by the call-count spies). `tests/test_source_rules.py`'s
+    sessions-ordered-by-name ratchet: none of the new code lists a directory
+    into `sorted`/`min`/`max`, so no count changes.
 
 - [ ] **R23.3 The OBD loop re-derives eligibility for every request on every
   tick.** `_loop_request_verdict` (`can_obd_loop.py`),
