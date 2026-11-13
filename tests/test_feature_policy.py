@@ -36,8 +36,8 @@ from src.decode.bindings import (
 )
 from src.decode.dids import load_repo_did_map
 from src.features.feature_pipeline import (
-    _SEGMENTER_SIGNAL_COLUMNS,
     MEMORY_CHANNEL_EXCLUSION,
+    SEGMENTER_SIGNAL_COLUMNS,
     FeaturePolicy,
     build_feature_spec,
     candidate_feature_columns,
@@ -243,7 +243,7 @@ def test_every_decoded_segmenter_input_stays_trainable() -> None:
         for sig in load_bindings(REPO_BINDINGS).signals
         if is_trainable_binding(sig)
     }
-    for value in _SEGMENTER_SIGNAL_COLUMNS.values():
+    for value in SEGMENTER_SIGNAL_COLUMNS.values():
         for column in (value,) if isinstance(value, str) else value:
             if column.startswith("decoded:"):
                 assert column in trainable, column

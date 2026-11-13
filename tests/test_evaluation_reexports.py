@@ -79,14 +79,13 @@ REEXPORTS = {
     "SessionSpan": "preprocessing.drives",
 }
 
-#: Defined in ``evaluation`` itself (reporting strata and its result type).
+#: Defined in ``evaluation`` itself (the reporting strata).
 OWNED_HERE = {
     "AMBIENT_BANDS_C",
     "AMBIENT_CHANNEL",
     "BARO_BANDS_KPA",
     "BARO_CHANNEL",
     "UNMEASURED",
-    "DriveDetectorResult",
     "band_of",
     "observed_median",
 }

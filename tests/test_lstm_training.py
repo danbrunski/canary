@@ -13,7 +13,6 @@ from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.config.models import LSTMAutoencoderConfig
 from src.models.lstm_training import (
-    LSTMAutoencoderManifest,
     calibrate_lstm_thresholds,
     default_lstm_manifest_path,
     load_lstm_autoencoder_model,
@@ -21,14 +20,15 @@ from src.models.lstm_training import (
 )
 from src.models.manifest import validate_manifest_common
 from src.models.sequence_dataset import SequenceWindowDataset
+from src.models.sequence_registry import SequenceAutoencoderManifest
 from src.models.sequence_training import SequenceThresholdCalibration
+from src.paths import REPO_ROOT
 from src.preprocessing.normalization import ZScoreScaler
 from tests.builders import sequence_training_frame
 
 # Torch training: not a commit gate (see the pyproject test tiers).
 pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
 
@@ -281,7 +281,7 @@ def test_manifest_round_trip() -> None:
         allow_in_sample_calibration=True,
     )
 
-    restored = LSTMAutoencoderManifest.from_dict(trained.manifest.to_dict())
+    restored = SequenceAutoencoderManifest.from_dict(trained.manifest.to_dict())
 
     assert restored == trained.manifest
 

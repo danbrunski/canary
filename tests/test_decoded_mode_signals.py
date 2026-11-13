@@ -35,7 +35,7 @@ from src.decode.engineering import (
     assert_scalable,
     physical_series,
 )
-from src.features.feature_pipeline import _SEGMENTER_SIGNAL_COLUMNS, segment_or_constant
+from src.features.feature_pipeline import SEGMENTER_SIGNAL_COLUMNS, segment_or_constant
 from src.features.live import LiveFeatureSource
 from src.preprocessing.segmenter import (
     DEFAULT_SIGNAL_COLUMNS,
@@ -241,7 +241,7 @@ def test_live_idle_integrator_uses_broadcast_rpm_in_rpm(
 
 @pytest.mark.parametrize(
     "table",
-    [DEFAULT_SIGNAL_COLUMNS, _SEGMENTER_SIGNAL_COLUMNS, _RANGE_CHANNELS],
+    [DEFAULT_SIGNAL_COLUMNS, SEGMENTER_SIGNAL_COLUMNS, _RANGE_CHANNELS],
     ids=["default", "training", "dataset-health"],
 )
 def test_every_decoded_threshold_candidate_has_pinned_scaling(

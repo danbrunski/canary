@@ -20,7 +20,7 @@ from src.analysis.refit import Surface2DRecipe, fit_recipe  # noqa: E402
 from src.behavior.behavior_models import (  # noqa: E402
     BehaviorModels,
     DeviationConfig,
-    NoiseFloor,
+    ResolutionFloor,
     SyntheticFault,
     ValidationCriteria,
     dump_behavior_models,
@@ -59,7 +59,7 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, list[
     criteria = ValidationCriteria(
         kind="predictive_surface",
         unit="deg",
-        noise_floor=NoiseFloor(value=0.5, basis="LSB"),
+        noise_floor=ResolutionFloor(value=0.5, basis="LSB"),
         meaningful_deviation=5.0,
         meaningful_deviation_basis="test",
         min_eligible_observations=100,

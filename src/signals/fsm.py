@@ -169,31 +169,6 @@ def extract_param_names(pdf: Any, page_number: int, *, max_x: float = 135.0) -> 
     return out
 
 
-def extract_pdf_section(
-    pdf_path: Path, pages: list[int], *, max_x: float = 135.0
-) -> list[dict[str, str | int]]:
-    """Extract param names from a contiguous section of a PDF.
-
-    Returns deduplicated `[{"name": ..., "page": ...}]`, preserving the
-    page on which the name was first seen so we can cite the FSM.
-    """
-    # pdfplumber is the dev extra (tools/extract_fsm_signals.py). Imported here,
-    # not at module level: the daemon reaches PHYSICAL_LIMITS through the
-    # quality gate, and a fresh Pi without dev tools crash-looped on it
-    # (2026-10-11).
-    import pdfplumber
-
-    seen: set[str] = set()
-    out: list[dict[str, str | int]] = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page_no in pages:
-            for name in extract_param_names(pdf, page_no, max_x=max_x):
-                if name not in seen:
-                    seen.add(name)
-                    out.append({"name": name, "page": page_no})
-    return out
-
-
 # ---------------------------------------------------------------------------
 # Spec / expected-range extraction (the right side of the table)
 # ---------------------------------------------------------------------------
@@ -574,7 +549,7 @@ def extract_physical_limits_from_fsm(
 def extract_pdf_section_with_specs(
     pdf_path: Path, pages: list[int], *, max_x: float = 135.0
 ) -> list[dict[str, Any]]:
-    """Like `extract_pdf_section` but also collects the spec text per param.
+    """Extract param names from a contiguous PDF section, with the spec text per param.
 
     The spec column in Nissan FSM tables is to the right of the name column;
     a single param often spans multiple sub-rows (one per operating condition),

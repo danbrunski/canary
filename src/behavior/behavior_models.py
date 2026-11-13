@@ -605,7 +605,7 @@ class ResolutionFloor(_Strict):
     Named ``NoiseFloor`` until R05.14, which collided with
     :class:`src.analysis.noise_floor.NoiseFloor` — the measured null-run
     spread tuning comparisons gate on, a different quantity with a refusing
-    ``conditions`` rule. The old name remains an alias for existing imports.
+    ``conditions`` rule. The old name is gone (R27.12).
 
     ``basis`` is required because a floor measured under one condition is
     routinely quoted against another (the WOT timing floor is 16x smaller
@@ -615,10 +615,6 @@ class ResolutionFloor(_Strict):
 
     value: float = Field(gt=0)
     basis: str = Field(min_length=1)
-
-
-#: Pre-R05.14 name of :class:`ResolutionFloor`; kept so existing imports work.
-NoiseFloor = ResolutionFloor
 
 
 class SyntheticFault(_Strict):

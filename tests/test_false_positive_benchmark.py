@@ -23,12 +23,14 @@ from src.models.false_positive_benchmark import (
     _window_modes,
     benchmark_false_positives,
 )
-from src.models.lstm_training import TrainedLSTMAutoencoder, train_lstm_autoencoder
+from src.models.lstm_training import train_lstm_autoencoder
+from src.models.sequence_autoencoder_training import TrainedSequenceAutoencoder
 from src.models.sequence_dataset import SequenceWindow, SequenceWindowDataset
 from src.models.sequence_training import (
     ReconstructionErrorDistribution,
     SequenceThresholdCalibration,
 )
+from src.paths import REPO_ROOT
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config
@@ -36,7 +38,6 @@ from tests.configs import example_config
 # Torch training: not a commit gate (see the pyproject test tiers).
 pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
 FEATURE_COLUMNS = ("rpm", "speed")
@@ -87,7 +88,7 @@ def _dataset(frame: pd.DataFrame, sequence_length: int = 4) -> SequenceWindowDat
     )
 
 
-def _trained(**config_updates: Any) -> TrainedLSTMAutoencoder:
+def _trained(**config_updates: Any) -> TrainedSequenceAutoencoder:
     _torch()
     dataset = _dataset(_frame("train", rows=20, start="2026-05-12T00:00:00Z"))
     return train_lstm_autoencoder(

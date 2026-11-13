@@ -495,33 +495,72 @@ not measured.
   builders from five sources, then resolve each channel). The whole-file split
   of `isolation_forest.py` stays declined (R00, R10).
 
-- [ ] **R27.12 Dead symbols and small items.**
-  - No reference outside their own definition and `__all__`:
+- [~] **R27.12 Dead symbols and small items.** *Partly done 2026-11-13; the
+  rest is judgement or cold, left `[ ]` below.*
+  - [x] No reference outside their own definition and `__all__`:
     `spec_producibility.load_manifest_feature_columns`,
     `evaluation.DriveDetectorResult`, `preprocessing/derived.reduced_channels`,
-    `sequence_training.SequenceModelLike`.
-  - Test-only compatibility aliases: `behavior_models.NoiseFloor`
-    (`= ResolutionFloor`, and not `analysis.noise_floor.NoiseFloor`),
-    `sequence_calibration._block_maxima`,
-    `feature_transform._SEGMENTER_SIGNAL_COLUMNS`, the `LSTMAutoencoder*` and
-    TCN twins. Move the tests to the real names, then delete.
-  - `sequence_calibration.training_data_hash` caches by setting
-    `dataset._training_data_hash` on another class and reading it back with
-    `getattr`. It belongs on `SequenceWindowDataset`.
-  - `append_deviation_columns` runs over the whole 181-row live buffer each
-    tick, with a per-row `evaluate_2d` loop for the 2-D models: 14 ms per call
-    on the real `behavior_models.yaml`, in the worker. It may be limitable to
-    the rolling window, but eligibility reads `__roc` and `context:range_*`
-    lookbacks, so derive the safe slice from the models. Suspected only.
-  - `plausibility/limits.j1979_encoding_ranges`: 75 ms of input-free decoder
-    sweeps per `resolve_limits` call. `lru_cache`.
-  - `alerts/emitter.emit_behavior` / `emit_trend` re-list 12–13 keyword
-    arguments only to forward them to `AnomalyEvent.from_*`.
-  - `sequence_dataset._frame_mask_delta` is a segment × column × row Python
-    loop (1.7 s on 7.2 M cells against 0.47 s vectorized). Cold; do it only if
-    the corpus grows.
-  - Local copies of `src.coerce.optional_str` in
-    `models/retraining_policy.py` and `companion/discovery.py`.
+    `sequence_training.SequenceModelLike`. Re-grepped (`grep -rnw` over `src
+    scripts tools tests docs data`, the dashboard TS, `docs/mcp-server.md`, and
+    `grep -a` over `models/`, `data/`, `~/canary-data`: no pickle or manifest
+    names any of them). All four deleted, with their `__all__` entries and the
+    now-unused imports (`json`, `Protocol`). One test reference:
+    `tests/test_evaluation_reexports.py` listed `DriveDetectorResult` in
+    `OWNED_HERE` (the facade's `__all__` pin) and lost that line with the class.
+  - [x] Test-only compatibility aliases, tests moved to the real names, then
+    deleted:
+    - `behavior_models.NoiseFloor` (`= ResolutionFloor`): 7 test files
+      (`builders`, `axis_pairing`, `serving_contracts`, `bank_balance_persistence`,
+      `evaluate_behavior_models_script`, `behavior_validation`,
+      `behavior_resolution`) now import `ResolutionFloor`. The others that say
+      `NoiseFloor` import `analysis.noise_floor.NoiseFloor`, the real one.
+    - `sequence_calibration._block_maxima`: no reference at all; deleted.
+    - `feature_transform._SEGMENTER_SIGNAL_COLUMNS` and its re-export (import
+      and `__all__` entry) in `feature_pipeline`: `test_decoded_mode_signals`,
+      `test_preprocessing_segmenter`, `test_plausibility`, `test_feature_policy`
+      now use `SEGMENTER_SIGNAL_COLUMNS`; the `("_SEGMENTER_SIGNAL_COLUMNS",
+      ...)` pin in `test_feature_pipeline_boundaries` is gone.
+    - The twins: `lstm_training.{LSTMAutoencoderManifest,TrainedLSTMAutoencoder}`
+      and `tcn_training.{TCNAutoencoderManifest,TrainedTCNAutoencoder}`, plus
+      their four `src.models._EXPORTS` entries. The trainers' annotations say
+      `TrainedSequenceAutoencoder`; `test_lstm_training`, `test_model_manifest`
+      use `SequenceAutoencoderManifest`, `test_lstm_inference` and
+      `test_false_positive_benchmark` use `TrainedSequenceAutoencoder`. Both
+      real classes are what a pickle already names, so no artifact changes
+      (none of the names occur in `models/`). `LSTMAutoencoder*` classes in
+      `lstm_autoencoder.py` and the `*TrainingConfigLike` protocols are not
+      aliases and stay.
+    - Those three LSTM test files also read their own `REPO_ROOT =
+      Path(__file__)...`; they now import `src.paths.REPO_ROOT`.
+  - [x] `training_data_hash` now `SequenceWindowDataset.training_data_hash()`,
+    cached in the `_training_data_hash` the constructor already declares; no
+    `getattr`, no write from another class. Callers
+    (`sequence_calibration`, `sequence_autoencoder_training`) call the method;
+    the module function and its two re-exports (`sequence_training`,
+    `sequence_autoencoder_training` import) are gone. Same digest bytes
+    (`test_lstm_training` asserts manifest and calibration hashes match,
+    `sha256:` prefix).
+  - [ ] `append_deviation_columns` over the 181-row buffer: *suspected only*,
+    needs the safe slice derived from the models' `__roc` and `context:range_*`
+    lookbacks and a measurement. Not attempted.
+  - [x] `plausibility/limits.j1979_encoding_ranges`: the sweep is now an
+    `lru_cache`d private `_j1979_encoding_ranges`; the public function returns
+    `dict(...)` of it, so a caller that mutates the result cannot change the
+    next call's. Only caller is `resolve_limits`. No test patches
+    `MODE01_REGISTRY`. The 75 ms was taken from this item, not re-measured.
+  - [ ] `alerts/emitter.emit_behavior` / `emit_trend` keyword forwarding: the
+    item gives no design (a `**kwargs` forward loses the typed signature, a
+    parameter object changes every caller). Not attempted; judgement call.
+  - [ ] `sequence_dataset._frame_mask_delta` vectorization: item says cold, do
+    it only if the corpus grows. Not attempted.
+  - [ ] Local copies of `src.coerce.optional_str` in
+    `models/retraining_policy.py` and `companion/discovery.py`: **not
+    copies.** Both are `None if value in (None, "") else str(value)`;
+    `coerce.optional_str` keeps `""` as `""`. Swapping would turn an empty
+    `version` / `profile` / `session` / `source` / `model_version` into `""`
+    for the companion identity and the retraining feedback window. Either
+    rename them (`empty_to_none`) or move that variant into `src.coerce`; an
+    operator-side call on whether `""` should read as absent. Left as is.
 
 - [x] **R27.13 The IF runs its forest twice per tick, on an object-dtype row.**
   Found while doing R27.4 (2026-11-12), not yet measured on the Pi.

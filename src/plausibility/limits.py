@@ -41,6 +41,7 @@ import json
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -492,7 +493,16 @@ def j1979_encoding_ranges() -> dict[str, tuple[float, float, str, str, int]]:
     byte, so that reaches both ends. Status/bitmask/enum PIDs have no physical
     range and are left out (their tier still resolves via
     :func:`j1979_poll_tiers`).
+
+    The sweep takes 75 ms and has no input, so it runs once per process; the
+    caller gets its own copy, so mutating the result cannot change the next
+    call's.
     """
+    return dict(_j1979_encoding_ranges())
+
+
+@lru_cache(maxsize=1)
+def _j1979_encoding_ranges() -> dict[str, tuple[float, float, str, str, int]]:
     from src.collection.obd_registry import MODE01_REGISTRY
 
     out: dict[str, tuple[float, float, str, str, int]] = {}

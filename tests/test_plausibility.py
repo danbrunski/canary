@@ -810,11 +810,11 @@ def test_an_unexpected_start_failure_is_withheld_not_off(
 
 
 def test_offline_mode_labels_read_exactly_the_live_segmenter_columns() -> None:
-    from src.features.feature_pipeline import _SEGMENTER_SIGNAL_COLUMNS
+    from src.features.feature_pipeline import SEGMENTER_SIGNAL_COLUMNS
     from src.plausibility.offline import segmenter_channels, segmenter_decoded
 
     expected: set[str] = set()
-    for value in _SEGMENTER_SIGNAL_COLUMNS.values():
+    for value in SEGMENTER_SIGNAL_COLUMNS.values():
         expected |= {value} if isinstance(value, str) else set(value)
     assert set(segmenter_channels()) == expected
     assert {f"decoded:{name}" for name in segmenter_decoded()} == {

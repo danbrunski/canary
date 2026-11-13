@@ -22,7 +22,7 @@ from src.analysis.behavior_validation import (
 )
 from src.analysis.refit import default_recipes, fit_recipe
 from src.behavior.behavior_models import (
-    NoiseFloor,
+    ResolutionFloor,
     SyntheticFault,
     TransientControl,
 )
@@ -42,7 +42,7 @@ from tests.builders import (
 
 def test_resolution_inside_the_measured_noise_is_refused() -> None:
     with pytest.raises(ValueError, match="measured noise"):
-        behavior_resolution_spec(measured_noise=NoiseFloor(value=5.0, basis="measured"))
+        behavior_resolution_spec(measured_noise=ResolutionFloor(value=5.0, basis="measured"))
 
 
 def test_transient_control_must_be_shorter_than_the_sustained_duration() -> None:

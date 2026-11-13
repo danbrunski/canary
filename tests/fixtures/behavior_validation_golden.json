@@ -4603,7 +4603,7 @@
     },
     "ResolutionFloor": {
      "additionalProperties": false,
-     "description": "The smallest output change this model can resolve, with its basis.\n\nNamed ``NoiseFloor`` until R05.14, which collided with\n:class:`src.analysis.noise_floor.NoiseFloor` \u2014 the measured null-run\nspread tuning comparisons gate on, a different quantity with a refusing\n``conditions`` rule. The old name remains an alias for existing imports.\n\n``basis`` is required because a floor measured under one condition is\nroutinely quoted against another (the WOT timing floor is 16x smaller\nthan the all-condition spread \u2014 see ``noise_floor.yaml``). A sensor LSB\nis a lower bound, not a measured noise; say which one this is.",
+     "description": "The smallest output change this model can resolve, with its basis.\n\nNamed ``NoiseFloor`` until R05.14, which collided with\n:class:`src.analysis.noise_floor.NoiseFloor` \u2014 the measured null-run\nspread tuning comparisons gate on, a different quantity with a refusing\n``conditions`` rule. The old name is gone (R27.12).\n\n``basis`` is required because a floor measured under one condition is\nroutinely quoted against another (the WOT timing floor is 16x smaller\nthan the all-condition spread \u2014 see ``noise_floor.yaml``). A sensor LSB\nis a lower bound, not a measured noise; say which one this is.",
      "properties": {
       "basis": {
        "minLength": 1,
@@ -5460,7 +5460,7 @@
     },
     "ResolutionFloor": {
      "additionalProperties": false,
-     "description": "The smallest output change this model can resolve, with its basis.\n\nNamed ``NoiseFloor`` until R05.14, which collided with\n:class:`src.analysis.noise_floor.NoiseFloor` \u2014 the measured null-run\nspread tuning comparisons gate on, a different quantity with a refusing\n``conditions`` rule. The old name remains an alias for existing imports.\n\n``basis`` is required because a floor measured under one condition is\nroutinely quoted against another (the WOT timing floor is 16x smaller\nthan the all-condition spread \u2014 see ``noise_floor.yaml``). A sensor LSB\nis a lower bound, not a measured noise; say which one this is.",
+     "description": "The smallest output change this model can resolve, with its basis.\n\nNamed ``NoiseFloor`` until R05.14, which collided with\n:class:`src.analysis.noise_floor.NoiseFloor` \u2014 the measured null-run\nspread tuning comparisons gate on, a different quantity with a refusing\n``conditions`` rule. The old name is gone (R27.12).\n\n``basis`` is required because a floor measured under one condition is\nroutinely quoted against another (the WOT timing floor is 16x smaller\nthan the all-condition spread \u2014 see ``noise_floor.yaml``). A sensor LSB\nis a lower bound, not a measured noise; say which one this is.",
      "properties": {
       "basis": {
        "minLength": 1,

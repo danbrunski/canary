@@ -40,7 +40,7 @@ from src.behavior.behavior_models import (
     BandExcessPersistence,
     DeviationConfig,
     FittedBandExcessPersistence,
-    NoiseFloor,
+    ResolutionFloor,
     SyntheticFault,
     ValidationCriteria,
     contract_fingerprint,
@@ -266,7 +266,7 @@ def _balance_recipe() -> Surface1DRecipe:
         validation=ValidationCriteria(
             kind="constant_baseline",
             unit="%",
-            noise_floor=NoiseFloor(value=0.78125, basis="trim LSB"),
+            noise_floor=ResolutionFloor(value=0.78125, basis="trim LSB"),
             meaningful_deviation=5.0,
             meaningful_deviation_basis="test",
             min_validation_drives=2,

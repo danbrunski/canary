@@ -84,7 +84,7 @@ def test_replay_sessions_builds_preprocessing_report(tmp_path: Path) -> None:
     report = result.report
 
     # 4 OBD channels × 80 ticks each (RPM/SPEED/THROTTLE_POS/COOLANT_TEMP).
-    # COOLANT_TEMP is now required by ``_SEGMENTER_SIGNAL_COLUMNS`` so the
+    # COOLANT_TEMP is now required by ``SEGMENTER_SIGNAL_COLUMNS`` so the
     # synthetic session must include it for the idle/warmup split to resolve.
     assert report["rows"]["long"] == 320
     assert report["rows"]["wide"] == 80

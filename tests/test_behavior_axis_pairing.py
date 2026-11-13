@@ -43,7 +43,7 @@ from src.behavior.behavior_models import (
     AxisPairing,
     BehaviorModel2D,
     BehaviorModels,
-    NoiseFloor,
+    ResolutionFloor,
     SyntheticFault,
     ValidationCriteria,
     ValidationEvidence,
@@ -264,7 +264,7 @@ def _criteria(pairing: AxisPairing | None) -> ValidationCriteria:
     return ValidationCriteria(
         kind="predictive_surface",
         unit="deg",
-        noise_floor=NoiseFloor(value=0.5, basis="LSB"),
+        noise_floor=ResolutionFloor(value=0.5, basis="LSB"),
         meaningful_deviation=5.0,
         meaningful_deviation_basis="test",
         min_eligible_observations=1,

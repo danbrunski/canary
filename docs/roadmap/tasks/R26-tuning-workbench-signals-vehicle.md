@@ -406,13 +406,23 @@ The cross-cutting copies found here (`_aware`, `_iso`,
   - `analysis/session_deviations.py`: scalar `bin_index` per sample, which
     builds a one-element array each time.
 
-- [ ] **R26.11 Dead symbols.** Each checked by word-grep over `src`,
+- [x] **R26.11 Dead symbols.** Each checked by word-grep over `src`,
   `scripts`, `tools`, `tests` and `docs`:
   `analysis/refit.py` `_validation_r_squared`;
   `analysis/surface_2d.py` `_clean_xyz`;
   `analysis/fuel_comp_samples.py` `_separation`;
   `signals/fsm.py` `extract_pdf_section` (superseded by
   `extract_pdf_section_with_specs`).
+  *Done 2026-11-13.* Re-grepped (`grep -rnw`) over `src scripts tools tests
+  docs data` and `src/dashboard/static`: each name occurred only at its own
+  `def` (and in this item); `extract_pdf_section_with_specs` does not match
+  `-w`. No test, no string reference (`getattr`, registry, YAML). All four
+  deleted, none had a test to take with it. `src/analysis/fuel_comp_samples.py`
+  `_separation` also names an unrelated `self._separation` in
+  `collection/hybrid_cycle.py`, untouched. The `extract_pdf_section_with_specs`
+  docstring said "Like `extract_pdf_section`"; reworded. `pdfplumber` stays a
+  function-level import there. `pytest tests/test_refit.py test_surface_2d.py
+  test_fuel_comp_samples.py test_fsm.py` green; `ruff`, `mypy` clean.
 
 - [ ] **R26.12 Large but cohesive; split only when next touched.**
   `evidence/ledger.py` `MemoryLedger` (635 lines, 28 methods): the three

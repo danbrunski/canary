@@ -64,9 +64,6 @@ SEGMENTER_SIGNAL_COLUMNS: dict[str, str | tuple[str, ...]] = {
     "coolant_temp": ("obd:COOLANT_TEMP", "decoded:ECM_COOLANT_TEMP"),
 }
 
-#: Pre-R04.14 private name, kept for its importers.
-_SEGMENTER_SIGNAL_COLUMNS = SEGMENTER_SIGNAL_COLUMNS
-
 
 def segmenter_input_columns() -> tuple[str, ...]:
     """Every column :data:`SEGMENTER_SIGNAL_COLUMNS` names, flattened, in order,

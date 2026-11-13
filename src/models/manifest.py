@@ -1,7 +1,7 @@
 """Shared model-manifest schema (Task 5.15).
 
 Both the Isolation Forest (``IsolationForestManifest``) and the LSTM
-autoencoder (``LSTMAutoencoderManifest``) already serialize JSON manifests
+autoencoder (``SequenceAutoencoderManifest``) already serialize JSON manifests
 alongside their joblib / Torch artifacts. This module formalizes the
 *common* surface so the dashboard's ``/status`` endpoint (Task 5.3),
 ``ModelManager`` (Task 5.16, hot-swap), and any future retraining CLI

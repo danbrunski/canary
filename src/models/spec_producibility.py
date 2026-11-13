@@ -29,7 +29,6 @@ was renamed away is caught transitively.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -145,11 +144,6 @@ def manifest_feature_columns(manifest: Mapping[str, Any]) -> list[str]:
     if not isinstance(columns, list) or not columns:
         raise ValueError("manifest has no schema.feature_columns")
     return [str(column) for column in columns]
-
-
-def load_manifest_feature_columns(path: Path) -> list[str]:
-    """:func:`manifest_feature_columns` for a manifest file."""
-    return manifest_feature_columns(json.loads(Path(path).read_text()))
 
 
 def manifest_behavior_fingerprints(manifest: Mapping[str, Any]) -> dict[str, str] | None:

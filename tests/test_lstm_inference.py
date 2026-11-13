@@ -18,13 +18,14 @@ from src.models.inference import (
     SequenceInferenceResult,
     SequenceWindowBuffer,
 )
-from src.models.lstm_training import TrainedLSTMAutoencoder, train_lstm_autoencoder
+from src.models.lstm_training import train_lstm_autoencoder
+from src.models.sequence_autoencoder_training import TrainedSequenceAutoencoder
 from src.models.sequence_dataset import SequenceWindowDataset
+from src.paths import REPO_ROOT
 
 # Torch training: not a commit gate (see the pyproject test tiers).
 pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
 
@@ -73,7 +74,7 @@ def _dataset(sequence_length: int = 4) -> SequenceWindowDataset:
     )
 
 
-def _trained(**config_updates: Any) -> TrainedLSTMAutoencoder:
+def _trained(**config_updates: Any) -> TrainedSequenceAutoencoder:
     _torch()
     dataset = _dataset()
     return train_lstm_autoencoder(

@@ -147,9 +147,7 @@ class SequenceAutoencoderManifest:
     ``architecture`` was already a ``Mapping`` with no fixed shape. The live
     :class:`~src.models.inference.SequenceInferenceEngine` and hot-swap
     ``ModelManager`` read this manifest with no per-backbone branching.
-    ``src.models.lstm_training.LSTMAutoencoderManifest`` and
-    ``src.models.tcn_training.TCNAutoencoderManifest`` are now aliases of this
-    class, kept so existing imports of either name keep working.
+    The two names are gone (R27.12); this is the one class.
     """
 
     artifact_format_version: int

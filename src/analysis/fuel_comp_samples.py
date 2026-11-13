@@ -363,13 +363,6 @@ def _pair(anchor: np.ndarray, series: _Series, policy: PairingPolicy) -> np.ndar
     return out
 
 
-def _separation(anchor: np.ndarray, series: _Series, index: np.ndarray) -> np.ndarray:
-    out = np.full(len(anchor), np.nan)
-    ok = index >= 0
-    out[ok] = np.abs(series.times[index[ok]] - anchor[ok])
-    return out
-
-
 def _value_at_or_before(series: _Series, at: np.ndarray, max_age: float) -> np.ndarray:
     """The latest value at or before each instant, NaN when none is that recent."""
     index = previous_sample_indices(series.times, at, max_age_s=max_age)

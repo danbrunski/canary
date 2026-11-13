@@ -19,7 +19,7 @@ Imports stay lazy so non-ML tooling can import ``src.models`` without Torch.
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -38,7 +38,6 @@ from src.models.sequence_calibration import (
     error_distribution,
     is_rarely_observed,
     observed_block_counts,
-    training_data_hash,
     uncalibrated_distribution,
     window_blocks,
     window_modes,
@@ -71,18 +70,6 @@ from src.models.sequence_validation_split import (
     validation_split,
 )
 from src.timefmt import format_timestamp as _format_timestamp
-
-
-class SequenceModelLike(Protocol):
-    """The reconstruction surface calibration needs from any sequence model."""
-
-    sequence_length: int
-
-    def __call__(self, value: Any, mask: Any, delta: Any) -> Any: ...
-
-    def reconstruction_error(
-        self, value: Any, mask: Any, delta: Any, *, reduction: str = ...
-    ) -> Any: ...
 
 
 def masked_mse_loss(
@@ -262,7 +249,6 @@ __all__ = [
     "VALIDATION_RULE_STATEMENT",
     "EpochLoss",
     "ReconstructionErrorDistribution",
-    "SequenceModelLike",
     "SequenceThresholdCalibration",
     "calibrate_sequence_thresholds",
     "coerce_timestamp",
@@ -279,7 +265,6 @@ __all__ = [
     "torch_module",
     "torch_training_modules",
     "train_one_epoch",
-    "training_data_hash",
     "training_sessions",
     "dataset_observation_health",
     "validate_dataset_observations",

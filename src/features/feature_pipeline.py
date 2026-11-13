@@ -196,9 +196,6 @@ from src.features.feature_spec import (
     validate_feature_health as validate_feature_health,
 )
 from src.features.feature_transform import (
-    _SEGMENTER_SIGNAL_COLUMNS as _SEGMENTER_SIGNAL_COLUMNS,
-)
-from src.features.feature_transform import (
     ALL_MODE as ALL_MODE,
 )
 from src.features.feature_transform import (
@@ -316,7 +313,6 @@ __all__ = [
     "segment_or_constant",
     "segmenter_input_columns",
     "SEGMENTER_SIGNAL_COLUMNS",
-    "_SEGMENTER_SIGNAL_COLUMNS",
     "sequence_feature_columns",
     "sequence_feature_selection",
     "SPARSE_FOR_GRID",

@@ -15,8 +15,6 @@ model).
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -501,7 +499,7 @@ def calibrate_sequence_thresholds(
     return SequenceThresholdCalibration(
         threshold_k=threshold_k,
         calibrated_at=_format_timestamp(coerce_timestamp(calibrated_at)),
-        training_data_hash=training_data_hash(dataset),
+        training_data_hash=dataset.training_data_hash(),
         window_count=len(dataset),
         global_error=global_distribution,
         channel_errors=channel_distributions,
@@ -645,31 +643,6 @@ def error_distribution(
     )
 
 
-def training_data_hash(dataset: SequenceWindowDataset) -> str:
-    cached = getattr(dataset, "_training_data_hash", None)
-    if cached is not None:
-        return str(cached)
-    digest = hashlib.sha256()
-    digest.update(
-        json.dumps(
-            {
-                "feature_columns": list(dataset.feature_columns),
-                "sequence_length": dataset.sequence_length,
-                "windows": [window.to_dict() for window in dataset.windows],
-                "hash_layout": "contiguous-frame-v2",
-            },
-            sort_keys=True,
-        ).encode("utf-8")
-    )
-    # Windows heavily overlap. Hash the model-ready frame once instead of
-    # materializing and hashing the same row sequence_length times.
-    values = dataset.frame.loc[:, list(dataset.feature_columns)].to_numpy(dtype=np.float64)
-    digest.update(np.ascontiguousarray(values).tobytes())
-    result = f"sha256:{digest.hexdigest()}"
-    dataset._training_data_hash = result
-    return result
-
-
 def coerce_timestamp(value: datetime | pd.Timestamp | str | None) -> pd.Timestamp:
     if value is None:
         return pd.Timestamp(datetime.now(tz=UTC))
@@ -678,9 +651,6 @@ def coerce_timestamp(value: datetime | pd.Timestamp | str | None) -> pd.Timestam
         return timestamp.tz_localize("UTC")
     return timestamp.tz_convert("UTC")
 
-
-#: Pre-R04.11 private name.
-_block_maxima = block_maxima
 
 __all__ = [
     "CONTEXT_UNCALIBRATED_REASON",
@@ -697,7 +667,6 @@ __all__ = [
     "error_distribution",
     "is_rarely_observed",
     "observed_block_counts",
-    "training_data_hash",
     "uncalibrated_distribution",
     "window_blocks",
     "window_modes",

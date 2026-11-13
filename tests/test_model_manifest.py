@@ -350,9 +350,9 @@ def test_isolation_forest_manifest_conforms() -> None:
 
 
 def test_lstm_manifest_conforms() -> None:
-    from src.models.lstm_training import LSTMAutoencoderManifest
+    from src.models.sequence_registry import SequenceAutoencoderManifest
 
-    fields = LSTMAutoencoderManifest.__dataclass_fields__
+    fields = SequenceAutoencoderManifest.__dataclass_fields__
     assert "model_version" in fields
     assert "training_data_hash" in fields
     assert "model_type" in fields

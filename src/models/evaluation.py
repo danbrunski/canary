@@ -46,15 +46,13 @@ The code lives in four owner modules and this one re-exports every name, so
   alert-budget threshold, the drive bootstrap and :func:`vus_pr`;
 * :mod:`src.models.evaluation_shift` — the single-quantity shift known answer.
 
-Here stay the reporting strata and :class:`DriveDetectorResult`.
+Here stay the reporting strata.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass, field
-from typing import Any
 
 import pandas as pd
 
@@ -173,41 +171,6 @@ def observed_median(frame: pd.DataFrame, column: str) -> float | None:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class DriveDetectorResult:
-    """One detector on one drive's clean rows."""
-
-    rows: int = 0
-    scored_rows: int = 0
-    flagged_rows: int = 0
-    episodes: int = 0
-    #: Episodes that start inside a labelled interval, by label kind — reported
-    #: beside, never inside, the false-alarm count.
-    labelled_episodes: dict[str, int] = field(default_factory=dict)
-
-    @property
-    def withheld_rows(self) -> int:
-        return self.rows - self.scored_rows
-
-    @property
-    def false_alarm_episodes(self) -> int:
-        return self.episodes - sum(self.labelled_episodes.values())
-
-    def to_dict(self, hours: float) -> dict[str, Any]:
-        return {
-            "rows": self.rows,
-            "scored_rows": self.scored_rows,
-            "withheld_rows": self.withheld_rows,
-            "flagged_rows": self.flagged_rows,
-            "episodes": self.episodes,
-            "labelled_episodes": dict(self.labelled_episodes),
-            "false_alarm_episodes": self.false_alarm_episodes,
-            "false_alarms_per_engine_hour": (
-                None if hours <= 0 else self.false_alarm_episodes / hours
-            ),
-        }
-
-
 __all__ = [
     "AMBIENT_BANDS_C",
     "AMBIENT_CHANNEL",
@@ -229,7 +192,6 @@ __all__ = [
     "DetectionOutcome",
     "DetectionStatus",
     "Drive",
-    "DriveDetectorResult",
     "DriveHoldout",
     "Episode",
     "Era",

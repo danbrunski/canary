@@ -23,6 +23,8 @@ that mask (``OBSERVATION_MASK_SCHEMA_KEY``).
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -251,6 +253,29 @@ class SequenceWindowDataset:
             dtype=dtype,
             observation_mask=observation_mask,
         )
+
+    def training_data_hash(self) -> str:
+        """``sha256:`` of the window layout and the model-ready frame, cached."""
+        if self._training_data_hash is not None:
+            return self._training_data_hash
+        digest = hashlib.sha256()
+        digest.update(
+            json.dumps(
+                {
+                    "feature_columns": list(self.feature_columns),
+                    "sequence_length": self.sequence_length,
+                    "windows": [window.to_dict() for window in self.windows],
+                    "hash_layout": "contiguous-frame-v2",
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+        )
+        # Windows heavily overlap. Hash the model-ready frame once instead of
+        # materializing and hashing the same row sequence_length times.
+        values = self.frame.loc[:, list(self.feature_columns)].to_numpy(dtype=np.float64)
+        digest.update(np.ascontiguousarray(values).tobytes())
+        self._training_data_hash = f"sha256:{digest.hexdigest()}"
+        return self._training_data_hash
 
     def __len__(self) -> int:
         return len(self.windows)

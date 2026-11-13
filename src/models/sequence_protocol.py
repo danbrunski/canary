@@ -47,7 +47,7 @@ class SequenceAutoencoder(Protocol):
 class TrainedSequenceModel(Protocol):
     """A loaded sequence-detector bundle the inference engine serves.
 
-    Satisfied by ``TrainedLSTMAutoencoder`` (and, later, ``TrainedTCNAutoencoder``).
+    Satisfied by ``TrainedSequenceAutoencoder`` (both backbones).
     The engine reads ``model`` to reconstruct, ``feature_columns`` to align live
     rows, and ``manifest`` for the scaler, calibrated thresholds, window length,
     and version — ``manifest`` stays typed as ``Any`` to avoid binding the

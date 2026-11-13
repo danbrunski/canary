@@ -638,15 +638,15 @@ def test_default_segmenter_config_ranks_obd_ahead_of_broadcast() -> None:
 def test_training_pipeline_signal_columns_track_the_segmenter_defaults() -> None:
     """The two tables are separate on purpose; their candidate lists are not.
 
-    `_SEGMENTER_SIGNAL_COLUMNS` is the *required* set (every key must resolve
+    `SEGMENTER_SIGNAL_COLUMNS` is the *required* set (every key must resolve
     or the session collapses to one mode) while `DEFAULT_SIGNAL_COLUMNS` is the
     full candidate map including optional `imu:` signals. A fallback added to
     one and not the other silently does nothing on the training path.
     """
-    from src.features.feature_pipeline import _SEGMENTER_SIGNAL_COLUMNS
+    from src.features.feature_pipeline import SEGMENTER_SIGNAL_COLUMNS
     from src.preprocessing.segmenter import DEFAULT_SIGNAL_COLUMNS
 
-    for signal, required in _SEGMENTER_SIGNAL_COLUMNS.items():
+    for signal, required in SEGMENTER_SIGNAL_COLUMNS.items():
         candidates = (required,) if isinstance(required, str) else tuple(required)
         full = DEFAULT_SIGNAL_COLUMNS[signal]
         full_candidates = (full,) if isinstance(full, str) else tuple(full)

@@ -55,7 +55,7 @@ from src.behavior.behavior_models import (
     DeviationConfig,
     FoldMetrics,
     LookupTableFit,
-    NoiseFloor,
+    ResolutionFloor,
     SyntheticFault,
     ValidationCriteria,
     dump_behavior_models,
@@ -72,7 +72,7 @@ def _criteria(**overrides: Any) -> ValidationCriteria:
     fields: dict[str, Any] = {
         "kind": "predictive_surface",
         "unit": "deg",
-        "noise_floor": NoiseFloor(value=0.5, basis="test LSB"),
+        "noise_floor": ResolutionFloor(value=0.5, basis="test LSB"),
         "meaningful_deviation": 5.0,
         "meaningful_deviation_basis": "test",
         "min_validation_drives": 2,
@@ -340,7 +340,7 @@ def test_constant_idle_baseline_can_pass_its_own_criteria() -> None:
         validation=_criteria(
             kind="constant_baseline",
             unit="rpm",
-            noise_floor=NoiseFloor(value=25.0, basis="accessory steps"),
+            noise_floor=ResolutionFloor(value=25.0, basis="accessory steps"),
             meaningful_deviation=100.0,
             min_skill_vs_baseline=None,
             max_mae=40.0,

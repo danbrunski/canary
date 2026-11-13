@@ -218,23 +218,6 @@ def _validate_edges(edges: np.ndarray, label: str) -> None:
         raise ValueError(f"{label}: must be strictly increasing")
 
 
-def _clean_xyz(
-    frame: pd.DataFrame, x_column: str, y_column: str, output_column: str
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    for col in (x_column, y_column, output_column):
-        if col not in frame.columns:
-            raise KeyError(f"column {col!r} not in frame; available={list(frame.columns)[:8]}…")
-    x = pd.to_numeric(frame[x_column], errors="coerce")
-    y = pd.to_numeric(frame[y_column], errors="coerce")
-    z = pd.to_numeric(frame[output_column], errors="coerce")
-    mask = x.notna() & y.notna() & z.notna()
-    return (
-        x[mask].to_numpy(dtype=float),
-        y[mask].to_numpy(dtype=float),
-        z[mask].to_numpy(dtype=float),
-    )
-
-
 #: The serve-path evaluators live in :mod:`src.behavior.surface_eval` (R05.10);
 #: re-exported so analysis callers keep one import for a surface family.
 __all__ = [

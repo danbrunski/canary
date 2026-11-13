@@ -396,7 +396,6 @@ EXPORTS: dict[str, tuple[str | tuple[str, str], ...]] = {
     "src.features.feature_transform": (
         "ALL_MODE",
         "SEGMENTER_SIGNAL_COLUMNS",
-        ("_SEGMENTER_SIGNAL_COLUMNS", "_SEGMENTER_SIGNAL_COLUMNS"),
         "FeaturizedFrame",
         "configured_behavior_models",
         "featurize_wide_frame",

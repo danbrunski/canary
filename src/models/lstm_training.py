@@ -24,14 +24,9 @@ from src.models.sequence_autoencoder_training import (
     train_sequence_autoencoder,
 )
 from src.models.sequence_dataset import SequenceWindowDataset
-from src.models.sequence_registry import LSTM_TRAINING_BACKEND, SequenceAutoencoderManifest
+from src.models.sequence_registry import LSTM_TRAINING_BACKEND
 
 MODEL_TYPE = LSTM_TRAINING_BACKEND.model_type
-
-#: Back-compat aliases — both names existed as separate (byte-compatible)
-#: dataclasses before Task 2.1; now they're the same class/type.
-LSTMAutoencoderManifest = SequenceAutoencoderManifest
-TrainedLSTMAutoencoder = TrainedSequenceAutoencoder
 
 
 class LSTMAutoencoderTrainingConfigLike(Protocol):
@@ -57,22 +52,22 @@ def train_lstm_autoencoder(
     dataset: SequenceWindowDataset,
     config: LSTMAutoencoderTrainingConfigLike,
     **kwargs: object,
-) -> TrainedLSTMAutoencoder:
+) -> TrainedSequenceAutoencoder:
     """Train an LSTM autoencoder — see ``train_sequence_autoencoder`` for the contract."""
     return train_sequence_autoencoder(LSTM_TRAINING_BACKEND, dataset, config, **kwargs)  # type: ignore[arg-type]
 
 
 def calibrate_lstm_thresholds(
-    trained: TrainedLSTMAutoencoder,
+    trained: TrainedSequenceAutoencoder,
     dataset: SequenceWindowDataset,
     **kwargs: object,
-) -> TrainedLSTMAutoencoder:
+) -> TrainedSequenceAutoencoder:
     """Attach masked reconstruction-error thresholds to a trained LSTM bundle."""
     return calibrate_sequence_autoencoder_thresholds(trained, dataset, **kwargs)  # type: ignore[arg-type]
 
 
 def save_lstm_autoencoder_model(
-    trained: TrainedLSTMAutoencoder,
+    trained: TrainedSequenceAutoencoder,
     artifact_path: Path,
     *,
     manifest_path: Path | None = None,
@@ -86,7 +81,7 @@ def load_lstm_autoencoder_model(
     *,
     device: str = "cpu",
     dtype: str = "float32",
-) -> TrainedLSTMAutoencoder:
+) -> TrainedSequenceAutoencoder:
     """Load a checkpoint written by ``save_lstm_autoencoder_model``."""
     return load_sequence_autoencoder_model(
         LSTM_TRAINING_BACKEND, artifact_path, device=device, dtype=dtype
@@ -101,9 +96,7 @@ def default_lstm_manifest_path(artifact_path: Path) -> Path:
 __all__ = [
     "ARTIFACT_FORMAT_VERSION",
     "MODEL_TYPE",
-    "LSTMAutoencoderManifest",
     "LSTMAutoencoderTrainingConfigLike",
-    "TrainedLSTMAutoencoder",
     "calibrate_lstm_thresholds",
     "default_lstm_manifest_path",
     "load_lstm_autoencoder_model",

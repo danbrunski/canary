@@ -77,7 +77,6 @@ __all__ = [
     "bin_extremes",
     "grid_interval_ns",
     "reduce_long_frames",
-    "reduced_channels",
     "resample_reduced",
 ]
 
@@ -184,11 +183,6 @@ class ReducedSession:
             if source.get(channel):
                 out[channel] = source[channel]
         return out
-
-
-def reduced_channels(session: ReducedSession) -> list[str]:
-    """The value columns :func:`resample_reduced` builds, in wide-frame order."""
-    return session.channels
 
 
 # ---------------------------------------------------------------------------

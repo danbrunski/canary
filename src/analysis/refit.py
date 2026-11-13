@@ -1205,17 +1205,6 @@ def attach_criteria(
     return [replace(recipe, validation=document.recipes.get(recipe.name)) for recipe in recipes]
 
 
-def _validation_r_squared(actual: list[float], expected: list[float]) -> float | None:
-    if len(actual) < 2:
-        return None
-    actual_array = np.asarray(actual, dtype=float)
-    denominator = float(np.sum((actual_array - actual_array.mean()) ** 2))
-    if denominator <= 0:
-        return None
-    residual = actual_array - np.asarray(expected, dtype=float)
-    return float(1.0 - np.sum(residual**2) / denominator)
-
-
 def _fit_2d(
     recipe: Surface2DRecipe,
     frame: pd.DataFrame,

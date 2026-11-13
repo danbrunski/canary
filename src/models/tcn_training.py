@@ -23,14 +23,9 @@ from src.models.sequence_autoencoder_training import (
     train_sequence_autoencoder,
 )
 from src.models.sequence_dataset import SequenceWindowDataset
-from src.models.sequence_registry import TCN_TRAINING_BACKEND, SequenceAutoencoderManifest
+from src.models.sequence_registry import TCN_TRAINING_BACKEND
 
 MODEL_TYPE = TCN_TRAINING_BACKEND.model_type
-
-#: Back-compat aliases — both names existed as separate (byte-compatible)
-#: dataclasses before Task 2.1; now they're the same class/type.
-TCNAutoencoderManifest = SequenceAutoencoderManifest
-TrainedTCNAutoencoder = TrainedSequenceAutoencoder
 
 
 class TCNAutoencoderTrainingConfigLike(Protocol):
@@ -58,22 +53,22 @@ def train_tcn_autoencoder(
     dataset: SequenceWindowDataset,
     config: TCNAutoencoderTrainingConfigLike,
     **kwargs: object,
-) -> TrainedTCNAutoencoder:
+) -> TrainedSequenceAutoencoder:
     """Train a TCN autoencoder — see ``train_sequence_autoencoder`` for the contract."""
     return train_sequence_autoencoder(TCN_TRAINING_BACKEND, dataset, config, **kwargs)  # type: ignore[arg-type]
 
 
 def calibrate_tcn_thresholds(
-    trained: TrainedTCNAutoencoder,
+    trained: TrainedSequenceAutoencoder,
     dataset: SequenceWindowDataset,
     **kwargs: object,
-) -> TrainedTCNAutoencoder:
+) -> TrainedSequenceAutoencoder:
     """Attach masked reconstruction-error thresholds to a trained TCN bundle."""
     return calibrate_sequence_autoencoder_thresholds(trained, dataset, **kwargs)  # type: ignore[arg-type]
 
 
 def save_tcn_autoencoder_model(
-    trained: TrainedTCNAutoencoder,
+    trained: TrainedSequenceAutoencoder,
     artifact_path: Path,
     *,
     manifest_path: Path | None = None,
@@ -87,7 +82,7 @@ def load_tcn_autoencoder_model(
     *,
     device: str = "cpu",
     dtype: str = "float32",
-) -> TrainedTCNAutoencoder:
+) -> TrainedSequenceAutoencoder:
     """Load a checkpoint written by ``save_tcn_autoencoder_model``."""
     return load_sequence_autoencoder_model(
         TCN_TRAINING_BACKEND, artifact_path, device=device, dtype=dtype
@@ -102,9 +97,7 @@ def default_tcn_manifest_path(artifact_path: Path) -> Path:
 __all__ = [
     "ARTIFACT_FORMAT_VERSION",
     "MODEL_TYPE",
-    "TCNAutoencoderManifest",
     "TCNAutoencoderTrainingConfigLike",
-    "TrainedTCNAutoencoder",
     "calibrate_tcn_thresholds",
     "default_tcn_manifest_path",
     "load_tcn_autoencoder_model",
