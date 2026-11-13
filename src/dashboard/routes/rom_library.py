@@ -13,7 +13,6 @@ from __future__ import annotations
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +29,6 @@ from src.control.rom_backup import (
     ROM_BACKUP_FILE,
     BackupRefusedError,
     RomBackupJob,
-    VehicleReading,
     recipe_extent,
 )
 from src.control.rom_library import (
@@ -40,19 +38,14 @@ from src.control.rom_library import (
     RomNotFoundError,
     valid_sha,
 )
+from src.dashboard.readers import read_vehicle_reading
 from src.dashboard.routes.rom_maps import library_trace_context
 from src.dashboard.security import control_auth_dependency
-from src.dashboard.status import derive_vehicle_state_from_storage
 from src.paths import DIDS_YAML
 from src.vehicle.platforms import VehicleDataFile, config_data_file
 from src.vehicle.profiles import active_registry
 from src.vehicle.profiles import profile_dir as vehicle_profile_dir
 from src.vehicle.tune_revisions import TuneRevisionRegistry
-from src.vehicle_state import (
-    LiveStateSource,
-    ReplayStatusSource,
-    derive_from_live_source,
-)
 
 
 class RomLabelRequest(BaseModel):
@@ -60,45 +53,6 @@ class RomLabelRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     label: str | None
-
-
-def vehicle_reading(
-    config: CanaryConfig,
-    *,
-    live_source: LiveStateSource | None,
-    replay_controller: ReplayStatusSource | None,
-) -> VehicleReading:
-    """The backup job's view of ``vehicle_state``, from the same classifier.
-
-    The live source gives the broadcast engine speed the job watches while
-    OBD polling is paused; without one (live inference off) the state comes
-    from storage and the watch is unavailable, which refuses the start.
-    """
-    now = datetime.now(UTC)
-    if live_source is None:
-        state = derive_vehicle_state_from_storage(
-            config.collection.storage_path,
-            replay_controller=replay_controller,
-        )
-        return VehicleReading(
-            state=state.state,
-            rpm=state.rpm,
-            broadcast_rpm=None,
-            obd_freshness_seconds=state.obd_freshness_seconds,
-            watch_unavailable="no live telemetry source; live inference is not running",
-        )
-    state = derive_from_live_source(live_source, replay_controller=replay_controller, now=now)
-    # Fresh-gated by the classifier: ``None`` when absent or CAN is stale.
-    broadcast = state.broadcast_rpm
-    return VehicleReading(
-        state=state.state,
-        rpm=state.rpm,
-        broadcast_rpm=broadcast,
-        obd_freshness_seconds=state.obd_freshness_seconds,
-        watch_unavailable=None
-        if broadcast is not None
-        else "broadcast engine speed absent or stale",
-    )
 
 
 def capture_activity(capture_controller: CaptureController | None) -> str | None:
@@ -157,7 +111,7 @@ def register_rom_library_routes(
         recipe_file=recipe_file,
         library=library,
         open_bus=lambda: bus_factory(config.hardware.can),
-        vehicle=lambda: vehicle_reading(
+        vehicle=lambda: read_vehicle_reading(
             config, live_source=live_source, replay_controller=replay_controller
         ),
         capture_active=lambda: capture_activity(capture_controller),
@@ -302,5 +256,4 @@ __all__ = [
     "RomLabelRequest",
     "capture_activity",
     "register_rom_library_routes",
-    "vehicle_reading",
 ]

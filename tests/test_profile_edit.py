@@ -675,7 +675,7 @@ def _live(monkeypatch: pytest.MonkeyPatch, state: str) -> None:
     def reading(*_args: Any, **_kwargs: Any) -> VehicleReading:
         return VehicleReading(state=state, rpm=0.0, broadcast_rpm=None, obd_freshness_seconds=0.5)
 
-    monkeypatch.setattr(system_routes, "vehicle_reading", reading)
+    monkeypatch.setattr(system_routes, "read_vehicle_reading", reading)
 
 
 def _serve_once(payload: bytes | None, nrc: int | None = None) -> threading.Thread:

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
@@ -22,14 +23,20 @@ from src.behavior.behavior_models import (
     validation_scope,
 )
 from src.config import CanaryConfig
+from src.control.rom_backup import VehicleReading
+from src.control.vehicle_reading import vehicle_reading
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
-from src.dashboard.status import _resolve_latest_session
+from src.dashboard.status import _resolve_latest_session, derive_vehicle_state_from_storage
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, dbc_channel, load_dbc_dir
 from src.decode.on_read import on_read_catalog
 from src.preprocessing.decode import decode_on_read, decoded_channel
 from src.storage.session_files import PARQUET_PATTERN
 from src.timefmt import parse_iso_utc
+from src.vehicle_state import LiveStateSource, ReplayStatusSource
+
+if TYPE_CHECKING:  # decode.dids is imported lazily inside decoded_did_rows
+    from src.decode.dids import DidMap
 
 
 def read_latest_telemetry_rows(
@@ -423,8 +430,80 @@ def read_accepted_baselines(path: Path = DEFAULT_ACCEPTED_BASELINES_PATH) -> dic
     return {"active": active, "overrides": overrides}
 
 
+def polled_did_names(did_map: DidMap, obd_dids: Iterable[str]) -> list[str]:
+    """Catalog names for the configured `obd_dids`, which may be tokens
+    of either form (a name or a bare 4-char hex id)."""
+    names = {entry.name for entry in did_map.dids}
+    by_id = {entry.did: entry.name for entry in did_map.dids}
+    polled: list[str] = []
+    for token in obd_dids:
+        stripped = token.strip()
+        if stripped in names:
+            polled.append(stripped)
+            continue
+        try:
+            resolved = by_id.get(int(stripped, 16))
+        except ValueError:
+            continue
+        if resolved is not None:
+            polled.append(resolved)
+    return polled
+
+
+def decoded_did_rows(rows: list[dict[str, Any]], dids_path: Path) -> list[dict[str, Any]]:
+    """``did:<NAME>`` rows decoded from the raw ``DID_<hex>`` rows in `rows`."""
+    from src.decode.dids import (
+        DID_SOURCE,
+        decode_raw_did_reading,
+        did_entries_by_hex,
+        load_did_map,
+    )
+
+    raw = [r for r in rows if str(r.get("channel", "")).startswith("DID_")]
+    if not raw or not dids_path.exists():
+        return []
+    by_hex = did_entries_by_hex(load_did_map(dids_path))
+    decoded: list[dict[str, Any]] = []
+    for row in raw:
+        hit = decode_raw_did_reading(
+            by_hex, str(row["channel"]), row.get("value"), source=str(row.get("source", ""))
+        )
+        if hit is None:
+            continue
+        decoded.append(
+            {
+                "timestamp": row.get("timestamp"),
+                "source": DID_SOURCE,
+                "channel": hit.entry.name,
+                "value": hit.value,
+                "unit": hit.unit,
+            }
+        )
+    return decoded
+
+
+def read_vehicle_reading(
+    config: CanaryConfig,
+    *,
+    live_source: LiveStateSource | None,
+    replay_controller: ReplayStatusSource | None,
+) -> VehicleReading:
+    """:func:`src.control.vehicle_reading.vehicle_reading` with the stored-rows
+    fallback bound: the newest session of ``config``'s storage, classified."""
+    return vehicle_reading(
+        live_source=live_source,
+        replay_controller=replay_controller,
+        storage_state=lambda: derive_vehicle_state_from_storage(
+            config.collection.storage_path,
+            replay_controller=replay_controller,
+        ),
+    )
+
+
 __all__ = [
+    "decoded_did_rows",
     "echo_config",
+    "polled_did_names",
     "read_accepted_baselines",
     "read_anomalies_since",
     "read_behavior_models",
@@ -433,4 +512,5 @@ __all__ = [
     "read_latest_per_channel",
     "read_latest_telemetry_rows",
     "read_obd_coverage",
+    "read_vehicle_reading",
 ]

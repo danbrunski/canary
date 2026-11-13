@@ -16,7 +16,8 @@ from src.collection import bus_budget, tuning_profile, tx_gate
 from src.collection.discovery import registry_snapshot, reset_discovery
 from src.control.can_activity import CanActivityBusError, capture_can_activity
 from src.control.obd_request import AdHocRequestBusError, execute_ad_hoc_request
-from src.dashboard.routes.control.context import ControlContext, log
+from src.control.tuning_mode import set_tuning_mode
+from src.dashboard.routes.control.context import ControlContext
 from src.dashboard.schemas import (
     BusBudgetRequest,
     CanActivityRequest,
@@ -25,7 +26,6 @@ from src.dashboard.schemas import (
     TriggerPollRequest,
     TuningModeRequest,
 )
-from src.session import issue_isolated_id
 
 
 def build_router(ctx: ControlContext) -> APIRouter:
@@ -151,40 +151,12 @@ def build_router(ctx: ControlContext) -> APIRouter:
     async def post_control_tuning_mode(
         request: TuningModeRequest,
     ) -> dict[str, Any]:
-        names = frozenset(request.channels) if request.channels else None
-        previous = tuning_profile.set_active(
-            request.enabled,
-            channel_names=names,
+        payload = await set_tuning_mode(
+            storage_writer,
+            enabled=request.enabled,
+            channels=request.channels,
             rate_hz=request.rate_hz,
-            source="control",
         )
-        payload: dict[str, Any] = {
-            "tuning_mode": tuning_profile.snapshot(),
-            "previous_active": previous,
-        }
-        # engine-tuning-support.md 1.2 — quarantine the capture at the moment
-        # the mode is armed, not afterwards. Only on a real transition, so
-        # re-arming an already-active tuning mode doesn't split the session.
-        if storage_writer is not None and previous != request.enabled:
-            try:
-                if request.enabled:
-                    tuning_id = issue_isolated_id()
-                    await storage_writer.enter_tuning_mode(tuning_id)
-                    payload["output_session_dir"] = str(storage_writer.paths.root)
-                else:
-                    await storage_writer.exit_tuning_mode()
-                    payload["output_session_dir"] = str(storage_writer.paths.root)
-            except Exception as exc:
-                # Storage isolation failed, so the mode state and the on-disk
-                # layout now disagree. Put the poll profile back rather than
-                # silently logging a quarantined drive into the corpus.
-                log.exception("tuning-mode storage isolation failed; reverting poll profile")
-                tuning_profile.set_active(previous, source="control")
-                raise HTTPException(
-                    status_code=500,
-                    detail="failed to switch tuning session storage; tuning mode unchanged",
-                ) from exc
-        payload["tuning_mode"] = tuning_profile.snapshot()
         publish_control_event("tuning_mode", "ok", payload)
         return payload
 

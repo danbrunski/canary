@@ -43,11 +43,8 @@ from src.control.rom_backup import (
     recipe_extent,
 )
 from src.control.rom_library import RomLibrary
-from src.dashboard.routes.rom_library import (
-    capture_activity,
-    register_rom_library_routes,
-    vehicle_reading,
-)
+from src.dashboard.readers import read_vehicle_reading
+from src.dashboard.routes.rom_library import capture_activity, register_rom_library_routes
 from src.paths import REPO_ROOT
 from src.vehicle.platforms import vehicle_data_file
 from src.vehicle.profiles import read_registry_file
@@ -1422,15 +1419,15 @@ class FakeLiveSource:
 def test_vehicle_reading_from_a_live_source(tmp_path: Path) -> None:
     config = isolated_config(tmp_path)
     live = FakeLiveSource()
-    reading = vehicle_reading(config, live_source=live, replay_controller=None)
+    reading = read_vehicle_reading(config, live_source=live, replay_controller=None)
     assert reading.state == "ignition_only"
     assert reading.broadcast_rpm == 0.0 and reading.obd_freshness_seconds == 1.0
     assert reading.watch_unavailable is None
     live.inputs["can_freshness_seconds"] = 30.0  # a stale broadcast is no watch
-    stale = vehicle_reading(config, live_source=live, replay_controller=None)
+    stale = read_vehicle_reading(config, live_source=live, replay_controller=None)
     assert stale.broadcast_rpm is None
     assert stale.watch_unavailable == "broadcast engine speed absent or stale"
-    offline = vehicle_reading(config, live_source=None, replay_controller=None)
+    offline = read_vehicle_reading(config, live_source=None, replay_controller=None)
     assert offline.broadcast_rpm is None
     assert offline.watch_unavailable is not None and "no live telemetry source" in (
         offline.watch_unavailable
@@ -1446,9 +1443,9 @@ def test_a_running_engine_refuses_while_obd_still_reads_a_fresh_zero(
     live = FakeLiveSource()
     live.inputs["broadcast_rpm"] = 800.0
     rig = rig_factory(
-        vehicle=lambda: vehicle_reading(config, live_source=live, replay_controller=None)
+        vehicle=lambda: read_vehicle_reading(config, live_source=live, replay_controller=None)
     )
-    assert vehicle_reading(config, live_source=live, replay_controller=None).state == (
+    assert read_vehicle_reading(config, live_source=live, replay_controller=None).state == (
         "ignition_only"
     )
     with pytest.raises(BackupRefusedError, match="broadcast engine speed 800 rpm >= 400"):
@@ -1462,7 +1459,7 @@ def test_an_engine_start_inside_the_obd_freshness_window_aborts(
     config = isolated_config(tmp_path)
     live = FakeLiveSource()
     rig = rig_factory(
-        vehicle=lambda: vehicle_reading(config, live_source=live, replay_controller=None)
+        vehicle=lambda: read_vehicle_reading(config, live_source=live, replay_controller=None)
     )
 
     def crank(address: int, count: int) -> None:

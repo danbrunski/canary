@@ -11,20 +11,23 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from src.collection import tuning_profile, tx_gate, vin_read
+from src.collection import vin_read
 from src.control.preflight import build_preflight
+from src.control.profile_payloads import edit_payload, profiles_payload
+from src.control.rom_backup import VehicleReading
 from src.control.sequence_detector import (
     SequenceDetectorController,
     SequenceDetectorUnavailableError,
 )
+from src.control.vin_refusal import vin_refusal
 from src.daemon.ups import (
     build_power_snapshot,
     read_keepalive_remaining,
     read_watchdog_status,
     write_keepalive,
 )
+from src.dashboard.readers import read_vehicle_reading
 from src.dashboard.routes.control.context import ControlContext, _require
-from src.dashboard.routes.rom_library import vehicle_reading
 from src.dashboard.schemas import (
     ProfileNameUpdateRequest,
     ProfileRevertRequest,
@@ -39,17 +42,10 @@ from src.vehicle.profiles import (
     DuplicateVinError,
     NoTrackedProfileError,
     ProfileDeleteRefusedError,
-    ProfileEdit,
     ProfileEditError,
     delete_profile,
-    delete_refusal,
-    deleted_profiles,
-    last_resolution,
     load_registry,
-    parameter_schema,
-    pending_restart,
     profile_data_paths,
-    profile_overrides,
     restore_profile,
     revert_profile,
     update_profile,
@@ -61,24 +57,6 @@ from src.vehicle.vin import inspect_vin
 #: How long the VIN read waits for the collector to take the request: it is
 #: served between polls, after any open Mode 22 window closes.
 VIN_PICKUP_SECONDS = 5.0
-#: vehicle_state values where the OBD collector deliberately stays silent or
-#: nothing answers: the key is off, or no vehicle is on the port.
-_KEY_OFF_STATES = {
-    "parked": "the vehicle is parked (12 V on the port, every module asleep)",
-    "engine_off": "the key is off (broadcast CAN only; the ECM does not answer OBD)",
-    "no_data": "neither bus is fresh: the key is off or nothing is connected",
-    "bench": "no vehicle on the OBD port (bench power)",
-}
-#: Where a profile edit takes effect, in the API response and the UI.
-APPLIES_AT_RESTART = (
-    "The daemon copied this profile into its configuration when it started, and every "
-    "session manifest records that copy. Restart the daemon (scripts/restart_canary.sh, "
-    "which refuses during a capture) for the change to reach the derived fuel, trip and "
-    "power channels, the gear estimate, the dyno, tire wear and the next session's manifest. "
-    "The running session keeps the values it started with. Offline tools that resolve the "
-    "profile themselves (MCP analysis tools, scripts) read the new values at once."
-)
-APPLIES_WHEN_ACTIVE = "Takes effect when this vehicle is next the active profile."
 
 
 def build_router(ctx: ControlContext) -> APIRouter:
@@ -120,68 +98,9 @@ def build_router(ctx: ControlContext) -> APIRouter:
     # (see src.vehicle.profiles.scope_config).
     active_slug = config.collection.storage_path.name
 
-    def _pending(profiles: list[Any]) -> list[str]:
-        active = next((p for p in profiles if p.slug == active_slug), None)
-        return [] if active is None else pending_restart(config.vehicle, active)
-
-    def _edit_payload(edit: ProfileEdit) -> dict[str, Any]:
-        active = edit.profile.slug == active_slug
-        pending = pending_restart(config.vehicle, edit.profile) if active else []
-        return {
-            "profile": edit.profile.to_dict(),
-            "changed": list(edit.changed),
-            "warnings": list(edit.warnings),
-            "vin_resolution": edit.vin_resolution,
-            "active": active,
-            "pending_restart": pending,
-            "restart_required": bool(pending),
-            "applies": APPLIES_AT_RESTART if active else APPLIES_WHEN_ACTIVE,
-        }
-
-    def _delete_refusal(slug: str) -> str | None:
-        return delete_refusal(
-            slug, active_slug=active_slug, fallback_slug=vehicle_block_slug(config)
-        )
-
     @router.get("/control/profiles")
     def get_control_profiles() -> dict[str, Any]:
-        profiles = load_registry(config.profiles)
-        overrides = profile_overrides(config.profiles)
-        pending = _pending(profiles)
-        resolution = last_resolution()
-        return {
-            "profiles": [
-                {
-                    **profile.to_dict(),
-                    "tracked": overrides.get(profile.slug, {"tracked": False})["tracked"],
-                    "overrides": overrides.get(profile.slug, {"fields": []})["fields"],
-                    # Why Delete would refuse now (the reason the button shows), else null.
-                    "delete_refusal": _delete_refusal(profile.slug),
-                }
-                for profile in profiles
-            ],
-            # Tracked profiles this machine has deleted: hidden here, in git for
-            # everyone else, restorable.
-            "deleted": [
-                {
-                    "slug": profile.slug,
-                    "name": profile.name,
-                    "make": profile.make,
-                    "model": profile.model,
-                    "year": profile.year,
-                }
-                for profile in deleted_profiles(config.profiles)
-            ],
-            "active_slug": active_slug,
-            "count": len(profiles),
-            # What the daemon runs on: the active profile as it was at startup.
-            "in_use": config.vehicle.model_dump(mode="json"),
-            "pending_restart": pending,
-            "restart_required": bool(pending),
-            "applies": APPLIES_AT_RESTART,
-            "resolution": resolution.to_dict() if resolution is not None else None,
-            "parameter_fields": parameter_schema(),
-        }
+        return profiles_payload(config, active_slug)
 
     @router.patch("/control/profiles/{slug}")
     def patch_control_profile(slug: str, request: ProfileUpdateRequest) -> dict[str, Any]:
@@ -194,7 +113,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ProfileEditError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        payload = _edit_payload(edit)
+        payload = edit_payload(config, edit, active_slug)
         if edit.changed:
             publish_control_event("profile.update", "ok", payload)
         return payload
@@ -209,7 +128,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ProfileEditError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        payload = _edit_payload(edit)
+        payload = edit_payload(config, edit, active_slug)
         publish_control_event("profile.revert", "ok", payload)
         return payload
 
@@ -250,61 +169,16 @@ def build_router(ctx: ControlContext) -> APIRouter:
         publish_control_event("profile.restore", "ok", payload)
         return payload
 
-    def _vin_refusal() -> vin_read.VinReadOutcome | None:
-        """The named reason not to ask the ECU for its VIN now, if there is one."""
-        if config.collection.obd_source != "canable":
-            return vin_read.VinReadOutcome(
-                None,
-                "unsupported",
-                "reading the VIN needs collection.obd_source=canable "
-                f"(currently {config.collection.obd_source!r}); type it in instead",
-            )
-        if tx_gate.passive_armed():
-            return vin_read.VinReadOutcome(
-                None,
-                "passive_armed",
-                "passive armed: CANary is not transmitting; disarm it to read the VIN",
-            )
-        owner = tx_gate.ecm_session_owner()
-        if owner != "can_diagnostics":
-            return vin_read.VinReadOutcome(
-                None,
-                "ecm_held",
-                f"another tool holds the ECM ({owner}); CANary does not transmit to it until "
-                "that ends",
-            )
-        if tuning_profile.is_paused():
-            return vin_read.VinReadOutcome(
-                None,
-                "capture_paused",
-                "the capture is paused: the OBD collector is not polling, so it does not "
-                "transmit the VIN request either; resume the capture to read the VIN",
-            )
-        reading = vehicle_reading(
-            config,
-            live_source=ctx.live_source,
-            replay_controller=ctx.replay_controller,
+    def _vehicle_reading() -> VehicleReading:
+        return read_vehicle_reading(
+            config, live_source=ctx.live_source, replay_controller=ctx.replay_controller
         )
-        if reading.state == "replay":
-            return vin_read.VinReadOutcome(
-                None,
-                "replay",
-                "a replay is running: the vehicle on the dashboard is a stored session",
-            )
-        if reading.state in _KEY_OFF_STATES:
-            return vin_read.VinReadOutcome(
-                None,
-                "key_off",
-                f"key off: {_KEY_OFF_STATES[reading.state]} (vehicle_state "
-                f"{reading.state}); turn the key on, or type the VIN in",
-            )
-        return None
 
     @router.post("/control/vin/read")
     def post_control_vin_read() -> dict[str, Any]:
         """Read the connected vehicle's VIN (Mode 09 0x02) through the running
         collector. Returned for the operator to confirm; never saved here."""
-        outcome = _vin_refusal() or vin_read.request_vin(
+        outcome = vin_refusal(config, _vehicle_reading) or vin_read.request_vin(
             timeout_seconds=config.profiles.vin_probe_timeout_seconds,
             pickup_seconds=VIN_PICKUP_SECONDS,
         )

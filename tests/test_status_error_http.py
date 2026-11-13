@@ -36,7 +36,7 @@ from src.control.profile_capture import ProfileCaptureError
 from src.control.status_error import StatusError
 from src.control.workbench_jobs import WorkbenchRefusedError
 from src.dashboard.api import create_app
-from src.dashboard.routes import public as public_routes
+from src.dashboard.routes import analysis_reads as analysis_reads_routes
 from src.dashboard.routes import workbench as workbench_routes
 from src.dashboard.routes.control import brain as brain_routes
 from src.dashboard.routes.control import classification as classification_routes
@@ -192,7 +192,7 @@ CASES: list[tuple[str, tuple[str, str], list[Patch], int, str]] = [
     (
         "public /analysis/binned (capture_deferral refuses)",
         ("GET", "/analysis/binned?value=obd:RPM&x=obd:RPM"),
-        [(public_routes, "capture_deferral", _wb(425, "binned"))],
+        [(analysis_reads_routes, "capture_deferral", _wb(425, "binned"))],
         425,
         "binned",
     ),
@@ -424,6 +424,8 @@ RAISERS = (
     "BrainJobStore",
     "ProfileCaptureSession",
     "ProfileCaptureError",
+    "set_tuning_mode",
+    "TuningStorageSwitchError",
 )
 
 

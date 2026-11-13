@@ -86,6 +86,7 @@ def _construct_typed() -> dict[str, Any]:
         "src.control.brain_jobs.BrainJobRefusedError": ((409, {"message": "busy"}), {}),
         "src.control.brain_reads.BrainReadError": ((503, {"message": "down"}), {}),
         "src.control.profile_capture.ProfileCaptureError": ((409, {"message": "busy"}), {}),
+        "src.control.tuning_mode.TuningStorageSwitchError": ((500, "storage did not switch"), {}),
         "src.control.workbench_jobs.WorkbenchRefusedError": ((409, {"message": "busy"}), {}),
         "src.models.sequence_autoencoder_training.CalibrationCoverageError": ((["v"],), {}),
         "src.provisioning.improv.ImprovPacketError": (
@@ -202,6 +203,7 @@ def test_the_bases_reach_the_classes_that_were_hand_written() -> None:
         "BrainJobRefusedError",
         "BrainReadError",
         "ProfileCaptureError",
+        "TuningStorageSwitchError",
         "WorkbenchRefusedError",
     }
     # Every one is in the whole-``src`` enumeration, so it is also round-tripped there.

@@ -382,7 +382,7 @@ it; go after that work lands.
   - Must not change: `create_app`'s keyword signature (52 files call it), the
     route table snapshot.
 
-- [ ] **R29.7 Route modules hold domain logic in closures.**
+- [~] **R29.7 Route modules hold domain logic in closures.**
   `register_public_routes` is one 383-line function with 17 closures covering
   status, telemetry reads, catalog reads, OBD coverage, binned analysis, LLM
   cards and trip summary. Logic that cannot be tested without building an app:
@@ -393,13 +393,91 @@ it; go after that work lands.
   `routes/control/bus.py` `post_control_tuning_mode`. `rom_library.py`'s
   `vehicle_reading` is imported by `system.py`: one route module serving
   another.
-  - [ ] `public.py` → `status.py`, `catalog_reads.py`, `analysis_reads.py`.
+  - [x] `public.py` → `status.py`, `catalog_reads.py`, `analysis_reads.py`.
     The DID helpers to `dashboard/readers.py` or `decode/dids.py`;
     `_vin_refusal` to `control/`, taking a `VehicleReading`;
     `vehicle_reading` to `vehicle_state.py` or `control/`.
+    **Route modules** (`src/dashboard/routes/`): `status_routes.py` (named so it
+    is not mistaken for the payload builder `dashboard/status.py`; `/identity`,
+    `/status`, `/config`, `/anomalies`, `/telemetry/latest`), `catalog_reads.py`
+    (`/models/behavior[/live]`, `/bindings`, `/dids`, `/test-profiles`,
+    `/obd/coverage`, `/can/coverage`, `/obd/dtc`, `/obd/monitors`),
+    `analysis_reads.py` (`/analysis/binned`, `/analysis/llm-assist/cards`,
+    `/sessions/{id}/trip-summary`; it installs the `StatusError` handler, the only
+    one of the three that can raise a refusal, so a bare app mounting only it
+    answers `analysis_deferred`). `public.py::register_public_routes` keeps its
+    signature and calls the three in the old registration order.
+    **Logic out of the closures**: `polled_did_names(did_map, obd_dids)` /
+    `decoded_did_rows(rows, dids_path)` in `dashboard/readers.py`;
+    `src/control/vin_refusal.py::vin_refusal(config, take_reading)`;
+    `src/control/vehicle_reading.py::vehicle_reading(...)`;
+    `src/control/profile_payloads.py` (`profiles_payload`, `edit_payload`,
+    `active_pending_restart`, `profile_delete_refusal`, the two `APPLIES_*`
+    texts); `src/control/tuning_mode.py::set_tuning_mode` (the arm + isolate +
+    roll back transaction; its failure is a `TuningStorageSwitchError`
+    (`StatusError`, 500) the app handler answers).
+    Two departures from the item text, both forced: `vehicle_reading` cannot take
+    `derive_vehicle_state_from_storage` (a dashboard function; `control` may not
+    import `dashboard`), so it takes it as a required `storage_state` callable
+    and `dashboard/readers.py::read_vehicle_reading` binds it once for both
+    callers; and `vin_refusal` takes a `take_reading` callable rather than a
+    `VehicleReading`, because the old closure read the vehicle only after its
+    four cheaper rungs passed (a parquet read when there is no live source),
+    and `test_the_vehicle_is_not_read_when_a_cheaper_rung_already_refused` pins
+    that.
+    **Bodies identical**: an AST diff against `HEAD` of every moved body, after
+    dropping docstrings and substituting only the named closure-captured
+    expressions for their parameters, is identical for all 26 pairs (17 routes
+    incl. decorators and signatures, 2 DID helpers, `_vin_refusal`,
+    `vehicle_reading`, `get_control_profiles`, `_edit_payload`, `_pending`,
+    `_delete_refusal`, the tuning-mode body). Two non-parameter changes, both in
+    the tuning-mode transaction. (1) `HTTPException(500, ...)` ->
+    `TuningStorageSwitchError(500, ...)` (same `(status, body)`, pinned over
+    HTTP). (2) The ERROR record "tuning-mode storage isolation failed; reverting
+    poll profile" moved from logger `src.dashboard.routes.control` to
+    `src.control.tuning_mode` (`log = logging.getLogger(__name__)`); level and
+    `exc_info` are unchanged and no consumer in the repo reads the old name.
+    **Responses unchanged**: 44 `(status, body)` pairs across every route R29.7
+    touches, recorded on the tree before the move and after it, are equal
+    (`/status` by key set; temp paths normalised). New pins:
+    `tests/test_public_route_pins.py` (18), `test_tuning_mode_transaction.py`
+    (12, incl. the rollback on a writer that fails to enter and to exit),
+    `test_vin_refusal.py` (16), `test_vehicle_reading.py` (5),
+    `test_profile_payloads.py` (10), `test_did_readers.py` (11).
+    `tests/fixtures/route_table_snapshot.json` and
+    `mcp_tool_snapshot.json` untouched.
+    **Gate**: `pytest -n 4 -m ""` over the 86 test files that import
+    `create_app`/`TestClient`/the touched routes, plus the route-table and MCP
+    snapshots, `test_status_error_http`, `test_layering`, `test_source_rules`:
+    1894 passed, 1 xfailed, 1 failed
+    (`test_source_rules::test_the_allowlist_only_shrinks[tests-recompute-repo-root]`,
+    on another session's uncommitted `tests/test_profiles_split.py:43`, not on
+    this change); `ruff check .`, `ruff format --check .`, `mypy` clean.
+    **Repointed patches**: `tests/test_status_error_http.py`
+    (`public_routes.capture_deferral` -> `analysis_reads_routes`),
+    `tests/test_profile_edit.py` (`system_routes.vehicle_reading` ->
+    `read_vehicle_reading`), `tests/test_rom_backup.py` (six
+    `vehicle_reading(...)` calls -> `read_vehicle_reading`). No re-export is left
+    behind; `test_the_logic_r29_7_moved_is_not_defined_in_a_route_module_again`
+    and `test_a_control_router_does_not_import_the_rom_library_routes` keep it so.
+    **Other existing tests edited**: `tests/test_exceptions_pickle.py` (the new
+    `StatusError` subclass `TuningStorageSwitchError`: a typed-args entry and a
+    place in the expected `STATUS` set, so it is round-tripped like its siblings)
+    and `tests/test_status_error_http.py` (besides the repoint above, `RAISERS`
+    gains `set_tuning_mode` / `TuningStorageSwitchError`, so the
+    handler-installed scan sees `routes/control/bus.py` as a raiser).
   - [ ] Operator question: `/control/tuning-mode` and `/control/capture` look
     like two lifecycles for one thing. Does the dashboard still use the
     former?
+    Left open for the operator. Finding: no. `src/dashboard/static/src` has no
+    reference to `/control/tuning-mode`, `tuningMode` or `tuning_mode`. The
+    remaining callers are the MCP write tool `set_tuning_mode`
+    (`src/mcp_server/write_tools/tuning_mode.py`, in `mcp_tool_snapshot.json`),
+    `tests/test_control_passive.py` and the two route-snapshot rows, plus
+    `docs/headless-api.md` and `docs/mcp-server.md`. The route is a shim over
+    `tuning_profile.set_active` (its docstring: "Compatibility shim for the old
+    boolean tuning-mode endpoint"); `/control/capture` is the lifecycle with
+    session isolation (`enter_capture_mode`).
 
 - [ ] **R29.8 Four `async def` handlers do file work on the event loop, and
   the deferral preamble is copied.** `routes/workbench.py`
