@@ -173,6 +173,17 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
   last column. Keep sorting full-pedal data by gear. Gear bands, the every-gear
   trigger (`0xFFFF4856` bit 3) and the `rom_map.yaml` entries:
   `references/engine-and-ecu.md`.
+- **Several broadcast bytes are not what their binding names say** (firmware,
+  2026-11-12). The names stay for compatibility, so read the notes in
+  `data/bindings.yaml`:
+  - `ECM_THROTTLE_SENSOR_V` (`0x23D` b2) is the ECM's *target* opening.
+  - `ECM_ENGINE_STATE_A`/`_B` (`0x231` b0/b3) are signed torques,
+    (byte + 50) × 3 N·m.
+  - `0x233` b1–2 are commanded fuel flow (`ECM_FUEL_FLOW_233`), not airflow.
+  - `0x551` b1 is the ECM's own fuel-used counter.
+
+  The byte maps are in `docs/ecu-firmware-analysis.md`, "The CAN frames the
+  ECM builds and reads".
 - **The factory A/F sensors floor at 10.0 AFR** in UpRev logs, so samples there
   are censored. They are good to roughly ±5 % at WOT. Don't chase a smaller WOT
   error with them.

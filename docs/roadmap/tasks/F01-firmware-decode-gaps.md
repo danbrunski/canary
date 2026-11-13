@@ -420,17 +420,38 @@ Same conventions as the other task files: task-level truth is the checkboxes,
 
 ## Nothing recorded yet
 
-- [ ] **F01.14 The CAN frames the ECM builds and reads.** Trace the transmit
-  builders and receive handlers. Head start from F01.13: the receive and
-  transmit table at ROM `0x095F1` (8 receive and 8 transmit slots in ZS44A),
-  the `0x29E` decode, and two `bindings.yaml` corrections ready to apply.
-  `BRAKE_ACTIVITY_29E_7` is a checksum and `BRAKE_PRESSURE_29E_3` is a bit
-  flag.
+- [x] **F01.14 The CAN frames the ECM builds and reads.** Trace the transmit
+  builders and receive handlers.
   - *Answers:* the exact byte, scale and offset of every ECM-originated
     broadcast signal, replacing statistical bindings in `data/bindings.yaml`
     with code evidence; which received frames the ECM acts on (F01.13).
   - **Accept:** a table of id → bytes → RAM word for every frame, and every
     ECM-originated entry in `bindings.yaml` either agrees or is corrected.
+  - [x] 2026-11-12. Firmware doc: "The CAN frames the ECM builds and
+    reads". Byte maps for all 8 transmit frames and all 8 receive frames.
+    - **Agree:** `ECM_RPM`, `ECM_RPM_23D`, the three coolant copies, and
+      `COOLING_FAN_1F9_0` (every bit now named).
+    - **Corrected in `bindings.yaml`:**
+      - `0x23D` b1 is a pedal position (0.954 × APP1 against DID
+        `0x120D`), and b2 is the *target* opening. The second matches the
+        enrichment-switch known answer, 223.8 against 223 measured.
+      - `0x23D` b6 and `0x231` b0/b3 are signed torques; b0 decodes to −78
+        to 363 N·m.
+      - `0x29E` b0 is the VDC's torque echo.
+      - `0x233` b1–2 are one 16-bit commanded fuel flow (new
+        `ECM_FUEL_FLOW_233`; ratio to MAF × φ 31–33 across φ bins).
+      - `0x233` b4 is the low byte of rpm.
+      - `0x29E` b7 is a checksum and b3 a bit flag.
+    - **New bindings:**
+      - `ECM_FUEL_USED_COUNTER_551`: the ECM's rolling fuel count, 24.7
+        field-seconds per count in all 3 captures.
+      - `VEHICLE_SPEED_280`: 0.01 km/h, 10.006 × `0x2D1`.
+    - `0x794` broadcasts the lowest-numbered failing DTC (it read P0328).
+      `0x23E` is automatic-only and all zeros here.
+    - Existing names, scales and trainability were kept, because manifests
+      read them.
+    - The signed decode is owed as shared-code work; see "Not disassembly"
+      below.
 
 - [ ] **F01.15 Misfire monitor.** Only its DTC items and MIL blink routine
   are noted.
@@ -469,6 +490,12 @@ tracked where it is named; listed here so they are not mistaken for F01 items.
   (`uncovered: airflow_pipeline`).
 - Air-charge branch state at key-on and crank (`air_charge_branch_state`).
 - `mem:ECM_ACTIVE_MAP` stepping when the map switch is used.
+- Signed bindings (from F01.14), which is code work, not a truck read. The
+  bindings `Signal` schema has no `signed` flag, so the signed torque bytes
+  (`0x231` b0/b3/b4/b5, `0x23D` b5–6, `0x29E` b0) still decode unsigned and
+  wrap at 150 N·m. To fix it, add the flag, a signed column decode and the
+  DBC sign, then bind `0x231` b0 as torque. That last step is a feature-set
+  change, so it needs the operator's call on retraining.
 
 ## Order
 

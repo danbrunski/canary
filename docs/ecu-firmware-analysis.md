@@ -1692,10 +1692,13 @@ ABS module. The ECM receives it in its receive table (below):
 - Byte 2 bit 4 is the request flag, `0xFFFF4794` bit 6 (snapshot `478C` bit
   6). It is taken only while `0xFFFF4851` bits 1–4 are clear. Its only other
   writer clears it when the bus is off (`0x0CB618`).
-- Byte 0 is the ceiling. `0x0C24E8` makes `0xFFFF3414` = byte 0 × 30 +
-  1,500 while the flag and `0xFFFF4785` bit 7 are set, and 0x7FFF otherwise.
-  In the torque-demand units (N·m × 10, inferred) that is 150 N·m plus
-  3 N·m per count. `0x0C252A` copies it to `0xFFFF1578`.
+- Byte 0 is the ceiling, a **signed** byte (`mov.b` then `exts.w`).
+  `0x0C24E8` makes `0xFFFF3414` = byte 0 × 30 + 1,500 while the flag and
+  `0xFFFF4785` bit 7 are set, and 0x7FFF otherwise. In the torque-demand
+  units (N·m × 10, inferred) that is (byte + 50) × 3 N·m, from −234 to
+  531 N·m. The bus-off default 0x7F is the top of that range, i.e. no
+  limit. `0x0C252A` copies it to `0xFFFF1578`. With no request active, the
+  VDC echoes the ECM's own torque here (`0x231` byte 0, F01.14).
 - Byte 1 is the ramp. `0x0C254C` puts the lower of `0xFFFF2814` (the driver
   demand after the limiters) and `1578` in `0xFFFF1CB8`, and moves
   `0xFFFF1CBA` towards it by at most byte 1 × 2 per call. `0xFFFF1CB6` is
@@ -1714,10 +1717,13 @@ Checked on 329,698 stored `0x29E` frames from 26 sessions (2026-10-26 to
 - Byte 6's counter stepped by 1 on 99.9 % of consecutive frames.
 
 So VDC asked for no torque in any of those drives. That is expected unless a
-wheel slipped. Two `bindings.yaml` entries on this frame are wrong, and
-F01.14 corrects them. `BRAKE_ACTIVITY_29E_7` is the checksum, which moves with
-the brake because byte 3 moves. `BRAKE_PRESSURE_29E_3` is a single flag, bit
-6, not a pressure.
+wheel slipped. Three `bindings.yaml` entries on this frame were wrong;
+F01.14 corrected them:
+
+- `BRAKE_ACTIVITY_29E_7` is the checksum, which moves with the brake because
+  byte 3 moves.
+- `BRAKE_PRESSURE_29E_3` is a single flag, bit 6, not a pressure.
+- `ECM_ENGINE_STATE_C` is the VDC's signed torque field.
 
 **CAN receive table.** The table sits in ROM at `0x095F1`: 30 slots of 4
 bytes each (a flag, a byte, and the ID word = CAN ID << 5).
@@ -1770,6 +1776,90 @@ the cap cannot fire on this calibration.
 **Live reads still owed** (KOEO, then cruise): `0xFFFF3C36`, `479F` bit 1,
 `4800`, `0xFFFF4856` bit 3, `2B46`/`2B47` (expect 0), `3C6C` (expect
 0x7FFF), and `37A2` against the map's last column at the same rpm.
+
+### The CAN frames the ECM builds and reads (F01.14, 2026-11-12)
+
+The slot table at ROM `0x095F1` (F01.13) lists every frame. `0x0CB99C` runs
+the transmit builders each cycle and `0x0CB618` the receive handlers. Both
+dispatch on the slot's ID word, and each builder writes its slot's buffer
+(`0xFFFF4162` + 10 × slot). Verified from code; quantities are marked
+inferred where only the RAM word is known. "LE" means little-endian. Rates
+are from one 23-minute capture (`_capture-tuning-2026-11-11T174602`).
+
+**Transmitted** (ECM → bus):
+
+| ID | Slot, builder | Rate | Bytes |
+|---|---|---|---|
+| `0x23D` | 0, `0x0CD1F2` | 97 Hz | b0 flags: bit 7 a fault (`47BE` b2, `28B6` b2, `28BB` b6, items 0x67/0x68); bits 6–5 the rolling counter `42B6`; bit 4 `4792` b3; bit 3 `4797` b3; bit 2 fuel cut (`26B8` ≠ 0); bit 1 `2834` b4; bit 0 `4783` b4. b1 the lower pedal sensor above its released position × 255/727. b2 the driver-demand target opening `2D28` × 255/727. b3–4 LE engine speed `120A` (3.125 rpm, capped at 10,000). b5–6 LE signed torque `27DE` = `1AFA` − `1B8A` (inferred: net of a loss term). b7 coolant + 50. |
+| `0x231` | 1, `0x0CD41C` | 97 Hz | Torque for the VDC, signed bytes, torque = (byte + 50) × 3 N·m (inferred units): b0 arbitrated demand `1C74`; b3 driver demand `2812`; b4 `1C82`; b5 `1C6A` (−99 to −33 N·m observed, inferred minimum torque). b1: bit 7 set, bit 6 `480A` b2, bits 5–4 counter `42B6`, bits 3–0 `35B5`. b2 pedal `2C1C` × 200/727 (0.5 % per count, capped at 200). b6 `3CD0`. b7 flags: bit 7 = not VDC-limited (`4807` b3 clear), bit 6 its complement, bit 4 set, bits 3/2 = `4851` b2/b1 clear, bit 1 `484D` b4. |
+| `0x233` | 6, `0x0CE0FA` | 79 Hz | b0 coolant + 50. b1–2 LE commanded fuel flow = `1204` × `1B94` / 7,680 (`1B94` from commanded φ × BFS, 0 in fuel cut). b3 flags (`4850` b0, `484D` b1, `47B5` b2, `484F` b0, `28B4` b7). b4 and b7 the low and high bytes of `120A` (engine speed). |
+| `0x1F9` | 2, `0x0CE698` | 54 Hz | b0: bits 7–6 fan stage `2748` & 3; bits 5–4 engine-state code; bit 3 A/C clutch (`28B0` b6); bit 2 `4792` b3. b2–3 engine speed × 8 (`120A` × 25, big-endian). b6 `2708` (DID `0x117B`, inferred alternator duty). b7 `273B` & 0x7F. |
+| `0x551` | 4, `0x0CE80A` | 34 Hz | b0 coolant + 40 (`4766`). b1 the high byte of the fuel-used accumulator `1448` (`0x07C8D8`): a rolling count. b3 bit 7 = `4792` b3 clear, bits 6–5 from `484F` b0. b5 bits 6–4 from `4851` b7 and `484D` b2, bits 1–0 the engine-state code. b6 bit 7 `28B4` b7. |
+| `0x794` | 14, `0x0CE576` | 97 Hz | b0–1 the lowest code among items whose status bit 7 is set (table `0x102CC`, 0x114 items, state at `657C` + 3i). It read 0x0328 = **P0328**, the knock-sensor code this truck carries. b2: bits 1–0 counter `42B6`, bits 6–3 the inverse of `0x231` b7 bits 4–1, bit 7 `4828` b4. |
+| `0x512` | 15, `0x0CD18C` | none | b0–3 copy `4412`–`4415`, sent only while `4834` bit 1 is set. It never appeared on the bus. |
+| `0x23E` | 3, `0x0CDA22` | 0.1 Hz, zeros | Returns at once when cal `0x8ADE` bit 7 is set (a manual), so on this truck every byte is 0. On an automatic: baro high byte `4466` in b5, a value and its complement in b6/b2, and a signed torque in b3–4 LE. |
+
+`0x0CB99C` also has builders for `0x232` (`0x0CD6B0`), `0x234` (`0x0CDECE`)
+and `0x236` (`0x0CE268`). No slot in ZS44A names them.
+
+**Received** (bus → ECM; slot data at `0xFFFF4162` + 10 × slot):
+
+| ID | Slot, handler | What the ECM takes |
+|---|---|---|
+| `0x2D1` | 11, `0x0CCA2A` | b1–2 LE road speed (0.1 km/h) → `21D4` and `114E`; b0 bit 0 → `289E` b4; b3 & 3 rolling counter; b4 → `4440`; b5–6 LE → `43C4`. |
+| `0x29E` | 13, `0x0CCC3A` | The VDC frame (F01.13): checksum b7, counter b6, request b2 bit 4, signed ceiling b0, ramp b1, flags from b2 bits 5–7 and b3 bits 0–5 and 7. |
+| `0x280` | 19, `0x0CCFF8` | b6–7 → 10-bit `43D0`. Road speed b4–5 big-endian ÷ 10 → `114E`, only with cal `0x834A` = 1 (0 here, so this truck takes speed from `0x2D1`). The field is 0.01 km/h: 10.006 × `0x2D1`'s per sample. |
+| `0x625` | 20, `0x0CCE20` | b0 bit 0 → `2834` b0; b1 bits 6/5/4/3 → `2834` bits 1/2/3/5; b0 bits 3–2 → `1168`. |
+| `0x358` | 21, `0x0CCECE` | b1 bit 6 (the blower bit in `bindings.yaml`) → `2834` b6 and `289E` b2. |
+| `0x35D` | 22, `0x0CCF3C` | b0 bit 0 → `289D` b2. |
+| `0x2A5` | 10, `0x0CCF72` | b3 bits 5–4 → `2C84`. |
+| `0x342` | 16, `0x0CD066` | b0–3 → `440D`–`4410`, only while `4834` bit 2. With `0x512` this looks like a challenge and response, inferred to be the immobilizer. |
+
+Handlers for `0x251`, `0x253`, `0x254`, `0x255` (the automatic's
+transmission frames), `0x2A8`, `0x54C`, `0x5C5` and `0x611` exist, but no
+slot in this calibration names them.
+
+**Checked against `bindings.yaml`.** Every ECM-originated entry either
+agrees with the code or is now corrected there, with firmware evidence:
+
+- Agree: `ECM_RPM` (`0x1F9` b2–3, 0.125 rpm), `ECM_RPM_23D`, the three
+  coolant copies (one value, `4766`, sent at +40 and +50), and
+  `COOLING_FAN_1F9_0` (every bit now named).
+- `ECM_ACCEL_PEDAL_POS_V` (`0x23D` b1) is a pedal *position*, the lower
+  sensor above its learned released position. Against DID `0x120D` it runs
+  0.954 × APP1's (676 pairs), so its volts scale carries sensor 2's gain.
+- `ECM_THROTTLE_SENSOR_V` (`0x23D` b2) is the *target* opening, not the
+  sensor. Known answer: the enrichment switch at `2D28` = 638 predicts this
+  byte at 223.8, and `dids.yaml` had measured it at 223.
+- `ECM_THROTTLE_TRANSIENT` (`0x23D` b6) is the high byte of the signed
+  torque `27DE`.
+- `ECM_ENGINE_STATE_A` and `_B` (`0x231` b0, b3) are the signed arbitrated
+  and driver-demand torques, not enums. Over one drive they decode to −78
+  to 363 N·m against a 381 N·m rating, and B equals A in 83 % of frames.
+- `ECM_ENGINE_STATE_C` (`0x29E` b0) is the VDC's echo of A, not an ECM
+  byte (exact in 70 % of pairs).
+- `ECM_INTAKE_VACUUM_OR_IAC` and `ECM_AIRFLOW_233_B2` (`0x233` b1, b2) are
+  the halves of one 16-bit commanded fuel flow. They are superseded by
+  `ECM_FUEL_FLOW_233`. Divided by MAF × φ it holds at 31–33 counts across φ
+  bins, while divided by MAF alone it jumps from 31.7 to 39.5 above φ 1.1.
+- `ECM_CALC_LOAD_A` (`0x233` b4) is the low byte of engine speed, the same
+  trap as the retracted `ECM_CALC_LOAD_B`.
+- New: `ECM_FUEL_USED_COUNTER_551` (`0x551` b1). Its increments equal the
+  integral of `ECM_FUEL_FLOW_233` ÷ 24.7 in all three captures checked.
+  That is the ECM's own fuel-used count, the one the cluster's trip
+  computer integrates.
+- New: `VEHICLE_SPEED_280`, which supersedes `MOTION_SIGNAL_280_5` (its low
+  byte).
+
+Names, scales and trainability of existing entries were left as they were,
+because deployed model manifests and `sequence_roles.yaml` read them. The
+new entries are `model_feature: false` until a retrain takes them up.
+
+**Not closed here:** the bindings schema has no signed field. The signed
+torque bytes (`0x231` b0/b3/b4/b5, `0x23D` b5–6, `0x29E` b0) are corrected
+in notes but still decode unsigned and wrap at 150 N·m. Decoding them as
+torque needs a `signed` flag on `Signal`, plus the column decoder and the
+DBC emit, which is shared-code work.
 
 ### Throttle area units: not settleable at the desk (F01.9, 2026-11-12)
 

@@ -136,6 +136,13 @@ signals:
           Regressed against Mode 01 PID 0x05 (engine coolant temp): r2 = 0.999,
           coolant_degC = raw × 0.9986 − 39.86 (n = 354) — i.e. exactly the
           scale 1.0 / offset −40 already recorded. Confirmed.
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          Agrees. 0x0CE80A sends 0xFFFF4766 = curve 0xD9CF(coolant
+          0xFFFF119F) - 10, floored at 0 (0x08301A). So the field cannot read
+          below -40 degC, and the -50 copies on 0x23D:7 and 0x233:0 are the
+          same value + 10.
     notes: |
       Strong candidate. ELM327 Mode 01 PID 0x05 (engine coolant temp) will
       cross-reference exactly. Other coolant duplicates may exist: 0x233:0
@@ -173,6 +180,12 @@ signals:
           (engine RPM) over the engine-running window: r2 = 1.000,
           RPM = raw x 0.1251 − 4.8 (n = 354). The clean form raw ÷ 8 is almost
           certainly the true scaling (byte 2 alone ≈ RPM / 32, also r2 ≈ 1.0).
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          Agrees exactly. 0x0CE698 writes bytes 2-3 (high, low) = 0xFFFF120A
+          x 25, capped at 0xFFFF. 120A is rpm / 3.125 (the word DID 0x1219
+          reads), so the field is rpm x 8: 0.125 rpm per count, big-endian.
     notes: |
       Confirmed engine RPM, 16-bit at 8 counts/rpm on the ~100 Hz 0x1F9 frame.
       This is the real RPM signal — NOT 0x23D:1-2, which the earlier rev-session
@@ -227,7 +240,31 @@ signals:
           Byte 2 is a SEPARATE signal (throttle sensor, see
           ECM_THROTTLE_SENSOR_V), so the old 16-bit big-endian reading spanning
           bytes 1-2 was decoding two independent 8-bit channels as one number.
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          The ECM builds byte 1 in 0x0CD1F2 as min(0xFFFF2C18, 0xFFFF2C1A)
+          x 255 / 727 (cal 0x8F8C), capped at 255. Those words are the two
+          pedal sensors above their learned released positions: APP1 A/D
+          count - 0xFFFF618C, and 2 x APP2 count - 0xFFFF618E (0x07513C,
+          0x06FCF6). So the byte is a pedal POSITION in units of 727/255 A/D
+          counts, taken from whichever sensor reads lower, not a voltage.
+          Known-answer check on _capture-rom-trace-2026-09-21T142926 against
+          DID 0x120D (APP1 A/D count, exact): 676 same-instant pairs with byte
+          1 >= 10 give byte / ((0x120D - 157) x 255/727) = 0.954 median
+          (p10-p90 0.885-0.988). The lower sensor is APP2, whose doubled
+          count runs about 4.6 % below APP1's.
     notes: |
+      WHAT THE BYTE IS (firmware, 2026-11-12): the lower of the two pedal
+      sensors, above its learned released position, x 255/727. The volts
+      scale below is a fit to UpRev's APP1 voltage, and it holds while
+      sensor 2 is the lower one and the learned released positions stay
+      where they are. Those are kept in EEPROM and survive a flash (F01.11),
+      but they move on a pedal relearn or a pedal replacement. Its slope
+      (14.85 mV/count, against 727/255 x 5 mV = 14.25) carries sensor 2's
+      gain relative to sensor 1. Name, unit and scale are kept because
+      model manifests and sequence_roles.yaml read them.
+
       Renamed twice: ECM_ENGINE_REV_LEVEL → ECM_AIRFLOW_PROXY_23D → this. The
       first rename ruled out RPM (that's ECM_RPM @ 0x1F9:2-3); the second ruled
       out airflow. Both earlier labels were fitted against signals that are
@@ -261,7 +298,32 @@ signals:
           with R2 0.993 vs 0.919 for pedal, and byte 1 predicts pedal with
           R2 0.998 vs 0.905 for throttle. Each byte is decisively better at its
           own target than at the other's, so the two are not duplicates.
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          The ECM builds byte 2 in 0x0CD1F2 as max(0xFFFF2D28, 0xFFFF46DE)
+          x 255 / 727, capped at 255. 0xFFFF46DE is always 0 (its only
+          source, 0x077BC2, writes 0), and 0xFFFF2D28 is the ECM's TARGET
+          opening from the driver-demand area 0xFFFF1A64 (0x07248C), before
+          the idle-air and purge areas are added. So this is the commanded
+          driver-demand opening, not the plate sensor. Known answer: the
+          full-pedal enrichment switch sets at 0xFFFF2D28 >= 638 counts
+          (docs/ecu-firmware-analysis.md), which is byte 2 >= 223.8, and
+          data/dids.yaml measured that switch independently at "throttle
+          >= 223". Against DID 0x120F (throttle sensor 1 A/D) on
+          _capture-rom-trace-2026-09-21T142926 (1,573 pairs) the best fit is
+          at zero lag (r2 0.996, 255/707 per count against the code's
+          255/727), with byte 2 = 0 at idle where the sensor reads the idle
+          opening.
     notes: |
+      WHAT THE BYTE IS (firmware, 2026-11-12): the ECM's target throttle
+      opening for the driver's demand, excluding idle air and purge. It
+      reads 0 at idle while the plate is open for idle air, and it leads
+      the plate by the servo's lag. The volts fit below holds off idle
+      because the servo tracks the target closely. The name says "sensor"
+      and is wrong, but it is kept because model manifests,
+      sequence_roles.yaml and tools/analyze_uprev_kline_capture.py read it.
+
       Previously unbound — byte 2 was being consumed as the low half of the
       16-bit ECM_AIRFLOW_PROXY_23D field. Throttle-plate position on an
       electronic-throttle engine tracks pedal closely but not identically
@@ -278,6 +340,7 @@ signals:
     offset: 0.0
     unit: unknown     # tracks MAF g/s, but non-linearly or with a drifting term
     confidence: medium
+    superseded_by: ECM_FUEL_FLOW_233  # high byte of it (firmware, 2026-11-12)
     evidence:
       - session: 2026-07-27T152444 + 2026-07-27T225711
         method: uprev_kline_ground_truth
@@ -304,7 +367,18 @@ signals:
           move for an A/C load step at matched rpm (764 vs 759 rpm, n = 1919 /
           2957). Bytes 2-3 read as a 16-bit pair give an IDENTICAL r to 4 dp, so
           byte 3 is not its low byte -- the coarseness is real.
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          This byte is the HIGH byte of a little-endian 16-bit field in bytes
+          1-2, and byte 1 is its low byte (byte 3 is a flag byte, which is why
+          the 2-3 pairing changed nothing). See ECM_FUEL_FLOW_233: the field is
+          the ECM's commanded fuel flow, not airflow. That explains both the
+          coarseness and the drifting MAF scale.
     notes: |
+      SUPERSEDED (firmware, 2026-11-12) by ECM_FUEL_FLOW_233, the 16-bit field
+      this byte is the top half of. The notes below predate the trace.
+
       Resolution ceiling (2026-08-08): at ~0.147 counts per g/s, idle airflow
       rounds to 0-1, so every low-flow fit is dominated by rounding rather than
       by a state-dependent term. Some or all of the -6.5 % "scale drift" above
@@ -328,6 +402,7 @@ signals:
     offset: null
     unit: unknown     # kPa (manifold abs pressure) or % (idle air control)
     confidence: high  # promoted from medium based on A/C-load response
+    superseded_by: ECM_FUEL_FLOW_233  # low byte of it (firmware, 2026-11-12)
     evidence:
       - session: 2026-05-11T152858
         method: byte_vs_tag_differential
@@ -375,6 +450,101 @@ signals:
       Do NOT reach for Mode 01 PID 0x0B as the reference. It is unsupported on
       this ECU. That instruction appeared in this file for three months.
 
+      SUPERSEDED (firmware, 2026-11-12): this byte is the LOW byte of
+      ECM_FUEL_FLOW_233 (bytes 1-2, little-endian), the ECM's commanded fuel
+      flow. It is neither manifold pressure nor idle air. A low byte wraps, so
+      its window means describe nothing, and the A/C "direction conflict"
+      above is two readings of a wrapping byte. Kept because
+      sequence_roles.yaml and older model manifests name it.
+
+  - name: ECM_FUEL_FLOW_233
+    module: ECM
+    can_id: 0x233
+    byte_start: 1
+    byte_length: 2
+    byte_order: little
+    scale: null       # counts are the ECM's own units; see the conditions below
+    offset: null
+    unit: unknown
+    confidence: high
+    # Kept out of training until a retrain decides on it: the two bytes it
+    # supersedes are what deployed manifests read, and adding a feature is a
+    # feature-set change (AGENTS.md).
+    model_feature: false
+    evidence:
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          0x0CE0FA writes bytes 1-2 (low, high) = min(0xFFFF, w1204 x
+          0xFFFF1B94 / 7680). 0xFFFF1B94 (0x07C972) is formed from commanded
+          phi 0xFFFF26BE x the base fuel schedule 0xFFFF1038 (snapshot of BFS
+          0xFFFF103A), x 625/256, and is 0 in fuel cut (0xFFFF26B8). w1204 is
+          the engine-speed word Tp divides by. So the field is fuel per
+          injection x engine speed: the commanded fuel flow.
+      - session: >-
+          _capture-tuning-2026-11-10T235310 + _capture-tuning-2026-11-11T174602
+          + _capture-tuning-2026-11-12T034249
+        method: per_sample_ratio_by_phi_bin
+        finding: >
+          5,442 same-instant pairs against Mode 01 MAF (PID 0x10) and commanded
+          phi (PID 0x44), MAF > 8 g/s. The field / (MAF x phi) median is 31.65
+          at phi 0.90-1.02 (n 4,317), 30.95 at 1.02-1.10 (n 429) and 33.20 at
+          1.10-1.30 (n 294). The field / MAF alone jumps from 31.66 to 39.48
+          across the same bins. So the field follows MAF x phi, not MAF.
+        constant: 31.65
+        constant_unit: counts per (g/s of air x commanded phi)
+        conditions: >
+          Closed loop, phi 0.90-1.02, MAF > 8 g/s, three tuning captures on
+          ZS44A-20261111-2 at 63-82 kPa. Per-sample IQR/median 0.11, mostly
+          from the PID pairing skew. Not established under enrichment beyond
+          phi 1.3 or in fuel cut, where the field is 0 by construction.
+    notes: |
+      Commanded fuel flow from the ECM's own fuel equation (BFS x phi x
+      engine speed). It is not a measurement of delivered fuel, and it
+      ignores injector dead time and the purge term. It is what the
+      instrument cluster's trip computer integrates. ECM_FUEL_USED_COUNTER_551
+      is the ECM's running integral of it.
+
+  - name: ECM_FUEL_USED_COUNTER_551
+    module: ECM
+    can_id: 0x551
+    byte_start: 1
+    byte_length: 1
+    byte_order: big
+    scale: null       # a wrapping counter: decode the deltas, not the value
+    offset: null
+    unit: count
+    confidence: high
+    model_feature: false  # a wrapping counter, not a state
+    evidence:
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          0x0CE80A copies 0xFFFF143C into byte 1. 0x07C8D8 adds each cycle's
+          fuel 0xFFFF1936 to the 16-bit accumulator 0xFFFF1448 and stores its
+          high byte in 143C. So the byte is a rolling fuel-used count that
+          wraps at 256.
+      - session: >-
+          _capture-tuning-2026-11-10T235310 + _capture-tuning-2026-11-11T174602
+          + _capture-tuning-2026-11-12T034249
+        method: counter_vs_integrated_field
+        finding: >
+          Summed byte increments (mod 256) against the time integral of
+          ECM_FUEL_FLOW_233 over each whole capture: 24.7 field-seconds per
+          count in all three (45,694 / 48,773 / 41,429 counts over 1,785 /
+          1,405 / 1,225 s). At 31.65 counts per (g/s x phi), one count is
+          about 0.78 g of air x phi, roughly 0.053 g of fuel at 14.7:1.
+        constant: 24.7
+        constant_unit: ECM_FUEL_FLOW_233 counts x seconds per counter count
+        conditions: >
+          Whole drives, all operating states included, frames at 33 Hz. Holds
+          across the three captures to 3 significant figures. A frame gap
+          longer than 256 counts' worth of fuel would hide whole wraps.
+    notes: |
+      The ECM's own fuel-used count, the one the instrument cluster integrates
+      for its trip computer. Take increments mod 256 between consecutive
+      frames; never average the byte.
+
   - name: ECM_CALC_LOAD_A
     module: ECM
     can_id: 0x233
@@ -419,7 +589,22 @@ signals:
           window regardless of engine state — so it matches any signal that
           also sits near mid-scale. This byte's own identification is
           untouched; only the corroboration it drew from the pair is gone.
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          This byte is ENGINE SPEED too. 0x0CE0FA writes min(0xFFFF120A, 0xC80)
+          split across two non-adjacent bytes: the low byte goes in byte 4 and
+          the high byte in byte 7. 0xFFFF120A is the word that ECM_RPM_23D
+          carries in 0x23D bytes 3-4 (rpm / 3.125, capped at 10,000 rpm). So
+          this byte is the same low byte that ECM_CALC_LOAD_B was, on another
+          frame. That is why it moved with rpm and never with load.
     notes: |
+      RETRACTED IDENTIFICATION (firmware, 2026-11-12): low byte of engine
+      speed / 3.125. The high byte is byte 7 of this frame, two bytes away,
+      so no binding in this schema can join them; read ECM_RPM_23D or
+      ECM_RPM instead. Kept only because ground-truth fixtures and
+      sequence_roles.yaml name it. The notes below predate the trace.
+
       Direction (high cranking, mid idle, low at sustained throttle) is
       consistent with engine load or fuel pulse width. The cross-broadcast
       pair that once narrowed this was withdrawn on 2026-08-06 — see the
@@ -489,7 +674,24 @@ signals:
           (idle compensation activity). The 8 → 239 jump at the cranking tag
           rules out any "set on diagnostic request" interpretation — this is
           engine-running activity, full stop.
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          0x0CD1F2 writes bytes 5-6 as the little-endian 16-bit word
+          0xFFFF27DE = 0xFFFF1AFA - 0xFFFF1B8A, clamped to signed 16-bit
+          (0x0663A8). This byte is its HIGH byte, which is why it reads as a
+          small signed number: about -2 (-512..-257) at closed throttle and up
+          to +8 under load. 0xFFFF1B8A is one of the two loss-torque words in
+          0xFFFF3C44. That makes 27DE a torque net of that loss (inferred), in
+          the same units as the torque map (N·m x 10, inferred).
     notes: |
+      WHAT THE BYTE IS (firmware, 2026-11-12): the high byte of a signed
+      16-bit torque word in bytes 5-6, little-endian. See the evidence
+      above. The bindings schema cannot declare a signed field yet, so the
+      16-bit word is not bound. Notes below this line predate the firmware
+      trace.
+
+
       Three physical-action sessions agree, including a full engine-off
       bracket: 0 at engine off, jumps the moment the engine cranks, climbs
       with throttle activity. The earlier screen-tagged session is treated
@@ -524,7 +726,31 @@ signals:
         finding: >
           Mean values match 0x231:3 AND 0x29E:0 in every window — ECM
           publishes this state byte three times across two CAN IDs.
+      - session: firmware ZS44A-20260920 (F01.14) + _capture-tuning-2026-11-11T174602
+        method: firmware_frame_builder
+        finding: >
+          NOT AN ENUM. 0x0CD41C builds byte 0 as the arbitrated torque demand
+          0xFFFF1C74 / 30 - 50, clamped to a SIGNED byte (-128..127): torque
+          = (signed byte + 50) x 3 in the torque map's units (N·m, inferred).
+          It is the exact inverse of the VDC ceiling coding the ECM reads from
+          0x29E byte 0 (signed byte x 30 + 1500, 0x0C24E8). Over 136,832
+          frames the signed value ran -76..71, i.e. -78 to 363 N·m against a
+          381 N·m rating. Byte 3 is the driver-demand torque 0xFFFF2812 the
+          same way, and equals byte 0 in 83 % of frames (the two differ only
+          while a limit acts). The VDC's 0x29E byte 0 echoes this byte exactly
+          in 70 % of same-instant pairs. That is the "identical means" above:
+          one torque, published by the ECM and repeated by the VDC.
     notes: |
+      WHAT THE BYTE IS (firmware, 2026-11-12): signed arbitrated engine
+      torque demand, (byte + 50) x 3 N·m (units inferred). See the evidence.
+      254 "engine off" is -2, i.e. 144 N·m. With the engine stopped the
+      demand words hold no meaning, so the value is not a state code. An
+      unsigned decode wraps at 150 N·m (byte 0), and the bindings schema has
+      no signed flag yet, so the engineering decode is not applied here.
+      Name, unit and scale are kept because model manifests may read them.
+      The notes below predate the firmware trace.
+
+
       State enum, useful as an anomaly-detection input: an unexpected
       transition to 254 mid-drive = engine stalled / fuel cut / major fault.
       The three-way redundancy means a single bit-flip in one location is
@@ -552,7 +778,16 @@ signals:
       - session: 2026-05-11T152858
         method: cross_broadcast_pairing
         finding: Identical means to ECM_ENGINE_STATE_A.
-    notes: Cross-broadcast duplicate.
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          0x0CD41C builds byte 3 as the driver-demand torque 0xFFFF2812 / 30
+          - 50, a signed byte. It is not a duplicate: it equals byte 0 (the
+          arbitrated demand) only while no limit acts. See ECM_ENGINE_STATE_A.
+    notes: >
+      Signed driver-demand torque, (byte + 50) x 3 N·m (units inferred),
+      before the limiters and the arbitration. Not an enum and not a
+      duplicate; the name is kept for compatibility (firmware, 2026-11-12).
 
   - name: ECM_ENGINE_STATE_C
     module: ECM
@@ -568,7 +803,23 @@ signals:
       - session: 2026-05-11T152858
         method: cross_broadcast_pairing
         finding: Identical means to ECM_ENGINE_STATE_A.
-    notes: Cross-broadcast duplicate.
+      - session: firmware ZS44A-20260920 (F01.13) + 26 sessions 2026-10-26..11-12
+        method: firmware_receive_handler
+        finding: >
+          0x29E is RECEIVED by the ECM, not sent by it: it sits in a receive
+          slot of the CAN table at ROM 0x095F1, and the ABS/VDC sends it.
+          Handler 0x0CCC3A checks byte 7 = (sum of bytes 0-6 + 0xA0) mod 256.
+          Byte 0 is a signed torque ceiling that the ECM applies, as
+          (byte + 50) x 3 N·m, only while byte 2 bit 4 is set (0x0C24E8,
+          0x0C254C). That bit was never set in 329,698 stored frames. When no
+          request is active the VDC echoes the ECM's own torque from 0x231
+          byte 0 here (identical in 70 % of same-instant pairs).
+    notes: >
+      The VDC's torque field: an echo of the ECM's torque demand (0x231 byte
+      0) when no request is active, and a ceiling when byte 2 bit 4 is set.
+      It is a signed byte, so unsigned decoding wraps. Sent by the ABS/VDC
+      and received by the ECM; `module: ECM` is wrong, but the field is kept
+      for compatibility (firmware, 2026-11-12).
 
   # --------------------------------------------------------------------------
   # Motion-correlated candidates from the partial drive session.
@@ -632,6 +883,15 @@ signals:
           has the same scale. This known-answer chain fixes the old one-byte
           extraction and identifies the quantity without relying on a motion
           inventory or per-window means.
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_receive_handler
+        finding: >
+          Agrees. 0x2D1 is a receive slot of the ECM's CAN table, so another
+          module sends it (inferred: the ABS). The ECM's handler 0x0CCA2A takes
+          bytes 1-2 little-endian into 0xFFFF21D4 and 0xFFFF114E. It also takes
+          byte 0 bit 0 to 0xFFFF289E bit 4, byte 3 & 3 as the frame's rolling
+          counter, byte 4 to 0xFFFF4440, and bytes 5-6 little-endian to
+          0xFFFF43C4.
     notes: |
       Aggregate vehicle speed, not an individual wheel. Like the other ECU/ABS
       speed copies, it inherits the vehicle's approximately 8% under-read
@@ -648,11 +908,55 @@ signals:
     unit: unknown
     confidence: hypothesized
     model_feature: false  # body/motion — not engine behaviour
+    superseded_by: VEHICLE_SPEED_280  # its low byte (2026-11-12)
     evidence:
       - session: 2026-05-11T154648
         method: inventory_comparison
         finding: 1 unique parked → 256 unique driving.
-    notes: Strong motion-correlated; type TBD.
+    notes: >
+      Strong motion-correlated; type TBD. Resolved 2026-11-12: the low byte of
+      VEHICLE_SPEED_280 (bytes 4-5, big-endian, 0.01 km/h).
+
+  - name: VEHICLE_SPEED_280
+    module: unknown      # received by the ECM, so another module sends it (inferred: ABS)
+    can_id: 0x280
+    byte_start: 4
+    byte_length: 2
+    byte_order: big
+    scale: 0.01
+    offset: 0.0
+    unit: km/h
+    confidence: high
+    model_feature: false  # redundant road speed
+    plausible_min: 0.0
+    plausible_max: 250.0
+    evidence:
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_receive_handler
+        finding: >
+          0x280 is a receive slot of the ECM's CAN table. Its handler 0x0CCFF8
+          sets the ECM's vehicle-speed word 0xFFFF114E (0.1 km/h, the word
+          0x2D1 bytes 1-2 also feed) = (byte 4 x 256 + byte 5) / 10 when cal
+          0x8346 bit 3 is set and cal 0x834A = 1. ZS44A has 0x834A = 0, so this
+          truck's ECM takes speed from 0x2D1 instead. The handler always keeps
+          bytes 6-7 as a 10-bit word 0xFFFF43D0 = (byte 7 >> 6) x 256 + byte 6.
+      - session: _capture-tuning-2026-11-11T174602
+        method: per_sample_ratio
+        finding: >
+          Against VEHICLE_SPEED_2D1 raw (0.1 km/h) at the same instant (within
+          6 ms), 51,805 moving pairs: bytes 4-5 big-endian / that raw = 10.006
+          median, p5 10.000, p95 10.023. So the field is the same road speed
+          at 0.01 km/h, which is the scale the code implies.
+        constant: 10.006
+        constant_unit: 0x280[4:6] raw per VEHICLE_SPEED_2D1 raw
+        conditions: >
+          Moving (VEHICLE_SPEED_2D1 raw > 100), one 23-minute drive at 39 Hz.
+          The p95 spread is pairing skew during acceleration.
+    notes: |
+      Road speed at 0.01 km/h. Like the other speed copies it inherits the
+      truck's approximately 8 % under-read against GPS. It is the 10x finer
+      twin of VEHICLE_SPEED_2D1; neither declares `quantity`, which only one
+      live binding may.
 
   - name: MOTION_SIGNAL_590_2
     module: unknown      # 92ms body bus
@@ -1129,7 +1433,19 @@ signals:
           through parking_brake_off/on (foot brake stayed down), 2.2 at
           brake_pedal_released. Zero throttle sensitivity — responds ONLY
           to the foot brake. Two independent sessions agree.
+      - session: 26 sessions 2026-10-26..11-12 + firmware ZS44A-20260920 (F01.13)
+        method: value_census + firmware_receive_handler
+        finding: >
+          A FLAG, NOT A PRESSURE. Over 329,698 frames the byte took exactly
+          two values, 0 (277,063) and 64 (52,635), so it is bit 6 on or off.
+          The ~32 window means above are the fraction of the window the bit
+          was set. The ECM's handler (0x0CCC3A) reads bits 0-5 and 7 of this
+          byte into its own flags and ignores bit 6.
     notes: |
+      CORRECTED (2026-11-12): bit 6 is a foot-brake flag, set while the
+      pedal is pressed. Nothing here scales to a line pressure. The notes
+      below predate the census.
+
       Foot-brake-applied signal on the ~20 ms ABS frame: ~0 released,
       ~64 firmly applied. Promoted low→high — two tagged sessions, clean
       isolation from throttle. Still `high` not `confirmed` because the
@@ -1172,7 +1488,21 @@ signals:
           reverting to 118.5 at brake_pedal_released. Brake moves it ~3× more
           than throttle does → brake-dominant driver-demand composite, not a
           pure brake flag (consistent with the 005522 weak-throttle r2).
+      - session: firmware ZS44A-20260920 (F01.13) + 26 sessions 2026-10-26..11-12
+        method: firmware_receive_handler + checksum_check
+        finding: >
+          A CHECKSUM. The ECM's handler for this frame (0x0CCC3A) requires
+          byte 7 = (sum of bytes 0-6 + 0xA0) mod 256, sets 0xFFFF4792 bit 2
+          and ignores the frame's fields on a mismatch. The relation held on
+          all 329,698 stored frames. It moves with the brake because byte 3
+          (the brake flag) and byte 0 (the torque echo) move, and with the
+          throttle through byte 0.
     notes: |
+      CORRECTED (2026-11-12): this byte is the frame's checksum, (sum of bytes
+      0-6 + 0xA0) mod 256. It carries no signal of its own; everything it
+      appeared to show comes from the other bytes. The notes below predate
+      the firmware trace.
+
       Brake-dominant driver-demand / pedal-activity composite on the ~20 ms
       ABS frame: ~115 idle, ~180 on firm brake, small throttle component.
       Promoted low→high — the 202800 session separated the two inputs and
@@ -1285,6 +1615,19 @@ signals:
           this ~100 Hz ECM frame. Duty cycle matched too (80.2 % both), but
           that was NOT the basis of the call — matching two aggregate duty
           percentages is the failure mode this project keeps retracting.
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          Agrees, and names every bit. 0x0CE698 writes:
+          - bits 7-6 = fan stage, 0xFFFF2748 & 3 (0 off, 1 low = 0x40,
+            3 high = 0xC0; the 0xE0 HIGH above is 0xC0 + bit 5);
+          - bits 5-4 = engine-state code: 3 while 0xFFFF4786 bit 6, else 2
+            while 0xFFFF282C bit 5 (the steady 0x20), else 1 while
+            0xFFFF4783 bit 5, else 0 while 0xFFFF4786 bit 7;
+          - bit 3 = 0xFFFF28B0 bit 6, the A/C clutch identified below;
+          - bit 2 = 0xFFFF4792 bit 3.
+          Bytes 6 and 7 carry 0xFFFF2708 (DID 0x117B, probably the alternator
+          duty) and 0xFFFF273B & 0x7F.
     notes: |
       Bit 0x08 = A/C compressor clutch engaged, mirrored from the body bus onto
       the ECM frame (identified 2026-08-08). Useful because it carries the
@@ -1589,6 +1932,13 @@ signals:
           counter at 1/25 the resolution. Independently regressed against
           Mode 22 DID 0x1219 (ECM_RPM): r2 = 0.9992, rpm = raw x 3.12457
           - 1.34, slope drift 0.14% across three disjoint sub-windows.
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          Agrees exactly. 0x0CD1F2 writes bytes 3-4 (low, high) =
+          min(0xFFFF120A, 0xC80), and 120A x 50/16 is rpm (3.125 rpm/count),
+          so the field caps at 10,000 rpm. 0x233 carries the same capped word
+          split across byte 4 (low) and byte 7 (high).
     notes: |
       0x1F9 stores rpm x 8; this field stores rpm x 0.32, so it carries the
       same value with 25x coarser quantisation (~3.1 rpm per count). Prefer
@@ -1629,6 +1979,17 @@ signals:
           0x233:0 and 0x23D:7 are bit-identical across the whole session
           (mean difference 0.000, sd 0.000, n = 412) and both run exactly
           10 counts above 0x551:0 (mean -10.000, sd 0.000).
+      - session: firmware ZS44A-20260920 (F01.14)
+        method: firmware_frame_builder
+        finding: >
+          Agrees, with the mechanism. 0x08301A makes 0xFFFF4766 = curve
+          0xD9CF(coolant 0xFFFF119F) - 10, floored at 0. 0x551 byte 0
+          (0x0CE80A) sends 4766. 0x23D byte 7 (0x0CD1F2) and 0x233 byte 0
+          (0x0CE0FA) send 4766 + 10, capped at 255. So one value is formatted
+          twice, 10 counts apart, and the -40 field cannot read below -40
+          degC. The Mode 22 conflict the notes cite is settled: the firmware
+          DID audit (2026-10-05) verified 0x1101 as byte 0xFFFF1083, degC =
+          raw - 50.
     notes: &coolant_alt_notes |
       Engine coolant temperature, published on three frames with two offset
       conventions: 0x233:0 and 0x23D:7 use -50, 0x551:0 uses -40. The
