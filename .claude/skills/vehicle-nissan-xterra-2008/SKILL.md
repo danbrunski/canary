@@ -60,7 +60,10 @@ general, put it there instead.
    and open questions: `docs/roadmap/supercharger-build.md`.
 3. **Altitude.** Home is **79–82 kPa** (Colorado Springs, ~2070 m), but drives
    reach **63–73 kPa** (2,900–3,900 m). Read `BAROMETRIC_PRESSURE` (PID `0x33`)
-   per session. Never assume sea level, and never assume 80 kPa either. The
+   per session. Never assume sea level, and never assume 80 kPa either. PID
+   `0x33` tracks altitude continuously within its 1 kPa steps. It reads the
+   EVAP pressure sensor and holds only during EVAP leak tests (firmware and
+   GNSS check, F01.12). After a flash it reads 103.6 kPa for about 2 s. The
    trained models fire out-of-distribution at 63–73 kPa, and that is not a
    fault.
 

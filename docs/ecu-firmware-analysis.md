@@ -1395,7 +1395,8 @@ Three words above it guard it:
   without its after-run. Three plausibility tests must then all pass:
   1. every cell of both learned trim maps is within 0x5A00–0x6E00
      (`0x02766E`);
-  2. `0xFFFF52DA` is within 0x7900–0x8700, unless `0xFFFF4858` bit 3 is set
+  2. `0xFFFF52DA`, the A/D gain word that `0x0683A8` applies (0x8000 =
+     1.0), is within 0x7900–0x8700, unless `0xFFFF4858` bit 3 is set
      (`0x068358`);
   3. seven RAM complement pairs are intact (`0x027798`): `4C72`/`625C`,
      `4C74`/`625E`, `6172`/`614A`, `5EA0`/`52CE`, `618C`/`6256`,
@@ -1526,6 +1527,80 @@ F01.11 acceptance):
   unchanged.
 - A read before the flash's key cycle and one after it separates the
   re-initialisation from the next validated start.
+
+### Barometric pressure: when it updates (F01.12, 2026-11-12)
+
+**Baro is read continuously** from the EVAP control system pressure sensor
+and tracks a climb with no lag visible at PID 0x33's 1 kPa resolution. It
+freezes only while a hold flag is set. That flag's writers are the EVAP
+purge code and four diagnostic state machines, inferred to be the EVAP leak
+tests. Verified from code unless marked inferred.
+
+**The chain** runs in the 10.24 ms group (`0x03DD8C`, task table
+`0x02189C`):
+
+1. **Sensor.** A/D input AN3, slot 7 of the external multiplexer, goes to
+   `0xFFFF1FFC`. Cal `0x88F0` bit 7 selects the EVAP pressure sensor for
+   that slot.
+2. **Conditioning.** `0x03DA08` filters it, and the result × 64 is
+   `0xFFFF11A2`.
+3. **Fast filter.** `0x03DA8C` runs `0xFFFF6272` += (`11A2` − `6272`) / 16
+   each call, a time constant of about 0.16 s. The filter is frozen while
+   the hold flag `0xFFFF4853` bit 0 is set.
+4. **Learned baro** `0xFFFF4C60`:
+   - It copies `6272` each call while the two are within 0xA00 counts
+     (2.3 kPa) and the hold has been clear for 100 calls (1.0 s).
+   - A larger gap closes by 0x500 counts (1.1 kPa) per 102.4 ms event
+     (`0xFFFF84C0` bit 6), about 11 kPa/s.
+   - `0xFFFF4C30` is its per-cycle snapshot. `0xFFFF4466` is its high byte,
+     or 0xFF while item 0xCD, 0xCE or 0x2C (P0452, P0453, P0448) or two ids
+     the decompiler lost are failing.
+5. **Units.** kPa = (raw × 58/128 + 27,724) / 512, which is 0.000885 kPa
+   per count, from cal `0x89AA`/`0x92D4`. PID 0x33 is that value truncated
+   to whole kPa (`0x053B8C`), or 101.3 kPa (`0xCA99`) on a sensor fault.
+
+**Persistence.** `6272` and `4C60` are both inside the battery-backed block
+(F01.11), so the learned baro carries across key cycles. After a flash or a
+battery disconnect they restart at `0xDA80`, which is 103.6 kPa. At home
+that is 23 kPa high, and the slew corrects it in about 2 s of key-on.
+
+**The hold**, `0xFFFF4853` bit 0, has six writers:
+
+- `0x06A288` sets it from `0xFFFF4858` bit 2 OR `0xFFFF47B3` bit 1.
+  `EVAP_purge_control` writes `4858` bit 2 (from `0xFFFF91F0`). `47B3`
+  bit 1 is written by `EVAP_purge_control` and `0x0BDCF2`.
+- Four autocoded diagnostic state machines also write it: `0x0B0A3C`,
+  `0x0B3ED8`, `0x0B5260` and `0x0BA320`.
+- That these are the EVAP leak tests, during which the vent valve is closed
+  and the sensor reads purge-line vacuum rather than the atmosphere, is
+  inferred. It is consistent with PID 0x32 (baro minus the EVAP sensor)
+  reading 0 outside leak tests (2026-10-27).
+
+**A second word, `0xFFFF1188`**, is a separately filtered copy of `11A2`.
+It takes `0xDA80` while `0xFFFF6958` bit 4 is set. It follows `11A2`
+only while `0xFFFF1115` > 0x51 and `11A2` is within 0x1600–0xF100,
+and otherwise holds. Its consumers have not been followed.
+
+**Checked against GNSS altitude.** Each PID 0x33 reading was paired with
+the same-second GNSS altitude converted through the standard atmosphere:
+
+| Drive | Pairs | GNSS altitude | PID 0x33 | PID / standard atmosphere |
+|---|---|---|---|---|
+| 2026-08-06T162657 | 197 | 1,849–2,816 m | 72–82 kPa | median 1.007, residual s.d. 0.58 kPa |
+| 2026-09-18, 17 sessions | 1,180 | 1,688–3,882 m | 63–83 kPa | median 1.0065, residual s.d. 0.83 kPa, worst 2.2 kPa |
+
+- The ratio drifts from 0.998 below 2,100 m to 1.018 near 3,000 m. That is
+  the real atmosphere against the standard one, which assumes a fixed
+  temperature lapse, plus a day's weather. It is not the ECM.
+- A stale or lagging baro would read high while climbing. The residual has
+  the opposite sign: −0.36 kPa at 0.5–2 m/s of climb, +0.04 kPa
+  descending. So any lag is below what 1 kPa steps can show, and smaller
+  than the GNSS receiver's own altitude smoothing.
+
+**Answer.** Baro follows a climb from 82 to 63 kPa. Nothing in the drives
+shows a stale value, and the code holds it only for EVAP leak tests
+(inferred). The λ gain, the injector pressure model and the torque limit
+that read `4C30` see the current altitude.
 
 ### Throttle area units: not settleable at the desk (F01.9, 2026-11-12)
 

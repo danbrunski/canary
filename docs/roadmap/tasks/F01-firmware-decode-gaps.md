@@ -364,6 +364,24 @@ Same conventions as the other task files: task-level truth is the checkboxes,
     limit.
   - **Accept:** the update gate is traced; PID `0x33` is compared with GNSS
     altitude over one mountain drive.
+  - [x] 2026-11-12. Firmware doc: "Barometric pressure: when it updates".
+    - **Chain.** EVAP sensor (AN3 slot 7) → `11A2` → a 1/16 filter `6272`
+      (about 0.16 s) → learned `4C60` (`0x03DA8C`, every 10.24 ms).
+      - `4C60` copies the filter while within 2.3 kPa, once the hold has
+        been clear for 1 s.
+      - Larger gaps slew at 1.1 kPa per 102.4 ms.
+    - **Gate.** The hold is `0xFFFF4853` bit 0. Its writers are
+      `EVAP_purge_control` (through `4858` bit 2 and `47B3` bit 1) and four
+      autocoded state machines. That these are the EVAP leak tests is
+      inferred.
+    - **Persistence.** Baro sits in the battery-backed block. After a flash
+      it restarts at 103.6 kPa and settles in about 2 s.
+    - **Drives.** 1,377 same-second pairs over 2026-08-06 and 2026-09-18
+      (1,688–3,882 m GNSS, 63–83 kPa) track the standard atmosphere at
+      0.998–1.018 by altitude band. There is no plateau, and no lag at
+      1 kPa resolution: the residual against climb rate has the opposite
+      sign to a lag.
+    - **Answer:** baro tracks the climb. It is not a stale value.
 
 - [ ] **F01.13 Torque limits and who asks for them.** The arbitration is
   traced. Open: the torque-down request `0xFFFF3C36` (`0x07A00C`) and what
