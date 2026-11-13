@@ -158,8 +158,9 @@ def installer(tmp_path: Path) -> Installer:
     shutil.copy(REPO_ROOT / "scripts" / "data_drive.sh", checkout / "scripts")
     shutil.copy(REPO_ROOT / "scripts" / "canary_token.sh", checkout / "scripts")
     (checkout / "scripts" / "lib").mkdir()
-    for lib in ("canary_hostname.sh", "dashboard_build.sh"):
-        shutil.copy(REPO_ROOT / "scripts" / "lib" / lib, checkout / "scripts" / "lib")
+    # Every lib: install_pi.sh sources its install_*.sh sections (R30.11) too.
+    for lib in sorted((REPO_ROOT / "scripts" / "lib").glob("*.sh")):
+        shutil.copy(lib, checkout / "scripts" / "lib")
     (checkout / "scripts" / "install_deps.py").write_text(_INSTALL_DEPS_STUB)
     shutil.copy(EXAMPLE_CONFIG, checkout / "canary.pi.example.yaml")
     (checkout / "systemd").mkdir()

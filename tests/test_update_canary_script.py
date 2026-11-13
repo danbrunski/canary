@@ -531,6 +531,25 @@ def test_a_changed_dashboard_helper_also_reexecs(harness: Harness) -> None:
     assert f"re-executed from {after}" in result.stdout
 
 
+@pytest.mark.parametrize("lib", ["install_gps_time", "install_hat", "install_network"])
+def test_a_changed_installer_section_reexecs_and_runs_install_pi(
+    harness: Harness, lib: str
+) -> None:
+    """install_pi.sh's GPS/time, HAT and network sections live in lib/ (R30.11).
+    A change to one is a change to the installer: it re-execs like the
+    dashboard helper, and install_pi.sh runs even though nothing else moved."""
+    path = f"scripts/lib/{lib}.sh"
+    after = harness.commit_upstream("section", **{path: "# shellcheck shell=bash\n# changed\n"})
+
+    result = harness.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"{path} changed" in result.stdout
+    assert f"re-executed from {after}" in result.stdout
+    assert f"install_pi.sh: ran ({path} changed)" in _summary(result.stdout)
+    assert harness.calls("install_pi.sh")
+
+
 def test_a_missing_dashboard_helper_is_a_setup_error(harness: Harness) -> None:
     (harness.checkout / "scripts" / "lib" / "dashboard_build.sh").unlink()
 

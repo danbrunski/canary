@@ -288,11 +288,13 @@ else
   # (2026-09-22: the first run after 119527d printed the old health failure
   # while the daemon was healthy). Hand over to the new copy now, once, with
   # the fetch already done. The dashboard helper it sourced counts as part of
-  # it: the functions in memory are the old ones.
+  # it: the functions in memory are the old ones. So do install_pi.sh's three
+  # sections (lib/install_*.sh, R30.11): the updater does not source them, but
+  # a change to one is a change to the installer, which the new copy runs.
   self_changed=""
   if [[ "${before}" != "${after}" ]]; then
     self_changed="$(git -C "${CANARY_HOME}" diff --name-only "${before}" "${after}" \
-      | grep -xE 'scripts/update_canary\.sh|scripts/lib/dashboard_build\.sh' | head -n 1 || true)"
+      | grep -xE 'scripts/update_canary\.sh|scripts/lib/(dashboard_build|install_gps_time|install_hat|install_network)\.sh' | head -n 1 || true)"
   fi
   if [[ -n "${self_changed}" ]]; then
     echo "${self_changed} changed in ${before} -> ${after}; re-executing the new copy"
@@ -317,7 +319,8 @@ changed_between() {
 # Files install_pi.sh installs somewhere outside the checkout, or runs.
 # The HAT overlay sources are: install_pi.sh compiles them into /boot/firmware,
 # and picks the GNSS UART from the revision table (hat_revisions.json, hat_rev.py).
-INSTALL_PI_INPUTS='^(scripts/install_pi\.sh|scripts/install_deps\.py|scripts/update_canary\.sh|systemd/|canary\.pi\.example\.yaml|hardware/canary-hat-firmware/([^/]*-overlay\.dts|hat_revisions\.json|hat_rev\.py))'
+# lib/install_*.sh are install_pi.sh's own sections (GPS and time, HAT, network).
+INSTALL_PI_INPUTS='^(scripts/install_pi\.sh|scripts/lib/install_[a-z_]*\.sh|scripts/install_deps\.py|scripts/update_canary\.sh|systemd/|canary\.pi\.example\.yaml|hardware/canary-hat-firmware/([^/]*-overlay\.dts|hat_revisions\.json|hat_rev\.py))'
 PIP_INPUTS='^(pyproject\.toml|requirements[^/]*\.txt|uv\.lock|poetry\.lock|pdm\.lock)$'
 
 decide_dashboard() {

@@ -194,17 +194,42 @@ they started.
   - Land with a `scripts/push.sh` run on a documentation-only and a code
     commit.
 
-- [ ] **R30.11 `scripts/install_pi.sh` is 1,058 linear lines with one
+- [x] **R30.11 `scripts/install_pi.sh` is 1,058 linear lines with one
   265-line `if`.** Three functions; sections for hostname, wired link,
   GPS and time (the long conditional), journal, cloud-init, cgroup, HAT
   overlay, Node and the dashboard; fourteen heredocs. HAT and GNSS logic
   changes with each board revision, and each change edits the middle of that
   conditional. `tests/test_install_pi_script.py` (64 tests over
   `CANARY_INSTALL_ROOT`) already tests per section.
-  - [ ] `lib/install_gps_time.sh`, `lib/install_hat.sh`,
+  - [x] `lib/install_gps_time.sh`, `lib/install_hat.sh`,
     `lib/install_network.sh`, sourced. Extend the list of libs for which
-    `update_canary.sh` re-execs.
-  - Acceptance: `test_install_pi_script.py` passes unchanged.
+    `update_canary.sh` re-execs. Done 2026-11-12: `install_pi.sh` 1,058 ->
+    542 lines; `install_network.sh` (`install_hostname`, `install_wired_link`),
+    `install_hat.sh` (`hat_detect`, `hat_fact`, `hat_refuse_uart0_console`,
+    `install_hat_overlay`), `install_gps_time.sh` (`gps_time_settings`,
+    `install_gps_time` calling `gps_choose_device`, `gps_configure_gpsd`,
+    `gps_configure_chrony`; the 265-line `if` is now the 17-line `install_gps_time`). Same
+    commands, same order, no `local` (the moved code's variables stay global
+    for the closing summary); `hat_detect` ends `return 0` because its last
+    `[[ -r ]] &&` would trip `set -e` at the call once it is a function.
+    `update_canary.sh`: the re-exec list takes the three libs, and
+    `INSTALL_PI_INPUTS` takes `scripts/lib/install_*.sh` (without it a
+    lib-only update would not run the installer at all); new
+    `test_a_changed_installer_section_reexecs_and_runs_install_pi` (3 cases).
+    shellcheck -x on `install_pi.sh`: clean.
+  - [x] Acceptance: `test_install_pi_script.py` passes (75 passed,
+    `pytest -m ""`). Its assertions are unchanged; the one fixture line that
+    copied two named libs into the scratch checkout now copies
+    `scripts/lib/*.sh`, or the new sections would not be there to source.
+    Stronger: HEAD (a worktree) and the new script run under the same sandbox
+    (the test's shims) for 28 configurations (no HAT, rev 2.0 / 2.1 / blank /
+    unknown / foreign HAT, explicit and autodetected GPS device, GPS stack
+    off, custom and refused baud/rate, uart0 console refusals, hostname
+    explicit/MAC/refused, wired default/custom/none/edited/refused, data
+    drive with and without, and a re-run of the first install): rc, stdout,
+    stderr, shim command log and the whole file tree are identical once the
+    random token, `mktemp` names and bash's own `line N:` prefix on one
+    redirect-error message are normalized.
 
 - [ ] **R30.12 Guards that cost a few lines.**
   - `rust/` is outside every gate and its constants are hand-copied from
