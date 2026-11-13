@@ -1997,6 +1997,114 @@ The live idle read is owed (F01 "Not disassembly"). It has no known-answer
 relation to a DID, so it would go into the `memory:` catalog only after the
 idle read has shown the cylinder phase is stable.
 
+### Outputs: fans, A/C, alternator, VIAS (F01.16, 2026-11-12)
+
+Verified from code unless marked inferred. Units used here:
+
+- coolant byte `1079` = °C + 50;
+- `11CA` = rpm / 50;
+- battery byte `1115` = 0.08 V per count;
+- `111C` = road speed, 2 km/h per count (inferred from the stationary
+  self-test note, ≤ 2 counts = ≤ 4 km/h);
+- `10F8` = (A/D count of AN3 mux slot 5 − 19) × 66 / 400, written by
+  `0x03D7B4` into `1184` and snapshotted as `10F8`. This is inferred to be
+  refrigerant pressure, consistent with the DID `0x1223` candidate.
+
+Every request below is cancelled by a CONSULT active test, whose override
+block is at `99xx`.
+
+**Cooling fan.** The fan is not a pin. The ECM sends the stage in `0x1F9` b0
+bits 7–6 (F01.14) and the IPDM switches the relays. The chain is:
+
+- demand `19AB` (`0x0492A4`);
+- staging `0x0495F8`, one stage at a time, 26 timer counts to step up and
+  25 to step down;
+- `1278`, then `19A9`, then `27D4` (`0x04986A`), then the snapshot `2748`.
+
+While `11DC` is 0 the request holds its last value. The thresholds are
+immediates in the code, not calibration.
+
+| Stage | Requested when |
+|---|---|
+| 3 (high) | Coolant ≥ 105 °C (off below 103 °C); or `10F8` ≥ 98 (off below 83); or the P0500 item failing now (`FUN_0002660c(0)`); or `2838` bit 7 |
+| 1 (low) | Coolant ≥ a speed- and A/C-dependent threshold: 98 °C below 40 km/h with the A/C off, else 105 °C (off 2 °C lower). With the A/C on and `10F8` ≥ 79 (off below 64), the threshold is 0, so stage 1 is on whenever the A/C is |
+| 2 | Not reachable from these inputs. Its coolant test uses the same 105 °C threshold and hysteresis as stage 3's, so stage 3 always wins |
+| 0 | Otherwise; and always unless the engine is running (`4785` b7 set and b6 clear, `282A` b5) |
+
+The 40 km/h band has 8 km/h hysteresis, and an 80 km/h band (`288E` b6) is
+computed but selects the same thresholds. Expected-state rule: at idle with
+the A/C off the fan is off below 98 °C, on (low) at 98 °C, and high from
+105 °C. With the A/C on and pressure up, it is on (low) at any coolant
+temperature.
+
+**A/C compressor.** The clutch request is `28B6` bit 6 → `28B0` → `0x1F9` b0
+bit 3, sent to the IPDM (`0x048F42`). It is the driver's request (`2833`
+bit 7 with `2835`, `0x048D3E`) gated by the cut flag `28AE` bit 7
+(`0x0488EE`). The A/C is cut for any of these:
+
+- **Full pedal.** The lower pedal reading `2AFC` reaches 610/727 (84 %;
+  0x23D b1 ≈ 214). It re-arms below 528/727 (73 %). This is a transient
+  cut: it lasts while the countdown `28E7`, loaded with 5 whenever the
+  pedal is below the threshold, runs out. The timer's period was not traced.
+- **Refrigerant pressure out of band.** Cut when `11CA` ≥ 110 (5,500 rpm),
+  `10F8` ≥ 156 or ≤ 7, or `10F8` ≥ 137 above 1,500 rpm. Restore when
+  below 5,000 rpm with 8 < `10F8` < 78, or below 1,500 rpm with
+  77 < `10F8` < 108.
+- **Engine hot.** Coolant ≥ 114 °C; restore at ≤ 111 °C.
+- **Starting.** While cranking (`4785` b6) and for 30 timer counts after.
+- **Saturated inputs.** Coolant byte 0xFF with load or rpm also at full
+  scale.
+- `284C` bits 4 and 3 (not traced).
+
+**Alternator** (power-generation voltage control, `0x07BFB8`). The ECM
+commands a duty in `2794` → `2708` (DID `0x117B`, `0x1F9` b6). It sets a
+target voltage `1B7F`, which `1B7E` follows by 0.08 V every 102 ms
+(`0x07C5DA`):
+
+| Mode `1418` | Target | When |
+|---|---|---|
+| 0 | 14.0 V, duty 0 (the regulator's own setting) once `1B7E` has reached it | Variable control off (`28B6` b5 clear) |
+| 1 | 13.04 V | Control on, the normal case |
+| 11 | 13.84 V | Control on, `10DC` non-zero, held 60 counts after (inferred: an electrical-load request) |
+| 2 | 14.0 V | Control on, `2852` b4 set (`0x07C230`, a battery-current condition) |
+
+The duty is (16 × `1B7E` / 5 − 440) plus a ±20 trim (`1394`, integrated
+from measured `1D04` = `1115` against `1B7E`, `0x07C71C`), clamped to
+40–160 (`0x07C802`).
+
+Variable control (`28B6` b5, `0x07C230`) needs all of:
+
+- the engine running, at least 100 counts after start;
+- battery ≥ 13.04 V and `11CE` ≥ 96 (1,200 rpm), and not with the fan on
+  and `2834` bits 0 and 2–3 set (`287D` b7);
+- a battery-current condition from `10B2`;
+- `133A` ≥ 0x2241;
+- the lower of coolant and `2BD0` ≥ 5 °C;
+- the battery-current-sensor items P1550–P1554 (0x109–0x10D) not failing;
+- battery below 16 V (`284F` b4), and never latched below 7.1 V (`47AA` b4).
+
+`10B2` is inferred to be the battery current sensor: offset 0x8000, and the
+P155x items are that sensor's codes.
+
+**VIAS** (`0x059818`). `28BB` bit 4 → `28B5` → port `0xFFFFF754` bit 11
+(`0x041304`). The solenoid is on, which closes the power valve, when:
+
+- `11CA` ≥ 44 (2,200 rpm). It stays on down to `11CA` 40 (2,000 rpm).
+- `11CA` ≤ 66 (below 3,350 rpm) when switching on from above. It stays on
+  up to `11CA` 70 (3,550 rpm). Above that it would need `11CA` and load both
+  at full scale, which never happens.
+- The engine is running, not cranking, and not at idle (`2833` b4).
+- `FUN_0008E498` passes: the electronic-throttle status flag `479E` bit 1
+  is set (`0x0D8EEC`), the throttle fault `47BE` bit 2 is clear, and the
+  counter `3C18` < 20.
+
+The coolant test (`288D` b0) and the load test (`288D` b2) compare against
+0, so they always pass in this code. The FSM's "2,200–3,300 rpm, warm"
+(EC-44) is therefore these two `11CA` thresholds. With the hysteresis, the
+valve closes at 2,200 rpm and opens near 3,550 rpm going up, and closes near
+3,350 rpm and opens at 2,000 rpm coming down. Expect the VE and torque steps
+at those four speeds, not at 2,200 and 3,300 both ways.
+
 ### Throttle area units: not settleable at the desk (F01.9, 2026-11-12)
 
 **Why the desk can't settle them.**

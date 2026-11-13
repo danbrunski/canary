@@ -240,8 +240,9 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
   spec check is defined only at 98.3–104.3 kPa barometric pressure, so a healthy
   engine here reads low on airflow and base fuel schedule. Warm idle is
   625 ± 50 rpm at 15 ± 5° BTDC. The VIAS power valve is closed from 2,200 to
-  3,300 rpm, so expect VE and torque steps near those speeds; they are not a
-  sensor fault.
+  3,300 rpm. The firmware adds hysteresis: it opens near 3,550 rpm going up
+  and closes near 3,350 rpm coming down. Expect VE and torque steps near those
+  speeds; they are not a sensor fault.
 - **Bank 1 is cylinders 1-3-5, on the right (passenger) side.** Firing order is
   1-2-3-4-5-6.
 

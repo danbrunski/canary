@@ -472,12 +472,24 @@ Same conventions as the other task files: task-level truth is the checkboxes,
   - *Open (truck):* the live idle read of the roughness bytes. Pi unplugged;
     listed under "Not disassembly".
 
-- [ ] **F01.16 Outputs: fans, A/C cut, alternator, VIAS.** Nothing recorded.
+- [x] **F01.16 Outputs: fans, A/C cut, alternator, VIAS.** Nothing recorded.
   The FSM gives the VIAS valve as closed from 2,200 to 3,300 rpm.
   - *Answers:* expected-state rules for behaviour models (fan on by coolant,
     A/C cut at full throttle), and the real VIAS switch points, which put
     steps in VE and torque.
   - **Accept:** each output's condition and thresholds listed from the image.
+  - *Done 2026-11-12:* all four are in the firmware doc, "Outputs: fans, A/C,
+    alternator, VIAS (F01.16)".
+    - **Fan.** Sent as a stage in `0x1F9`. Low at 98 °C (A/C off, under
+      40 km/h), else 105 °C. High at 105 °C, on high refrigerant pressure,
+      or with a P0500 fault. Stage 2 is unreachable.
+    - **A/C.** Cut transiently at 84 % pedal, on pressure out of band by
+      rpm, at coolant ≥ 114 °C, and at start.
+    - **Alternator.** Targets 13.04, 13.84 or 14.0 V by mode, gated by the
+      battery current sensor.
+    - **VIAS.** On from 2,200 rpm, with hysteresis to about 3,550 rpm going
+      up and 3,350 to 2,000 rpm coming down. Gated by electronic-throttle
+      status, not by coolant or load.
 
 - [ ] **F01.17 The unidentified curves and maps.** 35 curves with no input,
   118 inferred, and the flash-resident two-dimensional maps.
