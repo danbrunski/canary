@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from src.analysis.rom_targets import TargetEditor
 from src.config import CanaryConfig
+from src.control.rom_library import MAX_ROM_UPLOAD
 from src.dashboard.routes import rom_maps
 
 
@@ -36,7 +37,7 @@ def test_upload_size_type_and_errors(client, monkeypatch):
     headers = {"Authorization": "Bearer secret", "Content-Type": "application/octet-stream"}
     assert (
         client.post(
-            "/control/rom/inspect", content=b"x" * (rom_maps.MAX_ROM_UPLOAD + 1), headers=headers
+            "/control/rom/inspect", content=b"x" * (MAX_ROM_UPLOAD + 1), headers=headers
         ).status_code
         == 413
     )

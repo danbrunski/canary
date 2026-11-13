@@ -1,21 +1,16 @@
-"""Service helpers for the companion API.
+"""Service helpers for the companion API: the library import, the HTTP client
+to a Pi's control API, and the queued-action bookkeeping.
 
-Also home to the backend-agnostic ``/control/*`` handlers shared with
-``src/dashboard/routes/control/`` (refactoring.md 1.2) for jobs, training
-runs, feedback, model manifests and dataset health: each takes the bits that
-differ between the companion (local library-backed) and control (live-daemon)
-callers as parameters, with an optional hook for the one caller's extra side
-effect (control's audit-event publish). Callers keep their own request-schema
-classes and unpack them to primitives before calling in, so this module never
-depends on either schema module. The per-session routes both apps serve are
-one router instead (:mod:`src.dashboard.routes.stored_sessions`, R03.7).
+The backend-agnostic ``/control/*`` handlers this module once shared with the
+dashboard (jobs, training runs, feedback, dataset health) went with the
+standalone companion app (R29.15); the per-session routes both apps serve are
+one router (:mod:`src.dashboard.routes.stored_sessions`, R03.7).
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import secrets
 import shutil
 import sys
 import tempfile
@@ -26,62 +21,32 @@ from io import BytesIO
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-import yaml
-from fastapi import HTTPException
-
 from src.artifact_hash import sha256_file
 from src.companion.library import CanaryLibrary, LibrarySession
 from src.config import CanaryConfig
 from src.control.jobs import JobController
 from src.mcp_server.client import DaemonClient, DaemonError
-from src.models.feedback import FEEDBACK_LABELS, FeedbackStore
 from src.storage.sessions import summarize_session
 
 
-def companion_config(base_config: CanaryConfig, library: CanaryLibrary) -> CanaryConfig:
-    """Return a config pointed at the local companion library."""
-
-    anomalies_dir = library.root / "anomalies"
-    control_dir = library.root / "control"
-    for path in (anomalies_dir, control_dir):
-        path.mkdir(parents=True, exist_ok=True)
-    collection = base_config.collection.model_copy(update={"storage_path": library.sessions_dir})
-    daemon = base_config.daemon.model_copy(
-        update={
-            "anomalies_dir": anomalies_dir,
-            "models_dir": library.models_dir,
-            "jobs_dir": library.jobs_dir,
-            "audit_log": control_dir / "audit.jsonl",
-            "feedback_log": control_dir / "anomaly_feedback.jsonl",
-            "vehicle_ledger": control_dir / "vehicle_ledger.jsonl",
-            "training_ledger": library.training_runs_dir / "training_runs.jsonl",
-            "tuning_config": control_dir / "tuning.yaml",
-            "tuning_audit": control_dir / "tuning_audit.jsonl",
-        }
-    )
-    return base_config.model_copy(update={"collection": collection, "daemon": daemon})
-
-
-def write_companion_config(config: CanaryConfig, path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = config.model_dump(mode="json")
-    path.write_text(yaml.safe_dump(payload, sort_keys=False))
-    return path
-
-
 def import_session_archive(
-    archive_bytes: bytes,
+    archive: bytes | Path,
     library: CanaryLibrary,
     *,
     config: CanaryConfig | None = None,
     source_host: str | None = None,
 ) -> LibrarySession:
-    """Safely extract a Pi session zip and import it into the local library."""
+    """Safely extract a Pi session zip and import it into the local library.
+
+    ``archive`` is the zip's bytes or a path to it. A path is opened in place,
+    so a multi-hundred-MB export is never held in memory (R29.16); deleting it
+    afterwards is the caller's.
+    """
 
     with tempfile.TemporaryDirectory(prefix="session-import-", dir=library.sync_dir) as tmp:
         tmp_path = Path(tmp)
-        with zipfile.ZipFile(BytesIO(archive_bytes)) as archive:
-            _safe_extract_zip(archive, tmp_path)
+        with zipfile.ZipFile(BytesIO(archive) if isinstance(archive, bytes) else archive) as zf:
+            _safe_extract_zip(zf, tmp_path)
         session_dirs = [path for path in tmp_path.iterdir() if path.is_dir()]
         if len(session_dirs) != 1:
             raise ValueError("expected archive to contain exactly one session directory")
@@ -107,21 +72,6 @@ def _make_job_controller(
         python=py,
         compute_target="laptop",
     )
-
-
-def _library_session(library: CanaryLibrary, session_id: str) -> LibrarySession:
-    session = library.get_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
-    return session
-
-
-def _library_session_path(library: CanaryLibrary, session_id: str) -> Path:
-    session = _library_session(library, session_id)
-    path = Path(session.path)
-    if not path.is_dir():
-        raise HTTPException(status_code=404, detail=f"session files missing: {session_id}")
-    return path
 
 
 def _library_session_to_control_dict(session: LibrarySession) -> dict[str, Any]:
@@ -152,19 +102,6 @@ def _library_session_to_control_dict(session: LibrarySession) -> dict[str, Any]:
     return data
 
 
-def _dataset_row_to_dict(row: Mapping[str, Any]) -> dict[str, Any]:
-    payload = dict(row)
-    raw_manifest = payload.get("manifest")
-    if isinstance(raw_manifest, str):
-        try:
-            payload["manifest"] = json.loads(raw_manifest)
-        except json.JSONDecodeError:
-            payload["manifest"] = {}
-    elif raw_manifest is None:
-        payload["manifest"] = {}
-    return payload
-
-
 def _safe_extract_zip(archive: zipfile.ZipFile, target_root: Path) -> None:
     root = target_root.resolve()
     for item in archive.infolist():
@@ -180,17 +117,6 @@ def _safe_extract_zip(archive: zipfile.ZipFile, target_root: Path) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         with archive.open(item) as source, target.open("wb") as dest:
             shutil.copyfileobj(source, dest)
-
-
-def _require_optional_bearer(expected_token: str | None, authorization: str | None) -> None:
-    if not expected_token:
-        return
-    prefix = "Bearer "
-    if not authorization or not authorization.startswith(prefix):
-        raise HTTPException(status_code=401, detail="missing bearer token")
-    provided = authorization[len(prefix) :]
-    if not secrets.compare_digest(provided, expected_token):
-        raise HTTPException(status_code=401, detail="invalid bearer token")
 
 
 def _base_url(host: str) -> str:
@@ -259,7 +185,7 @@ def _download_session_export(
     token: str | None,
     dest_dir: Path,
     expected_sha256: str | None = None,
-) -> bytes:
+) -> Path:
     """Resumable, checksum-verified fetch of a Pi session export (6.34).
 
     Streams into ``dest_dir/{session_id}.zip`` via `DaemonClient.download_file`'s
@@ -271,13 +197,14 @@ def _download_session_export(
     process died after the transfer finished but before import completed),
     skip the network entirely — a byte-for-byte duplicate of what we're
     about to fetch.
+
+    Returns the path of the verified zip, left on disk for the caller to
+    import from and delete: the export is never read into memory (R29.16).
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{session_id}.zip"
     if expected_sha256 is not None and dest.exists() and sha256_file(dest) == expected_sha256:
-        data = dest.read_bytes()
-        dest.unlink(missing_ok=True)
-        return data
+        return dest
 
     async def _call() -> Path:
         async with DaemonClient(host, token, timeout=300.0) as client:
@@ -295,9 +222,7 @@ def _download_session_export(
             f"checksum mismatch for session {session_id} export: "
             f"expected {expected_sha256}, got {digest}"
         )
-    data = result_path.read_bytes()
-    result_path.unlink(missing_ok=True)
-    return data
+    return result_path
 
 
 def run_queued_action(
@@ -343,79 +268,15 @@ def _manifest_version(manifest: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _unlink_path(path: Path) -> None:
-    path.unlink(missing_ok=True)
-
-
-# -- shared `/control/*` handlers (refactoring.md 1.2) -----------------------
-#
-# Both the companion app and the dashboard's control API register the same
-# job/training-run/feedback/dataset-health routes against different backing
-# stores (companion: `CanaryLibrary`'s sqlite index; control: the live
-# daemon's). Each handler below takes that difference as a parameter instead
-# of being written twice. The per-session routes (read, metadata, pin, unpin,
-# delete, export, checksum) are no longer here: both apps include one router,
-# `src.dashboard.routes.stored_sessions` (R03.7).
-
-
-def feedback_list_response(feedback_log_path: Path) -> dict[str, Any]:
-    """Shared body of `GET /control/feedback` — offline false-positive review
-    (6.35) needs this to work identically against the companion's local
-    feedback log as it does against the Pi's."""
-    store = FeedbackStore(feedback_log_path)
-    records = [fb.to_dict() for fb in store.labels().values()]
-    return {"feedback": records, "count": len(records), "summary": store.summary()}
-
-
-def submit_feedback_response(
-    feedback_log_path: Path,
-    *,
-    event: dict[str, Any],
-    label: str,
-    reason: str | None = None,
-    driving_context: dict[str, Any] | None = None,
-    labeled_by: str | None = None,
-    on_feedback: Callable[[dict[str, Any]], None] | None = None,
-) -> dict[str, Any]:
-    """Shared body of `POST /control/feedback` (6.35 offline false-positive
-    labeling). ``on_feedback`` is control's seam for its audit-event publish
-    (companion has no audit bus to publish to, so it passes none)."""
-    if label not in FEEDBACK_LABELS:
-        raise HTTPException(
-            status_code=422, detail=f"label must be one of {sorted(FEEDBACK_LABELS)}"
-        )
-    store = FeedbackStore(feedback_log_path)
-    fb = store.record(
-        event=event,
-        label=label,  # type: ignore[arg-type]  # checked above
-        reason=reason,
-        driving_context=driving_context or {},
-        labeled_by=labeled_by,
-    )
-    record = fb.to_dict()
-    if on_feedback is not None:
-        on_feedback(record)
-    return {"feedback": record}
-
-
 __all__ = [
-    "companion_config",
     "import_session_archive",
-    "write_companion_config",
+    "run_queued_action",
     "_base_url",
-    "_dataset_row_to_dict",
     "_download_session_export",
-    "_library_session",
-    "_library_session_path",
     "_library_session_to_control_dict",
     "_make_job_controller",
     "_manifest_version",
     "_model_id",
     "_request_bytes",
     "_request_json",
-    "_require_optional_bearer",
-    "_unlink_path",
-    "feedback_list_response",
-    "run_queued_action",
-    "submit_feedback_response",
 ]

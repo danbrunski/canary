@@ -2490,6 +2490,7 @@
     "_sequence_cadence_can_latch",
     "from_yaml",
     "model_post_init",
+    "profile_slug",
     "rom_map_lookup",
     "scoped_profile"
    ],

@@ -112,7 +112,7 @@ def legacy_adoption(config: CanaryConfig) -> LegacyAdoption:
     if legacy_registry.exists():
         shares, why = _registries_share_history(config, legacy_registry)
         return LegacyAdoption(legacy, shares, why)
-    slug = config.collection.storage_path.name
+    slug = config.profile_slug
     registered = [profile.slug for profile in load_registry(config.profiles)]
     if registered == [slug]:
         return LegacyAdoption(

@@ -590,7 +590,7 @@ async def test_a_digest_cancelled_at_shutdown_is_recorded_and_not_restarted(
     assert skipped["reason"] == REASON_INTERRUPTED_AT_SHUTDOWN
     assert skipped["row_count"] == count_session_rows(session)
     assert not trip_end.digest_in_flight(session)
-    assert trip_end.digest_interrupted(session)
+    assert session in trip_end._INTERRUPTED  # noqa: SLF001
 
     # The shutdown fallback: same session, same process — no second child.
     assert await handle_trip_end_off_loop(session, config, executor=pool) is None

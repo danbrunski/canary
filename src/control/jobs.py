@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import sys
 import threading
@@ -19,6 +20,8 @@ from src.jsonl_store import append_jsonl_line
 from src.models.override_reason import require_override_reason, stated_override_reason
 from src.session import format_session_timestamp
 from src.storage.sessions import resolve_session
+
+log = logging.getLogger(__name__)
 
 JobKind = Literal[
     "retrain_if",
@@ -572,7 +575,14 @@ class JobController:
             try:
                 self._event_callback({"type": "job", "job": record.to_dict()})
             except Exception:
-                pass
+                # A publisher that raises must not fail the job: the record is
+                # already persisted and the dashboard re-reads it. Say so, once
+                # per transition, rather than lose the reason.
+                log.warning(
+                    "job event callback failed; the job record is unaffected",
+                    extra={"job_id": record.job_id, "job_status": record.status},
+                    exc_info=True,
+                )
 
     def _persist_locked(self, record: JobRecord) -> None:
         # Task 3.4: this ledger keeps an in-memory `dict[str, JobRecord]`

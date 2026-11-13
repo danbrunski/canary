@@ -407,7 +407,11 @@ class DtcCodeEntry(BaseModel):
 
 
 class DtcReportResponse(BaseModel):
-    """``GET /obd/dtc`` (Task 1.5) — the cached ``DtcReport`` plus staleness."""
+    """``GET /obd/dtc`` (Task 1.5) — the cached ``DtcReport`` plus staleness.
+
+    A contract model, not the route's ``response_model``: the route's test
+    validates the live body against it (``extra="forbid"``), and the
+    TypeScript ``DtcReportResponse`` mirrors it."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -421,42 +425,6 @@ class DtcReportResponse(BaseModel):
     #: value, or ``None`` when no stored DTC has triggered a read yet.
     freeze_frame: dict[str, Any] | None = None
     stale: bool
-
-
-class TripSummaryFields(BaseModel):
-    """Matches ``TripSummary.to_dict()`` (``src/signals/derived.py``)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    duration_s: float
-    distance_km: float | None
-    fuel_used_l: float | None
-    avg_economy_l_per_100km: float | None
-    avg_economy_mpg: float | None
-    co2_kg: float | None
-    idle_time_s: float | None
-    idle_fraction: float | None
-    max_speed_kph: float | None
-    avg_speed_kph: float | None
-    zero_to_60_mph_s: float | None
-    quarter_mile_s: float | None
-    quarter_mile_trap_kph: float | None
-    #: The speed the distance and speeds were computed on (M01.2).
-    speed_basis: str
-    #: The fuel constants and fuel-cut handling (M01.3(b), M01.4).
-    fuel_basis: str
-
-
-class TripSummaryResponse(BaseModel):
-    """``GET /sessions/{id}/trip-summary`` (Task 1.5) — the ``trip_summary.json``
-    sidecar (Task 1.4), computed on demand from the stored session."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: int
-    computed_at: str
-    session_id: str
-    summary: TripSummaryFields
 
 
 __all__ = [
@@ -473,8 +441,6 @@ __all__ = [
     "ReplayStartRequest",
     "SessionMetadataRequest",
     "SessionPinRequest",
-    "TripSummaryFields",
-    "TripSummaryResponse",
     "TuningModeRequest",
     "TuningRevertRequest",
     "TuningUpdateRequest",

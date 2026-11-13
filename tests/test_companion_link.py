@@ -303,9 +303,13 @@ def test_sync_session_from_pi_uses_control_export_and_optional_pin(tmp_path: Pat
         token: str | None,
         dest_dir: Path,
         expected_sha256: str | None = None,
-    ) -> bytes:
+    ) -> Path:
         download_calls.append((host, session_id, token, dest_dir, expected_sha256))
-        return _session_zip(session_id)
+        # The real helper leaves the verified zip on disk (R29.16); the route
+        # imports from the file and deletes it.
+        exported = dest_dir / f"{session_id}.zip"
+        exported.write_bytes(_session_zip(session_id))
+        return exported
 
     client, lib = app_for(
         tmp_path, request_json=fake_json, download=fake_download, pi_host="pi.local:8000"
@@ -344,6 +348,7 @@ def test_sync_session_from_pi_uses_control_export_and_optional_pin(tmp_path: Pat
     assert actions[-1]["status"] == "done"
     # The synced session is in the daemon's own session store.
     assert (lib.sessions_dir / "2026-05-17T130000" / "manifest.json").exists()
+    assert not (lib.sync_dir / "2026-05-17T130000.zip").exists()
 
 
 def test_sync_session_from_pi_marks_action_failed_on_error(tmp_path: Path) -> None:

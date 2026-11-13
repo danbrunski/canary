@@ -176,13 +176,14 @@ def test_download_session_export_delegates_to_daemon_client(
 ) -> None:
     monkeypatch.setattr(services, "DaemonClient", _FakeDaemonClient)
 
-    data = services._download_session_export(
+    exported = services._download_session_export(
         "http://pi.local:8000", "2026-05-17T120000", token="secret", dest_dir=tmp_path
     )
 
-    assert data == b"zip-bytes"
-    # The downloaded file is cleaned up after being read into memory.
-    assert not (tmp_path / "2026-05-17T120000.zip").exists()
+    # R29.16: the zip is handed back as a file, never read into memory; the
+    # caller imports from it and deletes it.
+    assert exported == tmp_path / "2026-05-17T120000.zip"
+    assert exported.read_bytes() == b"zip-bytes"
 
 
 def test_download_session_export_verifies_checksum(
@@ -192,14 +193,24 @@ def test_download_session_export_verifies_checksum(
     import hashlib
 
     good = hashlib.sha256(b"zip-bytes").hexdigest()
-    data = services._download_session_export(
+    exported = services._download_session_export(
         "http://pi.local:8000",
         "2026-05-17T120000",
         token=None,
         dest_dir=tmp_path,
         expected_sha256=good,
     )
-    assert data == b"zip-bytes"
+    assert exported.read_bytes() == b"zip-bytes"
+    # A verified copy already on disk skips the network entirely.
+    _FakeDaemonClient.instances.clear()
+    again = services._download_session_export(
+        "http://pi.local:8000",
+        "2026-05-17T120000",
+        token=None,
+        dest_dir=tmp_path,
+        expected_sha256=good,
+    )
+    assert again == exported and not _FakeDaemonClient.instances
 
     with pytest.raises(ValueError, match="checksum mismatch"):
         services._download_session_export(
@@ -209,6 +220,36 @@ def test_download_session_export_verifies_checksum(
             dest_dir=tmp_path,
             expected_sha256="not-the-right-digest",
         )
+    # A mismatched download is removed, not left to be imported.
+    assert not (tmp_path / "2026-05-17T120000.zip").exists()
+
+
+def test_import_session_archive_from_a_path_equals_importing_its_bytes(tmp_path: Path) -> None:
+    """The streamed import lands the same session as the in-memory one (R29.16)."""
+    import zipfile
+    from io import BytesIO
+
+    def archive(session_id: str) -> bytes:
+        buf = BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr(f"{session_id}/manifest.json", json.dumps({"started_at": "now"}))
+            zf.writestr(f"{session_id}/telemetry-00000.parquet", b"parquet-ish")
+        return buf.getvalue()
+
+    data = archive("2026-05-17T120000")
+    zip_path = tmp_path / "export.zip"
+    zip_path.write_bytes(data)
+
+    from_bytes = services.import_session_archive(data, CanaryLibrary(tmp_path / "lib-bytes"))
+    from_path = services.import_session_archive(zip_path, CanaryLibrary(tmp_path / "lib-path"))
+
+    assert from_path.session_id == from_bytes.session_id
+    assert from_path.size_bytes == from_bytes.size_bytes
+    for lib_session in (from_bytes, from_path):
+        files = sorted(p.name for p in Path(lib_session.path).iterdir())
+        assert files == ["manifest.json", "telemetry-00000.parquet"]
+        assert (Path(lib_session.path) / "telemetry-00000.parquet").read_bytes() == b"parquet-ish"
+    assert zip_path.exists()  # deleting the export is the caller's job
 
 
 def test_download_session_export_wraps_daemon_error(

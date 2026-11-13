@@ -94,9 +94,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
         publish_control_event("sequence_detector.switch", "ok", status.to_dict())
         return {"sequence_detector": status.to_dict()}
 
-    # The active profile's slug is the scoped storage path's final component
-    # (see src.vehicle.profiles.scope_config).
-    active_slug = config.collection.storage_path.name
+    active_slug = config.profile_slug
 
     @router.get("/control/profiles")
     def get_control_profiles() -> dict[str, Any]:

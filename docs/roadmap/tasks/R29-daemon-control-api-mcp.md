@@ -1038,7 +1038,7 @@ it; go after that work lands.
   - Deep tier (near the non-volatile-write conditions). No change to what
     `ignition_only` means for anything else.
 
-- [ ] **R29.15 Dead code.**
+- [x] **R29.15 Dead code.** (2026-11-13)
   - `src/companion/services.py`, about 115 of 421 lines: `companion_config`,
     `write_companion_config`, `_library_session_path`,
     `_dataset_row_to_dict`, `_require_optional_bearer` (a copy of the check in
@@ -1053,8 +1053,47 @@ it; go after that work lands.
   - Test-only: `drain.reset_drop_bursts`, `trip_end.digest_interrupted`,
     `schemas.DtcReportResponse`.
   - Checked by word-grep over `src`, `scripts`, `tools`, `tests`, `docs`.
+  - [x] `companion/services.py`: deleted `companion_config`,
+    `write_companion_config`, `_library_session_path`, `_dataset_row_to_dict`,
+    `_require_optional_bearer`, `_unlink_path`, `feedback_list_response`,
+    `submit_feedback_response`, plus `_library_session`, whose only caller was
+    `_library_session_path`, and the shared-handlers comment block above the
+    two feedback helpers. 421 -> 282 lines; the `yaml`, `secrets`,
+    `HTTPException`, `FeedbackStore` imports went with them. `__all__` now
+    lists the nine live names. Re-verified by word-grep over `src`, `scripts`,
+    `tools`, `tests`, `docs` (excluding roadmap docs): 0 hits for each deleted
+    name (only an archived R03 doc names `_require_optional_bearer`). Left
+    alone, not on the list: `_make_job_controller` (only a test calls it).
+  - [x] `control/trip_end.handle_trip_end` (and the `get_or_compute_digest`
+    and `SESSION_TRIP_KEY` imports it alone used) and
+    `control/twin_identity.segment_index` (and `import bisect`): deleted, 0
+    hits in `src`, `scripts`, `tools`, `tests`.
+  - [x] `dashboard/schemas.TripSummaryResponse`: deleted, with
+    `TripSummaryFields`, whose only user it was. Adopting it as a
+    `response_model` was refused: the route returns the cached sidecar dict,
+    so FastAPI would re-validate it (`extra="forbid"`) and re-order its keys,
+    and a sidecar written before `speed_basis`/`fuel_basis` became required
+    would answer 500. The TypeScript comment in `types/tripSummary.ts` now
+    says it mirrors `TripSummary.to_dict()` under the sidecar envelope.
+    `tests/fixtures/route_table_snapshot.json` untouched.
+  - [x] Test-only symbols, decided one by one:
+    - `trip_end.digest_interrupted`: deleted; its one test line
+      (`test_trip_end_digest.py`) asserts `session in trip_end._INTERRUPTED`
+      instead, and the same test still pins the behavior (no second child,
+      no digest).
+    - `drain.reset_drop_bursts`: **kept**. `test_drop_logging_is_coalesced_into_bursts`
+      needs a reset for module-level `_drop_bursts` state, which sink names
+      share across cases; the docstring already says so.
+    - `schemas.DtcReportResponse` (and `DtcCodeEntry`): **kept** as a contract
+      model. `test_get_obd_dtc_returns_the_cached_report_shape` validates the
+      live `/obd/dtc` body against it (`extra="forbid"`) and the TypeScript
+      `DtcReportResponse` mirrors it; its docstring now says it is not the
+      route's `response_model`.
+  - Gate: `ruff check .`, `ruff format --check .`, bare `mypy` (1284 files) green;
+    pytest over the touched modules' tests (`-m "" -n 4`, 789 tests) green
+    after the golden update below.
 
-- [ ] **R29.16 Small items.**
+- [~] **R29.16 Small items.** (2026-11-13; one bullet left open)
   - The active profile slug is recovered as
     `config.collection.storage_path.name` in three places
     (`routes/control/system.py`, `dashboard/status.py`,
@@ -1069,6 +1108,61 @@ it; go after that work lands.
     places; the second exists for tests.
   - `docs/mcp-server.md` has table cells several kilobytes long. Move the
     per-tool prose under headings so the table is a table.
+  - [x] Profile slug: `CanaryConfig.profile_slug` (`src/config/root.py`) is the
+    scoped slug, else the storage path's final component. `dashboard/status.py`,
+    `routes/control/system.py` and `vehicle/profiles/legacy.py` (the vehicle
+    one moved there in the R26.4 split) read it; `grep storage_path.name src`
+    finds none. (`validation/report.py` reads `storage_path.parent.name`, a
+    different question, left.) The property is not state, so the scoring
+    child's pickle is unchanged: `test_profiles_split.py` and
+    `test_exceptions_pickle.py` green. `test_config_golden.py` lists a
+    model's methods, so `tests/fixtures/config_golden.json` gained the one
+    line `"profile_slug"` (hand-edited: `--write` also churns the unrelated
+    imported-module list). One divergence from the old expression, verified:
+    a scoped config whose `storage_path` is replaced after scoping
+    (`validation/harness.py`, `scratch/"storage"`) now reports its real slug
+    where `storage_path.name` gave `"storage"`. No test pins the property
+    directly; coverage is through the status, system-route and legacy
+    adoption tests.
+  - [x] Upload cap: `MAX_ROM_UPLOAD` lives only in `control/rom_library.py`;
+    `routes/rom_maps.read_rom_upload(request, wrong_type=, too_large=)` is the
+    one octet-stream-with-a-cap block, used by `/control/rom/inspect` and
+    `/control/rom/library`. The 415 and 413 messages stay each route's own, so
+    responses are unchanged (`test_rom_maps_api.py`, `test_rom_library_api.py`
+    green). `test_layering.py` green.
+  - [x] `JobController._emit`: the `except Exception: pass` is now a
+    `log.warning(..., exc_info=True)` naming the job id and status
+    (`src/control/jobs.py` gained a module `log`); a raising publisher still
+    never fails the job. New test
+    `test_a_raising_job_event_callback_is_logged_and_never_fails_the_job`
+    (`tests/test_control_api.py`).
+  - [x] `_download_session_export` streams: it now returns the verified zip's
+    `Path` (no `read_bytes`), `import_session_archive` takes `bytes | Path`
+    and opens a path in place (no `BytesIO`), and the `/companion/sync`
+    route imports from the file and deletes it in a `finally`. Same imported
+    session either way: `test_import_session_archive_from_a_path_equals_importing_its_bytes`;
+    the sync test asserts the export file is gone afterwards and the
+    checksum tests assert a mismatched download is removed and a verified
+    one on disk skips the network. `/companion/sessions/import` (base64
+    body) still imports from bytes.
+  - [~] `CaptureProfileStore` / `CaptureAutostart` double construction: not
+    changed. The daemon passes both (`daemon/server.py` hands `profile_capture`
+    and `capture_autostart` to `create_app`); the second construction is the
+    fallback in `dashboard/api.py` (store) and `routes/control/__init__.py`
+    (session and autostart) that 55 test files reach by calling `create_app`
+    without them. Making the tests pass their own is a change to every one of
+    those call sites. A cheaper route if wanted: one `CaptureProfileStore`
+    factory over `config` for `runtime.py`, `collectors.py`, `harness.py` and
+    the fallback.
+  - [x] `docs/mcp-server.md`: the eleven table cells over 900 characters
+    (`get_status`, `get_binned_analysis`, `get_trip_summary`,
+    `get_session_digest`, `get_behavior_deviations`, `get_delivery_error`,
+    `compare_tuning_sessions`, `preview_rom_edit`, `simulate_rom_edit`,
+    `arm_tuning_capture` / `disarm_tuning_capture`, `obd_request`) now carry a
+    one-sentence cell and a link to a `### ` heading under a new `## Tool
+    notes` section holding the full text verbatim (`\|` unescaped). Longest
+    table row is now under 900 characters (was 6,496). No test reads the
+    file; `test_mcp_tool_snapshot.py` pins `server.py`, green.
 
 - [ ] **R29.17 The legacy `/control/tuning-mode` shim restores the wrong
   profile.** Pre-existing. Found while moving it to

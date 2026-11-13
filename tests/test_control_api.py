@@ -591,6 +591,43 @@ def test_retrain_job_command_passes_job_id_to_ledger(tmp_path: Path) -> None:
     assert command[command.index("--job-id") + 1] == "job-123"
 
 
+def test_a_raising_job_event_callback_is_logged_and_never_fails_the_job(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`_emit` used to swallow the publisher's error without a trace (R29.16)."""
+    from src.control.jobs import JobRecord
+
+    cfg_path = _write_config(tmp_path, tmp_path / "storage")
+    config = CanaryConfig.from_yaml(cfg_path)
+
+    def boom(_event: dict[str, Any]) -> None:
+        raise RuntimeError("publisher is down")
+
+    controller = JobController(
+        config=config,
+        repo_root=tmp_path,
+        config_path=cfg_path,
+        jobs_dir=tmp_path / "jobs",
+        python=Path(sys.executable),
+        event_callback=boom,
+    )
+    record = JobRecord(
+        job_id="job-1",
+        kind="retrain_if",
+        status="running",
+        created_at="2026-11-13T00:00:00+00:00",
+        log_path=tmp_path / "job-1.log",
+    )
+
+    with caplog.at_level("WARNING", logger="src.control.jobs"):
+        controller._emit(record)  # noqa: SLF001 - the swallow is the behavior under test
+
+    (entry,) = caplog.records
+    assert "event callback failed" in entry.getMessage()
+    assert entry.exc_info is not None and "publisher is down" in str(entry.exc_info[1])
+    assert entry.job_id == "job-1"  # type: ignore[attr-defined]
+
+
 def test_retrain_job_command_defaults_compute_target_to_pi(tmp_path: Path) -> None:
     """Task 6.36: the Pi daemon's own JobController (no override) records
     'pi'; the companion's (`_make_job_controller`) passes 'laptop' instead

@@ -17,6 +17,7 @@ from src.analysis.rom_trace import (
 )
 from src.analysis.tuning_frame import load_provider_registry
 from src.config import CanaryConfig
+from src.control.rom_library import MAX_ROM_UPLOAD
 from src.dashboard.security import (
     control_auth_dependency,
 )
@@ -26,7 +27,23 @@ from src.vehicle.profiles import profile_dir as vehicle_profile_dir
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 from src.yaml_load import load_yaml
 
-MAX_ROM_UPLOAD = 2 * 1024 * 1024
+
+async def read_rom_upload(request: Request, *, wrong_type: str, too_large: str) -> bytes:
+    """The body of an ``application/octet-stream`` ROM upload, size-capped.
+
+    The one copy of the block every ROM upload route needs: 415 (``wrong_type``)
+    for any other content type, 413 (``too_large``) the moment the streamed body
+    passes :data:`src.control.rom_library.MAX_ROM_UPLOAD`, before the rest is
+    buffered. The messages stay each route's own.
+    """
+    if request.headers.get("content-type", "").split(";")[0] != "application/octet-stream":
+        raise HTTPException(415, wrong_type)
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > MAX_ROM_UPLOAD:
+            raise HTTPException(413, too_large)
+        body.extend(chunk)
+    return bytes(body)
 
 
 def inspect_rom(
@@ -183,17 +200,15 @@ def register_rom_routes(
     @app.post("/control/rom/inspect", dependencies=[Depends(authorize)])
     async def post_rom_inspect(request: Request) -> dict[str, Any]:
         """Raw octet-stream upload. Decode only; never select a tune or flash."""
-        if request.headers.get("content-type", "").split(";")[0] != "application/octet-stream":
-            raise HTTPException(415, "Send an OsirisROM file as application/octet-stream")
-        body = bytearray()
-        async for chunk in request.stream():
-            if len(body) + len(chunk) > MAX_ROM_UPLOAD:
-                raise HTTPException(413, "ROM exceeds 2 MiB limit")
-            body.extend(chunk)
+        body = await read_rom_upload(
+            request,
+            wrong_type="Send an OsirisROM file as application/octet-stream",
+            too_large="ROM exceeds 2 MiB limit",
+        )
         try:
             return await run_in_threadpool(
                 inspect_rom,
-                bytes(body),
+                body,
                 vehicle_profile_dir(config),
                 dids_path,
                 revisions=active_registry(config),

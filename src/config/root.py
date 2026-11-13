@@ -76,6 +76,20 @@ class CanaryConfig(_Strict):
         """The profile slug this config is scoped to, or ``None`` (unscoped)."""
         return self._scoped_profile
 
+    @property
+    def profile_slug(self) -> str:
+        """The active vehicle profile's slug, always a string.
+
+        The scoped slug when :func:`src.vehicle.profiles.scope_config` ran;
+        otherwise the storage path's final component, which is what scoping
+        makes it (``storage_path / <slug>``) and what a hand-built config
+        names its vehicle by. The one place that recovery lives, so no reader
+        re-derives it from a path.
+        """
+        if self._scoped_profile is not None:
+            return self._scoped_profile
+        return self.collection.storage_path.name
+
     @model_validator(mode="after")
     def _root_state_paths(self) -> Self:
         """The non-daemon runtime paths follow ``daemon.state_dir`` too (S03.1)."""

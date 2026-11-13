@@ -91,7 +91,6 @@ from src.analysis.digest import (
     compute_digest,
     digest_address_space_bytes,
     digest_preflight,
-    get_or_compute_digest,
     persist_digest,
     stale_tuning_version,
     tuning_section,
@@ -103,7 +102,6 @@ from src.config import CanaryConfig
 from src.control import child_pool
 from src.refusal import ReasonedRefusal
 from src.storage.session_products import (
-    SESSION_TRIP_KEY,
     list_trip_records,
     read_rolling_circumference,
     read_trip_digest,
@@ -296,11 +294,6 @@ _IN_FLIGHT: dict[tuple[Path, str], asyncio.Task[dict[str, Any] | None]] = {}
 #: inside a 30 s ``TimeoutStopSec``. Process-local on purpose: the next
 #: daemon start may legitimately compute the digest; this one may not.
 _INTERRUPTED: set[Path] = set()
-
-
-def digest_interrupted(session_dir: Path) -> bool:
-    """Whether this process already cancelled a digest for ``session_dir``."""
-    return session_dir in _INTERRUPTED
 
 
 def digest_in_flight(session_dir: Path) -> bool:
@@ -622,42 +615,6 @@ def record_trip_end_unobservable(
     return skipped
 
 
-def handle_trip_end(
-    session_dir: Path,
-    config: CanaryConfig,
-    *,
-    emitter: AnomalyEventEmitter | None = None,
-    notifier: Notifier | None = None,
-    now: datetime | None = None,
-    catalog_db: Path | None = None,
-) -> dict[str, Any] | None:
-    """In-process trip end, for callers that are not on an event loop.
-
-    Offline tools and scripts (``scripts/catalog.py``, a hand-run digest)
-    keep this; the daemon uses :func:`handle_trip_end_off_loop`, which is the
-    only variant with the address-space ceiling. Still pre-flighted, so the
-    row budget applies here too.
-
-    Returns the digest dict on a freshly-computed trip end, or ``None``
-    when the trip has no telemetry, no session directory, was refused by
-    the pre-flight, or was already handled (idempotent re-fire — see module
-    docstring). ``catalog_db`` (Task 6.3), when given, re-indexes the session
-    into the catalog right after the digest is written; ``None`` (the
-    default) skips it.
-    """
-    if emitter is not None:
-        emitter.reset_notification_count()
-    if _trip_already_digested(session_dir, SESSION_TRIP_KEY, named=False):
-        return None
-    digest = get_or_compute_digest(session_dir, config, now=now, catalog_db=catalog_db)
-    if digest is None:
-        return None
-    if notifier is not None and config.notifications.digest_enabled:
-        title, body = format_digest_message(digest)
-        notifier.notify(title, body)
-    return digest
-
-
 __all__ = [
     "refresh_stale_tuning_off_loop",
     "tuning_section_under_limit",
@@ -666,7 +623,6 @@ __all__ = [
     "compute_digest_off_loop",
     "compute_digest_under_limit",
     "digest_in_flight",
-    "handle_trip_end",
     "handle_trip_end_off_loop",
     "limit_address_space",
     "record_trip_end_unobservable",

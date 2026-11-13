@@ -1,7 +1,7 @@
 /** `GET /sessions/{id}/trip-summary` (Task 1.5, engine-analysis-and-mapping.md).
- *  Mirrors `TripSummaryResponse` / `TripSummaryFields` in
- *  `src/dashboard/schemas.py`, which mirror `TripSummary.to_dict()`
- *  (`src/signals/derived.py`). Read-only, unauthenticated like `/obd/dtc`. */
+ *  Mirrors `TripSummary.to_dict()` (`src/signals/derived.py`) under the
+ *  sidecar envelope `trip_summary_off_loop` returns; the route has no Python
+ *  response model. Read-only, unauthenticated like `/obd/dtc`. */
 export interface TripSummaryFields {
   duration_s: number;
   distance_km: number | null;

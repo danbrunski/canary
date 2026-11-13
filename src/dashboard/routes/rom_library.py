@@ -32,14 +32,13 @@ from src.control.rom_backup import (
     recipe_extent,
 )
 from src.control.rom_library import (
-    MAX_ROM_UPLOAD,
     RomLibrary,
     RomLibraryError,
     RomNotFoundError,
     valid_sha,
 )
 from src.dashboard.readers import read_vehicle_reading
-from src.dashboard.routes.rom_maps import library_trace_context
+from src.dashboard.routes.rom_maps import library_trace_context, read_rom_upload
 from src.dashboard.security import control_auth_dependency
 from src.paths import DIDS_YAML
 from src.vehicle.platforms import VehicleDataFile, config_data_file
@@ -161,14 +160,12 @@ def register_rom_library_routes(
     ) -> dict[str, Any]:
         """Octet-stream upload: a plain image or an ``.OsirisROM``. Refusals
         name the cause (422); over 2 MiB is 413."""
-        if request.headers.get("content-type", "").split(";")[0] != "application/octet-stream":
-            raise HTTPException(415, "Send the ROM file as application/octet-stream")
-        body = bytearray()
-        async for chunk in request.stream():
-            if len(body) + len(chunk) > MAX_ROM_UPLOAD:
-                raise HTTPException(413, "ROM exceeds the 2 MiB upload limit")
-            body.extend(chunk)
-        entry, created = await _call(library.add_upload, bytes(body), filename)
+        body = await read_rom_upload(
+            request,
+            wrong_type="Send the ROM file as application/octet-stream",
+            too_large="ROM exceeds the 2 MiB upload limit",
+        )
+        entry, created = await _call(library.add_upload, body, filename)
         return {**entry, "created": created}
 
     @app.get("/control/rom/library", dependencies=[Depends(authorize)])

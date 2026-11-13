@@ -28,7 +28,6 @@ off the event loop.
 
 from __future__ import annotations
 
-import bisect
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -311,9 +310,3 @@ def session_last_read(session: Path) -> float | None:
         return None
     stamp = span.last if isinstance(span.last, datetime) else datetime.fromisoformat(str(span.last))
     return _epoch(stamp)
-
-
-def segment_index(segments: list[IdentitySegment], t: float) -> int:
-    """Which segment acquisition time ``t`` falls in (segments are ordered)."""
-    starts = [s.start for s in segments[1:]]
-    return bisect.bisect_right([float(s) for s in starts if s is not None], t)

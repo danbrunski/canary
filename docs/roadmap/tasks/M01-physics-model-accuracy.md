@@ -119,8 +119,9 @@ does, the fix is a spec change and a retrain is owed (the 2026-09 IF incident).
     not borrow it. Callers: `trip_summary_sidecar`, `feature_transform`
     (instant economy, gear) and `LiveFeatureSource` (trip integrals).
     `TripSummary.speed_basis` and `fuel_basis` are required dataclass fields
-    (and required in `dashboard/schemas.py` `TripSummaryFields` and the TS
-    type). Tests: `test_live_and_batch_apply_the_same_speed_ratio_and_fuel_cut`
+    (and in the TS type; `dashboard/schemas.py` `TripSummaryFields` also
+    listed them but nothing validated against it, and R29.15 deleted it).
+    Tests: `test_live_and_batch_apply_the_same_speed_ratio_and_fuel_cut`
     (live = batch = hand-computed, at ratio 0.9203 with a fuel cut),
     `test_distance_and_average_speed_integrate_road_speed` (1 h at an
     indicated 100 km/h = 108.66 km), `test_the_summary_states_its_speed_basis`,

@@ -188,7 +188,7 @@ def register_companion_link_routes(
     discover_fn: DiscoverFn = discover,
     probe_fn: ProbeFn = probe,
     request_json: Callable[..., dict[str, Any]] = _request_json,
-    download_session_export: Callable[..., bytes] = _download_session_export,
+    download_session_export: Callable[..., bytes | Path] = _download_session_export,
     import_archive: Callable[..., LibrarySession] = import_session_archive,
     environ: dict[str, str] | None = None,
 ) -> CompanionLink:
@@ -299,12 +299,18 @@ def register_companion_link_routes(
                 dest_dir=library.sync_dir,
                 expected_sha256=expected_sha256,
             )
-            session = import_archive(
-                archive,
-                library,
-                config=config if request.index_with_config else None,
-                source_host=host,
-            )
+            try:
+                session = import_archive(
+                    archive,
+                    library,
+                    config=config if request.index_with_config else None,
+                    source_host=host,
+                )
+            finally:
+                # The export is imported from the file it was downloaded to,
+                # never read into memory (R29.16); it is spent either way.
+                if isinstance(archive, Path):
+                    archive.unlink(missing_ok=True)
             return {
                 "session": _library_session_to_control_dict(session),
                 "sha256": expected_sha256,
