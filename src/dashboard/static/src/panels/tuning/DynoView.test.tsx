@@ -12,7 +12,8 @@ import type {
   DynoRunOk,
 } from "../../types/workbench";
 import { AnalysisPage } from "./AnalysisPage";
-import { DynoView, dynoEmptySentence } from "./DynoView";
+import { psiToKpa } from "../../util/pressure";
+import { DynoView, dynoEmptySentence, tiresSentence } from "./DynoView";
 
 vi.mock("../../api/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../api/core")>();
@@ -68,6 +69,8 @@ function pending(): DynoResponse {
       induction: "na",
       ambient_temp_c: null,
       allow_single_direction: false,
+      tire_pressure_front_kpa: null,
+      tire_pressure_rear_kpa: null,
     },
     prerequisites: PENDING,
     demand: { spec: "did:ECM_THROTTLE_POS_SENSOR_1", reason: null },
@@ -288,6 +291,12 @@ function respond(body: DynoResponse) {
 
 const CHOICE = { sessions: ["2026-09-26T120000"], revision: null };
 
+/** The query string of the dyno request the view made. */
+function dynoQuery(): URLSearchParams {
+  const call = control.mock.calls.find(([path]) => String(path).startsWith("/analysis/dyno"));
+  return new URLSearchParams(String(call?.[0]).split("?")[1]);
+}
+
 afterEach(() => vi.clearAllMocks());
 
 describe("DynoView", () => {
@@ -317,6 +326,67 @@ describe("DynoView", () => {
       "/analysis/dyno?sessions=2026-09-26T120000&road=Hwy+7&payload_kg=127&induction=na",
       "t",
       expect.anything(),
+    );
+  });
+
+  it("takes tire pressures in psi and sends kPa, converting only at the edge (M01.8)", async () => {
+    respond(pending());
+    render(<DynoView token="t" choice={CHOICE} />);
+    fireEvent.change(screen.getByLabelText("Front tires (psi)"), { target: { value: "35" } });
+    fireEvent.change(screen.getByLabelText("Rear tires (psi)"), { target: { value: " 33 " } });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByRole("status");
+    const query = dynoQuery();
+    expect(Number(query.get("tire_pressure_front_kpa"))).toBeCloseTo(psiToKpa(35), 9);
+    expect(Number(query.get("tire_pressure_rear_kpa"))).toBeCloseTo(psiToKpa(33), 9);
+    // 241.3 kPa, not the 35 that was typed.
+    expect(Number(query.get("tire_pressure_front_kpa"))).toBeGreaterThan(241);
+  });
+
+  it("states one axle without inventing the other", async () => {
+    respond(pending());
+    render(<DynoView token="t" choice={CHOICE} />);
+    fireEvent.change(screen.getByLabelText("Front tires (psi)"), { target: { value: "35" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByRole("status");
+    const query = dynoQuery();
+    expect(query.has("tire_pressure_front_kpa")).toBe(true);
+    expect(query.has("tire_pressure_rear_kpa")).toBe(false);
+  });
+
+  it("refuses a tire pressure that is probably kPa or bar, in psi's words, and sends nothing", async () => {
+    respond(pending());
+    render(<DynoView token="t" choice={CHOICE} />);
+    await screen.findByText(/Saved vehicle weight/);
+    fireEvent.change(screen.getByLabelText("Rear tires (psi)"), { target: { value: "241" } });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "241 psi is outside 11.7-87 psi: is it kPa or bar? Enter psi",
+    );
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(control).not.toHaveBeenCalledWith(
+      expect.stringContaining("/analysis/dyno"),
+      expect.anything(),
+      expect.anything(),
+    );
+    fireEvent.change(screen.getByLabelText("Rear tires (psi)"), { target: { value: "33" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
+  });
+
+  it("shows a run's stated tire pressures in psi, or that it stated none", async () => {
+    expect(
+      tiresSentence({
+        ...(computed().runs[0] as DynoRunOk).conditions,
+        tire_pressure_front_kpa: psiToKpa(35),
+        tire_pressure_rear_kpa: null,
+      }),
+    ).toBe("tires front 35.0 psi, rear not stated");
+    respond(computed());
+    render(<DynoView token="t" choice={CHOICE} />);
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(await screen.findByLabelText("Dyno runs")).toHaveTextContent(
+      "tires front not stated, rear not stated",
     );
   });
 

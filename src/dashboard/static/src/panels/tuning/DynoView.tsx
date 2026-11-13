@@ -20,6 +20,7 @@ import type {
 import { buttonClass, cn, inputClass, selectClass } from "../../styles";
 import { toCsv } from "../../util/csv";
 import { downloadText } from "../../util/browser";
+import { kpaToPsi, readTirePsi } from "../../util/pressure";
 import { ConditionsBlock, RefusalNotice, UnavailableList } from "./WorkbenchNotices";
 
 const QUANTITIES: ReadonlyArray<SegmentOption<DynoQuantity>> = [
@@ -179,6 +180,26 @@ function peak(run: DynoRunOk, quantity: DynoQuantity): string {
   return at === null ? "—" : `${best.toFixed(1)} ${UNIT[quantity]} @ ${(at as number).toFixed(0)}`;
 }
 
+/** The tire pressures a run states, in psi as the rest of the app shows them (M01.8). */
+export function tiresSentence(conditions: DynoRunOk["conditions"]): string {
+  const psi = (kpa: number | null | undefined) =>
+    kpa === null || kpa === undefined ? "not stated" : `${kpaToPsi(kpa).toFixed(1)} psi`;
+  return (
+    `tires front ${psi(conditions.tire_pressure_front_kpa)}, ` +
+    `rear ${psi(conditions.tire_pressure_rear_kpa)}`
+  );
+}
+
+/** What the operator typed in a tire psi box when it cannot be sent (M01.8). */
+function TireReadingNote({ reading }: { reading: ReturnType<typeof readTirePsi> }) {
+  if (reading.state !== "refused") return null;
+  return (
+    <span role="alert" className="max-w-[16rem] text-[0.68rem] leading-snug text-bad">
+      {reading.message}
+    </span>
+  );
+}
+
 /** The road load's air scaling, mismatches and speed scale, one line (M01.8, M01.10). */
 export function roadLoadAndScaleSentence(flags: DynoRunOk["flags"]): string {
   const air = flags.road_load_air;
@@ -296,6 +317,11 @@ export function DynoView({ token, choice }: { token: string; choice: SessionChoi
   const payloadKg = payload.trim() ? Number(payload) : null;
   const [induction, setInduction] = useState<"" | "na" | "boosted">("");
   const [ambient, setAmbient] = useState("");
+  // The operator sets tire pressure in psi; the request carries kPa (M01.8).
+  const [tireFront, setTireFront] = useState("");
+  const [tireRear, setTireRear] = useState("");
+  const front = readTirePsi(tireFront);
+  const rear = readTirePsi(tireRear);
   const [single, setSingle] = useState(false);
   const [quantity, setQuantity] = useState<DynoQuantity>("wheel_power_kw");
   const ready = Boolean(token && (choice.sessions.length || choice.revision));
@@ -373,6 +399,30 @@ export function DynoView({ token, choice }: { token: string; choice: SessionChoi
             onChange={(e) => setAmbient(e.target.value)}
           />
         </label>
+        <label className="flex flex-col gap-1">
+          Front tires (psi)
+          <input
+            className={inputClass}
+            aria-label="Front tires (psi)"
+            inputMode="decimal"
+            placeholder="as set, not stated"
+            value={tireFront}
+            onChange={(e) => setTireFront(e.target.value)}
+          />
+          <TireReadingNote reading={front} />
+        </label>
+        <label className="flex flex-col gap-1">
+          Rear tires (psi)
+          <input
+            className={inputClass}
+            aria-label="Rear tires (psi)"
+            inputMode="decimal"
+            placeholder="as set, not stated"
+            value={tireRear}
+            onChange={(e) => setTireRear(e.target.value)}
+          />
+          <TireReadingNote reading={rear} />
+        </label>
         <label className="flex items-center gap-1.5">
           <input type="checkbox" checked={single} onChange={(e) => setSingle(e.target.checked)} />
           Allow one direction (labelled single)
@@ -380,7 +430,7 @@ export function DynoView({ token, choice }: { token: string; choice: SessionChoi
         <button
           type="button"
           className={buttonClass}
-          disabled={!ready || busy}
+          disabled={!ready || busy || front.state === "refused" || rear.state === "refused"}
           onClick={() =>
             run((signal) =>
               getDyno(
@@ -392,6 +442,8 @@ export function DynoView({ token, choice }: { token: string; choice: SessionChoi
                   induction: induction || null,
                   ambient_temp_c: ambient.trim() ? Number(ambient) : null,
                   allow_single_direction: single,
+                  tire_pressure_front_kpa: front.state === "ok" ? front.kpa : null,
+                  tire_pressure_rear_kpa: rear.state === "ok" ? rear.kpa : null,
                 },
                 signal,
               ),
@@ -454,7 +506,8 @@ export function DynoView({ token, choice }: { token: string; choice: SessionChoi
                         {r.conditions.road} · {r.conditions.baro_kpa.toFixed(1)} kPa · IAT{" "}
                         {r.conditions.intake_temp_c.toFixed(0)} °C · ambient{" "}
                         {r.conditions.ambient_temp_c.toFixed(0)} °C · payload{" "}
-                        {r.conditions.payload_kg} kg · {r.conditions.date}
+                        {r.conditions.payload_kg} kg · {tiresSentence(r.conditions)} ·{" "}
+                        {r.conditions.date}
                       </td>
                       <td>
                         inertia {r.flags.inertia} · squat{" "}
@@ -462,8 +515,8 @@ export function DynoView({ token, choice }: { token: string; choice: SessionChoi
                         {r.flags.imu_pitch_offset_deg.toFixed(2)}° (
                         {r.flags.imu_pitch_offset_source}) · {roadLoadAndScaleSentence(r.flags)}
                         {r.flags.road_load_mismatches.map((m) => (
-                          // "differs" is a finding; "unstated" is a gap the request cannot
-                          // yet fill (no tire fields), so it must not read as a warning.
+                          // "differs" is a finding; "unstated" is a gap the operator left
+                          // (the tire fields are optional), so it must not read as a warning.
                           <span
                             key={m.field}
                             data-mismatch={m.status}

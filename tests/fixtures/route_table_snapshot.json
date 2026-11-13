@@ -128,7 +128,9 @@
         "payload_kg",
         "revision",
         "road",
-        "sessions"
+        "sessions",
+        "tire_pressure_front_kpa",
+        "tire_pressure_rear_kpa"
       ],
       "status_code": null
     },

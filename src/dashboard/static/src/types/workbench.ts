@@ -708,6 +708,9 @@ export interface DynoRequest {
   induction: "na" | "boosted" | null;
   ambient_temp_c: number | null;
   allow_single_direction: boolean;
+  /** kPa (the form takes psi and converts); `null` is not stated (M01.8). */
+  tire_pressure_front_kpa: number | null;
+  tire_pressure_rear_kpa: number | null;
 }
 
 /** `GET /analysis/dyno` (H07.9). */

@@ -239,6 +239,8 @@ def register_workbench_routes(
         induction: Literal["na", "boosted"] | None = None,
         ambient_temp_c: float | None = None,
         allow_single_direction: bool = False,
+        tire_pressure_front_kpa: float | None = None,
+        tire_pressure_rear_kpa: float | None = None,
     ) -> dict[str, Any]:
         """Wheel power and torque against rpm per session and gear (H07.9).
 
@@ -246,14 +248,24 @@ def register_workbench_routes(
         road load or squat is still owed is refused ``coefficients_pending``
         rather than computed from a default. ``road``, ``payload_kg`` and
         ``induction`` are run conditions the operator states; a run without
-        them is refused naming each."""
-        request = DynoRequest(
-            road=(road or "").strip() or None,
-            payload_kg=payload_kg,
-            induction=induction,
-            ambient_temp_c=ambient_temp_c,
-            allow_single_direction=allow_single_direction,
-        )
+        them is refused naming each. ``tire_pressure_front_kpa`` and
+        ``tire_pressure_rear_kpa`` are optional, in kPa within
+        ``TIRE_PRESSURE_MIN_KPA`` to ``MAX``: unstated, the result names the
+        road load's pressures as unchecked; stated, a difference from them is
+        named (M01.8). A value outside the range is a 400 naming it, because
+        it is probably psi or bar."""
+        try:
+            request = DynoRequest(
+                road=(road or "").strip() or None,
+                payload_kg=payload_kg,
+                induction=induction,
+                ambient_temp_c=ambient_temp_c,
+                allow_single_direction=allow_single_direction,
+                tire_pressure_front_kpa=tire_pressure_front_kpa,
+                tire_pressure_rear_kpa=tire_pressure_rear_kpa,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
         selection = pooled(sessions, revision)
         dyno_preflight(config, selection)
         return await run_pooled("dyno", selection, {"request": request.as_dict()})

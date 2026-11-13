@@ -43,7 +43,7 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.channels import parse_spec, read_channels
-from src.analysis.dyno_comparison import RunConditions
+from src.analysis.dyno_comparison import RunConditions, check_tire_pressure_kpa
 from src.analysis.dyno_contract import DynoRefusal
 from src.analysis.dyno_driveline import Driveline
 from src.analysis.dyno_motion import Leg, estimate_pitch_offset
@@ -133,6 +133,19 @@ class DynoRequest:
     #: Only when the session holds no ambient channel (the operator's reading).
     ambient_temp_c: float | None = None
     allow_single_direction: bool = False
+    #: Tire pressures the run was made at, in kPa (M01.8). Unstated is ``None``,
+    #: and the result then names the road load's pressures as unchecked.
+    #: Checked against :data:`~src.analysis.dyno_comparison.TIRE_PRESSURE_MIN_KPA`
+    #: to ``MAX``, so a psi or bar figure is refused here and never compared
+    #: with the road load as kPa.
+    tire_pressure_front_kpa: float | None = None
+    tire_pressure_rear_kpa: float | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("tire_pressure_front_kpa", "tire_pressure_rear_kpa"):
+            value = getattr(self, name)
+            if value is not None:
+                check_tire_pressure_kpa(name, value)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -141,6 +154,8 @@ class DynoRequest:
             "induction": self.induction,
             "ambient_temp_c": self.ambient_temp_c,
             "allow_single_direction": self.allow_single_direction,
+            "tire_pressure_front_kpa": self.tire_pressure_front_kpa,
+            "tire_pressure_rear_kpa": self.tire_pressure_rear_kpa,
         }
 
 
@@ -451,6 +466,8 @@ def _run_conditions(
         date=dated.date(),
         payload_kg=request.payload_kg,
         sessions=[session.name],
+        tire_pressure_front_kpa=request.tire_pressure_front_kpa,
+        tire_pressure_rear_kpa=request.tire_pressure_rear_kpa,
     )
 
 

@@ -57,6 +57,7 @@ from src.analysis.dyno_inputs import (
     ImuSpecificForce,
     build_motion_inputs,
 )
+from src.analysis.dyno_power import TIRE_PRESSURE_MATCH_TOLERANCE_KPA
 from src.analysis.dyno_road_load import ROAD_LOAD_BARO_MAX_KPA, ROAD_LOAD_BARO_MIN_KPA
 from src.config import VehicleParameters
 from src.signals.committees import STANDARD_GRAVITY as G
@@ -821,6 +822,34 @@ def test_a_runs_mass_payload_and_tires_against_the_borrowed_road_load_are_named(
     assert "+73 kg" in named["test_mass_kg"].detail
     assert named["payload_kg"].road_load == 127.0
     assert "220 kPa" in named["tire_pressure_front_kpa"].detail
+
+
+def test_tire_pressures_within_the_gauge_tolerance_match_and_mass_and_payload_stay_exact() -> None:
+    tol = TIRE_PRESSURE_MATCH_TOLERANCE_KPA
+    assert tol == 3.5  # about 0.5 psi, under a tire gauge's resolution
+
+    def named(front: float, **kw: float) -> set[str]:
+        conditions = _conditions(tire_pressure_front_kpa=front, tire_pressure_rear_kpa=240.0, **kw)
+        return {m.field for m in _ok(_power(PAIR, conditions=conditions)).road_load_mismatches}
+
+    # The road load was coasted at 240 kPa. 34 psi is 234.4 kPa; 240.42 is noise.
+    assert named(240.42) == set()
+    assert named(240.0 + tol) == set() and named(240.0 - tol) == set()
+    # Past the tolerance it is a different pressure, and the detail states the rule.
+    assert named(240.0 + tol + 0.1) == {"tire_pressure_front_kpa"}
+    assert named(247.0) == {"tire_pressure_front_kpa"}
+    detail = next(
+        m.detail
+        for m in _ok(
+            _power(
+                PAIR,
+                conditions=_conditions(tire_pressure_front_kpa=247.0, tire_pressure_rear_kpa=240.0),
+            )
+        ).road_load_mismatches
+    )
+    assert "+7.0 kPa" in detail and "3.5 kPa" in detail
+    # The tolerance is for tires only: a payload 0.3 kg off is still named.
+    assert named(240.0, payload_kg=127.3) == {"payload_kg"}
 
 
 # ---------------------------------------------------------------------------

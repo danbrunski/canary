@@ -138,6 +138,8 @@ export function getDyno(
       induction: request.induction,
       ambient_temp_c: request.ambient_temp_c,
       allow_single_direction: request.allow_single_direction || null,
+      tire_pressure_front_kpa: request.tire_pressure_front_kpa,
+      tire_pressure_rear_kpa: request.tire_pressure_rear_kpa,
     })}`,
     token,
     { signal },

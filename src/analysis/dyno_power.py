@@ -369,8 +369,20 @@ def _j1349_range(correction: J1349Correction, conditions: RunConditions) -> J134
     )
 
 
+#: Two tire pressures within this many kPa are the same pressure (M01.8). It is
+#: about 0.5 psi, under the resolution of a tire gauge, so a run entered as
+#: 34 psi (234.4 kPa) matches a road load recorded as 234 kPa rather than
+#: reading as a difference, while a 1 psi (6.9 kPa) change is named. Mass and
+#: payload keep the exact rule of :func:`_differs`.
+TIRE_PRESSURE_MATCH_TOLERANCE_KPA = 3.5
+
+
 def _differs(run: float, stored: float) -> bool:
     return abs(run - stored) > 1e-6 * max(1.0, abs(stored))
+
+
+def _tire_pressure_differs(run_kpa: float, stored_kpa: float) -> bool:
+    return abs(run_kpa - stored_kpa) > TIRE_PRESSURE_MATCH_TOLERANCE_KPA
 
 
 def road_load_mismatches(
@@ -381,6 +393,8 @@ def road_load_mismatches(
     Not a refusal: a road load is borrowed across days by design. ``A`` is
     mostly rolling resistance, which scales with the load and the tires, and
     it is applied as stored, so a difference is named for the reader to weigh.
+    Tire pressures match within :data:`TIRE_PRESSURE_MATCH_TOLERANCE_KPA`; mass
+    and payload must match exactly.
     """
     stored = road_load.conditions
     out: list[RoadLoadMismatch] = []
@@ -429,7 +443,7 @@ def road_load_mismatches(
                     ),
                 )
             )
-        elif _differs(run_tire, fitted):
+        elif _tire_pressure_differs(run_tire, fitted):
             out.append(
                 RoadLoadMismatch(
                     field=field,
@@ -438,8 +452,10 @@ def road_load_mismatches(
                     road_load=fitted,
                     detail=(
                         f"the run's {axle} tire pressure {run_tire:g} kPa differs from the "
-                        f"{fitted:g} kPa the road load was coasted at; A (rolling resistance) "
-                        "depends on it and is applied as stored"
+                        f"{fitted:g} kPa the road load was coasted at ({run_tire - fitted:+.1f} "
+                        f"kPa; within {TIRE_PRESSURE_MATCH_TOLERANCE_KPA:g} kPa counts as the "
+                        "same pressure); A (rolling resistance) depends on it and is applied "
+                        "as stored"
                     ),
                 )
             )

@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import math
+import re
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -27,6 +28,11 @@ from fastapi.testclient import TestClient
 from src.analysis import dyno_workbench
 from src.analysis.channels import read_channels
 from src.analysis.dyno import DynoRefusal, load_dyno_profile
+from src.analysis.dyno_comparison import (
+    TIRE_PRESSURE_MAX_KPA,
+    TIRE_PRESSURE_MIN_KPA,
+    RunConditions,
+)
 from src.analysis.dyno_pulls import FoundPull
 from src.analysis.dyno_workbench import DynoRequest, dyno_runs, prerequisites
 from src.analysis.tuning_frame import WotCriterion
@@ -35,6 +41,7 @@ from src.collection import tuning_profile
 from src.config import MASS_NOT_SET, CanaryConfig, VehicleParameters
 from src.control import child_pool, workbench_jobs
 from src.dashboard.routes import workbench as workbench_routes
+from src.paths import REPO_ROOT
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
@@ -369,6 +376,131 @@ def test_recorded_coefficients_give_a_curve_with_conditions_flags_and_uncertaint
     assert set(run["per_heading"]) == {"course-000", "course-180"}
 
 
+def _tire_run(tmp_path: Path, found_pulls: list[list[FoundPull]], **tires: float) -> dict[str, Any]:
+    profile = _profile(tmp_path, measured=True)
+    session = _session(tmp_path / "storage")
+    found_pulls.append(_found())
+    result = dyno_runs(
+        [session],
+        inputs=_inputs(profile, providers=_providers(tmp_path)),
+        vehicle=VEHICLE,
+        request=DynoRequest(road="synthetic road", payload_kg=127.0, induction="na", **tires),
+    )
+    (run,) = result["runs"]
+    assert run["available"] is True
+    return result
+
+
+def test_the_requests_tire_pressures_reach_the_run_conditions_and_match_the_road_load_m01_8(
+    tmp_path: Path, found_pulls: list[list[FoundPull]]
+) -> None:
+    # The road load in _profile was coasted at 234 kPa front and rear.
+    result = _tire_run(
+        tmp_path, found_pulls, tire_pressure_front_kpa=234.0, tire_pressure_rear_kpa=234.0
+    )
+    (run,) = result["runs"]
+    assert run["conditions"]["tire_pressure_front_kpa"] == 234.0
+    assert run["conditions"]["tire_pressure_rear_kpa"] == 234.0
+    assert result["request"]["tire_pressure_front_kpa"] == 234.0
+    assert result["request"]["tire_pressure_rear_kpa"] == 234.0
+    # Stated and equal to the record's: nothing differs, nothing is unstated.
+    assert run["flags"]["road_load_mismatches"] == []
+
+
+def test_a_tire_pressure_that_differs_from_the_road_loads_is_named_and_the_other_is_not_m01_8(
+    tmp_path: Path, found_pulls: list[list[FoundPull]]
+) -> None:
+    result = _tire_run(
+        tmp_path, found_pulls, tire_pressure_front_kpa=220.0, tire_pressure_rear_kpa=234.0
+    )
+    (run,) = result["runs"]
+    (named,) = run["flags"]["road_load_mismatches"]
+    assert (named["field"], named["status"]) == ("tire_pressure_front_kpa", "differs")
+    assert named["run"] == 220.0 and named["road_load"] == 234.0
+    # 34 psi is 234.4 kPa: the same pressure as 234 to a gauge, so no mismatch;
+    # 241 kPa (35 psi) is a different one.
+    (tmp_path / "gauge").mkdir()
+    near = _tire_run(
+        tmp_path / "gauge",
+        found_pulls,
+        tire_pressure_front_kpa=34.0 * 6.894757293168361,
+        tire_pressure_rear_kpa=234.42,
+    )
+    assert near["runs"][0]["flags"]["road_load_mismatches"] == []
+    (tmp_path / "psi").mkdir()
+    far = _tire_run(
+        tmp_path / "psi", found_pulls, tire_pressure_front_kpa=241.0, tire_pressure_rear_kpa=234.0
+    )
+    (far_named,) = far["runs"][0]["flags"]["road_load_mismatches"]
+    assert (far_named["field"], far_named["status"]) == ("tire_pressure_front_kpa", "differs")
+    assert "3.5 kPa" in far_named["detail"]
+    # One axle stated leaves the other unstated, not defaulted to the first.
+    (tmp_path / "front").mkdir()
+    only_front = _tire_run(tmp_path / "front", found_pulls, tire_pressure_front_kpa=234.0)
+    (unstated,) = only_front["runs"][0]["flags"]["road_load_mismatches"]
+    assert (unstated["field"], unstated["status"]) == ("tire_pressure_rear_kpa", "unstated")
+    assert only_front["runs"][0]["conditions"]["tire_pressure_rear_kpa"] is None
+
+
+@pytest.mark.parametrize(
+    "kpa",
+    [
+        pytest.param(35.0, id="35 psi typed as kPa"),
+        pytest.param(2.4, id="2.4 bar typed as kPa"),
+        pytest.param(79.9, id="just under the floor"),
+        pytest.param(1662.0, id="241 kPa converted as psi"),
+        pytest.param(float("nan"), id="not a number"),
+    ],
+)
+def test_a_tire_pressure_outside_the_range_is_refused_naming_the_range_m01_8(kpa: float) -> None:
+    lo, hi = f"{TIRE_PRESSURE_MIN_KPA:g}", f"{TIRE_PRESSURE_MAX_KPA:g}"
+    for field in ("tire_pressure_front_kpa", "tire_pressure_rear_kpa"):
+        with pytest.raises(ValueError, match=rf"{field}.*{lo}-{hi} kPa.*psi or bar"):
+            DynoRequest(**{field: kpa})  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match=rf"{lo}-{hi} kPa"):
+            _run_conditions_with(**{field: kpa})
+    # The edges of the range are accepted, and so is "not stated".
+    DynoRequest(tire_pressure_front_kpa=TIRE_PRESSURE_MIN_KPA, tire_pressure_rear_kpa=600.0)
+    DynoRequest()
+
+
+def test_a_trail_pressure_is_accepted_and_a_psi_slip_is_not_m01_8() -> None:
+    # 12 psi, aired down for a trail, is 82.7 kPa and a real pressure.
+    trail = 12.0 * 6.894757293168361
+    assert 82.7 < trail < 82.8
+    DynoRequest(tire_pressure_front_kpa=trail, tire_pressure_rear_kpa=trail)
+    assert _run_conditions_with(tire_pressure_front_kpa=trail).tire_pressure_front_kpa == trail
+    # Every whole psi figure from 12 to 79 typed as kPa is under the floor.
+    for psi in range(12, 80):
+        with pytest.raises(ValueError, match="psi or bar"):
+            DynoRequest(tire_pressure_front_kpa=float(psi))
+
+
+def _run_conditions_with(**tires: float) -> RunConditions:
+    return RunConditions(
+        gear=3,
+        direction="pair",
+        tune_revision="r",
+        induction="na",
+        baro_kpa=80.0,
+        intake_temp_c=25.0,
+        ambient_temp_c=21.0,
+        road="synthetic road",
+        date=dt.date(2026, 9, 26),
+        payload_kg=127.0,
+        sessions=["s"],
+        **tires,
+    )
+
+
+def test_the_schema_states_the_tire_pressure_range_m01_8() -> None:
+    props = RunConditions.model_json_schema()["properties"]
+    for field in ("tire_pressure_front_kpa", "tire_pressure_rear_kpa"):
+        assert props[field]["minimum"] == TIRE_PRESSURE_MIN_KPA
+        assert props[field]["maximum"] == TIRE_PRESSURE_MAX_KPA
+    assert _run_conditions_with().tire_pressure_front_kpa is None
+
+
 def test_a_run_without_its_stated_conditions_is_refused_naming_each(
     tmp_path: Path, found_pulls: list[list[FoundPull]]
 ) -> None:
@@ -594,6 +726,8 @@ def test_dyno_route_runs_through_the_child_and_needs_auth(
         "induction": "na",
         "ambient_temp_c": None,
         "allow_single_direction": False,
+        "tire_pressure_front_kpa": None,
+        "tire_pressure_rear_kpa": None,
     }
     # The example config's vehicle has no dyno profile, or no pull in this
     # session; either way the page is told which kind of empty it is.
@@ -644,3 +778,47 @@ def test_dyno_route_refuses_an_unknown_induction(
 ) -> None:
     response = client.get("/analysis/dyno?sessions=x&induction=turbo", headers=AUTH)
     assert response.status_code == 422
+
+
+def test_dyno_route_passes_the_tire_pressures_into_the_request_m01_8(
+    client: TestClient,
+) -> None:
+    storage = client.config.collection.storage_path  # type: ignore[attr-defined]
+    _session(storage)
+    response = client.get(
+        "/analysis/dyno?sessions=2026-09-26T120000&road=r&payload_kg=100&induction=na"
+        "&tire_pressure_front_kpa=241.3&tire_pressure_rear_kpa=227.5",
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+    request = response.json()["request"]
+    assert request["tire_pressure_front_kpa"] == 241.3
+    assert request["tire_pressure_rear_kpa"] == 227.5
+
+
+@pytest.mark.parametrize("query", ["tire_pressure_front_kpa=35", "tire_pressure_rear_kpa=2.4"])
+def test_dyno_route_refuses_a_tire_pressure_that_is_probably_psi_or_bar_m01_8(
+    client: TestClient, query: str
+) -> None:
+    response = client.get(f"/analysis/dyno?sessions=x&{query}", headers=AUTH)
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert (
+        f"{TIRE_PRESSURE_MIN_KPA:g}-{TIRE_PRESSURE_MAX_KPA:g} kPa" in detail
+        and "psi or bar" in detail
+    )
+    assert query.split("=")[0] in detail
+
+
+def test_the_forms_psi_range_is_the_daemons_kpa_range_m01_8() -> None:
+    """``util/pressure.ts`` mirrors the Python range so the form can refuse in psi;
+    nothing but this test keeps the two copies the same."""
+    source = (REPO_ROOT / "src/dashboard/static/src/util/pressure.ts").read_text()
+    match = re.search(
+        r"TIRE_PRESSURE_RANGE_KPA\s*=\s*\{\s*min:\s*([0-9.]+),\s*max:\s*([0-9.]+)\s*\}", source
+    )
+    assert match, "TIRE_PRESSURE_RANGE_KPA not found in pressure.ts"
+    assert (float(match.group(1)), float(match.group(2))) == (
+        TIRE_PRESSURE_MIN_KPA,
+        TIRE_PRESSURE_MAX_KPA,
+    )

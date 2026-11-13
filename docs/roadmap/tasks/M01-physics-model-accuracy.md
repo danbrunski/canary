@@ -599,7 +599,7 @@ them; absolute and "corrected" figures do not.
       `too_few_samples` reason and `no_distance` in the stored refusal
       kinds.
 
-- [~] **M01.8 (Missing condition) Road load stores no air density.**
+- [x] **M01.8 (Missing condition) Road load stores no air density.**
   `RoadLoadConditions` holds road, date, sessions, payload, tire pressures and
   ambient temperature; its docstring names "air". `C` in `A + B·v + C·v²` is
   ½·ρ·Cd·A, and `compute_power` applies the stored `C` whatever the run's
@@ -651,8 +651,9 @@ them; absolute and "corrected" figures do not.
       `test_a_runs_mass_payload_and_tires_against_the_borrowed_road_load_are_named`
       (empty when all match and are stated; both tires `unstated` by default;
       +73 kg, payload 200 vs 127, front 220 vs 240 kPa each named).
-      The workbench request states no tire pressures yet, so every workbench
-      run lists both as `unstated`. The dashboard shows each `detail`:
+      The workbench request states tire pressures optionally (see the
+      follow-up below), and a run lists one as `unstated` only when its box is
+      left blank. The dashboard shows each `detail`:
       `differs` in the warning color, `unstated` as a quiet note, never a
       warning (`DynoView.test.tsx` asserts the classes).
     - Golden (`tests/fixtures/dyno_golden.json`): no curve value moved, because
@@ -669,11 +670,83 @@ them; absolute and "corrected" figures do not.
       `ROAD_LOAD_BARO_MIN_KPA`–`ROAD_LOAD_BARO_MAX_KPA` (45–110 kPa: the
       standard atmosphere at 5,800 m is ~48 kPa; the sea-level record ~108.4).
       Outside that range the value is refused as probably another unit (800 hPa, 11.6 psi).
-  - [ ] **Follow-up: the run's tire pressures are owed in the request.**
+  - [x] **Follow-up: the run's tire pressures are owed in the request.**
     `DynoRequest`, `GET /analysis/dyno` and the dashboard form have no tire
     fields, so every workbench run reports both pressures `unstated`. Add
     `tire_pressure_front_kpa` / `tire_pressure_rear_kpa` to the request,
     route, MCP tool and form, and pass them into `RunConditions`.
+    - *2026-11-13.* `DynoRequest` gained both fields (kPa, `None` = not
+      stated, in `as_dict` and so in the cached job params and the response's
+      `request`); `_run_conditions` passes them into `RunConditions`;
+      `GET /analysis/dyno` takes `tire_pressure_front_kpa` /
+      `tire_pressure_rear_kpa`. **Range, a schema constraint:**
+      `TIRE_PRESSURE_MIN_KPA`–`MAX` = 80–600 kPa (about 11.6–87 psi: the floor
+      lets a trail pressure of 12–14.5 psi through, and an LT load range E
+      tire's cold maximum is 80 psi) in `dyno_comparison`, one
+      `check_tire_pressure_kpa` used by `RunConditions` (a field validator,
+      with `minimum`/`maximum` in `model_json_schema`) and by
+      `DynoRequest.__post_init__`. It exists to refuse a unit slip: every psi
+      figure from 12 to 79 and every bar figure (1–6) falls under 80 as a kPa
+      figure, and a kPa figure converted as psi (241 → ~1,662) falls over 600. The route turns
+      the refusal into a 400 naming the field, the range and "psi or bar".
+      `RoadLoadConditions` is unchanged (its tire fields stay `gt=0`).
+    - **Matching tolerance:** `_differs` was 1e-6 relative, so a road load
+      recorded at 234 kPa against a run entered as 34 psi (234.42 kPa) read as
+      `differs`. The two tire fields now use an absolute
+      `TIRE_PRESSURE_MATCH_TOLERANCE_KPA` = 3.5 kPa (about 0.5 psi, below a
+      gauge's resolution) in `dyno_power`, and a `differs` detail states it
+      ("+7.0 kPa; within 3.5 kPa counts as the same pressure"). Mass and
+      payload keep the exact rule.
+      `test_tire_pressures_within_the_gauge_tolerance_match_and_mass_and_payload_stay_exact`
+      (240.42, 240 ± 3.5 match; 243.6 and 247 differ; payload 127.3 vs 127
+      still named) and, through the workbench,
+      `test_a_tire_pressure_that_differs_from_the_road_loads_is_named_and_the_other_is_not_m01_8`
+      (234.42 and 34 psi match 234 kPa; 241 differs). The golden
+      (`tests/fixtures/dyno_golden.json`) did not move: every golden power case
+      states no tire pressure, so its mismatches are `unstated`, which the
+      tolerance does not touch.
+    - **No MCP tool to thread:** `grep -rniE dyno src/mcp_server
+      docs/mcp-server.md` finds nothing; there is no MCP dyno tool (L01.x
+      also lists the driving dyno as not yet in the skill). The tire fields
+      are on the HTTP route and the form only. An MCP dyno tool, if one is
+      added, takes them from the route's signature.
+    - **Form (`DynoView`):** the app takes and shows tire pressure in psi (the
+      tire ledger and tread-wear card), so the form has "Front tires (psi)" and
+      "Rear tires (psi)"; `readTirePsi` (new `util/pressure.ts`) converts at the
+      edge (`psi × 6.894757293168361`, unrounded, so a record converted the same
+      way matches exactly) and the request carries kPa. A blank box is "not
+      stated" (null, never 0). A figure outside the range is refused in psi's
+      words ("241 psi is outside 11.7-87 psi: is it kPa or bar? Enter psi") with
+      Run disabled; the range is mirrored from the Python constants with the
+      daemon the authority. The runs table's conditions show
+      `tires front 35.0 psi, rear not stated`; the `unstated` note stays quiet.
+    - Tests: `tests/test_dyno_workbench.py`
+      `test_the_requests_tire_pressures_reach_the_run_conditions_and_match_the_road_load_m01_8`
+      (234/234 kPa stated against a road load coasted at 234/234: both reach
+      `conditions`, `road_load_mismatches == []`),
+      `test_a_tire_pressure_that_differs_from_the_road_loads_is_named_and_the_other_is_not_m01_8`
+      (front 220 `differs`; one axle stated leaves the other `unstated`),
+      `test_a_tire_pressure_outside_the_range_is_refused_naming_the_range_m01_8`
+      (35, 2.4, 79.9, 1662 and NaN refused on request and `RunConditions`;
+      80 and 600 accepted),
+      `test_a_trail_pressure_is_accepted_and_a_psi_slip_is_not_m01_8` (12 psi =
+      82.7 kPa accepted; every whole figure 12 to 79 typed as kPa refused),
+      `test_the_schema_states_the_tire_pressure_range_m01_8`,
+      `test_the_forms_psi_range_is_the_daemons_kpa_range_m01_8` (regex-reads
+      `TIRE_PRESSURE_RANGE_KPA` out of `util/pressure.ts` and compares it to the
+      Python constants, so the two copies cannot drift),
+      `test_dyno_route_passes_the_tire_pressures_into_the_request_m01_8` and
+      `test_dyno_route_refuses_a_tire_pressure_that_is_probably_psi_or_bar_m01_8`
+      (400). `tests/fixtures/route_table_snapshot.json` regenerated: the
+      `/analysis/dyno` query gained the two names and nothing else.
+      `DynoView.test.tsx`: psi sent as kPa, one axle without the other, a kPa
+      or bar figure refused with Run disabled, the conditions sentence;
+      `util/pressure.test.ts`: conversion, blank is unstated, range edges
+      (80 kPa is 11.603 psi, so 11.6 psi is 79.98 kPa and is refused, 11.7 is
+      accepted, 12 and 14.5 are accepted; the form's message therefore names
+      11.7-87 psi, rounded inward so every figure it names is accepted). Docs:
+      `docs/headless-api.md` (route params, range, 400, the stale "always
+      `unstated`" sentence).
   - [x] **The inertia fit applies the road load unscaled too.**
     `dyno_inertia.fit_engine_inertia` calls `road_load.force(v)`, which is
     the record in the air it was fitted in, and takes no run conditions. In

@@ -565,7 +565,7 @@ under GPS. Defects a dyno would inherit:
     `"dyno"` is a `workbench_jobs.JOB_KINDS` kind, so it inherits the
     bounded single-flight child, capture deferral, the row budget and
     `analysis_busy` while a brain child runs.
-  - **Route.** `GET /analysis/dyno?sessions=&revision=&road=&payload_kg=&induction=&ambient_temp_c=&allow_single_direction=`,
+  - **Route.** `GET /analysis/dyno?sessions=&revision=&road=&payload_kg=&induction=&ambient_temp_c=&allow_single_direction=&tire_pressure_front_kpa=&tire_pressure_rear_kpa=`,
     control auth, in `src/dashboard/routes/workbench.py`. The route table
     snapshot is regenerated (one row added). There is no MCP tool, matching
     the other `/analysis/*` workbench routes.

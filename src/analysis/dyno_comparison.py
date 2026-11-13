@@ -20,13 +20,43 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import numpy as np
-from pydantic import Field, model_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 
 from src.analysis.dyno_contract import DynoRefusal, FloatArray, StrictModel, as_float_array
 from src.analysis.noise_floor import SIGMA_THRESHOLD
 
 #: A noise floor needs at least this many pull pairs (H07.8).
 MIN_PULL_PAIRS = 3
+
+#: A run's stated tire pressure must lie in this range, in kPa (M01.8).
+#: 80 kPa is 11.6 psi (airing down to 12-14.5 psi for a trail is a real
+#: pressure), 600 kPa is 87 psi (an LT load range E tire's cold maximum is
+#: 80 psi, 552 kPa). The range exists to refuse a unit slip: every psi figure
+#: from 12 to 79 and every bar figure (1-6, 2.4 here) falls below 80 when
+#: entered as kPa, and a kPa figure converted as if it were psi (241 kPa x
+#: 6.895, ~1,660) falls above 600. An ordinary kPa pressure (200-300) lies
+#: well inside.
+TIRE_PRESSURE_MIN_KPA = 80.0
+TIRE_PRESSURE_MAX_KPA = 600.0
+
+
+def check_tire_pressure_kpa(field: str, value: float) -> float:
+    """``value`` if it is a plausible tire pressure in kPa, else ``ValueError``.
+
+    The one range check for a run's stated tire pressure, used by
+    :class:`RunConditions` and by the request that states it, so a psi or bar
+    figure is refused at the edge and never reaches the road-load comparison
+    as a kPa value (where it would read as a flat tire, or a mismatch of
+    hundreds of kPa that looks like a finding).
+    """
+    if not TIRE_PRESSURE_MIN_KPA <= value <= TIRE_PRESSURE_MAX_KPA:
+        raise ValueError(
+            f"{field} {value:g} is outside {TIRE_PRESSURE_MIN_KPA:g}-"
+            f"{TIRE_PRESSURE_MAX_KPA:g} kPa (about 11.6-87 psi): a value in psi or bar? "
+            "Give kPa (1 psi = 6.895 kPa; 35 psi is 241 kPa)"
+        )
+    return value
+
 
 #: Rpm grid step for resampling dyno curves before comparing them.
 CURVE_GRID_STEP_RPM = 50.0
@@ -62,8 +92,25 @@ class RunConditions(StrictModel):
     #: The one optional pair: ``None`` is "not stated", and a power result
     #: then names the road load's tire pressures as unchecked rather than
     #: matched (M01.8).
-    tire_pressure_front_kpa: float | None = Field(default=None, gt=0.0)
-    tire_pressure_rear_kpa: float | None = Field(default=None, gt=0.0)
+    #: Bounds checked by :func:`check_tire_pressure_kpa` (so the refusal can
+    #: name the likely unit) and stated in the schema.
+    tire_pressure_front_kpa: float | None = Field(
+        default=None,
+        json_schema_extra={"minimum": TIRE_PRESSURE_MIN_KPA, "maximum": TIRE_PRESSURE_MAX_KPA},
+    )
+    tire_pressure_rear_kpa: float | None = Field(
+        default=None,
+        json_schema_extra={"minimum": TIRE_PRESSURE_MIN_KPA, "maximum": TIRE_PRESSURE_MAX_KPA},
+    )
+
+    @field_validator("tire_pressure_front_kpa", "tire_pressure_rear_kpa")
+    @classmethod
+    def _tire_pressure_is_plausible(cls, value: float | None, info: ValidationInfo) -> float | None:
+        return (
+            None
+            if value is None
+            else check_tire_pressure_kpa(info.field_name or "tire pressure", value)
+        )
 
 
 @dataclass(frozen=True)
