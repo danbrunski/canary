@@ -1166,39 +1166,58 @@ class IsolationForestInferenceEngine:
         self.mode_column: str = trained.mode_column
         self.model_version: str = trained.manifest.model_version
 
-    def observe(self, row: Mapping[str, Any] | pd.Series) -> pd.Series:
+    def observe(self, row: Mapping[str, Any] | pd.Series | pd.DataFrame) -> pd.Series:
         """Score one row; return the scored Series.
 
         The caller passes the row to ``emit_isolation_forest_row`` to
         decide whether it merits an event. Splitting score / emit lets
         consumers log the score even when it didn't fire, useful for
         backfilling distributions.
+
+        A one-row frame (``aligned.iloc[[0]]``, what the daemon passes) is
+        scored as it is, in its own column dtypes. A Series is one object-dtype
+        row, so ``to_frame().T`` sends every column down the scaler's object
+        path (R27.13).
         """
-        if isinstance(row, pd.Series):
-            frame = row.to_frame().T
-        else:
-            frame = pd.DataFrame([dict(row)])
-        scored = self.trained.score(frame)
+        scored = self.trained.score(_one_row_frame(row))
         out: pd.Series = scored.iloc[0]
         return out
 
     def feature_contributions(
-        self, row: Mapping[str, Any] | pd.Series, *, top_k: int
+        self, row: Mapping[str, Any] | pd.Series | pd.DataFrame, *, top_k: int
     ) -> dict[str, float]:
         """The scoring mode model's own features, ranked by how much each
         raised this row's score (A04.2, occlusion — see
         ``TrainedIsolationForest.feature_contributions``). Never the
         ``feature_columns`` union: most of those are not features of the
         model that scored the row."""
-        if isinstance(row, pd.Series):
-            frame = row.to_frame().T
-        else:
-            frame = pd.DataFrame([dict(row)])
-        contributions: dict[str, float] = self.trained.feature_contributions(frame, top_k=top_k)
+        contributions: dict[str, float] = self.trained.feature_contributions(
+            _one_row_frame(row), top_k=top_k
+        )
         return contributions
 
-    def contribution_reference(self, row: Mapping[str, Any] | pd.Series) -> str | None:
+    def contribution_reference(
+        self, row: Mapping[str, Any] | pd.Series | pd.DataFrame
+    ) -> str | None:
         """``mode_median`` / ``pooled_mean``: what occlusion replaced features
         with for this row's mode (A04.2)."""
-        reference: str | None = self.trained.contribution_reference(row.get(self.mode_column))
+        if isinstance(row, pd.DataFrame):
+            column = _one_row_frame(row).get(self.mode_column)
+            mode = None if column is None else column.iloc[0]
+        else:
+            mode = row.get(self.mode_column)
+        reference: str | None = self.trained.contribution_reference(mode)
         return reference
+
+
+def _one_row_frame(row: Mapping[str, Any] | pd.Series | pd.DataFrame) -> pd.DataFrame:
+    """The one-row frame the IF scores. A frame passes through with its column
+    dtypes (R27.13); anything but exactly one row is refused, since the engine
+    returns one scored row and would silently drop the rest."""
+    if isinstance(row, pd.DataFrame):
+        if len(row) != 1:
+            raise ValueError(f"IsolationForestInferenceEngine scores one row, got {len(row)}")
+        return row
+    if isinstance(row, pd.Series):
+        return row.to_frame().T
+    return pd.DataFrame([dict(row)])

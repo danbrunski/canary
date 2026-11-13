@@ -725,9 +725,12 @@ class TrainedIsolationForest:
             # sklearn's decision_function is positive for inliers and
             # negative for outliers. Negating gives a more natural
             # "higher means worse" anomaly score. ``MODEL_MODE_COLUMN`` records
-            # the model actually used, so a fallback route is observable.
-            out.loc[complete_indexes, SCORE_COLUMN] = -model.decision_function(x)
-            out.loc[complete_indexes, LABEL_COLUMN] = model.predict(x).astype(int)
+            # the model actually used, so a fallback route is observable. One
+            # forest pass: the label comes from this decision, never from
+            # ``predict``, which runs the forest again (R27.13).
+            decision = model.decision_function(x)
+            out.loc[complete_indexes, SCORE_COLUMN] = -decision
+            out.loc[complete_indexes, LABEL_COLUMN] = _inlier_labels(decision)
             out.loc[complete_indexes, MODEL_MODE_COLUMN] = model_key
 
         # Phase 7.2 calibrated decision. Map each row to the threshold of the
@@ -1824,6 +1827,21 @@ def _scaled_medians(
             continue
         out[index] = (median - scaler.means[column]) / scaler.denominator(column)
     return out
+
+
+def _inlier_labels(decision: np.ndarray[Any, Any]) -> np.ndarray[Any, np.dtype[np.int_]]:
+    """``IsolationForest.predict``'s labels from a ``decision_function`` already
+    computed: +1 inlier, -1 where the decision is below zero.
+
+    ``predict`` is exactly this rule over its own ``decision_function`` call
+    (sklearn ``ensemble/_iforest.py``), so calling it after scoring ran every
+    tree a second time per tick (R27.13). ``test_inlier_labels_match_predict``
+    pins the rule against sklearn's own ``predict``, so an upgrade that
+    changes it fails there instead of drifting silently.
+    """
+    labels = np.ones_like(decision, dtype=int)
+    labels[decision < 0] = -1
+    return labels
 
 
 def _impute_scaled(

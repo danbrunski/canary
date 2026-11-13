@@ -468,8 +468,53 @@ not measured.
   - Local copies of `src.coerce.optional_str` in
     `models/retraining_policy.py` and `companion/discovery.py`.
 
-- [ ] **R27.13 The IF runs its forest twice per tick, on an object-dtype row.**
+- [x] **R27.13 The IF runs its forest twice per tick, on an object-dtype row.**
   Found while doing R27.4 (2026-11-12), not yet measured on the Pi.
+  *Done 2026-11-13 (laptop only; Pi per-tick time not measured):*
+  `TrainedIsolationForest.score` calls `decision_function` once per mode group
+  and takes the label from it through `_inlier_labels`, which is sklearn
+  1.8.0's `predict` rule (`ones`, `-1` where `decision < 0`, zero an inlier).
+  `IsolationForestInferenceEngine.observe` / `feature_contributions` /
+  `contribution_reference` accept a one-row frame and refuse any other row
+  count, and `_if_compute` / `_rank_feature_contributors` pass
+  `aligned.iloc[[0]]`. The typed frame alone was *slower* than the object row:
+  `ZScoreScaler` rebuilt its block plan on every call (two `np.result_type`
+  and two operand conversions a column, 1.4 ms of a 295-column row's 2.8 ms).
+  The plan is now cached per column layout (`_block_plan`, at most 8 layouts,
+  kept out of pickles, equality and `repr`). That speeds up both paths.
+  - Equivalence, deployed `models/nissan-xterra-2008/isolation_forest`
+    (2026-10-08 artifact) on stored drives 2026-10-08T182550,
+    2026-10-10T141532 and 2026-10-10T170455 (1,684 ticks, 363 forest-scored;
+    the rest are withheld for missing features or the `unknown` mode, as at
+    HEAD). The live `_if_compute` ran one row per tick at HEAD (worktree) and
+    in this tree. Scores were bit-identical (max |Δscore| 0.0) and labels,
+    calibrated verdicts, missing flags, thresholds and model modes all
+    matched: 0 mismatches and 0 verdict flips. On the same 363 rows the
+    occlusion contributions and reference matched frame against Series
+    (0 mismatches). The first sample (2026-11-11 drives, 2,939 ticks) was
+    all `unknown`/`koeo` and so all withheld. It matched too, but it never
+    reached a forest and proves nothing.
+  - Time, measured in one warm process with HEAD's work emulated per tick
+    (object row, uncached plan, `predict` after `decision_function`) and
+    interleaved with this tree's path. Same 1,684 ticks, load average about 1,
+    `engine.observe` only. Forest-scored ticks: median 27.53 → 18.07 ms, p95
+    30.22 → 20.50 ms. Withheld ticks: median 7.21 → 7.41 ms, p95 8.97 →
+    9.26 ms. All ticks: median 7.39 → 7.63 ms, p95 28.65 → 19.04 ms. With the
+    plan cached on both sides, the typed frame is still about 0.5 ms a tick
+    slower than an object row (17.50 vs 18.03 ms scored, 6.91 vs 7.43 ms
+    withheld). The extra time is the scaler's concat and reorder of two
+    numeric blocks: the absent features `reconcile_feature_frame_to_spec`
+    fills arrive as float64 NaN beside the float32 ones. Kept as specified.
+    The operator decides between this and the object row.
+  - Tests: `test_inlier_labels_match_predict` (the rule against sklearn's own
+    `predict`, including the zero boundary),
+    `test_score_runs_each_mode_forest_once_and_never_predict`,
+    `test_engine_scores_a_one_row_frame_in_its_own_dtypes` (bit-identical to
+    the Series path, refuses two rows),
+    `test_block_plans_are_cached_per_layout_and_stay_bit_identical` and
+    `test_block_plan_cache_is_bounded`. `test_scoring_continuity`, the IF,
+    inference, daemon and detector-evaluation files pass (624 passed), and so
+    does `-m ml_training` on the scaler and IF users (73 passed).
   - `TrainedIsolationForest.score` calls `model.decision_function(x)` and then
     `model.predict(x)`, and sklearn's `predict` calls `decision_function`
     again. On one row with the `city` model each pass took ~13 ms on the

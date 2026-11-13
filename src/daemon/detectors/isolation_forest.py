@@ -230,7 +230,8 @@ def _rank_feature_contributors(
     ``pooled_mean`` on an artifact that recorded no per-mode medians.
     """
     try:
-        row = aligned.iloc[0]
+        # A one-row frame keeps the features' own dtypes (R27.13).
+        row = aligned.iloc[[0]]
         contributions = engine.feature_contributions(row, top_k=_IF_TOP_FEATURES)
         reference = engine.contribution_reference(row)
     except Exception:  # noqa: BLE001 — attribution is best-effort, never blocks an emit
@@ -242,7 +243,8 @@ def _rank_feature_contributors(
 def _if_compute(loaded: Any, row: Any) -> _IFComputed:
     """The worker half of :func:`_score_and_emit`: schema alignment, the
     sklearn forward pass, threshold/scale lookup, and contributor ranking.
-    No shared state is read or written — safe off the loop (C08.4)."""
+    No shared state is read or written beyond the scaler's plan cache (an
+    immutable memo, R27.13) — safe off the loop (C08.4)."""
     import pandas as pd
 
     from src.models.isolation_forest import (
@@ -255,7 +257,9 @@ def _if_compute(loaded: Any, row: Any) -> _IFComputed:
     engine = IsolationForestInferenceEngine(loaded.artifact)
     aligned, report = reconcile_feature_frame_to_spec(row, _schema_for_loaded(loaded))
     started = time.perf_counter()
-    scored = engine.observe(aligned.iloc[0])
+    # ``iloc[[0]]``, not ``iloc[0]``: a one-row frame keeps the float32
+    # feature dtypes, where a Series is one object-dtype row (R27.13).
+    scored = engine.observe(aligned.iloc[[0]])
     latency_ms = (time.perf_counter() - started) * 1000.0
     timestamp = row["timestamp"].iloc[0]
     missing = bool(scored.get(MISSING_FEATURES_COLUMN, False))

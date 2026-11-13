@@ -169,7 +169,8 @@ class ZScoreScaler:
           stays float32 against a Python-float mean, ints and bools become
           float64. Columns sharing those dtypes share one 2-D block, which is
           what replaces ~230 µs of pandas overhead per column;
-        * an object column (the daemon's one-row ``to_frame().T`` frame) is
+        * an object column (a one-row frame built from a Series or Mapping
+          with ``to_frame().T``; the daemon itself passes a typed frame) is
           one object block, so each element keeps Python's own arithmetic for
           its type (an ``np.float32`` stays float32);
         * anything else (pandas extension dtypes, an object column holding
@@ -178,35 +179,26 @@ class ZScoreScaler:
         The reciprocal is never multiplied in its place: ``x * (1 / d)`` is
         not ``x / d`` to the last bit.
         """
-        dtypes = df.dtypes.tolist()
         labels = df.columns.tolist()
-        blocks: dict[_BlockKey, list[int]] = {}
-        by_column: list[int] = []
-        for pos in positions:
-            key = self._block_key(labels[pos], dtypes[pos])
-            if key is None:
-                by_column.append(pos)
-            else:
-                blocks.setdefault(key, []).append(pos)
+        plan = self._block_plan(labels, df.dtypes.tolist(), positions)
+        by_column = list(plan.by_column)
 
         pieces: list[pd.DataFrame] = []
-        for key, group in blocks.items():
-            names = [labels[pos] for pos in group]
-            means = [_operand(self.means[name]) for name in names]
-            denoms = [_operand(self.denominator(name)) for name in names]
-            if isinstance(key, str):
-                piece = _object_piece(df, group, means, denoms)
+        for block in plan.blocks:
+            group = list(block.positions)
+            if isinstance(block.key, str):
+                piece = _object_piece(df, group, list(block.means), list(block.denoms))
                 if piece is None:
                     by_column.extend(group)
                     continue
             else:
-                first, second = key
+                first, second = block.key
                 values = df.iloc[:, group].to_numpy(dtype=first)
                 with np.errstate(all="ignore"):
-                    diff = values - np.array(means, dtype=first)
+                    diff = values - block.means
                     if second != first:
                         diff = diff.astype(second)
-                    result = diff / np.array(denoms, dtype=second)
+                    result = diff / block.denoms
                 piece = pd.DataFrame(result, index=df.index, columns=group, copy=False)
             pieces.append(piece)
         if by_column:
@@ -216,6 +208,65 @@ class ZScoreScaler:
             ]
             pieces.append(pd.concat(series, axis=1).set_axis(by_column, axis=1))
         return pieces
+
+    def _block_plan(self, labels: list[Any], dtypes: list[Any], positions: list[int]) -> _BlockPlan:
+        """How :meth:`_scaled_pieces` groups ``positions``, with each block's
+        operands, cached per column layout (R27.13).
+
+        The plan depends only on which fitted column sits at each position and
+        its dtype. Rebuilding it cost two ``np.result_type`` calls and two
+        operand conversions per column on every call: 1.4 ms of a one-row,
+        295-column typed frame's 2.8 ms, so the daemon's typed row scaled
+        slower than the object row it replaced. The live layout repeats every
+        tick, so the cache holds a handful of entries; it is cleared rather
+        than grown past :data:`_MAX_BLOCK_PLANS`. The operands are the ones
+        the uncached loop built, so the arithmetic is unchanged.
+        """
+        cache_key = (
+            tuple(labels[pos] for pos in positions),
+            tuple(positions),
+            tuple(dtypes[pos] for pos in positions),
+        )
+        cache: dict[Any, _BlockPlan] = self.__dict__.setdefault(_BLOCK_PLANS_ATTR, {})
+        plan = cache.get(cache_key)
+        if plan is not None:
+            return plan
+        blocks: dict[_BlockKey, list[int]] = {}
+        by_column: list[int] = []
+        for pos in positions:
+            key = self._block_key(labels[pos], dtypes[pos])
+            if key is None:
+                by_column.append(pos)
+            else:
+                blocks.setdefault(key, []).append(pos)
+        planned: list[_Block] = []
+        for key, group in blocks.items():
+            names = [labels[pos] for pos in group]
+            means = [_operand(self.means[name]) for name in names]
+            denoms = [_operand(self.denominator(name)) for name in names]
+            if isinstance(key, str):
+                planned.append(_Block(key, tuple(group), tuple(means), tuple(denoms)))
+            else:
+                first, second = key
+                planned.append(
+                    _Block(
+                        key,
+                        tuple(group),
+                        _readonly(np.array(means, dtype=first)),
+                        _readonly(np.array(denoms, dtype=second)),
+                    )
+                )
+        plan = _BlockPlan(tuple(planned), tuple(by_column))
+        if len(cache) >= _MAX_BLOCK_PLANS:
+            cache.clear()
+        cache[cache_key] = plan
+        return plan
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Pickle the fitted parameters, never the per-layout plan cache."""
+        state = dict(self.__dict__)
+        state.pop(_BLOCK_PLANS_ATTR, None)
+        return state
 
     def _block_key(self, label: Any, dtype: Any) -> _BlockKey | None:
         """Which block column ``label`` of ``dtype`` joins, or ``None`` for the
@@ -297,6 +348,36 @@ class ZScoreScaler:
 _OBJECT_BLOCK = "object"
 # A numeric block's (``x - mean`` dtype, ``/ denom`` dtype), or _OBJECT_BLOCK.
 _BlockKey = tuple[np.dtype[Any], np.dtype[Any]] | str
+#: Where a scaler keeps its per-layout plans: in ``__dict__`` beside the
+#: dataclass fields, so equality, ``repr`` and ``to_dict`` never see it, a
+#: scaler unpickled from an older artifact simply starts empty, and
+#: ``__getstate__`` keeps it out of every pickle.
+_BLOCK_PLANS_ATTR = "_block_plans"
+_MAX_BLOCK_PLANS = 8
+
+
+@dataclass(frozen=True)
+class _Block:
+    """One dtype block: its key, the positions it holds, and the operands --
+    float arrays in the block's dtypes, or the Python scalars an object block
+    applies element by element."""
+
+    key: _BlockKey
+    positions: tuple[int, ...]
+    means: Any
+    denoms: Any
+
+
+@dataclass(frozen=True)
+class _BlockPlan:
+    blocks: tuple[_Block, ...]
+    by_column: tuple[int, ...]
+
+
+def _readonly(values: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+    """A cached operand: shared by every later call, so nothing may write it."""
+    values.flags.writeable = False
+    return values
 
 
 def _operand(value: Any) -> Any:

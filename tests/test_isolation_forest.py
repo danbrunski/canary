@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
@@ -32,6 +33,7 @@ from src.models.isolation_forest import (  # noqa: E402
     SCORE_COLUMN,
     ModeTrainingSummary,
     SkippedModeSummary,
+    TrainedIsolationForest,
     calibration_flag_rate,
     default_manifest_path,
     fit_isolation_forest,
@@ -1005,3 +1007,113 @@ def test_mode_summary_without_resolvability_fields_still_loads() -> None:
     assert legacy.requested_flag_rate is None
     assert legacy.target_unresolvable is None
     assert legacy.resolvable_flag_rate is None
+
+
+# ---------------------------------------------------------------------------
+# R27.13 — one forest pass per tick, scored in the features' own dtypes
+# ---------------------------------------------------------------------------
+
+
+def _probe_with_outliers() -> tuple[pd.DataFrame, TrainedIsolationForest]:
+    frame = _two_mode_frame()
+    trained = fit_isolation_forest(
+        frame,
+        _IFConfig(n_estimators=75, contamination=0.05),
+        feature_columns=["obd:RPM", "obd:SPEED", "obd:LOAD"],
+        fitted_at="2026-05-12T01:02:03Z",
+    )
+    probe = frame.copy()
+    # One far outlier in each mode, so both labels occur in both forests.
+    probe.loc[probe.index[0], ["obd:RPM", "obd:SPEED", "obd:LOAD"]] = [9e3, 200.0, 99.0]
+    probe.loc[probe.index[-1], ["obd:RPM", "obd:SPEED", "obd:LOAD"]] = [100.0, 0.0, 1.0]
+    return probe, trained
+
+
+def test_inlier_labels_match_predict() -> None:
+    """``_inlier_labels`` is sklearn's own ``predict`` rule (``decision < 0`` is
+    -1, zero is an inlier), checked against ``predict`` itself so a sklearn
+    upgrade that changes the rule fails here."""
+    from sklearn.ensemble import IsolationForest
+
+    from src.models.isolation_forest import _inlier_labels
+
+    rng = np.random.default_rng(7)
+    x = np.vstack([rng.normal(size=(400, 3)), rng.normal(loc=6.0, size=(20, 3))])
+    model = IsolationForest(n_estimators=50, contamination=0.05, random_state=0).fit(x)
+    labels = _inlier_labels(model.decision_function(x))
+    assert set(labels.tolist()) == {-1, 1}
+    np.testing.assert_array_equal(labels, model.predict(x))
+    assert labels.dtype == model.predict(x).dtype
+    boundary = _inlier_labels(np.array([-1e-12, 0.0, 1e-12]))
+    assert boundary.tolist() == [-1, 1, 1]
+
+
+def test_score_runs_each_mode_forest_once_and_never_predict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``predict`` runs the forest a second time (R27.13): ``score`` takes the
+    label from the decision it already computed, and the labels are the ones
+    ``predict`` gives."""
+    probe, trained = _probe_with_outliers()
+    expected = trained.score(probe)
+    models = trained.models
+    for key in models:
+        mode_rows = probe[MODE_COLUMN] == key
+        x = trained._mode_matrix(
+            trained.scaler.transform_fitted(probe.loc[mode_rows]),
+            key,
+            list(trained._features_for(key)),
+        )
+        np.testing.assert_array_equal(
+            expected.loc[mode_rows, LABEL_COLUMN].to_numpy(dtype=int), models[key].predict(x)
+        )
+    assert set(expected[LABEL_COLUMN].astype(int)) == {-1, 1}
+
+    calls: dict[str, int] = {}
+    for key, model in models.items():
+        real = model.decision_function
+
+        def counted(
+            x: np.ndarray, *, _key: str = key, _real: Callable[[np.ndarray], np.ndarray] = real
+        ) -> np.ndarray:
+            calls[_key] = calls.get(_key, 0) + 1
+            return _real(x)
+
+        def refuse(x: np.ndarray) -> np.ndarray:
+            raise AssertionError("score must not call predict: it re-runs the forest")
+
+        monkeypatch.setattr(model, "decision_function", counted)
+        monkeypatch.setattr(model, "predict", refuse)
+    again = trained.score(probe)
+    assert calls == {key: 1 for key in models}
+    pd.testing.assert_frame_equal(again, expected)
+
+
+def test_engine_scores_a_one_row_frame_in_its_own_dtypes() -> None:
+    """The daemon passes ``aligned.iloc[[0]]`` (R27.13): float32 columns stay
+    float32 instead of becoming one object row, and the score is bit-identical
+    to the object path's."""
+    from src.models.inference import IsolationForestInferenceEngine
+
+    probe, trained = _probe_with_outliers()
+    features = ["obd:RPM", "obd:SPEED", "obd:LOAD"]
+    probe = probe.astype({column: np.float32 for column in features})
+    engine = IsolationForestInferenceEngine(trained)
+    # Both injected outliers (first and last rows) and an inlier of each mode.
+    for index in (0, 1, 60, len(probe) - 1):
+        frame_row = engine.observe(probe.iloc[[index]])
+        object_row = engine.observe(probe.iloc[index])
+        assert (
+            np.float64(frame_row[SCORE_COLUMN]).tobytes()
+            == np.float64(object_row[SCORE_COLUMN]).tobytes()
+        )
+        assert frame_row[LABEL_COLUMN] == object_row[LABEL_COLUMN]
+        assert frame_row[MODEL_MODE_COLUMN] == object_row[MODEL_MODE_COLUMN]
+    assert engine.contribution_reference(probe.iloc[[0]]) == engine.contribution_reference(
+        probe.iloc[0]
+    )
+    assert engine.feature_contributions(probe.iloc[[0]], top_k=3) == (
+        engine.feature_contributions(probe.iloc[0], top_k=3)
+    )
+    with pytest.raises(ValueError, match="scores one row, got 2"):
+        engine.observe(probe.iloc[[0, 1]])

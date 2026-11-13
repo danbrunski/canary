@@ -122,9 +122,9 @@ def test_batch_frame_is_bit_identical_to_the_per_column_loop() -> None:
 
 
 def test_one_row_frames_are_bit_identical_typed_and_object() -> None:
-    """The daemon scores one row a tick, and ``IsolationForestInferenceEngine``
-    builds it as ``row.to_frame().T`` -- every column object dtype, holding
-    ``np.float32`` scalars."""
+    """Given a Series or Mapping row, ``IsolationForestInferenceEngine`` builds
+    it as ``row.to_frame().T`` -- every column object dtype, holding
+    ``np.float32`` scalars. (The daemon passes a typed one-row frame, R27.13.)"""
     frame, fitted = _realistic_frame()
     scaler = _scaler(frame, fitted)
     for position in (0, 17, 239):
@@ -227,3 +227,60 @@ def test_transform_fitted_refuses_duplicate_labels() -> None:
     doubled = pd.concat([frame, frame[["obd:F64"]]], axis=1)
     with pytest.raises(SchemaMismatchError, match="duplicate column labels"):
         scaler.transform_fitted(doubled)
+
+
+def test_block_plans_are_cached_per_layout_and_stay_bit_identical() -> None:
+    """R27.13: the plan (blocks and their operands) is built once per column
+    layout. A second call reuses it with the same bytes out, and a different
+    dtype layout of the same columns gets its own plan, not the cached one."""
+    import pickle
+
+    from src.preprocessing.normalization import _BLOCK_PLANS_ATTR
+
+    frame, fitted = _realistic_frame()
+    scaler = _scaler(frame, fitted)
+    typed = frame.iloc[[3]]
+    first = scaler.transform_fitted(typed)
+    plans = dict(scaler.__dict__[_BLOCK_PLANS_ATTR])
+    assert len(plans) == 1
+    second = scaler.transform_fitted(frame.iloc[[4]])
+    assert scaler.__dict__[_BLOCK_PLANS_ATTR] == plans  # same layout, same plan
+    _assert_bit_identical(first, _reference_transform(scaler, typed)[list(fitted)])
+    _assert_bit_identical(second, _reference_transform(scaler, frame.iloc[[4]])[list(fitted)])
+
+    objects = frame.iloc[3].to_frame().T
+    _assert_bit_identical(
+        scaler.transform_fitted(objects), _reference_transform(scaler, objects)[list(fitted)]
+    )
+    widened = typed.astype(
+        {column: np.float64 for column in fitted if column.startswith("obd:F32")}
+    )
+    _assert_bit_identical(
+        scaler.transform_fitted(widened), _reference_transform(scaler, widened)[list(fitted)]
+    )
+    assert len(scaler.__dict__[_BLOCK_PLANS_ATTR]) == 3
+
+    for block in next(iter(plans.values())).blocks:
+        if not isinstance(block.key, str):
+            assert not block.means.flags.writeable
+
+    # The cache is not state: equality, repr and pickles never see it.
+    restored = pickle.loads(pickle.dumps(scaler))
+    assert _BLOCK_PLANS_ATTR not in restored.__dict__
+    assert restored == scaler
+    assert repr(restored) == repr(scaler)
+    _assert_bit_identical(restored.transform_fitted(typed), first)
+
+
+def test_block_plan_cache_is_bounded() -> None:
+    from src.preprocessing.normalization import _BLOCK_PLANS_ATTR, _MAX_BLOCK_PLANS
+
+    frame, fitted = _realistic_frame()
+    scaler = _scaler(frame, fitted)
+    row = frame.iloc[[0]]
+    # Each reordering of the frame's columns is a new layout.
+    for shift in range(_MAX_BLOCK_PLANS + 3):
+        columns = list(row.columns)
+        rotated = row[columns[shift:] + columns[:shift]]
+        scaler.transform_fitted(rotated)
+        assert len(scaler.__dict__[_BLOCK_PLANS_ATTR]) <= _MAX_BLOCK_PLANS
