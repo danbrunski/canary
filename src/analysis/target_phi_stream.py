@@ -72,6 +72,7 @@ from src.analysis.target_phi import (
 from src.decode.dids import DidMap
 from src.paths import DIDS_YAML
 from src.signals.pairing import PairingPolicy, match_ordered
+from src.timefmt import format_epoch
 
 #: Recent decided records kept for publication (the live trace).
 RECENT_RECORDS = 120
@@ -410,10 +411,12 @@ class TwinStream:
                 "decision_horizon_s": self.horizon_s,
                 "settle_s": self.settle_s,
                 "lookback_s": self.lookback_s,
-                "clock": None if not math.isfinite(self.clock_s) else _iso(self.clock_s),
+                "clock": None
+                if not math.isfinite(self.clock_s)
+                else format_epoch(self.clock_s, nanoseconds=True),
                 "decided_through": None
                 if not math.isfinite(self.decided_through_s)
-                else _iso(self.decided_through_s),
+                else format_epoch(self.decided_through_s, nanoseconds=True),
                 "reads_seen": dict(self.reads_seen),
                 "late_reads": dict(self.late_reads),
                 "evicted_over_cap": dict(self.evicted_over_cap),
@@ -423,10 +426,6 @@ class TwinStream:
             "latest_prediction": self.latest_prediction,
             "recent": list(self.recent),
         }
-
-
-def _iso(seconds: float) -> str:
-    return pd.Timestamp(seconds, unit="s", tz="UTC").isoformat()
 
 
 __all__ = ["MAX_READS_PER_SPEC", "RECENT_RECORDS", "TwinStream", "compact"]

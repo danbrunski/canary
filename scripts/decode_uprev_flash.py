@@ -42,12 +42,13 @@ import json
 import re
 import sys
 import zlib
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from src.timefmt import format_epoch  # noqa: E402
 
 LINE = re.compile(r"^\((?P<ts>\d+\.\d+)\)\s+\S+\s+(?P<id>[0-9A-Fa-f]+)#(?P<data>[0-9A-Fa-f]*)")
 TESTER, LOADER, DATA = 0x742, 0x762, 0x743
@@ -64,10 +65,6 @@ def parse_candump(text: str) -> list[Frame]:
         if m and len(m["data"]) % 2 == 0:
             frames.append((float(m["ts"]), int(m["id"], 16), bytes.fromhex(m["data"])))
     return frames
-
-
-def _iso(ts: float) -> str:
-    return datetime.fromtimestamp(ts, UTC).isoformat().replace("+00:00", "Z")
 
 
 def _crc(data: bytes) -> str:
@@ -104,7 +101,7 @@ def decode(frames: list[Frame], old: bytes, new: bytes) -> dict[str, Any]:
             crc = data[1:5].hex()
             range_crcs.append(
                 {
-                    "time": _iso(ts),
+                    "time": format_epoch(ts, zulu=True),
                     "phase": "after" if pages else "before",
                     "start": start,
                     "length": length,
@@ -117,7 +114,7 @@ def decode(frames: list[Frame], old: bytes, new: bytes) -> dict[str, Any]:
             erases.append(
                 {
                     "sector": cmd[1],
-                    "time": _iso(sent_at),
+                    "time": format_epoch(sent_at, zulu=True),
                     "seconds": round(ts - sent_at, 3),
                     "reply": data.hex(),
                 }
@@ -132,7 +129,7 @@ def decode(frames: list[Frame], old: bytes, new: bytes) -> dict[str, Any]:
             pages.append(
                 {
                     "address": address,
-                    "time": _iso(sent_at),
+                    "time": format_epoch(sent_at, zulu=True),
                     "bytes": len(payload),
                     "loader_crc32": loader_crc,
                     "received_crc32": _crc(payload),
@@ -142,9 +139,21 @@ def decode(frames: list[Frame], old: bytes, new: bytes) -> dict[str, Any]:
                 }
             )
         elif op != 0x64:
-            other.append({"command": cmd.hex(), "time": _iso(sent_at), "reply": data.hex()})
+            other.append(
+                {
+                    "command": cmd.hex(),
+                    "time": format_epoch(sent_at, zulu=True),
+                    "reply": data.hex(),
+                }
+            )
     if pending is not None and pending[1][0] != 0x64:
-        other.append({"command": pending[1].hex(), "time": _iso(pending[0]), "reply": None})
+        other.append(
+            {
+                "command": pending[1].hex(),
+                "time": format_epoch(pending[0], zulu=True),
+                "reply": None,
+            }
+        )
 
     before = [r for r in range_crcs if r["phase"] == "before"]
     after = [r for r in range_crcs if r["phase"] == "after"]
@@ -208,7 +217,12 @@ def decode(frames: list[Frame], old: bytes, new: bytes) -> dict[str, Any]:
         "old_image_sha256": hashlib.sha256(old).hexdigest(),
         "new_image_sha256": hashlib.sha256(new).hexdigest(),
         "new_image_crc32": _crc(new),
-        "capture_span": [_iso(frames[0][0]), _iso(frames[-1][0])] if frames else None,
+        "capture_span": [
+            format_epoch(frames[0][0], zulu=True),
+            format_epoch(frames[-1][0], zulu=True),
+        ]
+        if frames
+        else None,
         "summary": {
             "before_crcs_matching_old": f"{sum(r['matches_old'] for r in before)}/{len(before)}",
             "after_crcs_matching_new": f"{sum(r['matches_new'] for r in after)}/{len(after)}",

@@ -16,12 +16,13 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from src.analysis.replay_window import replay_window
 from src.config import CanaryConfig
 from src.storage.sessions import resolve_session
+from src.timefmt import as_utc
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -29,7 +30,7 @@ def _parse_iso(value: str | None) -> datetime | None:
         return None
     text = value.replace("Z", "+00:00")
     parsed = datetime.fromisoformat(text)
-    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+    return as_utc(parsed)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

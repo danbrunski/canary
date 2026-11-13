@@ -27,6 +27,7 @@ from src.session import (
 from src.storage.capture_manifest import read_capture_manifest
 from src.storage.session_files import PARQUET_PATTERN, has_telemetry
 from src.storage.sidecar import read_json_object, write_json_sidecar
+from src.timefmt import as_utc
 
 log = logging.getLogger(__name__)
 
@@ -223,8 +224,8 @@ def list_sessions(
     # ``captures`` lists the profile-owned recordings: bounded captures and
     # legacy ``_tuning-*`` (a recorded session since R01.1's decision).
     kinds = {SessionKind.CAPTURE, SessionKind.TUNING} if captures else LIVE_SESSION_KINDS
-    lower = None if since is None else _as_utc(since)
-    upper = None if until is None else _as_utc(until)
+    lower = None if since is None else as_utc(since)
+    upper = None if until is None else as_utc(until)
     # Ordered by parsed start time (R01.1): with captures, name order sorted
     # by profile slug first, so a limit kept the lexically-last profiles
     # rather than the newest captures.
@@ -236,10 +237,6 @@ def list_sessions(
     if limit is not None:
         chosen = chosen[-limit:]
     return [summarize_session(child) for child in chosen]
-
-
-def _as_utc(value: datetime) -> datetime:
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 def _within(started_at: datetime | None, lower: datetime | None, upper: datetime | None) -> bool:
@@ -264,8 +261,8 @@ def filter_sessions(
     For summaries already in hand; :func:`list_sessions` takes the same
     bounds and applies them before it summarizes anything.
     """
-    lower = None if since is None else _as_utc(since)
-    upper = None if until is None else _as_utc(until)
+    lower = None if since is None else as_utc(since)
+    upper = None if until is None else as_utc(until)
     selected = sessions
     if lower is not None or upper is not None:
         selected = [
@@ -274,7 +271,7 @@ def filter_sessions(
             if _within(
                 None
                 if session.started_at is None
-                else _as_utc(datetime.fromisoformat(session.started_at)),
+                else as_utc(datetime.fromisoformat(session.started_at)),
                 lower,
                 upper,
             )

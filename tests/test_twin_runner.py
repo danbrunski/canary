@@ -81,6 +81,7 @@ from src.decode import air_charge as air_kernel
 from src.decode.target_phi_command import GATE_STATE_UNKNOWN, target_command, x_from_bfs
 from src.jsonable import jsonable
 from src.preprocessing.loader import read_session
+from src.timefmt import format_epoch
 from tests.test_target_phi import EXPECT, _session, _table, fixture_frame, record_lines
 from tools import fuel_plant_check
 
@@ -286,7 +287,7 @@ def test_x_reads_are_the_x_formula_checks_reads(kit: TwinKit) -> None:
     assert (reads.x_spec, reads.bfs_spec) == (X_SPEC, kit.twin.x_formula.bfs_channel)
     assert len(reads.x_times) == len(reads.x_raw) == 194
     pairs = zip(reads.x_times, reads.x_raw, strict=True)
-    by_time = {target_phi._iso(float(t)): int(v) for t, v in pairs}
+    by_time = {format_epoch(float(t), nanoseconds=True): int(v) for t, v in pairs}
     assert all(by_time[p["acquired_at"]] == p["x"] for p in check["pairs"])
 
 
@@ -392,7 +393,7 @@ def test_the_x_relation_through_the_runner_and_the_evaluator(kit: TwinKit) -> No
     # Per pair: the runner's own pairing and kernel call give the evaluator's
     # pairs (time, observed X, X from BFS), and every X read is a record.
     ours = sorted(
-        (target_phi._iso(t), o, x)
+        (format_epoch(t, nanoseconds=True), o, x)
         for t, o, x in zip(rows["acquired_at"], rows["observed"], rows["predicted"], strict=True)
     )
     theirs = sorted((p["acquired_at"], float(p["x"]), float(p["x_from_bfs"])) for p in old["pairs"])

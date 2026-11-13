@@ -61,6 +61,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.timefmt import format_epoch
 from src.yaml_load import load_yaml
 
 if TYPE_CHECKING:
@@ -801,8 +802,8 @@ class CommitteeFlag:
                 "max_departure": self.max_departure,
                 "sustain_seconds": self.sustain_seconds,
             },
-            "started_at": _iso(self.started_at),
-            "detected_at": _iso(self.detected_at),
+            "started_at": format_epoch(self.started_at, zulu=True),
+            "detected_at": format_epoch(self.detected_at, zulu=True),
             "verdicts": self.verdicts,
             "member_value": self.member_value,
             "reference_value": self.reference_value,
@@ -1068,7 +1069,7 @@ class CommitteeEvaluator:
                 "configured": runtime.spec is not None,
                 "alerting": any(run.latched for run in runtime.runs.values()),
                 "events": runtime.events,
-                "last_event_at": _iso(runtime.last_event_at)
+                "last_event_at": format_epoch(runtime.last_event_at, zulu=True)
                 if runtime.last_event_at is not None
                 else None,
                 "counts": dict(runtime.counts),
@@ -1264,14 +1265,6 @@ def _arrived(point: Mapping[str, Any], channel: str) -> bool:
 
 def _count(runtime: _CommitteeRuntime, key: str) -> None:
     runtime.counts[key] = runtime.counts.get(key, 0) + 1
-
-
-def _iso(epoch_seconds: float) -> str:
-    from datetime import UTC, datetime
-
-    from src.timefmt import format_timestamp
-
-    return format_timestamp(datetime.fromtimestamp(epoch_seconds, tz=UTC))
 
 
 __all__ = [

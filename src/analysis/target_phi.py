@@ -71,6 +71,7 @@ from src.paths import DIDS_YAML
 from src.refusal import ReasonedRefusal
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.signals.time_lookup import MISSING, bracketing_sample_indices
+from src.timefmt import format_epoch
 from src.yaml_load import load_yaml
 
 #: Bumped when the evaluator's states, reasons or record shape change.
@@ -844,10 +845,6 @@ def _raw(series: _Series, spec: str, dids_path: Path, catalog: DidMap | None) ->
     return raw
 
 
-def _iso(seconds: float) -> str:
-    return pd.Timestamp(seconds, unit="s", tz="UTC").isoformat()
-
-
 def _bracket(series: _Series, t: float, max_age: float) -> tuple[int | None, int | None]:
     """Indices of the latest reading at/before ``t`` and the next reading
     after that one, each within ``max_age`` of ``t`` (``None`` when missing).
@@ -1011,7 +1008,7 @@ def new_candidate(
             "sample": {
                 "spec": reference.sentinel_channel if sentinel else reference.channel,
                 "row": row,
-                "acquired_at": _iso(time),
+                "acquired_at": format_epoch(time, nanoseconds=True),
                 "timestamp_basis": basis,
                 "observed_word": word,
                 "observed_phi": None if word is None else word / (1 << reference.q_bits),
@@ -1142,7 +1139,7 @@ def _input_refs(
         refs[name] = {
             "spec": spec,
             "row": j,
-            "acquired_at": _iso(t),
+            "acquired_at": format_epoch(t, nanoseconds=True),
             "skew_s": round(t - candidate.time, 6),
             # One window read stamps its channels together; the ECM may still
             # have updated them in different loop iterations.
@@ -1194,7 +1191,7 @@ def _identity(
             selector=int(raw[rules.selector.channel][others[1]]),
         )
         detail[side] = {
-            "acquired_at": _iso(t),
+            "acquired_at": format_epoch(t, nanoseconds=True),
             "slot": resolution.slot,
             "reason": resolution.reason,
             "detail": resolution.detail,
@@ -1745,7 +1742,7 @@ def x_formula_check(
         expected = x_from_bfs(int(bfs_raw[b]), scaler, definition)
         pairs.append(
             {
-                "acquired_at": _iso(float(reads.x_times[a])),
+                "acquired_at": format_epoch(float(reads.x_times[a]), nanoseconds=True),
                 "separation_s": float(separation),
                 "bfs": int(bfs_raw[b]),
                 "x": observed,

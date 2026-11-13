@@ -46,7 +46,7 @@ import logging
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, ClassVar
 
 import numpy as np
@@ -96,6 +96,7 @@ from src.telemetry import (
     TelemetryRecord,
     channel_key,
 )
+from src.timefmt import assume_utc
 from src.vehicle.profiles import active_flash_history
 from src.vehicle.speed_correction import trip_speed_correction
 
@@ -785,7 +786,7 @@ class LiveFeatureSource:
             )
             return
         self._current_values[channel] = value
-        ts = observed_at if observed_at.tzinfo is not None else observed_at.replace(tzinfo=UTC)
+        ts = assume_utc(observed_at)
         self._last_observed_at[channel] = ts
         if channel in IMU_FRAME_INPUTS:
             self.imu_frame.observe_input(channel, value, ts)
@@ -799,10 +800,7 @@ class LiveFeatureSource:
             record_observer(record)
         recorded_at = record.metadata.get(REPLAY_SOURCE_AT_KEY)
         if isinstance(recorded_at, (int, float)) and not isinstance(recorded_at, bool):
-            stamped = record.timestamp
-            if stamped.tzinfo is None:
-                stamped = stamped.replace(tzinfo=UTC)
-            self._replay_shift_s = stamped.timestamp() - float(recorded_at)
+            self._replay_shift_s = assume_utc(record.timestamp).timestamp() - float(recorded_at)
         if record.source == "obd":
             # Raw Mode-22 DID poll responses arrive as obd-source records with
             # channel "DID_<hex>" and a hex-string payload value. Decode them
@@ -964,7 +962,7 @@ class LiveFeatureSource:
         tick of a real drive (181 x 308) took 7-8 ms on the laptop, and with
         the column blocks appended and copied out it takes 0.6-0.7 ms.
         """
-        now_utc = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        now_utc = assume_utc(now)
         previous_tick = self._last_tick_at
         # Every tick call closes an arrival window, emitted or not, exactly as
         # the offline grid has a row per interval before fully-stale rows drop.
@@ -1207,7 +1205,7 @@ class LiveFeatureSource:
         stores a raw ``can:*`` value — every CAN frame that matched a
         binding or DBC message updates one of those instead).
         """
-        now_utc = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        now_utc = assume_utc(now)
 
         def _freshest_age(prefix: str) -> float | None:
             ages = [
@@ -1261,7 +1259,7 @@ class LiveFeatureSource:
         observed_at = self._last_observed_at.get(channel)
         if observed_at is None:
             return None
-        now_utc = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        now_utc = assume_utc(now)
         return max((now_utc - observed_at).total_seconds(), 0.0)
 
     def reset(self) -> None:

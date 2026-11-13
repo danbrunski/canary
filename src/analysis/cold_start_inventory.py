@@ -44,6 +44,7 @@ from src.dataframe_utils import numeric_values
 from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.preprocessing.drives import DRIVE_GAP_SECONDS, physical_drives
 from src.signals.pairing import to_seconds
+from src.timefmt import format_epoch
 
 #: The serving contract's channels, thresholds and cold ceiling. Defaults
 #: match ``ColdStartRequirement`` and the warmup recipes' 40 °C ceiling; a
@@ -310,8 +311,8 @@ def _make_run(
     iat_window = _finite(iat[warmup])
     ambient_window = _finite(ambient[window])
     return EngineRun(
-        started_at=_iso(epoch[start]),
-        ended_at=_iso(epoch[stop - 1]),
+        started_at=format_epoch(epoch[start], nanoseconds=True),
+        ended_at=format_epoch(epoch[stop - 1], nanoseconds=True),
         duration_s=float(epoch[stop - 1] - epoch[start]),
         classification=classification,
         start_observed=was_observed,
@@ -326,10 +327,6 @@ def _make_run(
         iat_spread=_spread(iat[warmup]),
         catalyst_rows=int(np.isfinite(catalyst[warmup]).sum()),
     )
-
-
-def _iso(epoch_seconds: float) -> str:
-    return pd.Timestamp(epoch_seconds, unit="s", tz="UTC").isoformat()
 
 
 def usable_context_runs(

@@ -29,7 +29,7 @@ so neither correction has a second, live-only implementation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from src.coerce import finite_float
@@ -43,6 +43,7 @@ from src.signals.derived import (
 )
 from src.signals.speed_correction import TRIP_SPEED_CHANNEL, SpeedCorrection
 from src.telemetry import DECODED_SOURCE, OBD_SOURCE, channel_key
+from src.timefmt import assume_utc
 
 #: The cumulative columns :meth:`TripIntegrals.channels` reports, keyed as
 #: ``compute_derived_channels`` keys them so a consumer can merge the dict
@@ -122,7 +123,7 @@ class TripIntegrals:
         Same ``MAX_INTEGRATION_DT_S`` cap, same idle gate and same trapezoid
         between consecutive *observed* samples as ``compute_derived_channels``.
         """
-        now_utc = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        now_utc = assume_utc(now)
         if sample.fuel_lph is not None:
             increment, self.fuel_marker = _trapezoid(
                 self.fuel_marker, now_utc, sample.fuel_lph / 3600.0

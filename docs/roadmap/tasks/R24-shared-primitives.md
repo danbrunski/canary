@@ -140,20 +140,85 @@ a fixture per caller proves it.
   - Must not change: the bytes-keyed flash-history cache
     (`test_an_edited_flash_history_is_reread`).
 
-- [ ] **R24.4 Timezone coercion and ISO formatting.**
+- [~] **R24.4 Timezone coercion and ISO formatting.**
   `tzinfo is None` appears on 53 lines in 37 files. `_aware` is defined 8
   times, `_utc` twice more, `_iso` 13 times, and the copies do not agree:
   some `replace(tzinfo=UTC)` (leave a non-UTC aware value alone), some
   `astimezone(UTC)` (convert); `_iso` emits `+00:00` in some files and `Z` in
   others. `src/timefmt.py` has `format_timestamp` and `parse_iso_utc` and
   nothing for this.
-  - [ ] `timefmt.as_utc(dt)` (naive is UTC, aware is converted) and
+  - [x] `timefmt.as_utc(dt)` (naive is UTC, aware is converted) and
     `timefmt.format_epoch(seconds)`. Migrate the identical copies and the
     eight sites in `features/live.py` first.
-  - [ ] For each `_iso` that writes to a stored file, keep that file's
+    Done, with two more helpers because the copies split three ways, not two.
+    `src/timefmt.py` gains `as_utc` (convert), `assume_utc` (naive is UTC,
+    an aware value is returned untouched, offset kept), `utc_datetime` (the
+    pandas flavor: any stamp-like, floored to microseconds) and
+    `format_epoch(seconds, *, zulu=False, nanoseconds=False)`.
+    `as_utc` replaces `_utc` in `models/evaluation_corpus`,
+    `preprocessing/drives`, `analysis/labelled_events`, `storage/sessions`
+    (`_as_utc`), plus inline copies in `alerts/event_logger` (x2),
+    `scripts/derive_sessions`, `tools/replay_window`. `assume_utc` replaces the
+    keep-aware copies: `_aware` in `vehicle/interventions` and
+    `vehicle/tune_revisions` (plus its two inline sites), `_utc` in
+    `features/bus_freshness`, `features/trip_integrals`,
+    `control/twin_identity._epoch`, `scripts/_cli`,
+    `scripts/evaluate_detectors`, and every `features/live.py` site (the file
+    has five, not eight: lines 788, 803-804, 967, 1210, 1264 at the time).
+    The `live.py` sites stay keep-aware, not `as_utc` as the item wrote: a
+    copy that leaves an aware non-UTC value alone would otherwise start
+    emitting `+00:00` for it. `utc_datetime` replaces `_aware` in
+    `analysis/delivery_evidence`, `compare_evidence`, `twin_evidence` and
+    `change_evaluation` (its `None` guard stays local).
+    Evidence: `tests/test_timefmt.py` (533 cases) holds each deleted copy
+    verbatim as an oracle and compares helper to copy on naive, aware
+    non-UTC, aware UTC, pandas Timestamp, with and without microseconds,
+    ns-bearing and string forms (values and `isoformat()` text).
+    `tests/test_twin_runner.py` used `target_phi._iso` and now calls
+    `format_epoch(..., nanoseconds=True)`.
+    Left alone, not tz coercion or a different contract:
+    `analysis/replay_window._iso` (`astimezone(UTC)` treats a naive value as
+    local time, the others as UTC), `candidate_promotion._aware` and
+    `models/adaptive_candidate._aware` (`datetime.fromtimestamp(t, UTC)`, an
+    epoch constructor), `analysis/kline_exchanges._iso`,
+    `session_timeseries._iso`, `preprocessing/imu_session._iso`,
+    `dashboard/readers._iso`, `evidence/cards._iso` (plain `.isoformat()`,
+    no coercion, a naive stamp stays naive).
+  - [ ] The remaining ~35 `tzinfo is None` lines. Most are plain-`datetime`
+    copies of the `assume_utc`/`as_utc` pattern, not pandas:
+    `storage/sessions.py` (~114), `analysis/plant_validation.py` (~720, 895,
+    902, 933), `vehicle_state.py` (~429), `control/nonvolatile_write.py`
+    (~160), `analysis/artifact_lineage.py` (~1028, 1033),
+    `analysis/fuel_comp_restore.py` (~563), `analysis/digest.py` (~242),
+    `daemon/proposals_live.py` (~280), `analysis/behavior_validation_schema.py`
+    (~74), `scripts/tag.py` (~132, 195, 216), `tools/import_uprev_log.py`
+    (~180), `control/updater.py` (~118), `control/brain_reads.py` (~85). The
+    rest are pandas `tz_localize`/`tz_convert` on a Timestamp or index
+    (`session_files`, `evaluation_corpus` ~81-82, `anomaly_injection`,
+    `retraining_policy`). Each site needs its own check of which variant it
+    is (convert vs keep-aware) against the oracles in `tests/test_timefmt.py`.
+    This is desk work.
+  - [x] For each `_iso` that writes to a stored file, keep that file's
     current suffix behind an argument. Unifying `Z` and `+00:00` in stored
     artifacts is a separate, deliberate change, and probably not worth
     making.
+    Done: `format_epoch` takes `zulu` (`plausibility/evaluator`,
+    `scripts/decode_uprev_flash`, `signals/committees` write `Z`) and
+    `nanoseconds` (`cold_start_inventory`, `target_phi`, `target_phi_stream`
+    go through `pd.Timestamp(seconds, unit="s")`, so a float such as
+    1708740829.9991355 is stored as `...49.999135494+00:00`; the default
+    rounds to `...49.999135+00:00`, which `plant_validation` stores).
+    `test_format_epoch_flavors_reproduce_each_copy` runs 505 epochs through
+    all four spellings against the deleted `_iso` bodies, text for text, and
+    `test_nanoseconds_flag_is_load_bearing` pins the example. 13 `_iso`
+    defs: 7 replaced here (`decode_uprev_flash`, `cold_start_inventory`,
+    `plant_validation`, `target_phi`, `target_phi_stream`, `evaluator`,
+    `committees`), 6 left (`replay_window`, `kline_exchanges`,
+    `session_timeseries`, `imu_session`, `readers`, `cards`; see above).
+    Verified 2026-11-13: an independent differential over adversarial
+    inputs (fold, extreme dates, ZoneInfo, compact and offset strings,
+    µs rounding boundaries, negative epochs, numpy scalars) gave 0 diffs
+    from the HEAD bodies. No stored suffix changed.
 
 - [ ] **R24.5 Canonical-JSON hashing.** An AST scan found 38 sites that hash
   `json.dumps(…, sort_keys=True)` with sha256, in four flavors: compact

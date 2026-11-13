@@ -160,6 +160,7 @@ from src.models.false_positive_benchmark import V1_ALERTS_PER_HOUR_BUDGET
 from src.paths import DATA_DIR
 from src.preprocessing.anomaly_injection import REALISTIC_FAULTS, load_fault_channel_roles
 from src.preprocessing.derived_store import DEFAULT_DERIVED_DIR
+from src.timefmt import assume_utc
 from src.vehicle.profiles import resolve_profile_for_tooling
 
 log = logging.getLogger(__name__)
@@ -417,7 +418,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def _utc_date(value: str) -> datetime:
     parsed = datetime.fromisoformat(value)
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+    return assume_utc(parsed)
 
 
 def _profile_data_dir(config: CanaryConfig, profile: str | None) -> Path:

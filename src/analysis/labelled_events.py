@@ -22,12 +22,13 @@ the single source of truth for flash times.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from src.timefmt import as_utc
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 from src.yaml_load import load_yaml
 
@@ -67,7 +68,7 @@ class LabelledEvent(_Strict):
     @field_validator("start", "end")
     @classmethod
     def _utc(cls, value: datetime) -> datetime:
-        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+        return as_utc(value)
 
     @model_validator(mode="after")
     def _ordered(self) -> LabelledEvent:

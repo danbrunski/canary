@@ -31,6 +31,7 @@ from src.paths import BINDINGS_YAML  # noqa: E402
 from src.preprocessing import discover_sessions  # noqa: E402
 from src.session import LIVE_SESSION_KINDS, iter_sessions  # noqa: E402
 from src.storage.sessions import session_started_at  # noqa: E402
+from src.timefmt import assume_utc  # noqa: E402
 from src.vehicle.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 from src.vehicle.vehicle_ledger import VehicleLedgerStore  # noqa: E402
 
@@ -186,7 +187,7 @@ def parse_since_argument(value: str) -> datetime:
         raise argparse.ArgumentTypeError(
             f"invalid --since value {value!r}: expected YYYY-MM-DD or ISO-8601"
         ) from exc
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+    return assume_utc(parsed)
 
 
 def filter_sessions_since(sessions: list[Path], since: datetime) -> list[Path]:

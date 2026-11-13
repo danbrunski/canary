@@ -22,7 +22,7 @@ import argparse
 import sys
 import time
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 try:
@@ -45,11 +45,11 @@ from src.log import configure_logging
 from src.preprocessing.derived_store import DEFAULT_DERIVED_DIR, DerivedStore
 from src.preprocessing.resampler import resample_config_for
 from src.storage.sessions import recorded_sessions, session_started_at
+from src.timefmt import as_utc
 
 
 def _utc_date(text: str) -> datetime:
-    stamp = datetime.fromisoformat(text)
-    return stamp.replace(tzinfo=UTC) if stamp.tzinfo is None else stamp.astimezone(UTC)
+    return as_utc(datetime.fromisoformat(text))
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

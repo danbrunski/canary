@@ -51,8 +51,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
-
 import src.analysis.target_phi as target_phi_module
 import src.decode.ecm_lookup as ecm_lookup_module
 import src.signals.pairing as pairing_module
@@ -81,6 +79,7 @@ from src.evidence.records import (
 from src.paths import DIDS_YAML
 from src.storage.session_files import session_files_fingerprint, session_footer_span
 from src.storage.sessions import session_started_at
+from src.timefmt import utc_datetime
 
 __all__ = [
     "ECU_COMMAND",
@@ -160,16 +159,10 @@ class TwinSessionIdentity:
     image_sha256: str | None = None
 
 
-def _aware(text: str) -> datetime:
-    stamp = pd.Timestamp(text)
-    stamp = stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
-    return stamp.floor("us").to_pydatetime()
-
-
 def _session_window(session: Path) -> tuple[datetime, datetime]:
     span = session_footer_span(session)
     if span.first is not None and span.last is not None:
-        return _aware(str(span.first)), _aware(str(span.last))
+        return utc_datetime(str(span.first)), utc_datetime(str(span.last))
     started = session_started_at(session.name)
     if started is None:
         raise ValueError(f"{session.name}: no footer timestamps and no parseable start")
@@ -478,7 +471,7 @@ def _mint(
     flags: tuple[str, ...],
     segment: str | None = None,
 ) -> str:
-    stamps = [_aware(r["sample"]["acquired_at"]) for r in result["records"]]
+    stamps = [utc_datetime(r["sample"]["acquired_at"]) for r in result["records"]]
     start, end = (min(stamps), max(stamps)) if stamps else _session_window(session)
     provenance = result["provenance"]
     record = Evidence(

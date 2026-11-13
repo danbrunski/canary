@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -34,6 +34,7 @@ from src.session import session_sort_key
 from src.storage.corpus_eligibility import default_profile_exclusion
 from src.storage.session_files import PARQUET_PATTERN
 from src.storage.sessions import session_started_at
+from src.timefmt import as_utc
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 
 log = logging.getLogger(__name__)
@@ -109,10 +110,10 @@ def era_resolver(
     ``corpus_boundary``, vehicle-ledger boundaries); flashes come from the
     tune registry itself.
     """
-    ordered = sorted(_utc(moment) for moment in boundaries)
+    ordered = sorted(as_utc(moment) for moment in boundaries)
 
     def resolve(moment: datetime) -> Era:
-        when = _utc(moment)
+        when = as_utc(moment)
         revision = None if tune_revisions is None else tune_revisions.at(when)
         return Era(
             tune_revision=None if revision is None else revision.revision,
@@ -164,8 +165,8 @@ def _drive(
     start: datetime | None = None,
     end: datetime | None = None,
 ) -> Drive:
-    start = _utc(start) if start is not None else min(_utc(span.start) for span in members)
-    end = _utc(end) if end is not None else max(_utc(span.end) for span in members)
+    start = as_utc(start) if start is not None else min(as_utc(span.start) for span in members)
+    end = as_utc(end) if end is not None else max(as_utc(span.end) for span in members)
     era: Era | None = None
     straddles: str | None = None
     if era_of is not None:
@@ -260,8 +261,8 @@ def drives_of_sessions(
     for drive in drives:
         for span in drive.spans:
             if span.name in by_name:
-                lo, hi = extent.get(span.name, (_utc(span.start), _utc(span.end)))
-                extent[span.name] = (min(lo, _utc(span.start)), max(hi, _utc(span.end)))
+                lo, hi = extent.get(span.name, (as_utc(span.start), as_utc(span.end)))
+                extent[span.name] = (min(lo, as_utc(span.start)), max(hi, as_utc(span.end)))
         for name in drive.sessions:
             lo, hi = unit_extent.get(name, (drive.start, drive.end))
             unit_extent[name] = (min(lo, drive.start), max(hi, drive.end))
@@ -678,7 +679,3 @@ def refuse_non_default_profile_sessions(sessions: Sequence[Path], *, purpose: st
             "decision 2026-09-24): "
             + "; ".join(f"{name}: {reason}" for name, reason in sorted(refused.items()))
         )
-
-
-def _utc(moment: datetime) -> datetime:
-    return moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)

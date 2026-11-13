@@ -50,6 +50,7 @@ from src.control.rom_library import RomLibrary, RomNotFoundError
 from src.signals.afr import load_afr_calibration
 from src.storage.capture_manifest import read_capture_manifest
 from src.storage.session_files import session_footer_span
+from src.timefmt import assume_utc
 from src.vehicle.profiles import active_registry, profile_dir
 from src.vehicle.tune_revisions import TuneRevisionRegistry, session_dated_at
 
@@ -167,8 +168,7 @@ def twin_tables(
 
 
 def _epoch(moment: datetime) -> float:
-    aware = moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
-    return aware.timestamp()
+    return assume_utc(moment).timestamp()
 
 
 class TwinResolver:

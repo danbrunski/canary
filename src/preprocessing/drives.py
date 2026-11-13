@@ -43,6 +43,7 @@ from src.decode.on_read import can_channel_spellings, on_read_catalog
 from src.session import format_session_timestamp
 from src.storage.sessions import is_session_dir_name, session_started_at
 from src.telemetry import CAN_SOURCE, DECODED_SOURCE
+from src.timefmt import as_utc
 
 log = logging.getLogger(__name__)
 
@@ -101,12 +102,8 @@ def parent_session(name: str) -> str:
     return str(name).split(SEGMENT_MARKER, 1)[0]
 
 
-def _utc(moment: datetime) -> datetime:
-    return moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
-
-
 def drive_id_for(start: datetime) -> str:
-    return f"drive-{format_session_timestamp(_utc(start))}"
+    return f"drive-{format_session_timestamp(as_utc(start))}"
 
 
 # ---------------------------------------------------------------------------
@@ -120,17 +117,17 @@ def join_spans(
     """Group spans into drives, oldest first: a span that overlaps the running
     group, or starts within ``gap_seconds`` of its end, joins it. Ordered by
     parsed start, never by name."""
-    ordered = sorted(spans, key=lambda span: (_utc(span.start), span.name))
+    ordered = sorted(spans, key=lambda span: (as_utc(span.start), span.name))
     groups: list[list[SessionSpan]] = []
     group_end: datetime | None = None
     gap = timedelta(seconds=gap_seconds)
     for span in ordered:
-        if groups and group_end is not None and _utc(span.start) <= group_end + gap:
+        if groups and group_end is not None and as_utc(span.start) <= group_end + gap:
             groups[-1].append(span)
-            group_end = max(group_end, _utc(span.end))
+            group_end = max(group_end, as_utc(span.end))
         else:
             groups.append([span])
-            group_end = _utc(span.end)
+            group_end = as_utc(span.end)
     return groups
 
 
@@ -325,8 +322,8 @@ def _sibling_recordings(given: Sequence[Path]) -> list[Path]:
     starts = [s for p in given if (s := session_started_at(p.name)) is not None]
     if not starts:
         return []
-    window_start = min(_utc(s) for s in starts) - _BRIDGE_LOOKBACK
-    window_end = max(_utc(s) for s in starts) + _BRIDGE_LOOKBACK
+    window_start = min(as_utc(s) for s in starts) - _BRIDGE_LOOKBACK
+    window_end = max(as_utc(s) for s in starts) + _BRIDGE_LOOKBACK
     resolved = {p.resolve() for p in given}
     siblings: list[Path] = []
     for parent in sorted({p.parent for p in given}):
@@ -338,7 +335,7 @@ def _sibling_recordings(given: Sequence[Path]) -> list[Path]:
             if child.resolve() in resolved:
                 continue
             started = session_started_at(child.name)
-            if started is not None and window_start <= _utc(started) <= window_end:
+            if started is not None and window_start <= as_utc(started) <= window_end:
                 siblings.append(child)
     return siblings
 
@@ -362,7 +359,7 @@ def physical_drives(
             # No vehicle activity recorded (empty, or parked chatter only): the
             # recording is placed at its name's start, so a restart stub still
             # joins its drive, but its own data never stretches one.
-            found = [SessionSpan(path.name, _utc(started), _utc(started), path)]
+            found = [SessionSpan(path.name, as_utc(started), as_utc(started), path)]
         spans.extend(found)
     for path in _sibling_recordings(given):
         spans.extend(activity_spans(path, gap_seconds=gap_seconds))
@@ -371,12 +368,12 @@ def physical_drives(
         members = tuple(dict.fromkeys(s.name for s in group if s.name in given_names))
         if not members:
             continue
-        start = min(_utc(s.start) for s in group)
+        start = min(as_utc(s.start) for s in group)
         drives.append(
             PhysicalDrive(
                 drive_id=drive_id_for(start),
                 start=start,
-                end=max(_utc(s.end) for s in group),
+                end=max(as_utc(s.end) for s in group),
                 spans=tuple(group),
                 sessions=members,
             )
@@ -416,7 +413,7 @@ def stamp_physical_drives(
         for drive in physical_drives(recordings, gap_seconds=gap_seconds):
             for span in drive.spans:
                 intervals.setdefault(span.name, []).append(
-                    (_utc(span.start).timestamp(), _utc(span.end).timestamp(), drive.drive_id)
+                    (as_utc(span.start).timestamp(), as_utc(span.end).timestamp(), drive.drive_id)
                 )
         parents = frame[session_column].astype(str).map(parent_session).to_numpy()
         seconds = _epoch_seconds(frame[timestamp_column])
@@ -481,10 +478,10 @@ def row_drive_labels(
         for lo, hi in split_seconds(t, gap_seconds=gap_seconds):
             spans.append(SessionSpan(str(piece), _from_epoch(lo), _from_epoch(hi)))
     for group in join_spans(spans, gap_seconds=gap_seconds):
-        label = "rows-" + drive_id_for(min(_utc(s.start) for s in group)).removeprefix("drive-")
+        label = "rows-" + drive_id_for(min(as_utc(s.start) for s in group)).removeprefix("drive-")
         for span in group:
             order, t = index[span.name]
-            lo, hi = _utc(span.start).timestamp(), _utc(span.end).timestamp()
+            lo, hi = as_utc(span.start).timestamp(), as_utc(span.end).timestamp()
             inside = (t >= lo) & (t <= hi)
             labels[order[inside]] = label
     return labels

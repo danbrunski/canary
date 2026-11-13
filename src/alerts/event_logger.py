@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import IO
 
 from src.alerts.events import AnomalyEvent
-from src.timefmt import parse_iso_utc
+from src.timefmt import as_utc, parse_iso_utc
 
 FILENAME_PREFIX = "anomalies-"
 FILENAME_SUFFIX = ".jsonl"
@@ -36,7 +36,7 @@ def _event_date(event: AnomalyEvent) -> str:
     if event.timestamp:
         try:
             ts = datetime.fromisoformat(event.timestamp)
-            ts = ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts.astimezone(UTC)
+            ts = as_utc(ts)
             return ts.strftime("%Y-%m-%d")
         except ValueError:
             pass
@@ -190,7 +190,7 @@ def read_events_dir(
     since_utc: datetime | None = None
     oldest_file_date: date | None = None
     if since is not None:
-        since_utc = since.replace(tzinfo=UTC) if since.tzinfo is None else since.astimezone(UTC)
+        since_utc = as_utc(since)
         oldest_file_date = since_utc.date() - FILE_DATE_MARGIN
 
     def accept(event: AnomalyEvent) -> bool:

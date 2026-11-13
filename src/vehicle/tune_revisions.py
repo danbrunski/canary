@@ -16,7 +16,7 @@ See ``docs/roadmap/archive/tuning-analysis-toolkit.md`` Phase 4.3.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.timefmt import assume_utc
 from src.yaml_load import load_yaml_model
 
 
@@ -122,12 +123,10 @@ class TuneRevisionRegistry(_Strict):
 
     def at(self, when: datetime) -> TuneRevision | None:
         """The revision in force at ``when``, or ``None`` before the first flash."""
-        moment = when if when.tzinfo is not None else when.replace(tzinfo=UTC)
+        moment = assume_utc(when)
         found: TuneRevision | None = None
         for revision in self.revisions:
-            flashed = revision.flashed_at
-            if flashed.tzinfo is None:
-                flashed = flashed.replace(tzinfo=UTC)
+            flashed = assume_utc(revision.flashed_at)
             if flashed <= moment:
                 found = revision
             else:
@@ -148,7 +147,7 @@ class TuneRevisionRegistry(_Strict):
         values = np.full(len(stamps), None, dtype=object)
         if not self.revisions or stamps.empty:
             return pd.Series(values, index=timestamps.index, dtype=object)
-        flashed = pd.DatetimeIndex([_aware(r.flashed_at) for r in self.revisions]).as_unit("ns")
+        flashed = pd.DatetimeIndex([assume_utc(r.flashed_at) for r in self.revisions]).as_unit("ns")
         present = stamps.notna().to_numpy()
         instants = pd.DatetimeIndex(stamps[present]).as_unit("ns")
         position = flashed.searchsorted(instants, side="right") - 1
@@ -279,10 +278,6 @@ class RegistryConflictError(ValueError):
         return (type(self), (self.revision, *self.paths, self.fields), self.__dict__)
 
 
-def _aware(moment: datetime) -> datetime:
-    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
-
-
 def merge_tune_registries(
     operational: TuneRevisionRegistry | None,
     operational_path: Path,
@@ -315,7 +310,7 @@ def merge_tune_registries(
             name
             for name in _IDENTITY_FIELDS
             if (
-                _aware(getattr(own, name)) != _aware(getattr(item, name))
+                assume_utc(getattr(own, name)) != assume_utc(getattr(item, name))
                 if name == "flashed_at"
                 else getattr(own, name) != getattr(item, name)
             )
@@ -338,7 +333,7 @@ def merge_tune_registries(
             update["image_sha256"] = item.image_sha256
         if update:
             merged[merged.index(own)] = own.model_copy(update=update)
-    merged.sort(key=lambda revision: _aware(revision.flashed_at))
+    merged.sort(key=lambda revision: assume_utc(revision.flashed_at))
     references = {ref.name: ref for ref in operational.reference_images}
     for ref in tracked.reference_images:
         own_ref = references.get(ref.name)

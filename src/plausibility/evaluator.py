@@ -49,12 +49,12 @@ import time
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from src.jsonl_store import JsonlStore
 from src.plausibility.limits import CHECKS, ChannelLimits, CheckName, LimitsCatalog
+from src.timefmt import format_epoch
 
 log = logging.getLogger(__name__)
 
@@ -73,10 +73,6 @@ FRESHNESS_MIN_ARRIVALS = 3
 
 _INF = float("inf")
 _NEG_INF = float("-inf")
-
-
-def _iso(epoch: float) -> str:
-    return datetime.fromtimestamp(epoch, UTC).isoformat().replace("+00:00", "Z")
 
 
 @dataclass(frozen=True)
@@ -636,7 +632,7 @@ class PlausibilityEvaluator:
                     "expected_interval_seconds": limits.expected_interval_seconds,
                     "tier": limits.tier,
                     "group": limits.group,
-                    "checked_at": _iso(now),
+                    "checked_at": format_epoch(now, zulu=True),
                 },
             )
 
@@ -691,8 +687,8 @@ class PlausibilityEvaluator:
                 limit_source=limit_source,
                 unit=limits.unit if limits.engineering is not None else _arriving_unit(limits),
                 operating_mode=mode,
-                sample_times=tuple(_iso(t) for t in times),
-                detected_at=_iso(at),
+                sample_times=tuple(format_epoch(t, zulu=True) for t in times),
+                detected_at=format_epoch(at, zulu=True),
                 session=self._session,
                 detections=detections,
                 detail={**detail, **extra},

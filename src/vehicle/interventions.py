@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, time
 from typing import Any, Literal
 
+from src.timefmt import assume_utc
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
 from src.vehicle.vehicle_ledger import VehicleEvent
 
@@ -54,10 +55,6 @@ def source_digest(payload: dict[str, Any]) -> str:
     """sha256 of a source entry's identity, canonical JSON."""
     text = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(text.encode()).hexdigest()
-
-
-def _aware(moment: datetime) -> datetime:
-    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
 
 
 @dataclass(frozen=True)
@@ -96,7 +93,7 @@ def intervention_from_revision(revision: TuneRevision) -> InterventionSource:
         source="tune_revision",
         source_ref=revision.revision,
         title=f"flash {revision.revision}",
-        effective_at=_aware(revision.flashed_at),
+        effective_at=assume_utc(revision.flashed_at),
         precision=_REVISION_PRECISION[revision.flashed_at_precision],
         image_sha256=revision.image_sha256,
         affected_channels=(),

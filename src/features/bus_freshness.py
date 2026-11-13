@@ -13,14 +13,11 @@ fresh instance on ``reset`` (the replay-isolation boundary).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 from src.can_ids import parse_can_channel
 from src.telemetry import TelemetryRecord
-
-
-def _utc(at: datetime) -> datetime:
-    return at if at.tzinfo is not None else at.replace(tzinfo=UTC)
+from src.timefmt import assume_utc
 
 
 @dataclass
@@ -44,7 +41,7 @@ class BusFreshness:
     def observe(self, record: TelemetryRecord) -> None:
         """Stamp a raw CAN frame that decodes, kept by the change filter or not."""
         if self.decodes(record):
-            self.last_frame_at = _utc(record.timestamp)
+            self.last_frame_at = assume_utc(record.timestamp)
 
     def seed(self, heard_at: datetime) -> None:
         """When the bus was last heard before this process started.
@@ -55,13 +52,13 @@ class BusFreshness:
         seen since start always wins.
         """
         if self.last_frame_at is None:
-            self.last_frame_at = _utc(heard_at)
+            self.last_frame_at = assume_utc(heard_at)
 
     def frame_age_seconds(self, now: datetime) -> float | None:
         """Seconds since the newest decodable frame at ``now``, or ``None``."""
         if self.last_frame_at is None:
             return None
-        return (_utc(now) - self.last_frame_at).total_seconds()
+        return (assume_utc(now) - self.last_frame_at).total_seconds()
 
 
 __all__ = ["BusFreshness"]

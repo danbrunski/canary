@@ -106,6 +106,7 @@ from src.signals.pairing import (
 )
 from src.storage.corpus_eligibility import default_profile_exclusion
 from src.storage.session_files import session_footer_span
+from src.timefmt import utc_datetime
 from src.vehicle.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 from src.yaml_load import load_yaml
 
@@ -325,11 +326,7 @@ class SessionSamples:
 
 
 def _aware(stamp: Any) -> datetime | None:
-    if stamp is None:
-        return None
-    value = pd.Timestamp(stamp)
-    value = value.tz_localize(UTC) if value.tzinfo is None else value.tz_convert(UTC)
-    return value.floor("us").to_pydatetime()
+    return None if stamp is None else utc_datetime(stamp)
 
 
 def _attach(t_ref: np.ndarray, part: pd.DataFrame, tolerance_s: float, label: str) -> np.ndarray:

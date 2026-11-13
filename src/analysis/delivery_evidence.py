@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -89,6 +89,7 @@ from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.signals.pairing import to_seconds
 from src.storage.session_files import session_files_fingerprint, session_footer_span
 from src.storage.sessions import session_started_at
+from src.timefmt import utc_datetime
 
 __all__ = [
     "CLOSED_LOOP_STATUS",
@@ -166,20 +167,14 @@ INFORMED_REFUSAL = (
 )
 
 
-def _aware(stamp: pd.Timestamp | datetime) -> datetime:
-    value = pd.Timestamp(stamp)
-    value = value.tz_localize(UTC) if value.tzinfo is None else value.tz_convert(UTC)
-    return value.floor("us").to_pydatetime()
-
-
 def _session_window(session: Path) -> tuple[datetime, datetime]:
     span = session_footer_span(session)
     if span.first is not None and span.last is not None:
-        return _aware(span.first), _aware(span.last)
+        return utc_datetime(span.first), utc_datetime(span.last)
     started = session_started_at(session.name)
     if started is None:
         raise ValueError(f"{session.name}: no stored timestamps and no parseable start")
-    return _aware(started), _aware(started)
+    return utc_datetime(started), utc_datetime(started)
 
 
 def session_specs(session: Path) -> frozenset[str]:
@@ -936,7 +931,7 @@ def mint_fuel_pressure_droop(
                 "change: it neither explains nor rules out a detectable lean"
             )
     stamps = pd.concat([maf_stamps[low], pd.Series(target_stamps)])
-    window_span = (_aware(stamps.min()), _aware(stamps.max()))
+    window_span = (utc_datetime(stamps.min()), utc_datetime(stamps.max()))
     return minter.record(
         Result(
             status="evaluated",

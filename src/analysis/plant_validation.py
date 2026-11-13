@@ -104,6 +104,7 @@ from src.session import SessionKind, is_synthetic_session, iter_sessions
 from src.signals.afr import load_afr_calibration
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.storage.sessions import session_started_at
+from src.timefmt import format_epoch
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry, session_dated_at
 from src.yaml_load import load_yaml
 
@@ -202,17 +203,13 @@ def inventory_session(
     return {
         "session": session.name,
         "started_at": None if started is None else started.isoformat(),
-        "first_read": None if not math.isfinite(first) else _iso(first),
-        "last_read": None if not math.isfinite(last) else _iso(last),
+        "first_read": None if not math.isfinite(first) else format_epoch(first),
+        "last_read": None if not math.isfinite(last) else format_epoch(last),
         "revision": None if revision is None else revision.revision,
         "channels": channels,
         "groups": {g: {"present": present[g], "complete": present[g] == groups[g]} for g in groups},
         "plant_replay_ready": all(channels[getattr(s, f)]["n"] > 0 for f in REPLAY_NEEDS),
     }
-
-
-def _iso(seconds: float) -> str:
-    return datetime.fromtimestamp(seconds, tz=UTC).isoformat()
 
 
 def recorded_sessions(root: Path) -> list[Path]:

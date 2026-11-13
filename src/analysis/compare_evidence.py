@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import sys
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -64,6 +64,7 @@ from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.signals.pairing import ComparisonRefusedError, InputNotCapturedError
 from src.storage.session_files import session_files_fingerprint, session_footer_span
 from src.storage.sessions import session_started_at
+from src.timefmt import utc_datetime
 from src.vehicle.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 
 __all__ = [
@@ -95,25 +96,17 @@ def _pairs_hash(pairs: pd.DataFrame) -> str:
     return digest.hexdigest()
 
 
-def _aware(stamp: pd.Timestamp | datetime) -> datetime:
-    value = pd.Timestamp(stamp)
-    value = value.tz_localize(UTC) if value.tzinfo is None else value.tz_convert(UTC)
-    # Record times are microsecond-resolution; truncate explicitly rather
-    # than let pandas warn about discarded nanoseconds on every session.
-    return value.floor("us").to_pydatetime()
-
-
 def _session_window(session: Path) -> tuple[datetime, datetime]:
     span = session_footer_span(session)
     if span.first is not None and span.last is not None:
-        return _aware(span.first), _aware(span.last)
+        return utc_datetime(span.first), utc_datetime(span.last)
     started = session_started_at(session.name)
     if started is None:
         raise ValueError(
             f"{session.name}: no footer timestamps and no parseable start; evidence "
             "needs the window it rests on"
         )
-    return _aware(started), _aware(started)
+    return utc_datetime(started), utc_datetime(started)
 
 
 def _pairs_window(aligned: AlignedPairs) -> tuple[datetime, datetime]:
@@ -123,7 +116,7 @@ def _pairs_window(aligned: AlignedPairs) -> tuple[datetime, datetime]:
             pd.to_datetime(aligned.pairs["timestamp_b"], utc=True),
         ]
     )
-    return _aware(stamps.min()), _aware(stamps.max())
+    return utc_datetime(stamps.min()), utc_datetime(stamps.max())
 
 
 def _values(comparison: ChannelComparison, unit_a: str, unit_b: str) -> dict[str, Quantity]:
