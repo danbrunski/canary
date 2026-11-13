@@ -95,12 +95,14 @@ __all__ = [
     "DELIVERY_TOOL",
     "DELIVERY_TOOL_VERSION",
     "DROOP_INCIDENT",
+    "DROOP_LIMITATIONS",
     "DROOP_QUANTITY",
     "DROOP_TOOL",
     "DROOP_TOOL_VERSION",
     "ENGINE_RESPONSE",
     "FLOW_LOSS_QUANTITY",
     "INFORMED_REFUSAL",
+    "MANIFOLD_PRESSURE_SPECS",
     "drive_informed_constants",
     "mint_delivery_error",
     "mint_fuel_pressure_droop",
@@ -118,7 +120,9 @@ DELIVERY_RESIDUAL = "delivery_error"
 DELIVERY_REGION = "enrichment"
 
 DROOP_TOOL = "fuel_pressure_droop"
-DROOP_TOOL_VERSION = "2"
+#: 3: ``labels["limitations"]``, the induction refusals, and standard errors
+#: from non-overlapping pressure windows (M01.14).
+DROOP_TOOL_VERSION = "3"
 DROOP_INCIDENT = "fuel_pressure:droop_with_airflow"
 #: Closed-loop high-airflow droop (``fuel_pressure_droop@high_airflow``).
 DROOP_QUANTITY = "fuel_pressure_droop_pct"
@@ -127,10 +131,24 @@ DROOP_RESIDUAL = "fuel_pressure_droop"
 FLOW_LOSS_QUANTITY = "fuel_pressure_flow_loss_pct"
 FLOW_LOSS_RESIDUAL = "pressure_flow_loss"
 
+#: ``labels["limitations"]`` on every fuel-pressure record, whatever its result:
+#: what the number does not contain (M01.14).
+DROOP_LIMITATIONS = (
+    "manifold pressure is not in it: the value is a ratio of rail gauge pressures, "
+    "while injector flow follows the pressure across the injector (rail gauge + baro - "
+    "manifold). It equals that ratio only where manifold pressure equals baro in both "
+    "groups; on a naturally aspirated engine it answers whether the pump sagged, to "
+    "within a fraction of a point. Under boost a gauge-referenced rail loses flow it "
+    "does not show (38 kPa of boost on a flat 350 kPa rail: flow -5.6 %, this 0 %)"
+)
+
 #: ``labels["evidence_class"]``: what a residual is a disagreement *of*.
 ENGINE_RESPONSE = "engine_response"
 
 PRESSURE_SPEC = "sensor:FUEL_PRESSURE"
+#: Manifold absolute pressure, under either name the derived channels read it
+#: by (``src.signals.derived``): the Mode 01 PID 0x0B or a decoded broadcast.
+MANIFOLD_PRESSURE_SPECS: tuple[str, ...] = ("obd:INTAKE_PRESSURE", "decoded:MAP")
 MAF_SPEC = "obd:MAF"
 FUEL_STATUS_SPEC = "obd:FUEL_STATUS"
 #: SAE J1979 PID 0x03 fuel system status: 2 = closed loop using the oxygen
@@ -481,11 +499,40 @@ def _window_means(
     return mean, count
 
 
-def _median_se(values: np.ndarray) -> float:
-    """Standard error of a median (normal approximation, 1.2533 sd / sqrt n)."""
-    if len(values) < 2:
+def _non_overlapping(times: np.ndarray, half: float) -> np.ndarray:
+    """Indices of ``times`` whose ``±half`` windows share no sample.
+
+    Greedy in time order: a read is kept when it lies more than ``2 * half``
+    after the last one kept (:func:`_window_means` includes both window ends,
+    so windows exactly ``2 * half`` apart would share an edge sample).
+    """
+    order = np.argsort(times, kind="stable")
+    kept: list[int] = []
+    last = -np.inf
+    for i in order:
+        if times[i] > last + 2.0 * half:
+            kept.append(int(i))
+            last = float(times[i])
+    return np.asarray(kept, dtype=int)
+
+
+def _median_se(times: np.ndarray, values: np.ndarray, half: float) -> float:
+    """Standard error of the median of window means ``values`` taken at ``times``.
+
+    Normal approximation, 1.2533 sd / sqrt n, over **non-overlapping windows
+    only** (M01.14): MAF reads at 4-15 Hz put their ±0.25 s windows 60-90 %
+    over one another, so neighbouring means share most of their samples and
+    counting each as independent made the error about 2x too tight. Windows
+    that share no sample are independent while the pressure noise decorrelates
+    within a window (the 100 Hz trace's aliased pulsation does). Deterministic,
+    unlike a block bootstrap, so re-minting a drive reproduces its record; per
+    pull would leave a drive a handful of values. The median itself is still
+    taken over every read.
+    """
+    independent = values[_non_overlapping(times, half)]
+    if len(independent) < 2:
         return float("inf")
-    return float(1.2533 * np.std(values, ddof=1) / np.sqrt(len(values)))
+    return float(1.2533 * np.std(independent, ddof=1) / np.sqrt(len(independent)))
 
 
 def _long(frame: pd.DataFrame, spec: str) -> tuple[np.ndarray, np.ndarray, pd.Series]:
@@ -560,6 +607,17 @@ def mint_fuel_pressure_droop(
 
     Policy comes from the fault model's residual, so the artifact and the
     evidence cannot disagree.
+
+    Every record carries ``labels["limitations"]`` (:data:`DROOP_LIMITATIONS`):
+    both values are ratios of rail *gauge* pressure, with no manifold pressure
+    in them (M01.14). Hence two refusals before anything is read: a profile
+    that declares no ``induction`` is ``unknown_context``, and one that
+    declares ``forced`` is always refused: ``forced_induction_without_manifold_
+    pressure`` when the session recorded no manifold-pressure channel
+    (:data:`MANIFOLD_PRESSURE_SPECS`), ``forced_induction_delta_p_not_
+    implemented`` when it did (the pressure across the injector is not
+    computed yet). Standard errors count only
+    non-overlapping pressure windows (:func:`_median_se`).
     """
     session = Path(session)
     residual_name = DROOP_RESIDUAL if region == "high_airflow" else FLOW_LOSS_RESIDUAL
@@ -636,6 +694,8 @@ def mint_fuel_pressure_droop(
             "session_informed_constants": str(informed).lower(),
             "fault_model_version": str(model.version),
             "fault_model_channels": _model_channels(model, session),
+            "limitations": DROOP_LIMITATIONS,
+            "induction": context.induction,
         },
         flags=(
             *(("calibration_conflict",) if calibration_conflict else ()),
@@ -646,6 +706,37 @@ def mint_fuel_pressure_droop(
         now=now,
     )
 
+    if context.induction == "undeclared":
+        return minter.unevaluable(
+            "unknown_context",
+            "the vehicle profile declares no induction (vehicle parameter induction: "
+            "naturally_aspirated or forced). A rail gauge pressure is the pressure across "
+            "the injector only without boost, so this evidence cannot be computed for an "
+            "engine that may have it",
+            "not_declared",
+        )
+    if context.induction == "forced":
+        recorded = session_specs(session)
+        if not any(spec in recorded for spec in MANIFOLD_PRESSURE_SPECS):
+            return minter.unevaluable(
+                "refused",
+                "forced_induction_without_manifold_pressure: the vehicle profile declares "
+                "induction forced and this session recorded no manifold pressure ("
+                + " or ".join(MANIFOLD_PRESSURE_SPECS)
+                + "). Under boost the manifold pushes back on a gauge-referenced rail, so "
+                "injector flow falls with no change on the gauge; the gauge ratio alone "
+                "would read that loss as zero",
+                "refused",
+            )
+        return minter.unevaluable(
+            "refused",
+            "forced_induction_delta_p_not_implemented: the vehicle profile declares "
+            "induction forced. This evidence is a ratio of rail gauge pressures; under "
+            "boost the flow loss needs the pressure across the injector (rail gauge + baro "
+            "- manifold, fuel_plant.injector_delta_p_kpa), which it does not compute yet. "
+            "The session has manifold pressure, so the input exists",
+            "refused",
+        )
     frame = read_channels(
         session,
         [PRESSURE_SPEC, MAF_SPEC, FUEL_STATUS_SPEC],
@@ -710,6 +801,7 @@ def mint_fuel_pressure_droop(
     if region == "high_airflow":
         target = usable & (maf_v >= float(policy["high_airflow_min_gs"]))
         target_p = mean[target]
+        target_t = maf_t[target]
         target_stamps = maf_stamps[target]
         need = int(policy["min_pairs_high_airflow"])
         what = "closed-loop high airflow"
@@ -755,6 +847,7 @@ def mint_fuel_pressure_droop(
         e_mean, e_count = _window_means(p_t, p_v, e_t, window)
         keep = e_count >= int(policy["min_samples_per_window"])
         target_p = e_mean[keep]
+        target_t = e_t[keep]
         target_stamps = target_stamps[keep]
         need = int(policy["min_pairs_enrichment"])
         what = "B06-eligible enrichment"
@@ -764,7 +857,8 @@ def mint_fuel_pressure_droop(
         return uncovered(what, n_target, need, n_low + n_target)
 
     med_low, med_target = float(np.median(low_p)), float(np.median(target_p))
-    se_low, se_target = _median_se(low_p), _median_se(target_p)
+    se_low = _median_se(maf_t[low], low_p, window)
+    se_target = _median_se(target_t, target_p, window)
     halves = np.array_split(low_p[np.argsort(maf_t[low])], 2)
     drift = abs(float(np.median(halves[0])) - float(np.median(halves[1]))) / med_low
     ratio = med_target / med_low

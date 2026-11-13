@@ -39,6 +39,13 @@ class VehicleParameters(_Strict):
     fuel_type: Literal["gasoline", "e10", "diesel", "e85"] = "gasoline"
     #: Engine displacement in litres (volumetric-efficiency fuel estimate).
     displacement_l: float = 4.0
+    #: ``naturally_aspirated`` | ``forced`` (a supercharger or turbo), or
+    #: ``undeclared``. Whether manifold pressure can rise above ambient, which
+    #: decides whether a rail *gauge* pressure is the pressure across the
+    #: injector: under boost the manifold pushes back on a gauge-referenced
+    #: rail and flow falls with no change on the gauge (M01.14). Evidence that
+    #: needs the answer refuses ``undeclared`` rather than assume either.
+    induction: Literal["undeclared", "naturally_aspirated", "forced"] = "undeclared"
     #: Volumetric efficiency (0–1.2) for the speed-density fallback when no
     #: MAF / fuel-rate PID is available.
     volumetric_efficiency: float = 0.85

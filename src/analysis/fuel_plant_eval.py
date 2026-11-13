@@ -494,8 +494,9 @@ def ve_samples(session: Path, profile: FuelPlantProfile) -> pd.DataFrame:
 
 
 def identify_ve(samples: pd.DataFrame, profile: FuelPlantProfile) -> dict[str, Any]:
-    """Fit VE(rpm) on identification drives: per declared rpm band, the
-    largest steady warm charge fraction (:class:`~src.analysis.fuel_plant.VeCurve`).
+    """Fit VE(rpm) on identification drives: per declared rpm band, an upper
+    envelope of the steady warm charge fraction
+    (:class:`~src.analysis.fuel_plant.VeCurve`).
 
     On a naturally aspirated engine ``charge fraction = VE x p_m / p_ambient
     <= VE`` on every read, so the envelope is the smallest VE consistent with
@@ -504,6 +505,13 @@ def identify_ve(samples: pd.DataFrame, profile: FuelPlantProfile) -> dict[str, A
     is a VE bias here, and nothing measures VE independently. Refuses any
     recording outside ``split.identification``, and a band whose steady
     charge fraction exceeds 1 (the airflow boundary is wrong there).
+
+    The rule's ``form`` picks the envelope (:class:`~src.analysis.fuel_plant.
+    VeFitRule`). ``rpm_quantile``: the declared quantile of the band's reads
+    above the working VE, the band refused (``bands[...]["refused"]``, with
+    its count) below ``min_reads`` of them; ``n_reads`` is that count.
+    ``rpm_envelope``: the band maximum, which only reproduces a frozen curve
+    (its bias grows with the count, M01.16).
     """
     rule = profile.volumetric_efficiency
     if rule is None:
@@ -534,24 +542,48 @@ def identify_ve(samples: pd.DataFrame, profile: FuelPlantProfile) -> dict[str, A
     n_reads: list[int] = []
     bands: dict[str, dict[str, Any]] = {}
     for k in range(len(edges) - 1):
+        label = f"{edges[k]:g}-{edges[k + 1]:g}"
         values = cf[used & (band == k)]
-        n_reads.append(len(values))
         top = float(values.max()) if len(values) else math.nan
         if len(values) and top > 1.0:
             raise FuelPlantRefusalError(
                 "charge_fraction_above_one",
-                f"rpm {edges[k]:g}-{edges[k + 1]:g}: {int((values > 1.0).sum())} steady reads "
+                f"rpm {label}: {int((values > 1.0).sum())} steady reads "
                 "fill more than the displacement at ambient; the airflow boundary is wrong there",
             )
-        fitted = len(values) >= rule.min_reads
-        envelope.append(top if fitted else None)
-        bands[f"{edges[k]:g}-{edges[k + 1]:g}"] = {
+        if rule.form == "rpm_envelope":
+            fit_on, estimate = values, top
+        else:
+            assert rule.quantile is not None  # VeFitRule requires it for rpm_quantile
+            fit_on = values[values > floor.value]
+            # Hyndman-Fan type 9: about mean-unbiased for normal read noise, so
+            # a 20-read band and an 805-read band carry the same bias (the
+            # default linear rule reads ~0.2 sd low at 20 reads).
+            estimate = (
+                float(np.quantile(fit_on, rule.quantile, method="normal_unbiased"))
+                if len(fit_on)
+                else math.nan
+            )
+        n_reads.append(len(fit_on))
+        fitted = len(fit_on) >= rule.min_reads
+        envelope.append(estimate if fitted else None)
+        row: dict[str, Any] = {
             "n": len(values),
-            "envelope": top if fitted else None,
+            "envelope": estimate if fitted else None,
             "p99": float(np.quantile(values, 0.99)) if len(values) else None,
             "above_floor": int((values > floor.value).sum()),
-            "runs_at": max(top, floor.value) if fitted else floor.value,
+            "runs_at": max(estimate, floor.value) if fitted else floor.value,
         }
+        if rule.form == "rpm_quantile":
+            row["max"] = top if len(values) else None
+            if not fitted:
+                row["refused"] = (
+                    f"below_min_reads: rpm {label} has {len(fit_on)} steady warm reads above "
+                    f"the working VE {floor.value:g} ({len(values)} in all); the "
+                    f"q{rule.quantile:g} envelope needs {rule.min_reads}, so the band runs "
+                    "at the working VE"
+                )
+        bands[label] = row
     if not used.any():
         raise FuelPlantRefusalError("no_ve_reads", "no steady warm read to fit VE on")
     baro = samples["baro_kpa"].to_numpy(dtype=float)[used]

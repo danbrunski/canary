@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from src.analysis.lambda_delivery import (
     LambdaDeliveryDeclaration,
@@ -72,6 +72,10 @@ class TuningContext:
     regime_floors: dict[str, RegimeFloor] = field(default_factory=dict)
     #: The profile-data directory these were read from.
     profile_data: Path | None = None
+    #: The profile's ``induction`` vehicle parameter. Fuel-pressure evidence
+    #: reads a rail gauge pressure as the injector's pressure, which holds
+    #: only without boost (M01.14), so it refuses ``undeclared``.
+    induction: Literal["undeclared", "naturally_aspirated", "forced"] = "undeclared"
 
     @property
     def mode01_wot(self) -> LoadWotCriterion | None:
@@ -137,6 +141,7 @@ def context_fields(config: CanaryConfig) -> dict[str, Any]:
         "lambda_delivery": declaration,
         "regime_floors": {} if declaration is None else dict(declaration.noise_floors),
         "profile_data": data,
+        "induction": config.vehicle.parameters.induction,
     }
 
 

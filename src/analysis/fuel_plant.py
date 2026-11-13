@@ -396,14 +396,58 @@ class VeCurve(_Strict):
         return ", ".join(parts)
 
 
-class VeFitRule(_Strict):
-    """How a ``speed_density_refusing`` plant fits VE(rpm), declared before the fit."""
+#: An ``rpm_quantile`` VE fit's quantile lies above this (a *high* quantile:
+#: the envelope estimates where the band's reads stop, M01.16).
+MIN_VE_QUANTILE = 0.5
 
-    form: Literal["rpm_envelope"]
+
+class VeFitRule(_Strict):
+    """How a ``speed_density_refusing`` plant fits VE(rpm), declared before the fit.
+
+    * ``rpm_quantile``: per band, the ``quantile`` (Hyndman-Fan type 9,
+      ``normal_unbiased``) of the steady warm charge fractions **above the
+      registry's working VE** (only those can lift a
+      band: :meth:`VeCurve.band_values` runs a band at ``max(envelope,
+      floor)``). A fixed quantile of noisy full-breathing reads is biased by a
+      fixed multiple of the noise, whatever the count; the maximum of ``n`` is
+      biased by about ``sd * sqrt(2 ln n)``, which put a false shape into a curve
+      whose bands held 805, 286, 24 and 5 reads (M01.16). A band with fewer
+      than ``min_reads`` such reads is refused, with its count. By design a
+      q-quantile envelope sits below about ``1 - q`` of the full-breathing
+      reads, so it refuses about that share of held-out full-throttle reads
+      as ``manifold_above_ambient``.
+    * ``rpm_envelope``: the per-band maximum over every steady warm read. Kept
+      only to reproduce the curves fuel-mv-2 and fuel-mv-3 froze with it: a
+      plant declaring it must carry a frozen baseline (:class:`FuelPlantProfile`),
+      so no new fit can be made on the biased rule.
+    """
+
+    form: Literal["rpm_envelope", "rpm_quantile"]
     rpm_edges: list[float] = Field(min_length=2)
-    #: Steady warm reads a band needs before its envelope counts.
+    #: Steady warm reads a band needs before its envelope counts (for
+    #: ``rpm_quantile``: reads above the working VE, at least ``1 / (1 - q)``).
     min_reads: int = Field(ge=1)
+    #: ``rpm_quantile`` only: the quantile, in ``(0.5, 1)``.
+    quantile: float | None = None
     evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _quantile_form(self) -> VeFitRule:
+        if self.form == "rpm_envelope":
+            if self.quantile is not None:
+                raise ValueError("rpm_envelope is the band maximum; it takes no quantile")
+            return self
+        q = self.quantile
+        if q is None or not MIN_VE_QUANTILE < q < 1.0:
+            raise ValueError(f"rpm_quantile needs a quantile in ({MIN_VE_QUANTILE}, 1), got {q}")
+        need = math.ceil(1.0 / (1.0 - q) - 1e-9)
+        if self.min_reads < need:
+            raise ValueError(
+                f"rpm_quantile {q} needs min_reads >= {need} (1 / (1 - q)): with fewer reads "
+                "the quantile is set by the top one or two reads, so the read count still "
+                "biases it"
+            )
+        return self
 
 
 class BaselineParameterSet(_Strict):
@@ -680,6 +724,17 @@ class FuelPlantProfile(_Strict):
             )
         if self.manifold_model == "speed_density_load_dependent":
             _check_breathing_form(declared)
+        rule = self.volumetric_efficiency
+        if (
+            rule is not None
+            and rule.form == "rpm_envelope"
+            and not (self.baseline is not None and self.baseline.frozen)
+        ):
+            raise ValueError(
+                "rpm_envelope (the band maximum, biased by the read count: M01.16) only "
+                "reproduces a frozen baseline's ve_curve; a plant without one declares "
+                "rpm_quantile"
+            )
         if self.baseline is not None:
             curve = self.baseline.ve_curve
             if refusing and (

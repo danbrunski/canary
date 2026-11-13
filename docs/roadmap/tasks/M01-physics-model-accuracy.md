@@ -1006,7 +1006,7 @@ them; absolute and "corrected" figures do not.
 
 ## Part D — Fuel plant, pressure and λ
 
-- [ ] **M01.14 (Approximation now; an error under boost) Fuel-pressure droop
+- [~] **M01.14 (Approximation now; an error under boost) Fuel-pressure droop
   uses the gauge-pressure ratio, not the pressure across the injector.**
   `delivery_evidence.mint_fuel_pressure_droop` computes
   `loss = 1 − √(med_target / med_low)` from rail gauge pressure. Injector
@@ -1020,17 +1020,58 @@ them; absolute and "corrected" figures do not.
   0.00 %; with the rail drooping to 330, 8.7 % against a reported 2.9 %. The
   ECM's own pressure factor has the same blind spot, so nothing in the chain
   would flag it.
-  - [ ] A required `limitations` field on the minted evidence, as
+  - [x] A required `limitations` field on the minted evidence, as
     `fuel_comp_droop.py` already has, stating that manifold pressure is not
     in it.
-  - [ ] Refuse (by name) when the profile declares forced induction and no
+    *Done 2026-11-13:* `delivery_evidence.DROOP_LIMITATIONS` is written by
+    `mint_fuel_pressure_droop` into `labels["limitations"]` of every record
+    it mints, evaluated or not ("manifold pressure is not in it: … rail gauge
+    + baro − manifold …"); `labels["induction"]` beside it. `DROOP_TOOL_VERSION`
+    2 → 3. `tests/test_fuel_pressure_droop_evidence.py::
+    test_every_droop_record_states_that_manifold_pressure_is_not_in_it`
+    (evaluated, `uncovered` and `missing_input` records on the committed
+    2026-10-04 and rom-trace fixtures).
+  - [x] Refuse (by name) when the profile declares forced induction and no
     manifold-pressure channel is recorded. Do this before the supercharger
     goes on, not after.
-  - [ ] `_median_se` assumes independent samples. Its inputs are
+    *Done 2026-11-13:* new vehicle parameter `induction: undeclared |
+    naturally_aspirated | forced` (`VehicleParameters`, default `undeclared`;
+    dashboard choice via `PARAMETER_FIELDS`), carried into
+    `TuningContext.induction`. The 2008 Xterra in `profiles.yaml` states
+    `naturally_aspirated`; the 2013 (another operator's truck, owner has not
+    said) states `undeclared`. The minter refuses `undeclared`
+    (`unknown_context`, `empty_kind: not_declared`) and refuses `forced` in
+    every case, under two names: a session with neither `obd:INTAKE_PRESSURE`
+    nor `decoded:MAP` is `forced_induction_without_manifold_pressure`, one
+    with manifold pressure is `forced_induction_delta_p_not_implemented`
+    (both `refused`). Tests:
+    `test_an_undeclared_induction_is_refused_before_anything_is_read`,
+    `test_forced_induction_is_refused_by_name_with_or_without_manifold_pressure`,
+    `test_the_dev_xterra_states_naturally_aspirated_and_the_2013_does_not`.
+    Side effect: `VehicleParameters` gained a field, so the feature-frame
+    cache key (`src/features/feature_cache.py`, which hashes the parameters'
+    dump) changes and cached frames rebuild once.
+  - [x] `_median_se` assumes independent samples. Its inputs are
     `_window_means` over ±0.25 s around each MAF read; at 4–15 Hz reads the
     windows overlap 60–90 %, so the standard error is about 2× too tight
     (a 3.3 σ droop is nearer 1.5 σ). One value per non-overlapping window or
     per pull, or a block bootstrap.
+    *Done 2026-11-13, non-overlapping windows:* `_median_se(times, values,
+    half)` keeps only reads more than 2·half apart (`_non_overlapping`,
+    greedy in time); the median is still over every read. Chosen over a block
+    bootstrap (random: a re-mint would not reproduce its record) and per pull
+    (a drive has a handful). Monte Carlo
+    (`test_median_se_is_calibrated_on_overlapping_windows`: 100 Hz AR(1)
+    pressure, 300 drives of 60 s): at 10 Hz reads the old SE was 1/2.17 of the
+    median's true spread (0.0355 vs 0.0771 kPa), the new one 1.14× (0.0875);
+    at 4 / 15 Hz old 1/1.69 and 1/2.62, new 1.03× and 1.11×. Test bounds: old
+    < 1/1.8, new within 0.9–1.3×. On the committed 2026-10-04 drive (MAF reads
+    ~0.67 s apart, little overlap) the high-airflow droop moves only in its
+    error: 1.988 % ± 0.078 → ± 0.084 (195 of 215 low and 64 of 71 high reads
+    independent), margin 0.482 → 0.493, sign `+` unchanged.
+  - [ ] Compute the flow loss from ΔP across the injector
+    (`fuel_plant.injector_delta_p_kpa`) for forced induction; lift the
+    `forced_induction_delta_p_not_implemented` refusal.
 
 - [ ] **M01.15 (Question) The AEM gauge's analog zero is unresolved and
   applied as 0.** `data/usb_adc_sensors.yaml` (and `hat_adc_rev2_1.yaml`)
@@ -1050,7 +1091,7 @@ them; absolute and "corrected" figures do not.
     would read 21 kPa low at 80 kPa ambient; the +1.85 psi zero argues
     against it, but the check is not written down.
 
-- [ ] **M01.16 (Approximation) The VE envelope is a sample maximum.**
+- [x] **M01.16 (Approximation) The VE envelope is a sample maximum.**
   `fuel_plant_eval.identify_ve` takes `values.max()` per rpm band. Without
   noise that is sound (charge fraction ≤ VE). With noise the maximum of n
   samples is biased up by about σ·√(2 ln n), and the bands have 805, 286, 24
@@ -1060,8 +1101,44 @@ them; absolute and "corrected" figures do not.
   charge fraction of 0.885; the top band's envelope is 0.873 from five
   samples, so the plant answers `manifold_above_ambient` and predicts
   nothing. A slightly denser day refuses every full-throttle sample.
-  - [ ] A high quantile with a minimum sample count per band, and the count
+  - [x] A high quantile with a minimum sample count per band, and the count
     in the refusal message.
+    *Done 2026-11-13:* `VeFitRule.form: rpm_quantile` with a declared
+    `quantile` (0.5 < q < 1) and `min_reads ≥ 1/(1 − q)` (below that count
+    the quantile is set by the top one or two reads, so the read count still
+    biases it); the validator refuses either missing. `identify_ve` takes the q-quantile (Hyndman-Fan type 9,
+    `normal_unbiased`) of the band's steady warm reads **above the working VE**
+    (only those can lift a band: it runs at max(envelope, floor)), so part
+    throttle composition does not pull it down. A band short of `min_reads`
+    is refused: `bands[…]["refused"] = "below_min_reads: rpm 5000-6500 has 5
+    steady warm reads above the working VE 0.7 (5 in all); the q0.95 envelope
+    needs 20, …"`, envelope `None`, runs at the working VE as an unfitted band
+    always has. Suggested declaration: q 0.95, min_reads 20. `rpm_envelope`
+    (the maximum) stays only to reproduce fuel-mv-2/-3's frozen curves:
+    `FuelPlantProfile` refuses it without a frozen baseline, so no new fit
+    can use it. Tests (`tests/test_fuel_plant.py`):
+    `test_the_quantile_envelope_has_no_read_count_bias` (VE 0.88, sd 0.01,
+    bands of 805/286/24/20 reads, 200 drives: max bias +3.19/+2.84/+1.92/+1.85
+    sd, a 1.34 sd false shape; q0.95 +1.65/+1.65/+1.67/+1.68, 0.03 sd across
+    it; numpy's default linear rule read 0.2 sd low at 20 reads),
+    `test_a_band_below_the_minimum_is_refused_with_its_count`,
+    `test_the_ve_rule_forms_are_declared_whole`; the unfrozen-declaration
+    case in `tests/test_fuel_plant_mv3.py` now declares `rpm_quantile`.
+    **Nothing frozen moves:** fuel-mv-2/-3 keep `rpm_envelope`, the mv3 curve
+    re-identifies to its frozen values, and the slow
+    `test_the_identification_numbers_through_the_runner_and_the_cli[fuel-mv-2]`
+    passes byte for byte. What the new rule would give on mv3's three
+    identification drives (measured, not frozen): 2000-3000 0.8884 → 0.8740,
+    3000-4000 0.8947 → 0.8924, 4000-5000 0.9055 → 0.9045, 5000-6500 refused
+    (5 reads) → runs at 0.7, so a full-throttle read above 5,000 rpm would be
+    `manifold_above_ambient` until a drive puts 20 reads there. By design a
+    q-quantile envelope sits below about (1 − q) of the full-breathing reads,
+    so it refuses about that share (5 % at q 0.95) of held-out full-throttle
+    reads as `manifold_above_ambient`. Adopting it is a new plant version and
+    frozen baseline (a refit): not done here.
+  - [ ] Adopt `rpm_quantile` in a new frozen plant version. Operator: (a)
+    refit after a drive with ≥ 20 high-rpm WOT reads (recommended) / (b) refit
+    now / (c) a looser q.
 
 - [ ] **M01.17 (Question) The voltage route's stoichiometric knot is 14.774,
   not 14.700.** `afr_calibration.yaml`: the table value at 880 counts

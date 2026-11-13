@@ -46,6 +46,7 @@ PARAMETER_FIELDS: dict[str, dict[str, str]] = {
     "usual_payload_kg": {"label": "Usual payload", "unit": "kg", "kind": "number"},
     "fuel_type": {"label": "Fuel", "unit": "", "kind": "choice"},
     "displacement_l": {"label": "Displacement", "unit": "L", "kind": "number"},
+    "induction": {"label": "Induction", "unit": "", "kind": "choice"},
     "volumetric_efficiency": {"label": "Volumetric efficiency", "unit": "", "kind": "number"},
     "drivetrain_loss_fraction": {"label": "Drivetrain loss", "unit": "", "kind": "number"},
     "thermal_efficiency": {"label": "Thermal efficiency", "unit": "", "kind": "number"},

@@ -107,9 +107,14 @@ def test_fuel_mv_3_is_frozen_and_unqualified_beside_the_other_versions() -> None
     assert params.values["stoich_air_per_open_ms"] == 0.050994
     assert params.values["compression_ratio"] == 9.7
     assert "exhaust_back_pressure_unmeasured" in params.effects
-    # Without its baseline the same declaration refuses to resolve.
+    # Without its baseline the declaration refuses to resolve. Its VE rule
+    # must be rpm_quantile then: the band maximum only reproduces a frozen
+    # curve (M01.16).
     raw = _raw()
     raw.pop("baseline")
+    with pytest.raises(ValidationError, match="rpm_envelope"):
+        FuelPlantProfile.model_validate(raw)
+    raw["volumetric_efficiency"] |= {"form": "rpm_quantile", "quantile": 0.95, "min_reads": 20}
     unfrozen = FuelPlantProfile.model_validate(raw)
     assert plant_qualification(unfrozen).reason == "plant_not_qualified: no frozen baseline"
     with pytest.raises(FuelPlantRefusalError) as err:

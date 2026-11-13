@@ -34,6 +34,7 @@ from src.analysis.fuel_plant import (
     ParameterRegistry,
     PlantInputs,
     SpentRecord,
+    VeFitRule,
     air_per_event_g,
     bootstrap_median,
     check_against_contract,
@@ -665,6 +666,112 @@ def test_ve_is_fitted_on_identification_drives_only_as_a_lower_envelope(
     with pytest.raises(FuelPlantRefusalError) as err:
         identify_ve(broken, plant_mv2)
     assert err.value.reason == "charge_fraction_above_one"
+
+
+def _quantile_plant(plant: FuelPlantProfile, **rule: Any) -> FuelPlantProfile:
+    """``plant`` with an ``rpm_quantile`` VE rule (q 0.95, 20 reads unless given)."""
+    assert plant.volumetric_efficiency is not None
+    raw = plant.volumetric_efficiency.model_dump() | {
+        "form": "rpm_quantile",
+        "quantile": 0.95,
+        "min_reads": 20,
+        **rule,
+    }
+    return plant.model_copy(update={"volumetric_efficiency": VeFitRule.model_validate(raw)})
+
+
+def _ve_rows(session: str, rpm: float, cf: np.ndarray) -> list[dict[str, Any]]:
+    return [
+        dict(session=session, rpm=rpm, charge_fraction=float(v), steady=True,
+             coolant_c=90.0, baro_kpa=81.0, iat_c=25.0)
+        for v in cf
+    ]  # fmt: skip
+
+
+def test_the_quantile_envelope_has_no_read_count_bias(plant_mv2: FuelPlantProfile) -> None:
+    """SYNTHETIC (M01.16): four bands at the same full-breathing VE 0.88 with
+    sd 0.01 read noise, holding the real fit's 805, 286, 24 and 20 reads (20 is
+    the rule's minimum; the real top band had 5). 200 drives each.
+
+    Measured 2026-11-13 (seed 5), mean bias over VE in noise sd per band
+    (805/286/24/20 reads): the band maximum (fuel-mv-2's rpm_envelope)
+    +3.19/+2.84/+1.92/+1.85, a 1.34 sd false shape across the curve; the q0.95
+    envelope (type 9) +1.65/+1.65/+1.67/+1.68 (normal theory 1.645), 0.03 sd
+    across it. numpy's default linear quantile read +1.64/+1.63/+1.48/+1.42.
+    """
+    ident = plant_mv2.split.identification[0]
+    quantile = _quantile_plant(plant_mv2)
+    rng = np.random.default_rng(5)
+    counts = {2500.0: 805, 3500.0: 286, 4500.0: 24, 5500.0: 20}
+    ve, sd, drives = 0.88, 0.01, 200
+    rpm = np.repeat(list(counts), list(counts.values()))
+    template = pd.DataFrame(_ve_rows(ident, 0.0, np.zeros(len(rpm)))).assign(rpm=rpm)
+    by_max, by_q = [], []
+    for _ in range(drives):
+        samples = template.assign(charge_fraction=ve + sd * rng.standard_normal(len(rpm)))
+        by_max.append(identify_ve(samples, plant_mv2)["ve_curve"].envelope[2:])
+        by_q.append(identify_ve(samples, quantile)["ve_curve"].envelope[2:])
+    bias_max = (np.mean(np.asarray(by_max, dtype=float), axis=0) - ve) / sd
+    bias_q = (np.mean(np.asarray(by_q, dtype=float), axis=0) - ve) / sd
+    assert np.ptp(bias_max) > 1.0  # the maximum's bias follows the count
+    assert np.ptp(bias_q) < 0.2  # the quantile's does not
+    assert np.all(np.abs(bias_q - 1.645) < 0.15)
+
+
+def test_a_band_below_the_minimum_is_refused_with_its_count(
+    plant_mv2: FuelPlantProfile,
+) -> None:
+    """Only reads above the working VE (0.7) count toward an rpm_quantile band,
+    since only they can lift it; a band short of min_reads names its count."""
+    ident = plant_mv2.split.identification[0]
+    plant = _quantile_plant(plant_mv2)
+    rng = np.random.default_rng(1)
+    samples = pd.DataFrame(
+        [
+            *_ve_rows(ident, 2500.0, 0.88 + 0.01 * rng.standard_normal(40)),
+            *_ve_rows(ident, 5500.0, np.array([0.873, 0.868, 0.863, 0.859, 0.857])),
+            *_ve_rows(ident, 4500.0, np.full(30, 0.5)),  # part throttle: cannot lift VE
+            *_ve_rows(ident, 4500.0, np.array([0.85, 0.86, 0.87])),
+        ]
+    )
+    out = identify_ve(samples, plant)
+    curve, bands = out["ve_curve"], out["bands"]
+    band = samples[samples.rpm == 2500.0].charge_fraction
+    assert curve.envelope[2] == pytest.approx(
+        float(np.quantile(band, 0.95, method="normal_unbiased"))
+    )
+    assert curve.envelope[4] is None and curve.envelope[5] is None
+    assert curve.n_reads[2:] == [40, 0, 3, 5]
+    top = bands["5000-6500"]
+    assert top["max"] == pytest.approx(0.873) and top["runs_at"] == 0.7
+    assert top["refused"].startswith("below_min_reads: rpm 5000-6500 has 5 steady warm reads")
+    assert "needs 20" in top["refused"]
+    assert (
+        "has 3 steady warm reads above the working VE 0.7 (33 in all)"
+        in bands["4000-5000"]["refused"]
+    )
+    assert "refused" not in bands["2000-3000"]
+    # A refused band runs at the working VE, as an unfitted band always has.
+    assert float(curve.ve([5500.0], 0.7, fitted_at=0.7)[0]) == 0.7
+
+
+def test_the_ve_rule_forms_are_declared_whole(plant_mv2: FuelPlantProfile) -> None:
+    rule = plant_mv2.volumetric_efficiency
+    assert rule is not None and rule.form == "rpm_envelope"
+    base = rule.model_dump()
+    with pytest.raises(ValidationError, match="takes no quantile"):
+        VeFitRule.model_validate(base | {"quantile": 0.95})
+    with pytest.raises(ValidationError, match="needs a quantile"):
+        VeFitRule.model_validate(base | {"form": "rpm_quantile"})
+    with pytest.raises(ValidationError, match="needs a quantile"):
+        VeFitRule.model_validate(base | {"form": "rpm_quantile", "quantile": 1.0})
+    with pytest.raises(ValidationError, match="min_reads >= 20"):
+        VeFitRule.model_validate(base | {"form": "rpm_quantile", "quantile": 0.95})
+    # The band maximum survives only beside the frozen curves made with it.
+    raw: dict[str, Any] = load_yaml((PROFILE / MV2_FILE).read_text())
+    raw["baseline"]["frozen"] = False
+    with pytest.raises(ValidationError, match="rpm_envelope"):
+        FuelPlantProfile.model_validate(raw)
 
 
 def test_the_ve_curve_belongs_to_a_refusing_plant_only() -> None:
