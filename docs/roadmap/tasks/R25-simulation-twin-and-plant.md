@@ -157,7 +157,7 @@ did not change.
       2/5/11/31/42/77).
     - Single-fault refusals are unchanged.
     - Mutating either side's seed or trim fails the new test.
-  - [ ] Follow-up (pre-existing, found verifying R25.3): the slot can split.
+  - [x] Follow-up (pre-existing, found verifying R25.3): the slot can split.
     The editor simulates the constant `SIM_SLOT = 1`, and its `_editable`
     refusal hard-codes it too. The CLI uses the profile's
     `fuel_comp_fit.yaml` `map_slot`. Today the only declaration is the
@@ -166,10 +166,125 @@ did not change.
     impossible: the editor reads the declared slot, or `simulate_cells`
     refuses (`slot_not_simulated`) when its `slot` differs from the
     declaration.
-  - [ ] Follow-up (pre-existing): bad CLI arguments are accepted or crash
+    Both are done.
+    - **The editor reads the declared slot.** `rom_editor.declared_slot(profile)`
+      is the `fuel_comp_fit.yaml` `map_slot`, or None. `editor_slot(profile)`
+      is that slot, falling back to `SIM_SLOT` only on a vehicle that declares
+      none, which cannot simulate because a design reads the declaration.
+      Preview, export and simulate all use it.
+      - `editor_spec` and `_candidate` take `slot=` as a keyword, and
+        `_effects` no longer has a default slot.
+      - The `_editable` refusal names the slot it runs.
+    - **`simulate_cells(…, profile_dir=…)` checks the slot.** It refuses
+      before any draw:
+      - `slot_not_simulated` when the run slot, or either template ROM's
+        slot, differs from the declaration, naming both values ("the run slot
+        is 1, but profile/fuel_comp_fit.yaml declares map_slot 2");
+      - `slot_undeclared` when the vehicle declares no slot.
+    - **Tests** in `tests/test_rom_sim_cli.py`:
+      - `test_a_declared_map_slot_2_is_the_slot_both_drivers_run` uses a
+        synthetic profile with `map_slot: 2`. Its Map 2-5 tables are stated
+        verified, because the twin refuses inferred ones. A Map 2 K ×1.05
+        edit run through `rom_sim run` and through `simulate_edits` gives
+        `inputs.slot == cell_table.slot == 2`, `cells == cell_table`, the same
+        Monte Carlo provenance and a changed BFS cell. A Map 1 edit is refused
+        `slot_not_simulated` ("simulator runs slot 2"). With `editor_slot`
+        mutated back to the constant, the test fails.
+      - `test_simulate_cells_refuses_a_slot_the_profile_does_not_declare`.
+    - **Xterra outputs are byte-identical to HEAD.** Checked 2026-11-13
+      between a ba5ecd68 worktree and a second one with only this diff
+      applied, with the real ZS44A-20260920 base, the ZS44A-Tuned-20261004
+      candidate and design f4332b8d…:
+      - `rom_sim run` result.json, traces.parquet and report.html, for both
+        the edit spec (seed 5) and the target_afr/fallback run (seed 3);
+      - the ROM Editor response for `simulate_edits` (Fuel Comp; K ×1.05 with
+        ecu_reflash) and for `_simulate` with the 20261004 image.
+    - **The dashboard reads the server's slot** (verifier, 2026-11-13: the
+      page still held `SIM_SLOT = 1`, so on a `map_slot: 2` vehicle it offered
+      only Map 1 copies, which the backend refuses).
+      - `RomLibrary.tables` and `preview_edits`' `tables` give every table
+        `sim_slot`, which is `editor_slot` of the profile `map_for` picks, the
+        one the editor routes use (`rom_editor.with_sim_slot`).
+      - The TypeScript `SIM_SLOT` is gone. `isSimulatedSlot` compares `slot`
+        with the table's own required `sim_slot`, so `isEditableTable`,
+        `buildEdits`' `slot_not_simulated` text, the tree's Editable filter,
+        the page's default table and its "Map N only" note all follow the
+        server.
+      - `romEditor.test.ts` "offers the slot the server names, so a vehicle
+        declaring Map 2 edits Map 2": a Map 2 copy is editable under
+        `sim_slot: 2`, Map 1 is refused "the simulator runs Map 2 only", and
+        a single-copy table stays editable.
+      - `test_rom_library_api.py::test_tables_and_compare_routes` asserts
+        `sim_slot == 1` on every table of the 2008.
+      - Fixtures carry `sim_slot: 1`, so slot 1 behaves as before.
+      - The `preview_rom_edit` description, docs/mcp-server.md and
+        docs/headless-api.md now say "the slot the profile's
+        `fuel_comp_fit.yaml` declares (slot 1 when none)", and the tables
+        response documents `sim_slot`.
+  - [x] Follow-up (pre-existing): bad CLI arguments are accepted or crash
     instead of being refused. `rom_sim run --seed -1` crashes with numpy's
     `ValueError` (exit 1) instead of refusing, and `--ltft 400` is accepted.
     Validate both at the argument boundary.
+    - **The trim bound.** The library already bounds the trims in one place:
+      `src.signals.fsm.PHYSICAL_LIMITS` for `obd:SHORT_FUEL_TRIM_1` and
+      `obd:LONG_FUEL_TRIM_1`, the J1979 decode bounds [-100, 100] %. That
+      decode is the contract's `observed_as` for `stft_b1`/`ltft_b1`.
+      `rom_editor.STFT_LIMIT` and `LTFT_LIMIT` name those bounds.
+    - **The CLI.** `rom_sim._run_bounds` runs right after `_need`, before any
+      work. It refuses with `argument_invalid`:
+      - `--seed` below 0;
+      - a trim outside the bound, naming the bound and the PID formula.
+
+      Both flags' help text states its range.
+    - **The editor had the same gap for trims only** (`seed` already had
+      `ge=0`). `SimRequest.stft_pct`/`ltft_pct` now carry `ge`/`le` from the
+      same limits, so the route answers 422. The typical-value checks inherit
+      the bound.
+    - **At HEAD vs now** on the real ROMs:
+      - `--seed -1`: exit 1 "ValueError: expected non-negative integer" at
+        HEAD, now exit 2 `argument_invalid`;
+      - `--ltft-pct 400`: ran (exit 0) at HEAD, now exit 2 `argument_invalid`.
+    - **Test:** `test_a_run_refuses_a_negative_seed_and_a_trim_outside_the_pid_decode`.
+      It covers seed -1, ltft 400 and stft -100.5. Nothing is written for a
+      refused run, the bounds themselves pass, a seed-0 run at LTFT −100 %
+      completes, and the editor's request refuses the same trims.
+    - **The −100 % bound used to be refused falsely.** At HEAD a run at
+      `--ltft-pct -100` was refused `fast_path_diverged`. The bound admits it,
+      and a trim that zeroes the fuel multiplier gives NaN delivered lambda on
+      both sides. `sim_montecarlo._verify_assembled` compared `relative_delta`
+      with `!=`, and NaN != NaN.
+      - It now uses `_same`, the NaN-equal comparison the base/candidate check
+        beside it already used. A NaN-free comparison is unchanged.
+      - Real ROMs (20260920 → 20261004, design f4332b8d…, seed 3, 20 draws,
+        LTFT −100): exit 2 `fast_path_diverged` at HEAD 5508a4a5, now exit 0.
+      - A normal run is byte-identical to HEAD: `rom_sim run` result.json,
+        traces.parquet and report.html (edit spec, seed 5), and the editor
+        responses for `simulate_edits` (Fuel Comp; K ×1.05) and `_simulate`.
+      - The `simulate_rom_edit` description and docs/mcp-server.md state the
+        trims' [−100, 100] % bound. `tests/fixtures/mcp_tool_snapshot.json`
+        was regenerated, and only those two descriptions changed.
+  - [ ] Follow-up (found verifying the above, 2026-11-13). None of these
+    changes a 2008 result today.
+    - **Third slot declaration.** The live overlay's slot is
+      `GET /control/rom/library/{sha}/trace` → `map_slot`, which comes from
+      `rom_targets.yaml` `map_slot`, not from `fuel_comp_fit.yaml`
+      `program.map_slot` (`editor_slot`). `afr_calibration.yaml`
+      `target_maps[].map_slot` is a third copy of the same fact.
+      `romOverlay.ts` places cells where `table.slot === context.map_slot`.
+      Make them one fact: `library_trace_context` refuses
+      `map_slot_mismatch`, or a profile-data test asserts the declarations
+      agree for every profile that has more than one.
+    - **Two axis lookups pin slot 1.** `lib/romSim.ts` `suggestEdges`
+      (~635) and `lib/romSimTiming.ts` `trimTable` (~210) look for
+      `slot === 1`. The 2008's copies share one axis table, so the values
+      are right. Switch both to `isSimulatedSlot`.
+    - **The −100 % LTFT test asserts only exit 0.** Also assert that the
+      `delivered_lambda` cells are all `unsupported` with a non-empty reason.
+      The reason is currently `short_pulse_undecoded`, which names the
+      mechanism, not the cause (the stated trim zeroes the fuel). A later
+      short-pulse decode must not turn the run into a "supported" NaN.
+    - **Docs nit.** `docs/headless-api.md` (~1056) lists `ltft_pct` without
+      the bound.
 
 - [ ] **R25.4 Three kit types, three `load_kit`s, and the same YAML parsed
   several times per request.** `paired_scenarios.SimKit` and

@@ -39,6 +39,7 @@ const TRIM_A: RomTableValues = {
   label: "Timing Main (trim A) (Map 1)",
   kind: "timing_trim_a",
   editable: true,
+  sim_slot: 1,
   confidence: "verified",
 };
 /** A daemon older than W10.7 sends no group. */

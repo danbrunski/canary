@@ -375,8 +375,14 @@ export interface RomTableValues {
   /** `axis` for a table another table uses as an axis. */
   role?: "axis" | "table";
   /** `rom_map.yaml` marks it editable (never an axis). Whether the page
-   *  takes an edit to this copy is `isEditableTable`'s: Map 1 or single-copy. */
+   *  takes an edit to this copy is `isEditableTable`'s: the `sim_slot` copy or
+   *  a single-copy table. */
   editable: boolean;
+  /** The slot this vehicle's editor edits and simulator runs
+   *  (`rom_editor.editor_slot`: the slot its `fuel_comp_fit.yaml` declares,
+   *  else 1). The same on every table of one response; the page compares
+   *  `slot` with it and holds no slot of its own. */
+  sim_slot: number;
   /** `[low, high]` raw values the ECU's code can take in this cell, when the
    *  map narrows the dtype's range (a word compared signed, a divisor); a
    *  value outside it is `value_out_of_range`. Null or absent: the dtype's. */

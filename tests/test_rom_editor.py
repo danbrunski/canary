@@ -256,7 +256,11 @@ def test_a_preview_names_the_lever_and_says_what_blocks_a_number(
     assert levers["messages"] and all(isinstance(m, str) for m in levers["messages"])
     candidate = build_candidate(
         rom_editor.editor_spec(
-            rom_editor.library_base(image, matched), "levers", [edit], kit.rom_map
+            rom_editor.library_base(image, matched),
+            "levers",
+            [edit],
+            kit.rom_map,
+            slot=rom_editor.SIM_SLOT,
         ),
         kit.rom_map,
         rom_editor.library_base(image, matched),

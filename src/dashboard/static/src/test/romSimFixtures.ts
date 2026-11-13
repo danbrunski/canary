@@ -555,6 +555,7 @@ export function timingTrimTable(which: "a" | "b"): RomTableValues {
   return {
     id: `timing_trim_${which}`,
     editable: true,
+    sim_slot: 1,
     name: `Ignition timing trim ${letter}`,
     label: `Ignition timing trim ${letter} (Map 1)`,
     slot: 1,

@@ -185,6 +185,9 @@ def test_tables_and_compare_routes(client: TestClient) -> None:
     assert k1["raw"] == [[27089]] and k1["confidence"] == "verified"
     fuel = next(t for t in tables["tables"] if t["id"] == "fuel_targets" and t["slot"] == 1)
     assert fuel["decoded"][0][0] == pytest.approx(14.7)
+    # The slot the page offers edits in is the server's (R25.3): the 2008's
+    # fuel_comp_fit.yaml declares map_slot 1, on every table of the response.
+    assert {t["sim_slot"] for t in tables["tables"]} == {1}
 
     compare = client.get("/control/rom/compare", params={"a": a, "b": b}, headers=AUTH)
     assert compare.status_code == 200

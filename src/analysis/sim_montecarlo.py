@@ -1041,7 +1041,9 @@ def _verify_assembled(
         lam = outputs["delivered_lambda"]
         if "relative_delta" in lam:
             mine = cand["delivered_lambda"][i, d] / base["delivered_lambda"][i, d] - 1.0
-            if mine != lam["relative_delta"]:
+            # NaN-equal, as the base/candidate check above: a trim that zeroes
+            # the fuel multiplier (LTFT -100 %) leaves no lambda on either side.
+            if not _same(lam["relative_delta"], float(mine)):
                 diverged.append(f"relative_delta@({i},{d})")
     if diverged:
         raise SimulationRefusalError(

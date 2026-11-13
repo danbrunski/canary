@@ -32,6 +32,7 @@ from typing import Any
 import pandas as pd
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from src.analysis import rom_editor
 from src.analysis.ecu_application import program_sha256
@@ -40,6 +41,7 @@ from src.analysis.rom_effects import CellEdit, RomEffectRefusalError, compare_ro
 from src.analysis.rom_image import revision_match
 from src.analysis.rom_levers import classify_edit
 from src.analysis.sim_cells import CellTable
+from src.analysis.sim_design import load_design
 from src.analysis.sim_montecarlo import load_sim_kit
 from src.analysis.sim_report import render_report
 from src.session import is_synthetic_session
@@ -398,6 +400,175 @@ def test_one_edit_through_the_rom_editor_and_the_cli_gives_the_same_cells(
         world["image"], match, _editor_request(seed=8), world["profile"]
     )
     assert reseeded["cells"] != cli["cell_table"]
+
+
+#: The Map 2-5 copies of the tables the twin reads (data/<profile>/rom_map.yaml).
+SLOT_2_5_TABLES = (
+    "fuel_targets_maps_2_5",
+    "timing_trim_a_maps_2_5",
+    "timing_trim_b_maps_2_5",
+    "fuel_compensation_maps_2_5",
+)
+#: K x1.05 in Map 2: k_constant has a copy in every slot (rom_map ``slot_offset``).
+K_SLOT_2 = {"table": "k_constant", "slot": 2, "all": True, "scale": 1.05, "rounding": "nearest"}
+
+
+@pytest.fixture(scope="module")
+def slot_2(world: dict[str, Any], tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    """The CLI test's profile declaring ``map_slot: 2``, and a K edit to Map 2."""
+    profile = tmp_path_factory.mktemp("slot_2") / "profile"
+    shutil.copytree(world["profile"], profile)
+    declaration = profile / "fuel_comp_fit.yaml"
+    text = declaration.read_text()
+    assert text.count("  map_slot: 1\n") == 1
+    declaration.write_text(text.replace("  map_slot: 1\n", "  map_slot: 2\n"))
+    # The twin refuses an inferred table (``table_unverified``), and the Map 2-5
+    # copies are inferred on the real map. This synthetic vehicle states them
+    # verified so Map 2 runs end to end; the real profile is untouched.
+    rom_map = profile / "rom_map.yaml"
+    map_text = rom_map.read_text()
+    for table in SLOT_2_5_TABLES:
+        start = map_text.index(f"  - id: {table}\n")
+        at = map_text.index("    confidence: inferred\n", start)
+        assert at < map_text.find("\n  - id: ", start + 1)
+        map_text = (
+            map_text[:at]
+            + "    confidence: verified\n"
+            + map_text[at + len("    confidence: inferred\n") :]
+        )
+    rom_map.write_text(map_text)
+    spec = world["root"] / "k_slot_2.yaml"
+    spec.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "base": {"file": "base.bin", "sha256": world["sha"]},
+                "label": "cli test k_slot_2.yaml",
+                "edits": [K_SLOT_2],
+            }
+        )
+    )
+    return {"profile": profile, "spec": spec}
+
+
+def test_a_declared_map_slot_2_is_the_slot_both_drivers_run(
+    world: dict[str, Any],
+    grid_design: Path,
+    slot_2: dict[str, Any],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """R25.3 follow-up: the editor once simulated the constant ``SIM_SLOT = 1``
+    while the CLI ran the declared ``map_slot``. On a vehicle declaring Map 2
+    both run Map 2 and give the same cells, and the editor refuses a Map 1 edit
+    rather than simulating a slot the CLI would not."""
+    profile = slot_2["profile"]
+    assert rom_editor.declared_slot(profile) == rom_editor.editor_slot(profile) == 2
+    args = _run_args(world, grid_design, tmp_path, "--edits", str(slot_2["spec"]))
+    args[args.index("--profile") + 1] = str(profile)
+    code, payload, _ = _cli(capsys, *args)
+    assert code == 0, payload
+    cli = json.loads((tmp_path / "result.json").read_text())
+    assert cli["inputs"]["slot"] == 2 and cli["cell_table"]["slot"] == 2
+    registry = load_tune_revisions(profile / "tune_revisions.yaml")
+    match = revision_match(world["sha"], registry)
+    editor = rom_editor.simulate_edits(
+        world["image"],
+        match,
+        _editor_request(label="cli test k_slot_2.yaml", edits=[K_SLOT_2]),
+        profile,
+    )
+    assert editor["cells"] == cli["cell_table"]
+    assert editor["provenance"] == cli["monte_carlo"]
+    # The Map 2 K edit reaches BFS somewhere: the run is not vacuous.
+    assert any(
+        c["outputs"]["base_fuel_schedule"]["status"] == "changed"
+        for c in editor["cells"]["cells"]
+        if c["n_points"]
+    )
+    # A Map 1 edit is refused by the editor on this vehicle, naming Map 2.
+    with pytest.raises(ValueError, match=r"simulator runs slot 2") as refused:
+        rom_editor.simulate_edits(world["image"], match, _editor_request(), profile)
+    assert getattr(refused.value, "reason", None) == "slot_not_simulated"
+
+
+def test_simulate_cells_refuses_a_slot_the_profile_does_not_declare(
+    world: dict[str, Any], grid_design: Path, slot_2: dict[str, Any]
+) -> None:
+    """The shared pipeline is where the drivers cannot split: handed Map 1 on a
+    vehicle declaring Map 2 (as the run slot, or in the template), it refuses
+    before any draw and names both slots."""
+    profile = slot_2["profile"]
+    loaded = load_sim_kit(profile)
+    design = load_design(grid_design)
+
+    def run(*, slot: int, template_slot: int) -> None:
+        template = rom_editor.scenario_template(
+            loaded.kit,
+            world["sha"],
+            world["candidate_sha"],
+            slot=template_slot,
+            learned=rom_sim._learned(argparse.Namespace(stft_pct=0.0, ltft_pct=0.0)),
+            candidate_events=(),
+        )
+        rom_editor.simulate_cells(
+            loaded.kit,
+            template,
+            design,
+            world["image"],
+            (world["root"] / "candidate.bin").read_bytes(),
+            loaded.uncertainty,
+            profile_dir=profile,
+            grid="fuel_comp",
+            slot=slot,
+            timing_state=None,
+            timing_coolant_c=88.0,
+            all_timing_cells=False,
+            draws=1,
+            seed=0,
+        )
+
+    for slot, template_slot, said in (
+        (1, 2, "the run slot is 1, but profile/fuel_comp_fit.yaml declares map_slot 2"),
+        (2, 1, "the base ROM's slot is 1, but profile/fuel_comp_fit.yaml declares map_slot 2"),
+    ):
+        with pytest.raises(ValueError, match=said) as refused:
+            run(slot=slot, template_slot=template_slot)
+        assert getattr(refused.value, "reason", None) == "slot_not_simulated"
+
+
+def test_a_run_refuses_a_negative_seed_and_a_trim_outside_the_pid_decode(
+    world: dict[str, Any], grid_design: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--seed -1`` reached numpy's PCG64 and crashed (exit 1); ``--ltft-pct
+    400`` ran. Both are refused at the argument boundary, before any work,
+    with the bounds the ROM Editor's request has."""
+    for flag, value, said in (
+        ("--seed", "-1", "--seed must be >= 0"),
+        ("--ltft-pct", "400", "--ltft-pct must be within [-100, 100] %"),
+        ("--stft-pct", "-100.5", "--stft-pct must be within [-100, 100] %"),
+    ):
+        args = _run_args(world, grid_design, tmp_path / "out", "--edits", str(world["spec"]))
+        args[args.index(flag) + 1] = value
+        code, payload, _ = _cli(capsys, *args)
+        assert code == 2 and payload["refused"] == "argument_invalid", payload
+        assert said in payload["message"]
+        assert not (tmp_path / "out").exists()
+    # The bounds themselves pass the boundary. A -100 % LTFT zeroes the fuel
+    # multiplier, so delivered lambda is NaN on both sides: that run completes
+    # (it was refused fast_path_diverged by a NaN != NaN comparison).
+    rom_sim._run_bounds(argparse.Namespace(seed=0, stft_pct=-100.0, ltft_pct=100.0))
+    args = _run_args(world, grid_design, tmp_path / "edge", "--edits", str(world["spec"]))
+    args[args.index("--seed") + 1] = "0"
+    args[args.index("--ltft-pct") + 1] = "-100"
+    code, payload, _ = _cli(capsys, *args)
+    assert code == 0, payload
+    edge = json.loads((tmp_path / "edge" / "result.json").read_text())
+    assert edge["inputs"]["learned"]["ltft_pct"] == -100.0
+    # The editor's request refuses the same trims (a 422 at the route).
+    for field, trim in (("ltft_pct", 400.0), ("stft_pct", -100.5)):
+        with pytest.raises(ValidationError, match=field):
+            _editor_request(**{field: trim})
 
 
 def test_a_spec_that_names_its_own_base_needs_no_base_flags(

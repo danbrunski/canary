@@ -299,6 +299,25 @@ describe("buildEdits", () => {
     expect(isEditableTable({ ...fuelTargets, editable: false })).toBe(false);
   });
 
+  it("offers the slot the server names, so a vehicle declaring Map 2 edits Map 2", () => {
+    // `sim_slot` is `rom_editor.editor_slot`: the profile's fuel_comp_fit.yaml
+    // map_slot. The page holds no slot of its own to disagree with it.
+    const k1: RomTableValues = { ...kConstant, slot: 1, sim_slot: 2 };
+    const k2: RomTableValues = { ...kConstant, slot: 2, sim_slot: 2 };
+    expect(isEditableTable(k2)).toBe(true);
+    expect(isEditableTable(k1)).toBe(false);
+    expect(buildEdits(k1, sel([0, 0], [0, 0]), { kind: "set_raw", raw: 130 })).toMatchObject({
+      ok: false,
+      reason: "slot_not_simulated",
+      message: expect.stringContaining("the simulator runs Map 2 only"),
+    });
+    expect(buildEdits(k2, sel([0, 0], [0, 0]), { kind: "set_raw", raw: 130 })).toMatchObject({
+      ok: true,
+    });
+    // A single-copy table is simulated whatever the slot.
+    expect(isEditableTable({ ...fuelTargets, slot: null, sim_slot: 2 })).toBe(true);
+  });
+
   it("counts a pending edit on its own copy only, not on every copy sharing the id", () => {
     const copy = (slot: number): RomTableValues => ({ ...fuelComp, id: "shared_id", slot });
     const pending = (slot: number | null): PendingEdit => ({

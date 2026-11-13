@@ -91,8 +91,13 @@ from src.analysis.rom_edit_spec import (
     load_edit_spec,
     resolve_base,
 )
+from src.analysis.rom_editor import (
+    LTFT_LIMIT,
+    STFT_LIMIT,
+    scenario_template,
+    simulate_cells,
+)
 from src.analysis.rom_editor import SLOT_SOURCE as EDITOR_SLOT_SOURCE
-from src.analysis.rom_editor import scenario_template, simulate_cells
 from src.analysis.rom_effects import (
     Candidate,
     EffectReport,
@@ -661,6 +666,27 @@ def edit_rows(provenance: Mapping[str, Any], spec: EditSpec | None) -> list[dict
     return rows
 
 
+def _run_bounds(args: argparse.Namespace) -> None:
+    """Refuse (``argument_invalid``) a seed the generator cannot take and a
+    trim outside the J1979 decode the trims are stated in, the bounds the ROM
+    Editor's request has (``rom_editor.STFT_LIMIT``/``LTFT_LIMIT``)."""
+    if args.seed < 0:
+        raise CliRefusalError(
+            "argument_invalid",
+            f"--seed must be >= 0 (numpy's PCG64 takes no negative seed), not {args.seed}",
+        )
+    for flag, value, limit in (
+        ("--stft-pct", args.stft_pct, STFT_LIMIT),
+        ("--ltft-pct", args.ltft_pct, LTFT_LIMIT),
+    ):
+        if not limit.min <= value <= limit.max:
+            raise CliRefusalError(
+                "argument_invalid",
+                f"{flag} must be within [{limit.min:g}, {limit.max:g}] {limit.unit} "
+                f"({limit.reason}), not {value:g}",
+            )
+
+
 def _candidate_events(args: argparse.Namespace) -> tuple[str, ...]:
     _need(args, "candidate_events")
     events = list(args.candidate_events)
@@ -710,6 +736,7 @@ def _publish(out: Path, texts: Mapping[str, str], traces: pd.DataFrame) -> None:
 
 def cmd_run(args: argparse.Namespace) -> dict[str, Any]:
     _need(args, "draws", "seed", "stft_pct", "ltft_pct", "design", "out")
+    _run_bounds(args)
     events = _candidate_events(args)
     out = _out_dir(args.out, _all_rom_dirs(args))
     started = time.monotonic()
@@ -737,6 +764,7 @@ def cmd_run(args: argparse.Namespace) -> dict[str, Any]:
         base.image,
         candidate.image,
         world.uncertainty,
+        profile_dir=world.profile,
         grid=args.grid,
         slot=world.slot,
         timing_state=_timing_state(args),
@@ -966,12 +994,18 @@ def _parser() -> argparse.ArgumentParser:
     _add_candidate(run)
     run.add_argument("--design", type=Path, help="a design directory <root>/<sha256> (required)")
     run.add_argument("--draws", type=int, help="Monte Carlo draws (required)")
-    run.add_argument("--seed", type=int, help="the generator's seed (required)")
+    run.add_argument("--seed", type=int, help="the generator's seed, >= 0 (required)")
     run.add_argument(
-        "--stft-pct", type=float, help="the learned short-term trim the base starts from (required)"
+        "--stft-pct",
+        type=float,
+        help="the learned short-term trim the base starts from, a PID 0x06 percentage "
+        f"in [{STFT_LIMIT.min:g}, {STFT_LIMIT.max:g}] (required)",
     )
     run.add_argument(
-        "--ltft-pct", type=float, help="the learned long-term trim the base starts from (required)"
+        "--ltft-pct",
+        type=float,
+        help="the learned long-term trim the base starts from, a PID 0x07 percentage "
+        f"in [{LTFT_LIMIT.min:g}, {LTFT_LIMIT.max:g}] (required)",
     )
     run.add_argument(
         "--candidate-events",

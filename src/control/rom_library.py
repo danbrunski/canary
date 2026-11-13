@@ -46,6 +46,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from src.analysis.rom_editor import editor_slot, with_sim_slot
 from src.analysis.rom_extent import ExtentSpec, read_extent
 from src.analysis.rom_image import (
     ImageFormatError,
@@ -476,10 +477,14 @@ class RomLibrary:
         """The image's tables read with its map. ``FileNotFoundError`` when no
         profile has a map."""
         image = self.image(sha)
-        rom_map = self.map_for(image).rom_map
-        if rom_map is None:
+        match = self.map_for(image)
+        if match.rom_map is None:
             raise FileNotFoundError(self.profile_dir / ROM_MAP_FILE)
-        return tables_payload(image, rom_map)
+        payload = tables_payload(image, match.rom_map)
+        # Each copy says which slot the editor edits and the simulator runs on
+        # the profile that reads it (the ROM Editor's routes use the same one).
+        payload["tables"] = with_sim_slot(payload["tables"], editor_slot(match.profile_dir))
+        return payload
 
     def compare(self, a: str, b: str) -> dict[str, Any]:
         """Byte ranges between two images, labelled with ``a``'s map when it

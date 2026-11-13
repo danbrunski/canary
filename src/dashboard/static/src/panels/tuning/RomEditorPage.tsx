@@ -18,7 +18,6 @@ import { useIsNarrow } from "../../hooks/useMediaQuery";
 import type { ChannelSnapshot } from "../../hooks/useTelemetryStream";
 import type { LoadedRom } from "../../hooks/useTuningContext";
 import {
-  SIM_SLOT,
   SIMULATE_REASON_TEXT,
   buildEdits,
   describeOperation,
@@ -137,8 +136,8 @@ const NO_CHANNELS = new Map<string, ChannelSnapshot>();
 /** Engine Tuning ▸ ROM Editor (W09.3), and since 2026-10-26 the one page for
  *  viewing ROM tables too (it absorbed ROM Maps): pick a stored image, look at
  *  every table its map declares but the axes, shaded low to high, edit the
- *  tables `rom_map.yaml` marks `editable` (a slotted one in Map 1, the slot
- *  the simulator runs), preview the result, download the edit spec when every
+ *  tables `rom_map.yaml` marks `editable` (a slotted one in the server's
+ *  `sim_slot`, the slot the simulator runs), preview the result, download the edit spec when every
  *  edited table is verified.
  *
  *  Loaded, the image is a one-line header (name, sha, chips, Open another
@@ -265,10 +264,11 @@ export function RomEditorPage({
           {nothingLoaded && (
             <p className="text-sm text-fg-dim">
               Look at every table in a ROM, shaded from low to high, and edit the fuel chain (Fuel
-              Targets, Fuel Compensation and K) and the ignition timing trims (A and B) in Map 1,
-              then see the tables after the edits. The edited image is never stored or offered: you
-              get an edit spec, a reviewable file that reproduces the edit from its base. Opening a
-              file adds it to the ROM library, kept by its hash. Nothing here writes the ECU.
+              Targets, Fuel Compensation and K) and the ignition timing trims (A and B) in the map
+              slot the engine runs, then see the tables after the edits. The edited image is never
+              stored or offered: you get an edit spec, a reviewable file that reproduces the edit
+              from its base. Opening a file adds it to the ROM library, kept by its hash. Nothing
+              here writes the ECU.
             </p>
           )}
           {!token && <TokenRequired purpose="use the ROM Editor" />}
@@ -390,8 +390,8 @@ const Workspace = memo(function Workspace({
     { enabled: Boolean(token), intervalMs: null },
   );
   // Every table the map declares that is worth a grid, every slot's copy
-  // (W10.14). The first Map 1 or single-copy table opens: Map 1 is the slot
-  // the editor edits and the simulator runs.
+  // (W10.14). The first single-copy table or copy in the slot the server
+  // names (`sim_slot`) opens: the slot the editor edits and the simulator runs.
   const viewable = useMemo(
     () => (tables.data?.tables ?? []).filter(isViewableTable),
     [tables.data],
@@ -399,7 +399,7 @@ const Workspace = memo(function Workspace({
   const [choice, setChoice] = useState<string | null>(null);
   const table =
     viewable.find((item) => tableChoice(item) === choice) ??
-    viewable.find((item) => item.slot === null || item.slot === SIM_SLOT) ??
+    viewable.find(isSimulatedSlot) ??
     viewable[0] ??
     null;
   const editable = table !== null && isEditableTable(table);
@@ -712,7 +712,7 @@ const Workspace = memo(function Workspace({
                 <p role="note" className="text-xs text-fg-dim">
                   Viewing only:{" "}
                   {!isSimulatedSlot(table)
-                    ? `edits and the simulator cover Map ${SIM_SLOT} only.`
+                    ? `edits and the simulator cover Map ${table.sim_slot} only.`
                     : `the ROM map does not mark ${table.name} editable.`}
                 </p>
               )}

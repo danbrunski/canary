@@ -10,8 +10,8 @@
 // - a raw outside the cell's dtype, or outside the map's `raw_range` for the
 //   table, is refused (`value_out_of_range`), never clamped;
 // - an edit that changes no selected cell is refused (`no_op_edit`);
-// - only a table the map marks `editable` is offered, a slotted one in Map 1
-//   only (`table_not_editable`, `slot_not_simulated`): editable is the map's
+// - only a table the map marks `editable` is offered, a slotted one in the
+//   server's `sim_slot` only (`table_not_editable`, `slot_not_simulated`): editable is the map's
 //   word, simulated the simulator's;
 // - a masked cell (the trims' flag bit 7, decode mask 0x7F) is edited on its
 //   masked value and keeps its other bits, as `rom_edit_spec` does: a result
@@ -33,17 +33,14 @@ import type {
 } from "../types/romEditor";
 import type { RomTableGroup, RomTableValues } from "../types/romLibrary";
 
-/** `rom_editor.SIM_SLOT`: the slot the simulator runs, the one the ECM runs
- *  after a cold boot. */
-export const SIM_SLOT = 1;
-
 /** The largest raw each dtype stores. */
 export const DTYPE_MAX: Record<string, number> = { u8: 0xff, be16: 0xffff };
 
 /** Whether the simulator reads an edit to this copy: a single-copy table
- *  (`slot: null`, a stock image's) or Map 1's. */
+ *  (`slot: null`, a stock image's) or the slot the server names
+ *  (`sim_slot`, the vehicle's declared map slot). */
 export function isSimulatedSlot(table: RomTableValues): boolean {
-  return table.slot === null || table.slot === SIM_SLOT;
+  return table.slot === null || table.slot === table.sim_slot;
 }
 
 /** Whether the page offers this table for editing: `rom_map.yaml` marks it
@@ -390,7 +387,7 @@ export function buildEdits(
     return !isSimulatedSlot(table)
       ? refuse(
           "slot_not_simulated",
-          `${table.name} slot ${table.slot}: the simulator runs Map ${SIM_SLOT} only`,
+          `${table.name} slot ${table.slot}: the simulator runs Map ${table.sim_slot} only`,
         )
       : refuse("table_not_editable", `the ROM map does not mark ${table.name} editable`);
   }

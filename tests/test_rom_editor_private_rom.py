@@ -536,11 +536,15 @@ def wot_candidate(real: Real) -> bytes:
     without the Monte Carlo, so the ``run_paired`` cases below do not depend
     on a run's draws (``wot_run`` asserts it is the candidate its run used)."""
     base = rom_editor.library_base(real.image, real.revision_match, sha256=real.sha256)
+    slot = rom_editor.editor_slot(PROFILE)
     spec = rom_editor.editor_spec(
-        base, "Target AFR WOT column +4", [TARGET_PLUS_4_WOT], real.kit.rom_map
+        base, "Target AFR WOT column +4", [TARGET_PLUS_4_WOT], real.kit.rom_map, slot=slot
     )
     candidate, _ = rom_editor._candidate(
-        base, spec, rom_editor._EditContext(real.kit.rom_map, real.kit.model, real.kit.model_sha256)
+        base,
+        spec,
+        rom_editor._EditContext(real.kit.rom_map, real.kit.model, real.kit.model_sha256),
+        slot=slot,
     )
     return candidate
 

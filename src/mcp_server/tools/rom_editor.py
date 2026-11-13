@@ -342,8 +342,9 @@ async def preview_rom_edit(
     "%"}}``, and one operation of ``set_raw: int``, ``add_raw: int`` or
     ``scale: float`` with ``rounding: "nearest" | "floor" | "ceil"`` (no default
     rounding). Editable: the tables ``rom_map.yaml`` marks ``editable: true``
-    (``table_not_editable`` otherwise), a slotted copy in Map 1 only
-    (``slot: 1``; ``slot_not_simulated`` otherwise) and a single-copy table with
+    (``table_not_editable`` otherwise), a slotted copy only in the slot the
+    profile's ``fuel_comp_fit.yaml`` declares (slot 1 when none;
+    ``slot_not_simulated`` otherwise) and a single-copy table with
     ``slot: null``.
 
     The response carries ``spec``, ``spec_yaml``, ``export``, ``spec_sha256``,
@@ -470,7 +471,8 @@ async def simulate_rom_edit(
     - ``rail_kpa``: a number, or the string ``"working_assumption"`` (the
       plant's own, said so);
     - ``throttle_pct`` (float), ``pedal_flag`` (int 0-255);
-    - ``stft_pct``, ``ltft_pct``: fuel trims, percent;
+    - ``stft_pct``, ``ltft_pct``: fuel trims, percent, each in [-100, 100]
+      (the PID 0x06/0x07 decode; a 422 outside it);
     - ``throttle_closed_learned``, ``idle_air_learned``, ``evap_purge_area``:
       the learned state, each stated;
     - ``high_det`` (``"set"`` or ``"clear"``) and ``knock_control``

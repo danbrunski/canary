@@ -28,8 +28,10 @@ What it makes impossible rather than documented:
   every E08.1 refusal keeps its reason.
 * **Editable is the map's word; simulatable is the simulator's.** A table
   takes an edit when ``rom_map.yaml`` says ``editable: true``
-  (``table_not_editable``), and a slotted copy only in :data:`SIM_SLOT`: the
-  simulator runs slot 1 as the ECM does after a cold boot, so an edit to
+  (``table_not_editable``), and a slotted copy only in the slot the vehicle's
+  ``fuel_comp_fit.yaml`` declares (:func:`editor_slot`; :data:`SIM_SLOT`, the
+  ECM's cold-boot slot, where it declares none): the simulator runs that
+  slot, the one ``tools/rom_sim.py`` runs too, so an edit to
   another slot is refused (``slot_not_simulated``) instead of showing
   ``not_reached`` everywhere. A single-copy table (``slot: null``) has no slot
   to miss. A vehicle with no simulator (no ``sim_kit.yaml``) still previews:
@@ -96,6 +98,7 @@ from pydantic import (
 )
 
 from src.analysis.ecu_application import ApplicationModel, ApplicationModelRefusalError
+from src.analysis.fuel_comp_inputs import FUEL_COMP_FILE, load_fuel_comp_declaration
 from src.analysis.fuel_plant import FuelPlantRefusalError, plant_qualification
 from src.analysis.paired_scenarios import (
     KnockControl,
@@ -149,6 +152,7 @@ from src.analysis.sim_montecarlo import (
     load_sim_kit,
     run_monte_carlo,
 )
+from src.signals.fsm import PHYSICAL_LIMITS
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 from src.yaml_load import load_yaml
 
@@ -156,12 +160,20 @@ from src.yaml_load import load_yaml
 TOOL_VERSION = "1"
 TOOL = "rom_editor"
 
-#: The slot the simulator runs: the one the ECM runs after a cold boot.
+#: The slot the editor edits on a vehicle that declares none (no
+#: ``fuel_comp_fit.yaml``, so it cannot simulate: a design reads the
+#: declaration): the one the ECM runs after a cold boot. A vehicle that declares
+#: a ``map_slot`` edits and simulates that one (:func:`editor_slot`).
 SIM_SLOT = 1
 SLOT_SOURCE: Literal["default_slot"] = "default_slot"
 #: Grid cells and draws a simulate request may ask for (W09.6 measures them).
 MAX_GRID_POINTS = 1024
 MAX_DRAWS = 2000
+#: The stated trims are percentages as J1979 PIDs 0x06 and 0x07 report them
+#: (the contract's ``observed_as`` for ``stft_b1``/``ltft_b1``): a trim outside
+#: that decode's bounds is no state the ECU can be in.
+STFT_LIMIT = PHYSICAL_LIMITS["obd:SHORT_FUEL_TRIM_1"]
+LTFT_LIMIT = PHYSICAL_LIMITS["obd:LONG_FUEL_TRIM_1"]
 
 #: Every :class:`LearnedState` the editor builds says where it came from.
 LEARNED_SOURCE = "stated: ROM Editor"
@@ -277,20 +289,45 @@ def sim_base(revision_match: Mapping[str, Any], *, kit_reason: str | None = None
 # -- the edit spec --------------------------------------------------------------------------
 
 
-def _editable(spec: EditSpec, rom_map: RomMap) -> None:
-    """The tables the map marks ``editable``, a slotted one in Map 1 only. The
+def declared_slot(profile_dir: Path) -> int | None:
+    """The map slot the vehicle's ``fuel_comp_fit.yaml`` declares the ECM runs,
+    or None when it declares none."""
+    profile_dir = Path(profile_dir)
+    if not (profile_dir / FUEL_COMP_FILE).is_file():
+        return None
+    return load_fuel_comp_declaration(profile_dir).program.map_slot
+
+
+def editor_slot(profile_dir: Path) -> int:
+    """The slot the editor edits, previews and simulates: the declared one
+    (:func:`declared_slot`, the slot ``tools/rom_sim.py`` runs too), else
+    :data:`SIM_SLOT` on a vehicle that declares none and so cannot simulate."""
+    declared = declared_slot(profile_dir)
+    return SIM_SLOT if declared is None else declared
+
+
+def with_sim_slot(tables: list[dict[str, Any]], slot: int) -> list[dict[str, Any]]:
+    """``tables`` (:func:`~src.analysis.rom_image.table_values` entries), each
+    carrying ``sim_slot``: the slot this vehicle's editor edits and simulator
+    runs (:func:`editor_slot`). The page compares a copy's ``slot`` with it, so
+    it never holds a slot of its own to disagree with the server's."""
+    return [{**table, "sim_slot": slot} for table in tables]
+
+
+def _editable(spec: EditSpec, rom_map: RomMap, slot: int) -> None:
+    """The tables the map marks ``editable``, a slotted one in ``slot`` only. The
     slot is checked first: a table's other-slot placement
     (``fuel_targets_maps_2_5``) and K in slot 3 are the same refusal, an edit
     the simulator would never read. An id the map lacks is left to
     resolution's ``table_unknown``."""
     editable = sorted(table.id for table in rom_map.tables if table.editable)
     for index, edit in enumerate(spec.edits):
-        if edit.slot is not None and edit.slot != SIM_SLOT:
+        if edit.slot is not None and edit.slot != slot:
             raise EditSpecRefusalError(
                 "slot_not_simulated",
                 f"edit {index} ({edit.table} slot {edit.slot}): the simulator runs slot "
-                f"{SIM_SLOT} ({SLOT_SOURCE}, the slot the ECM runs after a cold boot), so an "
-                "edit to another slot reaches nothing it computes",
+                f"{slot} ({SLOT_SOURCE}: {FUEL_COMP_FILE}'s map_slot, else the slot the ECM "
+                "runs after a cold boot), so an edit to another slot reaches nothing it computes",
             )
         try:
             table = rom_map.table(edit.table)
@@ -303,15 +340,15 @@ def _editable(spec: EditSpec, rom_map: RomMap) -> None:
             )
 
 
-def editor_spec(base: BaseImage, label: str, edits: Any, rom_map: RomMap) -> EditSpec:
+def editor_spec(base: BaseImage, label: str, edits: Any, rom_map: RomMap, *, slot: int) -> EditSpec:
     """The page's ``edits`` on ``base`` as an E08.1 spec, through
     :func:`parse_edit_spec` (its refusals keep their names), refused before
     resolution when an edit is to a table ``rom_map`` does not mark editable
-    or to a slot other than :data:`SIM_SLOT`."""
+    or to a slot other than ``slot`` (:func:`editor_slot`)."""
     spec = parse_edit_spec(
         {"schema_version": 1, "base": _base_ref(base), "label": label, "edits": edits}
     )
-    _editable(spec, rom_map)
+    _editable(spec, rom_map, slot)
     return spec
 
 
@@ -396,9 +433,7 @@ def _preview_kit(profile_dir: Path, kit: SimKit | None) -> tuple[SimKit | None, 
         return None, SIM_KIT_UNDECLARED
 
 
-def _effects(
-    base_image: bytes, candidate_image: bytes, kit: SimKit, *, slot: int = SIM_SLOT
-) -> EffectReport:
+def _effects(base_image: bytes, candidate_image: bytes, kit: SimKit, *, slot: int) -> EffectReport:
     """``compare_roms`` on the two images under the run's contract mode, as the
     simulator's ``rom_report`` has it. Where a quantity the mode holds fixed
     makes an output ``unevaluable``, this is the report that says so."""
@@ -416,14 +451,16 @@ def _effects(
     )
 
 
-def _candidate(base: BaseImage, spec: EditSpec, ctx: _EditContext) -> tuple[bytes, dict[str, Any]]:
+def _candidate(
+    base: BaseImage, spec: EditSpec, ctx: _EditContext, *, slot: int
+) -> tuple[bytes, dict[str, Any]]:
     made = build_candidate(
         spec,
         ctx.rom_map,
         base,
         model=ctx.model,
         model_sha256=ctx.model_sha256,
-        slot=SIM_SLOT,
+        slot=slot,
         slot_source=SLOT_SOURCE,
     )
     return made.image, made.provenance
@@ -461,15 +498,16 @@ def preview_edits(
     base = library_base(image, revision_match, sha256=sha256)
     kit, kit_reason = _preview_kit(profile_dir, kit)
     rom_map = load_rom_map(profile_dir) if kit is None else kit.rom_map
-    spec = editor_spec(base, label, edits, rom_map)
+    slot = editor_slot(profile_dir)
+    spec = editor_spec(base, label, edits, rom_map, slot=slot)
     levers: dict[str, Any] | None = None
     if kit is None:
         made = build_untraced_candidate(spec, rom_map, base)
         candidate_image, provenance = made.image, made.provenance
     else:
-        candidate_image, provenance = _candidate(base, spec, _EditContext.of(kit))
+        candidate_image, provenance = _candidate(base, spec, _EditContext.of(kit), slot=slot)
         levers = classify_edit(
-            _effects(base.image, candidate_image, kit),
+            _effects(base.image, candidate_image, kit, slot=slot),
             rom_map=kit.rom_map,
             model=kit.model,
             contract=kit.contract,
@@ -485,9 +523,10 @@ def preview_edits(
         "spec_sha256": spec.sha256(),
         "candidate_sha256": sha256_hex(candidate_image),
         "provenance": provenance,
-        "tables": [
-            t for t in table_values(candidate_image, rom_map) if (t["id"], t["slot"]) in edited
-        ],
+        "tables": with_sim_slot(
+            [t for t in table_values(candidate_image, rom_map) if (t["id"], t["slot"]) in edited],
+            slot,
+        ),
         "levers": levers,
         "sim_base": sim_base(revision_match, kit_reason=kit_reason),
     }
@@ -545,7 +584,7 @@ def export_edits(
             f"{verdict['stored']}, computed {verdict['computed']}): new words over it would "
             "hide the fault",
         )
-    spec = editor_spec(base, label, edits, rom_map)
+    spec = editor_spec(base, label, edits, rom_map, slot=editor_slot(profile_dir))
     text = spec_yaml(spec, rom_map)
     made = build_untraced_candidate(spec, rom_map, base)
     written = rom_map.checksums.write(made.image)
@@ -618,8 +657,10 @@ class SimRequest(BaseModel):
     rail_kpa: _Finite | Literal["working_assumption"]
     throttle_pct: _Finite
     pedal_flag: StrictInt = Field(ge=0, le=255)
-    stft_pct: _Finite
-    ltft_pct: _Finite
+    #: J1979 PID 0x06/0x07 percentages, within that decode's bounds
+    #: (:data:`STFT_LIMIT`, :data:`LTFT_LIMIT`).
+    stft_pct: _Finite = Field(ge=STFT_LIMIT.min, le=STFT_LIMIT.max)
+    ltft_pct: _Finite = Field(ge=LTFT_LIMIT.min, le=LTFT_LIMIT.max)
     throttle_closed_learned: _Finite
     idle_air_learned: _Finite
     evap_purge_area: _Finite
@@ -742,6 +783,27 @@ def scenario_template(
     )
 
 
+def _check_slot(profile_dir: Path, slot: int, template: PairedScenario) -> None:
+    profile_dir = Path(profile_dir)
+    declared = declared_slot(profile_dir)
+    if declared is None:
+        raise SimulationRefusalError(
+            "slot_undeclared",
+            f"{profile_dir.name} has no {FUEL_COMP_FILE}: no map slot is declared to simulate",
+        )
+    for what, given in (
+        ("run", slot),
+        ("base ROM's", template.base.slot),
+        ("candidate ROM's", template.candidate.slot),
+    ):
+        if given != declared:
+            raise SimulationRefusalError(
+                "slot_not_simulated",
+                f"the {what} slot is {given}, but {profile_dir.name}/{FUEL_COMP_FILE} declares "
+                f"map_slot {declared}: both drivers simulate the declared slot",
+            )
+
+
 @dataclasses.dataclass(frozen=True)
 class SimulatedCells:
     """What :func:`simulate_cells` computes; the caller assembles its document."""
@@ -761,6 +823,7 @@ def simulate_cells(
     candidate_image: bytes,
     uncertainty: LoadedUncertainty,
     *,
+    profile_dir: Path,
     grid: Grid,
     slot: int,
     timing_state: TimingState | None,
@@ -776,8 +839,16 @@ def simulate_cells(
     the timing block's refusals (a trim edit with no stated timing state),
     both before the draws run. ``timing_coolant_c`` is the coolant the trim
     cells are read at and ``all_timing_cells`` whether every trim cell is
-    listed or only the changed ones: each caller states its own."""
+    listed or only the changed ones: each caller states its own.
+
+    ``slot`` and both of the template's ROM identities must be the slot
+    ``profile_dir`` declares (:func:`declared_slot`), else
+    ``slot_not_simulated`` naming both; a vehicle that declares none is
+    ``slot_undeclared``. The two drivers read the slot in different places
+    (the editor through :func:`editor_slot`, the CLI from its
+    ``fuel_comp_fit.yaml`` declaration), so this is where they cannot split."""
     require_base(design, template.base.image_sha256)
+    _check_slot(profile_dir, slot, template)
     timing = ignition_timing_block(
         kit,
         base_image,
@@ -853,11 +924,12 @@ def _simulate(
     _bounded(request)
     design = _grid_design(request, revision, profile_dir, registry, kit.plant.plant_version)
     require_base(design, base.image_sha256)
+    slot = editor_slot(profile_dir)
     template = scenario_template(
         kit,
         base.image_sha256,
         sha256_hex(candidate_image),
-        slot=SIM_SLOT,
+        slot=slot,
         learned=_learned(request),
         candidate_events=request.events,
     )
@@ -871,8 +943,9 @@ def _simulate(
         base.image,
         candidate_image,
         _uncertainty(profile_dir, kit),
+        profile_dir=profile_dir,
         grid=request.grid,
-        slot=SIM_SLOT,
+        slot=slot,
         timing_state=request.timing_state,
         timing_coolant_c=request.coolant_c,
         all_timing_cells=False,
@@ -935,8 +1008,9 @@ def simulate_edits(
     _recorded(base)
     _bounded(request)
     kit = _sim_kit(profile_dir, kit)
-    spec = editor_spec(base, request.label, request.edits, kit.rom_map)
-    candidate_image, provenance = _candidate(base, spec, _EditContext.of(kit))
+    slot = editor_slot(profile_dir)
+    spec = editor_spec(base, request.label, request.edits, kit.rom_map, slot=slot)
+    candidate_image, provenance = _candidate(base, spec, _EditContext.of(kit), slot=slot)
     out = _simulate(
         base,
         candidate_image,
@@ -1250,6 +1324,7 @@ __all__ = [
     "CALIBRATION_NOT_MAPPED",
     "JOB_KINDS",
     "LEARNED_SOURCE",
+    "LTFT_LIMIT",
     "MAX_DRAWS",
     "MAX_GRID_POINTS",
     "NEVER_TYPICAL_FIELDS",
@@ -1258,6 +1333,7 @@ __all__ = [
     "SIM_KIT_UNDECLARED",
     "SIM_SLOT",
     "SLOT_SOURCE",
+    "STFT_LIMIT",
     "TABLE_NOT_VERIFIED",
     "TOOL_VERSION",
     "TYPICAL_FIELDS",
@@ -1266,7 +1342,10 @@ __all__ = [
     "ExportedImage",
     "SimRequest",
     "SimulatedCells",
+    "declared_slot",
+    "editor_slot",
     "editor_spec",
+    "with_sim_slot",
     "export_edits",
     "export_refusal",
     "library_base",

@@ -269,7 +269,7 @@ Control endpoints:
 | `GET /control/rom/library/{sha}/tables` | every mapped table in every map slot: raw cells, decoded cells where a decode is declared, axes, confidence and evidence (W08.4) |
 | `GET /control/rom/library/{sha}/trace` | the ROM Editor's live-overlay inputs for one library image (ROM Maps merged into the editor, 2026-10-26), read-only: `{sha256, map_slot, afr_scale, recorded_revision, matches_recorded_revision, live, warnings, tables[]}`. `afr_scale` is the AFR the ECM states at λ = 1 (its tables' numerator / 128), not the fuel's stoich (M01.3); the same number is still sent as the deprecated `afr_stoich`. `map_slot` is the slot the trace definitions are written for (the overlay places nothing in another slot); `matches_recorded_revision` is true only when the flash history's running revision names this image's plain sha256; `live` is the vehicle's verified RPM / BFS / commanded-AFR providers; each `tables[]` entry is a `rom_viewer.yaml` kind with its `trace` (X/Y channels, `axis_mapping`, `axis_units`, `stored_decode`, `request_channel`, `out_of_range`) or `null`. The image's own cells and axes stay on `/tables`; the editor joins the two by `kind` and slot. 404 for an image not in the library, 409 when the vehicle has no `rom_viewer.yaml` |
 | `GET /control/rom/compare?a=<sha>&b=<sha>` | changed byte ranges a -> b merged with a 16-byte gap, each labelled with the regions and tables it overlaps; table ranges carry per-cell old/new values, decoded where declared (W08.5) |
-| `POST /control/rom/library/{sha}/edits/preview` | ROM Editor preview (W09.2): body `{label, edits}`, `edits` being E08.1 edit dicts on the tables `rom_map.yaml` marks `editable` (the 2008: the fuel chain and timing trims), a slotted copy in slot 1 only. A vehicle without a simulator previews from its map alone; `spec_yaml` is null unless every edited table is verified (`export` says why). Returns the edit spec (JSON, YAML, sha256), the candidate's sha256, its E08.1 provenance (cells old -> new, changed ranges, reach), the edited tables' after values and `levers` (which lever the edit pulls and what blocks a number per output, E09.14b). Runs in the thread pool, never deferred; nothing is stored. 404 unknown sha, 409 no map, 400 `edit_refused`, 422 body. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
+| `POST /control/rom/library/{sha}/edits/preview` | ROM Editor preview (W09.2): body `{label, edits}`, `edits` being E08.1 edit dicts on the tables `rom_map.yaml` marks `editable` (the 2008: the fuel chain and timing trims), a slotted copy only in the slot the profile's `fuel_comp_fit.yaml` declares (slot 1 when none). A vehicle without a simulator previews from its map alone; `spec_yaml` is null unless every edited table is verified (`export` says why). Returns the edit spec (JSON, YAML, sha256), the candidate's sha256, its E08.1 provenance (cells old -> new, changed ranges, reach), the edited tables' after values and `levers` (which lever the edit pulls and what blocks a number per output, E09.14b). Runs in the thread pool, never deferred; nothing is stored. 404 unknown sha, 409 no map, 400 `edit_refused`, 422 body. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
 | `POST /control/rom/library/{sha}/simulate` | ROM Editor simulate (W09.2): body is one `SimRequest`, every field required (nothing is defaulted). Runs the edits on a recorded base over a stated rpm x load grid, base vs candidate, paired Monte Carlo draws, aggregated per cell. In the workbench child (job `rom_sim`): `409 analysis_deferred` while a capture records, `409 analysis_busy` while another child runs, `503 analysis_unavailable`; a refusal is `400 sim_refused`; 404 unknown sha, 409 no map, 422 body. Nothing is stored; the candidate never leaves the simulator. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
 | `GET /control/rom/editor/typical-values?sha=<image>` | ROM Editor typical values (W09.11): the declared typical values of the vehicle whose map reads `sha` (the active vehicle without it) for the Simulate form's stated environment and learned state (`data/<vehicle>/sim_typical_values.yaml`), each with its `kind` (`typical`, or `placeholder` for a number the simulator reads nowhere) and its `source`, plus any fillable field it leaves empty with a `reason`. Nothing stored, and it changes no request field: the page only fills its form with these, visibly, when the operator presses *Fill typical values*. 409 `typical_values_undeclared` when the vehicle has no file, 409 `typical_values_invalid` when it fails its schema. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
 | `GET /control/rom/backup` / `POST /control/rom/backup` / `POST /control/rom/backup/cancel` | ECU flash backup job (W08.7), read-only: state + live preconditions / start (202, or 409 naming every refusing precondition) / cancel a running read (409 when none runs) |
@@ -479,7 +479,8 @@ map_slots: [1, 2, 3, 4, 5], tables: [...], reason}`. Each table:
 {"id": "fuel_targets", "kind": "fuel_targets", "name": "Fuel Targets",
  "label": "Fuel Targets (Map 1)", "short_name": null, "group": "fuel",
  "slot": 1, "offset": 918048, "end": 918111,
- "rows": 8, "cols": 8, "dtype": "u8", "role": "table", "editable": true, "unit": "AFR",
+ "rows": 8, "cols": 8, "dtype": "u8", "role": "table", "editable": true, "sim_slot": 1,
+ "unit": "AFR",
  "raw": [[128, 128, ...], ...], "decoded": [[14.7, 14.7, ...], ...],
  "decode": {"formula": "afr = 1881.6 / raw", "kind": "reciprocal", "quantity": "afr",
             "unit": "AFR", "confidence": "verified", "evidence": "..."},
@@ -494,6 +495,13 @@ map_slots: [1, 2, 3, 4, 5], tables: [...], reason}`. Each table:
 the ROM Editor's table tree (W10.7). `rom_map.yaml` must give every table that
 is not an axis a group. A name over 36 characters needs a short name, which
 the tree shows in its place. An axis (`role: "axis"`) has neither.
+
+`sim_slot` is the slot the ROM Editor edits and the simulator runs for the
+profile that reads the image: the `map_slot` its `fuel_comp_fit.yaml` declares,
+slot 1 when none (`rom_editor.editor_slot`). Every table of one response
+carries the same value, and so do a preview's `tables`. The page offers an edit
+to a single-copy table or to the copy whose `slot` equals it, the copies the
+server takes (`slot_not_simulated` otherwise).
 
 A table without a declared decode (`K`, `be16` at slot +0x762, `inferred`)
 has `decoded: null` and is shown raw; a scalar is `[[value]]`. `role` is
