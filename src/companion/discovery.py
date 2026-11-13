@@ -46,6 +46,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from src.coerce import nonempty_str
+
 PRODUCT = "canary"
 DEFAULT_PORT = 8000
 WIRED_ADDRESS = "192.168.137.2"
@@ -88,8 +90,8 @@ class DaemonIdentity:
                 product=PRODUCT,
                 hostname=str(payload.get("hostname") or host),
                 host_kind=str(payload.get("host_kind") or "unknown"),
-                version=_optional_str(payload.get("version")),
-                profile=_optional_str(payload.get("profile")),
+                version=nonempty_str(payload.get("version")),
+                profile=nonempty_str(payload.get("profile")),
                 dashboard_port=int(payload.get("dashboard_port") or DEFAULT_PORT),
                 source_path=IDENTITY_PATH,
             )
@@ -129,10 +131,6 @@ class DiscoveredPi:
         if self.identity.profile:
             who += f" ({self.identity.profile})"
         return f"{who} at {self.base_url} [{self.source}]"
-
-
-def _optional_str(value: Any) -> str | None:
-    return None if value in (None, "") else str(value)
 
 
 def base_url_of(host_or_url: str, port: int = DEFAULT_PORT) -> str:

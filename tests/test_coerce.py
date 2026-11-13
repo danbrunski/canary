@@ -57,3 +57,13 @@ def test_the_old_daemon_export_is_the_same_function() -> None:
     from src.daemon import _finite_or_none
 
     assert _finite_or_none is finite_float
+
+
+def test_nonempty_str_reads_empty_as_absent_where_optional_str_does_not() -> None:
+    from src.coerce import nonempty_str, optional_str
+
+    assert nonempty_str(None) is None
+    assert nonempty_str("") is None
+    assert optional_str("") == ""
+    for value in ("x", " ", 0, 1.5, False):
+        assert nonempty_str(value) == optional_str(value) == str(value)

@@ -4,9 +4,11 @@
 times (``isolation_forest.py``, ``sequence_registry.py``, ``control/jobs.py``)
 — a one-line "pass ``None`` through, ``str()`` everything else" coercion used
 by every ``from_dict`` that has an optional ISO-timestamp-or-similar field.
-``models/retraining_policy.py`` has a fourth, genuinely different version
-(``""`` also coerces to ``None``) that stays where it is rather than being
-folded in here.
+``nonempty_str`` is the other rule: ``""`` also reads as absent. The
+companion identity (``companion/discovery.py``) and the retraining feedback
+window (``models/retraining_policy.py``) each had a private copy under the
+same name as ``optional_str``, which hid the difference (operator,
+2026-11-13: keep ``""`` as absent there).
 
 ``finite_float`` (R01.3, refactor review 2026-09-24): "a finite number, or
 ``None``" had about ten private copies with four behaviours. Some refused NaN
@@ -29,6 +31,11 @@ def optional_str(value: Any) -> str | None:
     return str(value)
 
 
+def nonempty_str(value: Any) -> str | None:
+    """``None`` and ``""`` become ``None``; anything else is ``str()``'d."""
+    return None if value in (None, "") else str(value)
+
+
 def finite_float(value: object) -> float | None:
     """``value`` as a finite ``float``, else ``None``.
 
@@ -47,4 +54,4 @@ def finite_float(value: object) -> float | None:
     return out if math.isfinite(out) else None
 
 
-__all__ = ["finite_float", "optional_str"]
+__all__ = ["finite_float", "nonempty_str", "optional_str"]

@@ -553,14 +553,13 @@ not measured.
     parameter object changes every caller). Not attempted; judgement call.
   - [ ] `sequence_dataset._frame_mask_delta` vectorization: item says cold, do
     it only if the corpus grows. Not attempted.
-  - [ ] Local copies of `src.coerce.optional_str` in
+  - [x] Local copies of `src.coerce.optional_str` in
     `models/retraining_policy.py` and `companion/discovery.py`: **not
     copies.** Both are `None if value in (None, "") else str(value)`;
-    `coerce.optional_str` keeps `""` as `""`. Swapping would turn an empty
-    `version` / `profile` / `session` / `source` / `model_version` into `""`
-    for the companion identity and the retraining feedback window. Either
-    rename them (`empty_to_none`) or move that variant into `src.coerce`; an
-    operator-side call on whether `""` should read as absent. Left as is.
+    `coerce.optional_str` keeps `""` as `""`. Operator, 2026-11-13: keep
+    `""` as absent there. The variant is now `src.coerce.nonempty_str`
+    (same expression), both private copies are gone, and
+    `tests/test_coerce.py` pins the difference between the two rules.
 
 - [x] **R27.13 The IF runs its forest twice per tick, on an object-dtype row.**
   Found while doing R27.4 (2026-11-12), not yet measured on the Pi.

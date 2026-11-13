@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 import pandas as pd
 
+from src.coerce import nonempty_str
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.models.feedback import AnomalyFeedback
 
@@ -204,9 +205,9 @@ def _window_from_feedback(
         action="exclude",
         start_timestamp=start.isoformat().replace("+00:00", "Z"),
         end_timestamp=end.isoformat().replace("+00:00", "Z"),
-        session=_optional_str(event.get("session") or feedback.driving_context.get("session")),
-        source=_optional_str(event.get("source")),
-        model_version=_optional_str(event.get("model_version")),
+        session=nonempty_str(event.get("session") or feedback.driving_context.get("session")),
+        source=nonempty_str(event.get("source")),
+        model_version=nonempty_str(event.get("model_version")),
         reason=feedback.reason,
         hypothesis=feedback.hypothesis,
     )
@@ -221,10 +222,6 @@ def _coerce_utc(value: Any) -> pd.Timestamp:
     else:
         timestamp = timestamp.tz_convert(UTC)
     return timestamp
-
-
-def _optional_str(value: Any) -> str | None:
-    return None if value in (None, "") else str(value)
 
 
 __all__ = [
