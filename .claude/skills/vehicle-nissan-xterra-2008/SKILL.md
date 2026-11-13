@@ -258,7 +258,12 @@ knock behavior, the relearn procedures, and known failure modes are in
   both-off, blower-only, and blower+A/C, which is still enough to separate
   blower bits from A/C bits by nesting.
 - **Manual transmission.** Clutch and gear are driver actions, not ECU states,
-  and no transmission module requests a torque reduction at a shift.
+  and no transmission module requests a torque reduction at a shift. The
+  firmware confirms it. The transmission torque requests and the CAN-fault
+  limp cap do not run on this calibration. The only outside torque request is
+  VDC's, on frame `0x29E`, and stored drives never show it active. Altitude and
+  intake temperature don't derate torque either (`docs/ecu-firmware-analysis.md`,
+  "Torque limits and who asks for them").
 
 ## Reference files
 

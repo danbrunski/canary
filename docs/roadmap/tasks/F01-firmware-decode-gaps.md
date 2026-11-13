@@ -355,7 +355,7 @@ Same conventions as the other task files: task-level truth is the checkboxes,
       section before the next flash, after the flash, and after its key
       cycle.
 
-- [ ] **F01.12 Barometric pressure: when it updates.** The chain is traced
+- [x] **F01.12 Barometric pressure: when it updates.** The chain is traced
   (`0xFFFF4C30` from a slew-gated slow filter, PID `0x33` from it). That the
   source is the EVAP pressure sensor read while the canister is vented is
   inferred from the fault items that force the default.
@@ -392,11 +392,40 @@ Same conventions as the other task files: task-level truth is the checkboxes,
   - *Answers:* what can close the throttle under boost without a code; what
     VDC asks of the engine.
   - **Accept:** each limit has a source, and the limp cap names its CAN ids.
+  - [x] 2026-11-12. Firmware doc: "Torque limits and who asks for them".
+    - **Torque-down `3C36`.** Only the automatic's transmission frames
+      `0x253`/`0x255` feed it: type byte `40F2` (5 = ceiling, 6 = floor,
+      7 = both) and values `452C`/`452E` × 5 − 4,000. On this calibration
+      the unpackers return at once (`0x8ADE` bit 7) and no slot names the
+      frames, so it is 0x7FFF. The shift torque `4764` needs the
+      transmission's gear bytes, which stay 0.
+    - **Full-load cap `37A2`.** (full-load torque + losses `3C44`) ×
+      `0xB374`[baro, rpm] × `0xECAA`[IAT] − losses. Both tables are 1.0
+      with zero axes, so the cap is the torque map's last column and never
+      binds before full throttle.
+    - **VDC.** Frame `0x29E` (checksum byte 7, counter byte 6): byte 0 × 30
+      + 1,500 as a ceiling, byte 1 × 2 per call as its ramp, active on byte
+      2 bit 4. It becomes `3C6C`, which the doc had called cruise. The
+      request bit was never set in 329,698 stored frames.
+    - **Limp cap.** `2B46`/`2B47` are the time-since-received counters of
+      receive slots 8 and 9, which hold `0x251` and `0x253`/`0x255` on an
+      automatic and are empty in ZS44A. The other inputs are disabled by
+      calibration or have no writer. It cannot fire here.
+    - **Answers.** Nothing in the arbitration reads airflow, boost or baro,
+      so none of it closes the throttle under boost. VDC can ask for a
+      ramped torque ceiling and has not.
+    - Truck reads (confirmation only): `3C36`, `479F` bit 1, `4800`, `4856`
+      bit 3, `2B46`/`2B47`, `3C6C`, and `37A2` against the map's last
+      column.
 
 ## Nothing recorded yet
 
 - [ ] **F01.14 The CAN frames the ECM builds and reads.** Trace the transmit
-  builders and receive handlers.
+  builders and receive handlers. Head start from F01.13: the receive and
+  transmit table at ROM `0x095F1` (8 receive and 8 transmit slots in ZS44A),
+  the `0x29E` decode, and two `bindings.yaml` corrections ready to apply.
+  `BRAKE_ACTIVITY_29E_7` is a checksum and `BRAKE_PRESSURE_29E_3` is a bit
+  flag.
   - *Answers:* the exact byte, scale and offset of every ECM-originated
     broadcast signal, replacing statistical bindings in `data/bindings.yaml`
     with code evidence; which received frames the ECM acts on (F01.13).

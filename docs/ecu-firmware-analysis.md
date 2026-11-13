@@ -144,7 +144,7 @@ the last column (`data/analyses/2026-11-11-wot-target-lean-prediction.md`).
 | So the switch sets at a **target** opening of 638 counts and clears below 612. On PID `0x11`'s scale (counts × 100 / 321 of 255) that is 77.9 % and 74.7 %; a fully open throttle reads 88.6 % there (725 counts). | Derived from the three rows above | 200 / 0.3139 = 637.2. |
 | The target area comes from a torque demand: `0x0756E0` caps the air-quantity word `0xFFFF1C36` at `0xFD50` (the curves `0xEB0C` × `0xEB2C`, both flat), converts it to area per swept volume through the curve pair `0xEEDA` / `0xEDCA` (or `0xEF1A` / `0xEE0A` from `0xFC00` up), and multiplies by rpm × 158 (cal `0x8D25`). | Verified (code) | `0x0756E0`–`0x075A04`. |
 | **The `+0x260` slot map is the engine torque map**: torque as a function of rpm (rows, axis `0xCAE9`) and a normalised air quantity (columns, axis `0xE25E`, 0 to 65,535), 16 × 16 words biased by `0x8000`. `0x075A16` reads the RAM copy `0xFFFFB2A0` **backwards**: it interpolates the rpm row, then finds the air quantity at which that row gives the demanded torque `0xFFFF1C74`. The result is `0xFFFF1C36`. | Verified (code and bytes). The units are inferred: the last column peaks at 3,749 in row 80, which fits N·m × 10 and rpm ÷ 50 for an engine rated 381 N·m at 4,000 rpm. UpRev's editor calls it **Throttle A** ("X-Axis = Flow Potential; Y-Axis = Engine RPM", estimated torque; Tuning Guide Rev 8, p. 15). | Inverse read: `0x026D2C` with the map row as the axis and `0xE25E` as the values. The forward wrapper `0x026B14` gives the full-load torque (column `0xFFFF`) and the minimum torque (column 0) for the rpm, and the torque at a given air quantity (`0x0778E8`, `0x07BB3C`, `0x07BC58`). |
-| `0xFFFF1C74` is the arbitrated torque demand: `0x07B57C` takes `0xFFFF1C76` and applies upper limits `0xFFFF3C36` (a torque-down request, `0x07A00C`), `0xFFFF37A2` (baro × rpm and intake-temperature table `0xB374`, all 1.0 here) and `0xFFFF3C4A` (the lowest of the rev-limit, overheat and speed-limiter words, `0x0726DC`), and the lower limit `0xFFFF473A` (the torque of the idle air, `0x07BB3C`). `0xFFFF3C6C` is `0x7FFF` outside cruise. | Verified (code) | `0x07B57C`, `0x0C254C`, `0x07BB3C`, `0x07BC58`. |
+| `0xFFFF1C74` is the arbitrated torque demand: `0x07B57C` takes `0xFFFF1C76` and applies upper limits `0xFFFF3C36` (the automatic's torque-down request, `0x07A00C`; 0x7FFF on a manual), `0xFFFF37A2` (the full-load torque scaled by baro × rpm map `0xB374` and intake-temperature curve `0xECAA`, both 1.0 here) and `0xFFFF3C4A` (the lowest of the rev-limit, overheat and speed-limiter words, `0x0726DC`), and the lower limit `0xFFFF473A` (the torque of the idle air, `0x07BB3C`). `0xFFFF3C6C` is the VDC torque limit from frame `0x29E`, 0x7FFF unless VDC requests one; it is not cruise. Sources: "Torque limits and who asks for them (F01.13)". | Verified (code) | `0x07B57C`, `0x0C254C`, `0x07BB3C`, `0x07BC58`. |
 | `0xFFFF1C76` copies `0xFFFF2814`, and `0xFFFF2814` is written by `0x0726DC`: the driver demand `0xFFFF280E` (not below `0xFFFF3C80`), under the lowest of eight limit words (`0xFFFF3C60`, `3C62`, `3C64`, `3C66`, `3C6E`, `3C7E`, `3C86`, `3C8A`). The driver demand comes from `0xFFFF2812` through `0xFFFF2810` (`0x073068`: the lower of it and the rev-limit, overheat and speed-limiter words) and `0xFFFF280E` (`0x071A2E`). | Verified (code) | **`0x0726DC` was missing from the disassembly**: it is reached only through the task table entry at `0x021A20`, so no reference search found the store. Found by scanning the image for the store's opcode pattern, then disassembled read-only (2026-11-11). Other gaps in the listing may hide stores the same way. |
 
 What limits first gear:
@@ -262,15 +262,17 @@ The same function has a third trigger that the row above missed. When bit 3 of
 always clear here, so the cap would apply in every gear. `0x063D7C` sets bit 3
 when bit 7 of `0xFFFF4785` is set and any of `0xFFFF2B46`, `2B47`, `2B4E`, `2B4F`,
 `2B78`, `2B79` or `2B7A` reaches 11. These are snapshots of per-message bytes kept
-by the CAN receive layer (`0x0CBBFE`); on this calibration only `0xFFFF41B1` and
-`0xFFFF41BB` feed them. Inferred: a received-message timeout, so a CAN fault gives a
-limp-mode torque cap in all gears. Its snapshot (bit 3 of `0xFFFF484E`) also
-suspends the cruise ratio check (verified, code). It is not set in normal driving
-(inferred from measurement): second to fifth gear at full pedal read throttle 255,
-which a 3,138 cap would prevent between 1,705 and 5,906 rpm. Which messages
-`0xFFFF41B1` and `0xFFFF41BB` track is not identified. A live read of
-`0xFFFF4856`, `0xFFFF2B46`, `0xFFFF2B47`, `0xFFFF2208` (expect 0) and
-`0xFFFF2858` would confirm all of this.
+by the CAN receive layer (`0x0CBBFE`). `2B46`/`2B47` come from `0xFFFF41B1` and
+`0xFFFF41BB`, the time-since-received counters of receive slots 8 and 9. On an
+automatic those slots carry the transmission's `0x251` and `0x253`/`0x255`, so a
+lost transmission frame gives a limp-mode torque cap in all gears. ZS44A leaves both
+slots empty, and the other inputs are disabled by calibration or have no writer, so
+**the cap cannot fire on this calibration** (verified, code; "Torque limits and who
+asks for them (F01.13)"). Its snapshot (bit 3 of `0xFFFF484E`) also suspends the
+cruise ratio check (verified, code). The measurement agrees: second to fifth gear at
+full pedal read throttle 255, which a 3,138 cap would prevent between 1,705 and
+5,906 rpm. A live read of `0xFFFF4856`, `0xFFFF2B46`, `0xFFFF2B47`, `0xFFFF2208`
+(expect 0) and `0xFFFF2858` would confirm all of this.
 
 ### Diagnostic service handlers
 
@@ -1602,6 +1604,173 @@ shows a stale value, and the code holds it only for EVAP leak tests
 (inferred). The λ gain, the injector pressure model and the torque limit
 that read `4C30` see the current altitude.
 
+### Torque limits and who asks for them (F01.13, 2026-11-12)
+
+**On this truck only the driver, the rev, overheat and speed limiters, and
+VDC can lower the torque demand, and VDC never has.** The transmission's
+torque requests and the CAN-fault limp cap are code for an automatic. ZS44A
+leaves their receive slots empty, and their unpackers return at once. The
+full-load cap is the torque map's own last column, with its altitude and
+intake-temperature scaling set to 1.0. No limit in the arbitration reads
+airflow, boost or baro. Verified from code unless marked inferred.
+
+The arbitration is the `0xFFFF1C74` row under "What limits first gear". It
+has two chains. `0x07B57C` produces `0xFFFF1C74`, the demand that the inverse
+torque map turns into a throttle area. `0x07B818` produces `0xFFFF1FC6`, a
+second demand (inferred: the fast, spark-side path). Both apply the same upper
+limits:
+
+| Limit | Who asks | On this truck |
+|---|---|---|
+| `0xFFFF3C36`, torque-down | The automatic's transmission unit, frames `0x253`/`0x255` | 0x7FFF, never asked (inferred from code) |
+| `0xFFFF37A2`, full-load cap | The ECM's torque map | The map's last column; scaling 1.0 |
+| `0xFFFF3C4A` | Rev limit, overheat, speed limiter (`0x0726DC`) | Live |
+| `0xFFFF3C6C` | VDC, frame `0x29E` | 0x7FFF; the request bit was never set |
+
+**Transmission torque-down, `0xFFFF3C36`:**
+
+1. The frame handlers `0x0CC434` (`0x253`) and `0x0CC770` (`0x255`), and
+   their timeouts `0x0CEA3E`/`0x0CEAE4`, write a request type
+   `0xFFFF40F2` and two torque values `0xFFFF452C`/`452E`.
+2. `0x079B4C` scales the values to `0xFFFF2CD4`/`2CD6` = raw × 5 − 4,000.
+   It turns the type into flags:
+   - type 5 sets `0xFFFF4797` bit 6, a ceiling;
+   - type 6 sets bit 7, a floor;
+   - type 7 sets `0xFFFF4796` bit 0, both at once, which holds the torque at
+     the value;
+   - type 3 sets bit 5, which enters neither limit.
+3. The snapshot pass `0x020EF2` copies `2C00`–`2CE7` to `2B18` and
+   `4791`–`4798` to `4789`. The values arrive as `2BEC`/`2BEE`, and the flags
+   as `478F` bits 6 and 7 and `478E` bit 0.
+4. `0x07A00C` copies those flags into `0xFFFF4800` bits 2, 3 and 4, unless
+   `0xFFFF47A7` bit 5 is set. It then writes:
+   - the ceiling `0xFFFF3C3E` = `2BEE`, or 0x7FFF unless bit 2 or 4 is set;
+   - the floor `0xFFFF3C42` = `2BEE`, or −0x8000 unless bit 3 or 4 is set;
+   - `3C3C`/`3C40`, the same pair from `2BEC`.
+5. `0x07A106` makes `3C36` = `3C3E`. While `0xFFFF479F` bit 1 is set, it
+   uses the shift torque `0xFFFF4764` from `0x07A718` instead. That function
+   compares the automatic's current and target gears, `0xFFFF2AEB` and
+   `2B75`. Those are snapshots of `0xFFFF2AF1` and `2C5D`, and only the
+   `0x255` unpacker and its timeout write them.
+
+On a manual all four unpackers return at once, because cal `0x8ADE` bit 7 is
+set (0x80 in ZS44A). The receive table has no slot for either frame. So
+`40F2` stays 0, `4800` bits 2–4 stay clear and `3C3E` is 0x7FFF. With both
+gear bytes 0, `0xFFFF4859` bit 6 is set, `0xFFFF370E` stays 0, and `479F` bit
+1 would need `0xFFFF4AE7`, which this path never sets. So `3C36` is 0x7FFF
+(inferred from code). A live read of `3C36`, `479F` and `4800` would confirm
+it.
+
+**Full-load cap, `0xFFFF37A2`** (`0x07BC58`):
+
+- `0xFFFF37A4` = the full-load torque at the current rpm + `0xFFFF3C44` −
+  0x8000. The full-load torque is column 0xFFFF of the `+0x260` torque map,
+  read through `0x026B14`.
+- `0xFFFF3C44` = `0xFFFF1AE8` + `0xFFFF1B8A` (`0x07BB3C`). It is inferred to
+  be friction plus accessory loss torque. The shift code uses its negative as
+  the torque at zero output.
+- `0xFFFF3934` = map `0xB374`, 8 × 8, by baro `0xFFFF4C30` and rpm.
+  `0xFFFF3B0A` = curve `0xECAA`, 16 points, by intake temperature
+  `0xFFFF2BD0`. `0xFFFF37A0` = their product >> 12.
+- `37A2` = (`37A4` × `37A0`) >> 12 − `3C44`, capped at 0x7FFF. The shift is
+  arithmetic (`0x0225BC`).
+
+So the cap scales indicated torque (net plus losses) by an altitude and
+intake-temperature factor, then takes the losses off again. In ZS44A every
+cell of `0xB374` and `0xECAA` is 4,096 (1.0), and their three axes are all
+zero. `37A2` is therefore exactly the torque at full air, and it cannot bind
+before full throttle. Altitude and intake temperature do not derate torque
+here. Whether the stock calibration fills those tables is unknown, because
+its image is encrypted.
+
+**VDC request, frame `0x29E`.** `bindings.yaml` attributes the frame to the
+ABS module. The ECM receives it in its receive table (below):
+
+- `0x0CCC3A` checks byte 7 = (sum of bytes 0–6 + 0xA0) mod 256. A mismatch
+  sets `0xFFFF4792` bit 2, and the frame's fields are not taken. The low two
+  bits of byte 6 are a rolling counter (`0xFFFF4298` + slot).
+- Byte 2 bit 4 is the request flag, `0xFFFF4794` bit 6 (snapshot `478C` bit
+  6). It is taken only while `0xFFFF4851` bits 1–4 are clear. Its only other
+  writer clears it when the bus is off (`0x0CB618`).
+- Byte 0 is the ceiling. `0x0C24E8` makes `0xFFFF3414` = byte 0 × 30 +
+  1,500 while the flag and `0xFFFF4785` bit 7 are set, and 0x7FFF otherwise.
+  In the torque-demand units (N·m × 10, inferred) that is 150 N·m plus
+  3 N·m per count. `0x0C252A` copies it to `0xFFFF1578`.
+- Byte 1 is the ramp. `0x0C254C` puts the lower of `0xFFFF2814` (the driver
+  demand after the limiters) and `1578` in `0xFFFF1CB8`, and moves
+  `0xFFFF1CBA` towards it by at most byte 1 × 2 per call. `0xFFFF1CB6` is
+  `1CBA` floored at curve `0xEF8A` + 154.
+- While the flag is set and `3414` < 10,000, `0x0C254C` writes `3C6C` =
+  `1CB6` and caps `0xFFFF1C76` at it. `0x07826C` caps the second chain's
+  input `0xFFFF1FC8` at it as well. Otherwise `3C6C` is 0x7FFF.
+- The shift-torque code treats `3C6C` < 10,000 as an inhibit (`0x07A718`).
+
+Checked on 329,698 stored `0x29E` frames from 26 sessions (2026-10-26 to
+11-12):
+
+- The checksum held on every frame.
+- Byte 2 bit 4 was never set, and byte 1 was always 0.
+- Byte 2 read 0 or 0xC0, and byte 3 read 0 or 0x40.
+- Byte 6's counter stepped by 1 on 99.9 % of consecutive frames.
+
+So VDC asked for no torque in any of those drives. That is expected unless a
+wheel slipped. Two `bindings.yaml` entries on this frame are wrong, and
+F01.14 corrects them. `BRAKE_ACTIVITY_29E_7` is the checksum, which moves with
+the brake because byte 3 moves. `BRAKE_PRESSURE_29E_3` is a single flag, bit
+6, not a pressure.
+
+**CAN receive table.** The table sits in ROM at `0x095F1`: 30 slots of 4
+bytes each (a flag, a byte, and the ID word = CAN ID << 5).
+
+- Slot i keeps its status at `0xFFFF4160` + 10i, a counter at `4161` + 10i
+  and its data at `4162` + 10i.
+- Flag 1 marks a receive slot. ZS44A receives `0x2A5`, `0x2D1`, `0x29E`,
+  `0x342`, `0x280`, `0x625`, `0x358` and `0x35D`.
+- Flag 3 marks a transmit slot: `0x23D`, `0x231`, `0x1F9`, `0x23E`, `0x551`,
+  `0x233`, `0x794` and `0x512`.
+- Flag 5 is empty: slots 5, 7, 8, 9, 12, 17, 18, 23, 24 and 25.
+- `0x0CB618` dispatches by ID word. It also has handlers for `0x251`,
+  `0x253`, `0x254`, `0x255`, `0x2A8`, `0x54C`, `0x5C5` and `0x611`, which
+  no slot of this calibration names.
+- `0x0CB480` advances each counter for flag 1 and 3 slots while
+  `0xFFFF4786` bit 7 and `4792` bit 4 are set. A counter above 0xFD sets
+  `0xFFFF4825` bit 4.
+
+**The limp cap's inputs** (`0x063D7C`; the cap itself is in "What else the
+output-shaft constant `0x91F8` moves"):
+
+- `0xFFFF2B46`/`2B47` are snapshots of `0xFFFF41B1`/`41BB` (via
+  `0x0CBBFE`). Those are the counters of slots 8 and 9.
+  - The `0x251` handler `0x0CC1E4` reads slot 8's data, `0xFFFF41B2`.
+  - The `0x253` and `0x255` handlers both read slot 9's data, `0xFFFF41BC`.
+  - So on an automatic these count time since the transmission frames last
+    arrived (inferred: one calibration names one of `0x253`/`0x255`).
+  - Both slots are empty in ZS44A, so the counters never advance.
+- `2B78`/`2B79` (from `2C60`/`2C61`) need cal `0x86DB` bit 7, which is clear
+  (0x04).
+- `2B4E`/`2B4F` (from `2C36`/`2C37`) need an automatic and cal `0x896E` bit 3.
+- `2B7A`'s source `2C62` has no writer.
+
+So the cap's CAN ids are the transmission's `0x251` and `0x253`/`0x255`, and
+the cap cannot fire on this calibration.
+
+**Answers.**
+
+- *What can close the throttle under boost without a code:* nothing in the
+  torque arbitration. No limit reads airflow, boost or baro. The full-load
+  cap is the NA torque map's last column, so it stays at full throttle
+  however much air arrives. The demand-to-area path is still the NA map,
+  which turns a given pedal into the same opening and more torque (inferred).
+  Not covered: whether a measured-air correction trims the target area off
+  idle. F01.10 traced only the idle-air correction.
+- *What VDC asks of the engine:* a torque ceiling (byte 0), approached at a
+  rate (byte 1), on the air path and the second chain, while byte 2 bit 4 is
+  set. It never asked in the stored drives.
+
+**Live reads still owed** (KOEO, then cruise): `0xFFFF3C36`, `479F` bit 1,
+`4800`, `0xFFFF4856` bit 3, `2B46`/`2B47` (expect 0), `3C6C` (expect
+0x7FFF), and `37A2` against the map's last column at the same rpm.
+
 ### Throttle area units: not settleable at the desk (F01.9, 2026-11-12)
 
 **Why the desk can't settle them.**
@@ -1898,8 +2067,8 @@ The application's vector base is VBR = `0x20004` (vector v at
   1,158 ± 10 with the 4.08 axles, 1,024 stock;
   `data/analyses/2026-11-12-ratio-estimate-and-full-pedal-lean.md`). During
   cruise, `0xFFFF2CA2`, `0xFFFF3B4A` and `0xFFFF475A` (the cruise torque
-  conversion). The fault-cap inputs `0xFFFF4856` bit 3, `0xFFFF2B46`/`2B47`,
-  and which messages `0xFFFF41B1`/`41BB` track. (The readers of `0x91F8` and
+  conversion). The fault-cap inputs `0xFFFF4856` bit 3 and `0xFFFF2B46`/`2B47`
+  (expect 0; the messages are identified, F01.13). (The readers of `0x91F8` and
   the state byte `0xFFFF2208` were traced on 2026-11-12, "What else the
   output-shaft constant `0x91F8` moves". The drive-torque stage whose speed
   word was owed here does not run on this calibration.)
