@@ -167,6 +167,40 @@ function computed(): DynoResponse {
       correction: "none",
       engine_estimate: "engine = wheel / eta (estimate)",
       wheel_torque_convention: "chassis-dyno",
+      squat_slope: "apparent squat: body pitch per g plus scale error",
+      road_load_air: {
+        density_ratio: 0.9875,
+        c_fit_n_per_mps2: 0.55,
+        c_applied_n_per_mps2: 0.543,
+        fit_baro_kpa: 81.2,
+        fit_ambient_temp_c: 22,
+        run_baro_kpa: 80.2,
+        run_ambient_temp_c: 22,
+        temperature_source: "ambient_temp_c",
+      },
+      road_load_mismatches: [
+        {
+          field: "payload_kg",
+          status: "differs",
+          run: 200,
+          road_load: 127,
+          detail: "the run's payload 200 kg differs from the 127 kg the road load was coasted at",
+        },
+        {
+          field: "tire_pressure_front_kpa",
+          status: "unstated",
+          run: null,
+          road_load: 240,
+          detail: "the run states no front tire pressure; whether they match is unchecked",
+        },
+      ],
+      speed_scale: {
+        residuals: [0.004, -0.013],
+        speed_scale_residual: -0.013,
+        power_band: 0.026169,
+        n_unchecked: 0,
+        meaning: "power carries it up to squared",
+      },
     },
     test_mass_kg: 2311,
     effective_mass_kg: 2495,
@@ -319,6 +353,16 @@ describe("DynoView", () => {
     expect(table).toHaveTextContent("ZS44A-20261004 · na · Hwy 7");
     expect(table).toHaveTextContent("inertia estimated");
     expect(table).toHaveTextContent("pitch offset 0.31°");
+    // M01.8 / M01.10: the road load's air, what the run left unstated, the speed scale.
+    expect(table).toHaveTextContent("road load C x0.988 (coasted at 81.2 kPa, run at 80.2 kPa)");
+    expect(table).toHaveTextContent("speed scale -1.3 % (power up to ±2.6 %)");
+    expect(table).toHaveTextContent("the run states no front tire pressure");
+    // A difference warns; an unstated condition is a quiet note, never a warning.
+    const differs = container.querySelector('[data-mismatch="differs"]');
+    const unstated = container.querySelector('[data-mismatch="unstated"]');
+    expect(differs).toHaveClass("text-warn");
+    expect(unstated).toHaveClass("text-fg-faint");
+    expect(unstated).not.toHaveClass("text-warn");
     expect(table).toHaveTextContent("same-day floor from 3 pull pairs");
     expect(screen.getByRole("button", { name: "Export CSV" })).toBeEnabled();
 

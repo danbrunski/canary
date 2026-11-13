@@ -480,7 +480,7 @@ them; absolute and "corrected" figures do not.
       `too_few_samples` reason and `no_distance` in the stored refusal
       kinds.
 
-- [ ] **M01.8 (Missing condition) Road load stores no air density.**
+- [~] **M01.8 (Missing condition) Road load stores no air density.**
   `RoadLoadConditions` holds road, date, sessions, payload, tire pressures and
   ambient temperature; its docstring names "air". `C` in `A + B·v + C·v²` is
   ½·ρ·Cd·A, and `compute_power` applies the stored `C` whatever the run's
@@ -488,14 +488,83 @@ them; absolute and "corrected" figures do not.
   drag by 62 N at 100 km/h (1.7 kW) and 121 N at 140 km/h (4.7 kW, about 4 %
   of fourth-gear wheel force); at 63 kPa, 81 N and 160 N. This truck's roads
   span exactly that range.
-  - [ ] `baro_kpa` becomes a required field of `RoadLoadConditions` (a
+  - [x] `baro_kpa` becomes a required field of `RoadLoadConditions` (a
     constraint, so a schema field, not a note); `compute_power` scales
     `C` by `ρ_run / ρ_fit`. Existing records need the session's measured baro
     backfilled; refuse a record without it rather than assume one.
-  - [ ] Also unenforced: that a run's mass, payload and tire pressures match
+    - `RoadLoadConditions.baro_kpa` (required, > 0); a `mode="before"`
+      validator refuses a missing or null value naming `baro_kpa` and M01.8,
+      so `load_dyno_profile` raises on an old record rather than assume one.
+      `RoadLoadCoefficients.in_air(baro, ambient)` returns the
+      `AirScaledRoadLoad` with `C × ρ_run/ρ_fit`, ideal-gas dry air
+      (`air_density_ratio`); `compute_power` applies it and carries it as
+      `road_load_air`. **Temperature: ambient on both sides**
+      (`ROAD_LOAD_TEMPERATURE_SOURCE`): drag acts on the air the body moves
+      through, and IAT reads engine-bay air at low flow (M01.9). A run always
+      has a baro (`RunConditions.baro_kpa` is required; the workbench already
+      refuses `inputs_missing` without `obd:BAROMETRIC_PRESSURE`). What has no
+      baro is an unrecorded `RoadLoadFit`: `compute_power` now refuses it
+      `inputs_missing`, naming `baro_kpa` and M01.8, and takes only a record.
+    - Known answer, `test_a_fit_at_80_kpa_applied_at_70_kpa_carries_no_extra_drag_m01_8`:
+      `C = ½·ρ(80 kPa, 25 °C)·1.376 m² = 0.643`; used unscaled at 70 kPa it
+      overstates drag by 62.0 N at 100 km/h (1.72 kW) and 121.6 N at
+      140 km/h (4.73 kW); `in_air(70, 25)` leaves 0 N (atol 1e-9) and
+      `density_ratio` = 70/80 to 1e-12.
+      `test_compute_power_moves_the_road_loads_c_into_the_runs_air`: the same
+      pulls at 70 vs 80 kPa differ in wheel force by `−C·(1−70/80)·v²` at
+      each rpm's speed (rtol 1e-3). The item's 63 kPa figures do not
+      reproduce with the same `C`: `C·v²·(1 − 63/80)` is 105.4 N at
+      100 km/h and 206.7 N at 140 km/h, not 81 / 160 N.
+    - Backfill: **none owed.** `grep -rn road_load data/` finds only
+      `data/nissan-xterra-2008/dyno.yaml` (`road_load: null`) and unrelated
+      `torque_plant_tq0.yaml` / `engine_sim_contract.yaml` names; no other
+      profile or platform has a `dyno.yaml`.
+      `test_a_stored_road_load_without_baro_is_refused_naming_the_field`
+      covers the model and `load_dyno_profile`.
+  - [x] Also unenforced: that a run's mass, payload and tire pressures match
     the road-load record it borrows. Name the mismatch in the result.
+    - `DynoPower.road_load_mismatches` (`road_load_mismatches()`): one
+      `RoadLoadMismatch` per field that `differs` (test mass, payload, front,
+      rear tire pressure), plus `unstated` for a tire pressure the run does
+      not give. `RunConditions` gained optional `tire_pressure_front_kpa` /
+      `tire_pressure_rear_kpa` (None = not stated) so old results still
+      read. Named, never refused.
+      `test_a_runs_mass_payload_and_tires_against_the_borrowed_road_load_are_named`
+      (empty when all match and are stated; both tires `unstated` by default;
+      +73 kg, payload 200 vs 127, front 220 vs 240 kPa each named).
+      The workbench request states no tire pressures yet, so every workbench
+      run lists both as `unstated`. The dashboard shows each `detail`:
+      `differs` in the warning color, `unstated` as a quiet note, never a
+      warning (`DynoView.test.tsx` asserts the classes).
+    - Golden (`tests/fixtures/dyno_golden.json`): no curve value moved, because
+      the test road load is coasted in the run's own air (density ratio exactly
+      1). Added: `baro_kpa: 80` on the road-load record, the stored profile and
+      the schema (M01.8); `road_load_air`, `road_load_mismatches` (both tires
+      `unstated`), `speed_scale` (unchecked) and `correction_range` on the
+      power cases (the `power_corrected` one: 79.0 kPa dry, extrapolated;
+      M01.8/9/10); two `None` tire fields in each power case's conditions.
+      Six cases that changed only by float noise (relative change ≤ 7e-13: the
+      altitude-noise, squat, grade and single-direction road-load cases) were
+      restored by hand.
+    - `RoadLoadConditions.baro_kpa` must lie within
+      `ROAD_LOAD_BARO_MIN_KPA`–`ROAD_LOAD_BARO_MAX_KPA` (45–110 kPa: the
+      standard atmosphere at 5,800 m is ~48 kPa; the sea-level record ~108.4).
+      Outside that range the value is refused as probably another unit (800 hPa, 11.6 psi).
+  - [ ] **Follow-up: the run's tire pressures are owed in the request.**
+    `DynoRequest`, `GET /analysis/dyno` and the dashboard form have no tire
+    fields, so every workbench run reports both pressures `unstated`. Add
+    `tire_pressure_front_kpa` / `tire_pressure_rear_kpa` to the request,
+    route, MCP tool and form, and pass them into `RunConditions`.
+  - [ ] **The inertia fit applies the road load unscaled too.**
+    `dyno_inertia.fit_engine_inertia` calls `road_load.force(v)`, which is
+    the record in the air it was fitted in, and takes no run conditions. In
+    the verifier's synthetic two-gear harness, a fit at 80 kPa used at
+    70 kPa moved `engine_kg_m2` by +38 % (+45 % at 82 kPa). This is the
+    verifier's measurement; I did not re-run it. No production caller exists
+    yet. Fix it before any H07.12 inertia fit: give it the run's conditions
+    and `RoadLoadCoefficients.in_air`, as `compute_power` does.
 
-- [ ] **M01.9 (Out of range) SAE J1349 is applied at 63–82 kPa.**
+- [~] **M01.9 (Out of range) SAE J1349 is applied at 63–82 kPa.**
   `dyno_power._j1349_factor` implements the right formula
   (`1.18·(99/p_dry)·√((T+273)/298) − 0.18`). The standard limits the test
   conditions to roughly 90–105 kPa dry and 15–35 °C (from memory of the
@@ -510,12 +579,36 @@ them; absolute and "corrected" figures do not.
   It is also applied to wheel power, though the 0.85 is engine friction.
   - Already right: the workbench compares uncorrected curves; the correction
     refuses forced induction and a vapor pressure that leaves no dry air.
-  - [ ] Every corrected curve carries a range flag ("extrapolated: N kPa is
+  - [~] Every corrected curve carries a range flag ("extrapolated: N kPa is
     outside J1349's range") and the temperature source it used. Decide
     whether a correction this far out is shown at all, or only the density
     ratio beside it.
+    - Done: `DynoPower.correction_range` (`J1349Range`), present exactly when
+      `corrected` is: `flag` ("extrapolated: 69.0 kPa dry is outside J1349's
+      range (90-105 kPa)", and the same for temperature outside 15-35 °C),
+      `in_range`, `temperature_source` (`J1349_TEMPERATURE_SOURCE`:
+      `intake_temp_c`, engine-bay air at low flow, kept because a WOT pull is
+      high flow), `density_ratio` (dry air against 99 kPa / 25 °C),
+      `applied_to` (`J1349_APPLIED_TO`: the 1.18/0.18 encode a 0.85 engine
+      mechanical efficiency, so applying it to wheel power scales driveline
+      loss too; math unchanged) and `range_source`.
+    - **The range is not verified.** The standard's text was not available;
+      `J1349_DRY_PRESSURE_RANGE_KPA = (90, 105)` and
+      `J1349_TEMPERATURE_RANGE_C = (15, 35)` are named constants whose comment
+      and `range_source` say they are this review's recollection, not a quote.
+    - Known answers, `test_j1349_at_this_trucks_altitudes_is_flagged_extrapolated`:
+      factor 1.262 / 1.513 / 1.704 at 82 / 70 / 63 kPa (25 °C, 1 kPa vapor;
+      abs 5e-4), each flagged `extrapolated`, density ratio (p−1)/99.
+      `test_j1349_range_flag_inside_and_on_temperature`: 99 kPa dry is
+      `within`; 45 °C intake at 100 kPa is flagged on temperature; no
+      correction gives no flag.
+    - **Remaining (operator decision):** whether a correction this far out is
+      shown at all, or only the density ratio beside it. Nothing displays a
+      corrected curve today: the workbench calls `compute_power` without a
+      correction, so the UI is unchanged. Recommendation: show only the
+      uncorrected curve with the density ratio, and keep the factor as data.
 
-- [ ] **M01.10 (Approximation) A speed-scale error enters power squared.**
+- [x] **M01.10 (Approximation) A speed-scale error enters power squared.**
   `P = F·v`, and both `a` and `v` scale with the speed ratio. The
   accelerometer term would not, except that `dyno_squat.fit_squat` regresses
   `asin((f − a)/g)` on `a/g`, so its slope also absorbs any speed-scale error
@@ -523,9 +616,45 @@ them; absolute and "corrected" figures do not.
   `SPEED_SCALE_TOLERANCE = 0.03` is described as a gross-error check and its
   comment notes that using 0x6F7's 0.9203 for 0x2D1 (0.932) "is a 1.3 % error
   and passes it". That is a 2.6 % power error; at the tolerance, 6.1 %.
-  - [ ] State the squared consequence beside the tolerance and in the result
+  - [x] State the squared consequence beside the tolerance and in the result
     (`speed_scale_residual`, and the power band it implies).
-  - [ ] Report the squat slope as *apparent*: it is not purely squat.
+    - The `SPEED_SCALE_TOLERANCE` comment states it (1.3 % passes and is up to
+      2.6 % of power; at the tolerance, up to **6.3 %**, not the 6.1 % above:
+      the check bounds `GPS / scaled` at 0.97, a speed 3.09 % fast, and
+      `1/0.97² − 1` = 6.28 %). `dyno_contract` holds
+      `speed_scale_power_band(r) = (1+|r|)² − 1` and
+      `SPEED_SCALE_POWER_MEANING`. The band is an upper bound: the IMU's `m·f`
+      term does not scale with speed. `GpsSpeedCheck` gained
+      `speed_scale_residual` = `1/ratio − 1` = **scaled / GPS − 1** (the sign
+      the `speed_scale_mismatch` refusal already prints) and `power_band`.
+      With that convention the band bounds `|(1+r)² − 1|` for either sign:
+      exact for `r ≥ 0`; for `r < 0` the error is `2|r| − r²` against the
+      band's `2|r| + r²`. (The first version defined `r = GPS / scaled − 1`,
+      where the same band understated a −3 % ratio: 6.09 % for a true 6.28 %;
+      caught by the verifier.) `PowerPull`
+      carries the window's residual (set in `dyno_pulls._resolve`), and
+      `DynoPower.speed_scale` (`SpeedScale`) reports the per-pull residuals,
+      the worst, its band, and `n_unchecked`, so an unchecked pull is named
+      rather than read as 0. Workbench `flags.speed_scale`; the dashboard
+      shows e.g. "speed scale +1.3 % (power up to ±2.6 %)" for the
+      borrowed-ratio case (scaled speed reads fast; a slow one shows negative).
+    - `test_the_speed_scale_residual_and_its_power_band_are_carried_into_the_result`
+      (−0.03 gives 0.0609; 0x6F7's ratio on 0x2D1, r = +0.0127, gives
+      0.02559 = (0.932/0.9203)² − 1 exactly; unchecked counted),
+      `test_the_power_band_bounds_the_squared_error_for_either_sign` (44 ratios
+      0.90–1.10: band ≥ |1/ratio² − 1|, equal for r ≥ 0, over by 2r² for
+      r < 0), `test_the_power_band_at_the_speed_scale_tolerance` (0.97 → 6.28 %
+      exact; 1.03 → 5.91 % bounding 5.74 %),
+      `test_the_producer_carries_its_gps_check_into_the_pull`,
+      `test_the_scale_check_is_a_gross_error_check_not_a_calibration` (the
+      producer's 1.3 % case: band ≈ 0.026), `test_dyno_pulls` asserts the
+      residual travels from the window to the pull.
+  - [x] Report the squat slope as *apparent*: it is not purely squat.
+    - `dyno_squat.SQUAT_SLOPE_MEANING` ("apparent squat: … 1.3 % of scale is
+      0.74 deg/g"), referenced from the `deg_per_g` field comments. The stored
+      key is unchanged, so existing records still read. The workbench's squat
+      prerequisite detail and each run's `flags.squat_slope` carry the label
+      (`test_dyno_workbench` asserts it).
 
 - [ ] **M01.11 (Question) Driven-wheel slip under full throttle is not
   bounded.** `decoded:VEHICLE_SPEED_2D1` is described in `data/bindings.yaml`

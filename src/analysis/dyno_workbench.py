@@ -50,6 +50,7 @@ from src.analysis.dyno_motion import Leg, estimate_pitch_offset
 from src.analysis.dyno_power import DynoPower, PowerCurve, PowerPull, compute_power
 from src.analysis.dyno_profile import DYNO_FILENAME, DynoProfile, load_dyno_profile
 from src.analysis.dyno_pulls import FoundPull, find_power_pulls, label_headings, session_reads
+from src.analysis.dyno_squat import SQUAT_SLOPE_MEANING
 from src.analysis.tuning_frame import WotCriterion
 from src.analysis.workbench import (
     BARO_SPEC,
@@ -243,7 +244,9 @@ def prerequisites(
             (
                 f"A {road_load.a_n:.1f} N, B {road_load.b_n_per_mps:.2f} N/(m/s), "
                 f"C {road_load.c_n_per_mps2:.3f} N/(m/s)^2 on {road_load.conditions.road!r} "
-                f"({road_load.conditions.date})"
+                f"({road_load.conditions.date}, {road_load.conditions.baro_kpa:.1f} kPa, "
+                f"{road_load.conditions.ambient_temp_c:.0f} C ambient; C is scaled to each "
+                "run's air)"
                 if road_load is not None
                 else "no coast-down pair recorded in dyno.yaml; nothing stands in for it"
             ),
@@ -258,7 +261,7 @@ def prerequisites(
             "recorded" if squat is not None else "pending",
             (
                 f"{squat.deg_per_g:.2f} deg/g on {squat.conditions.road!r} "
-                f"({squat.conditions.date})"
+                f"({squat.conditions.date}); {SQUAT_SLOPE_MEANING}"
                 if squat is not None
                 else "no flat-ground squat fit recorded; the pitch offset each run estimates "
                 "from its own pulls would absorb the squat, so no run is computed without it"
@@ -483,6 +486,20 @@ def _heading_spread(power: DynoPower) -> dict[str, Any] | None:
     }
 
 
+def _road_load_air(power: DynoPower) -> dict[str, Any]:
+    air = power.road_load_air
+    return {
+        "density_ratio": air.density_ratio,
+        "c_fit_n_per_mps2": air.c_fit_n_per_mps2,
+        "c_applied_n_per_mps2": air.c_n_per_mps2,
+        "fit_baro_kpa": air.fit_baro_kpa,
+        "fit_ambient_temp_c": air.fit_ambient_temp_c,
+        "run_baro_kpa": air.run_baro_kpa,
+        "run_ambient_temp_c": air.run_ambient_temp_c,
+        "temperature_source": air.temperature_source,
+    }
+
+
 def _power_dict(
     session: Path, power: DynoPower, profile: DynoProfile, pitch_source: str
 ) -> dict[str, Any]:
@@ -504,6 +521,25 @@ def _power_dict(
             "correction": power.correction,
             "engine_estimate": power.engine_estimate,
             "wheel_torque_convention": power.wheel_torque_convention,
+            "squat_slope": SQUAT_SLOPE_MEANING if power.squat_corrected else None,
+            "road_load_air": _road_load_air(power),
+            "road_load_mismatches": [
+                {
+                    "field": m.field,
+                    "status": m.status,
+                    "run": m.run,
+                    "road_load": m.road_load,
+                    "detail": m.detail,
+                }
+                for m in power.road_load_mismatches
+            ],
+            "speed_scale": {
+                "residuals": list(power.speed_scale.residuals),
+                "speed_scale_residual": power.speed_scale.speed_scale_residual,
+                "power_band": power.speed_scale.power_band,
+                "n_unchecked": power.speed_scale.n_unchecked,
+                "meaning": power.speed_scale.meaning,
+            },
         },
         "test_mass_kg": power.test_mass_kg,
         "effective_mass_kg": power.effective_mass_kg,

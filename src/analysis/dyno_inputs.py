@@ -64,6 +64,7 @@ from src.analysis.dyno_contract import (
     FloatArray,
     MotionSamples,
     MotionSources,
+    speed_scale_power_band,
 )
 from src.decode.bindings import Bindings
 from src.decode.engineering import is_decoded_column, physical_series, repo_bindings
@@ -116,6 +117,13 @@ GPS_MAX_GAP_S = 2.5
 #: from epoch to epoch, so this is a gross-error check (a stale ratio after a
 #: tire change, the wrong channel, a missing correction), not a calibration:
 #: using 0x6F7's 0.9203 for 0x2D1 (0.932) is a 1.3 % error and passes it.
+#: **Power carries a speed error squared** (M01.10, ``P = F·v`` with ``a`` and
+#: the squat slope scaling too; :func:`speed_scale_power_band`): that passing
+#: 1.3 % is up to 2.6 % of power, and a window at the tolerance up to 6.3 %
+#: (GPS / scaled = 0.97 is a speed 3.1 % fast, ``1/0.97² − 1``).
+#: Every :class:`GpsSpeedCheck` reports its ``speed_scale_residual`` and that
+#: band, and :func:`~src.analysis.dyno_power.compute_power` carries them into
+#: the result, so what passes is stated rather than read as zero.
 SPEED_SCALE_TOLERANCE = 0.03
 #: GPS is received late: the committee evidence shows 3-5 s behind the wheels
 #: on a launch. The check fits the lag over this range.
@@ -166,6 +174,18 @@ class GpsSpeedCheck:
     lag_s: float | None = None
     n_epochs: int = 0
     reason: str | None = None
+
+    @property
+    def speed_scale_residual(self) -> float | None:
+        """``scaled / GPS − 1`` (``1/ratio − 1``): positive when the scaled speed reads
+        fast, the sign the ``speed_scale_mismatch`` refusal prints; ``None`` unchecked."""
+        return None if self.ratio is None else 1.0 / self.ratio - 1.0
+
+    @property
+    def power_band(self) -> float | None:
+        """The power error the residual implies, at most (:data:`SPEED_SCALE_POWER_MEANING`)."""
+        residual = self.speed_scale_residual
+        return None if residual is None else speed_scale_power_band(residual)
 
 
 @dataclass(frozen=True)

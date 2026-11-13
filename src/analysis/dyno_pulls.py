@@ -232,7 +232,16 @@ def _resolve(
     gear = _gear(inputs, driveline)
     if isinstance(gear, DynoRefusal):
         return None, gear
-    return PowerPull(heading="unlabelled", gear=gear, samples=motion, demand=inputs.demand), None
+    return (
+        PowerPull(
+            heading="unlabelled",
+            gear=gear,
+            samples=motion,
+            demand=inputs.demand,
+            speed_scale_residual=inputs.gps_check.speed_scale_residual,
+        ),
+        None,
+    )
 
 
 def _gear(inputs: DynoInputs, driveline: Driveline) -> int | DynoRefusal:

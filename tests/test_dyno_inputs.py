@@ -294,6 +294,14 @@ def test_the_scale_check_is_a_gross_error_check_not_a_calibration() -> None:
     out = _built(_build(channels, imu, sources=borrowed))
     assert out.gps_check.ratio == pytest.approx(0.9203 / RATIO, abs=0.005)
     assert np.median(out.speed_mps / _v(out.t_s + 2.0)) == pytest.approx(RATIO / 0.9203, abs=1e-3)
+    # What passes is stated, squared into power (M01.10): the speed reads
+    # 1.3 % fast (scaled / GPS - 1, the refusal's sign), up to 2.6 % of power.
+    residual = out.gps_check.speed_scale_residual
+    assert residual is not None
+    assert residual == pytest.approx(RATIO / 0.9203 - 1.0, abs=0.005)
+    assert residual > 0
+    assert out.gps_check.power_band == pytest.approx((1.0 + abs(residual)) ** 2 - 1.0)
+    assert out.gps_check.power_band == pytest.approx(0.026, abs=0.01)
 
 
 # ---------------------------------------------------------------------------

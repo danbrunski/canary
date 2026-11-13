@@ -45,7 +45,7 @@ FLOOR_SAME_DAY_FIELDS: tuple[str, ...] = (*FLOOR_MATCH_FIELDS, "tune_revision", 
 
 
 class RunConditions(StrictModel):
-    """The conditions every dyno result carries (H07 rules). Required, all of them."""
+    """The conditions every dyno result carries (H07 rules). Required, all but the tires."""
 
     gear: int = Field(ge=1)
     #: ``pair`` is the average of both directions on one road; ``single`` is not.
@@ -59,6 +59,11 @@ class RunConditions(StrictModel):
     date: dt.date
     payload_kg: float = Field(ge=0.0)
     sessions: list[str] = Field(min_length=1)
+    #: The one optional pair: ``None`` is "not stated", and a power result
+    #: then names the road load's tire pressures as unchecked rather than
+    #: matched (M01.8).
+    tire_pressure_front_kpa: float | None = Field(default=None, gt=0.0)
+    tire_pressure_rear_kpa: float | None = Field(default=None, gt=0.0)
 
 
 @dataclass(frozen=True)

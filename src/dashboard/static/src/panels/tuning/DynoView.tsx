@@ -179,6 +179,22 @@ function peak(run: DynoRunOk, quantity: DynoQuantity): string {
   return at === null ? "—" : `${best.toFixed(1)} ${UNIT[quantity]} @ ${(at as number).toFixed(0)}`;
 }
 
+/** The road load's air scaling, mismatches and speed scale, one line (M01.8, M01.10). */
+export function roadLoadAndScaleSentence(flags: DynoRunOk["flags"]): string {
+  const air = flags.road_load_air;
+  const scale = flags.speed_scale;
+  const parts = [
+    `road load C x${air.density_ratio.toFixed(3)} (coasted at ${air.fit_baro_kpa.toFixed(1)} kPa, ` +
+      `run at ${air.run_baro_kpa.toFixed(1)} kPa)`,
+    scale.speed_scale_residual === null || scale.power_band === null
+      ? "speed scale unchecked"
+      : `speed scale ${(100 * scale.speed_scale_residual).toFixed(1)} % ` +
+        `(power up to ±${(100 * scale.power_band).toFixed(1)} %)` +
+        (scale.n_unchecked > 0 ? `, ${scale.n_unchecked} pull(s) unchecked` : ""),
+  ];
+  return parts.join(" · ");
+}
+
 function floorSentence(floor: DynoFloor): string {
   if (floor.available) {
     return `same-day floor from ${floor.n_pull_pairs} pull pairs (${floor.bands.length} bands, shaded)`;
@@ -444,7 +460,21 @@ export function DynoView({ token, choice }: { token: string; choice: SessionChoi
                         inertia {r.flags.inertia} · squat{" "}
                         {r.flags.squat_corrected ? "corrected" : "not corrected"} · pitch offset{" "}
                         {r.flags.imu_pitch_offset_deg.toFixed(2)}° (
-                        {r.flags.imu_pitch_offset_source})
+                        {r.flags.imu_pitch_offset_source}) · {roadLoadAndScaleSentence(r.flags)}
+                        {r.flags.road_load_mismatches.map((m) => (
+                          // "differs" is a finding; "unstated" is a gap the request cannot
+                          // yet fill (no tire fields), so it must not read as a warning.
+                          <span
+                            key={m.field}
+                            data-mismatch={m.status}
+                            className={cn(
+                              "block",
+                              m.status === "differs" ? "text-warn" : "text-fg-faint",
+                            )}
+                          >
+                            {m.detail}
+                          </span>
+                        ))}
                       </td>
                       <td>{floorSentence(r.uncertainty.noise_floor[quantity])}</td>
                     </tr>

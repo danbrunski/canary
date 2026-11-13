@@ -2348,6 +2348,10 @@
          [
           "ambient_temp_c",
           18.0
+         ],
+         [
+          "baro_kpa",
+          80.0
          ]
         ]
        }
@@ -4828,6 +4832,14 @@
           "synthetic"
          ]
         }
+       ],
+       [
+        "tire_pressure_front_kpa",
+        null
+       ],
+       [
+        "tire_pressure_rear_kpa",
+        null
        ]
       ]
      },
@@ -4845,7 +4857,54 @@
      "correction": "none",
      "correction_factor": 1.0,
      "corrected": null,
-     "correction_inputs": null
+     "correction_inputs": null,
+     "correction_range": null,
+     "road_load_air": {
+      "__dataclass__": "AirScaledRoadLoad",
+      "a_n": 182.2,
+      "b_n_per_mps": 5.0,
+      "c_n_per_mps2": 0.55,
+      "c_fit_n_per_mps2": 0.55,
+      "density_ratio": 1.0,
+      "fit_baro_kpa": 80.0,
+      "fit_ambient_temp_c": 22.0,
+      "run_baro_kpa": 80.0,
+      "run_ambient_temp_c": 22.0,
+      "temperature_source": "ambient_temp_c (the road load's own record and the run's conditions); not intake_temp_c, which reads engine-bay air at low flow on this truck"
+     },
+     "road_load_mismatches": {
+      "__tuple__": [
+       {
+        "__dataclass__": "RoadLoadMismatch",
+        "field": "tire_pressure_front_kpa",
+        "status": "unstated",
+        "run": null,
+        "road_load": 240.0,
+        "detail": "the run states no front tire pressure; the road load was coasted at 240 kPa, so whether they match is unchecked"
+       },
+       {
+        "__dataclass__": "RoadLoadMismatch",
+        "field": "tire_pressure_rear_kpa",
+        "status": "unstated",
+        "run": null,
+        "road_load": 240.0,
+        "detail": "the run states no rear tire pressure; the road load was coasted at 240 kPa, so whether they match is unchecked"
+       }
+      ]
+     },
+     "speed_scale": {
+      "__dataclass__": "SpeedScale",
+      "residuals": {
+       "__tuple__": [
+        null,
+        null
+       ]
+      },
+      "speed_scale_residual": null,
+      "power_band": null,
+      "n_unchecked": 2,
+      "meaning": "speed_scale_residual is scaled / GPS speed - 1 at the fitted lag; power carries it up to squared (P = F*v, and the acceleration and the squat slope fitted on it scale too): power_band = (1 + |r|)^2 - 1, about 2x the speed error and never below |(1 + r)^2 - 1|"
+     }
     }
    ],
    [
@@ -6128,6 +6187,14 @@
           "synthetic"
          ]
         }
+       ],
+       [
+        "tire_pressure_front_kpa",
+        null
+       ],
+       [
+        "tire_pressure_rear_kpa",
+        null
        ]
       ]
      },
@@ -6145,7 +6212,54 @@
      "correction": "none",
      "correction_factor": 1.0,
      "corrected": null,
-     "correction_inputs": null
+     "correction_inputs": null,
+     "correction_range": null,
+     "road_load_air": {
+      "__dataclass__": "AirScaledRoadLoad",
+      "a_n": 182.2,
+      "b_n_per_mps": 5.0,
+      "c_n_per_mps2": 0.55,
+      "c_fit_n_per_mps2": 0.55,
+      "density_ratio": 1.0,
+      "fit_baro_kpa": 80.0,
+      "fit_ambient_temp_c": 22.0,
+      "run_baro_kpa": 80.0,
+      "run_ambient_temp_c": 22.0,
+      "temperature_source": "ambient_temp_c (the road load's own record and the run's conditions); not intake_temp_c, which reads engine-bay air at low flow on this truck"
+     },
+     "road_load_mismatches": {
+      "__tuple__": [
+       {
+        "__dataclass__": "RoadLoadMismatch",
+        "field": "tire_pressure_front_kpa",
+        "status": "unstated",
+        "run": null,
+        "road_load": 240.0,
+        "detail": "the run states no front tire pressure; the road load was coasted at 240 kPa, so whether they match is unchecked"
+       },
+       {
+        "__dataclass__": "RoadLoadMismatch",
+        "field": "tire_pressure_rear_kpa",
+        "status": "unstated",
+        "run": null,
+        "road_load": 240.0,
+        "detail": "the run states no rear tire pressure; the road load was coasted at 240 kPa, so whether they match is unchecked"
+       }
+      ]
+     },
+     "speed_scale": {
+      "__dataclass__": "SpeedScale",
+      "residuals": {
+       "__tuple__": [
+        null,
+        null
+       ]
+      },
+      "speed_scale_residual": null,
+      "power_band": null,
+      "n_unchecked": 2,
+      "meaning": "speed_scale_residual is scaled / GPS speed - 1 at the fitted lag; power carries it up to squared (P = F*v, and the acceleration and the squat slope fitted on it scale too): power_band = (1 + |r|)^2 - 1, about 2x the speed error and never below |(1 + r)^2 - 1|"
+     }
     }
    ],
    [
@@ -7428,6 +7542,14 @@
           "synthetic"
          ]
         }
+       ],
+       [
+        "tire_pressure_front_kpa",
+        null
+       ],
+       [
+        "tire_pressure_rear_kpa",
+        null
        ]
       ]
      },
@@ -7861,6 +7983,63 @@
         "synthetic"
        ]
       ]
+     },
+     "correction_range": {
+      "__dataclass__": "J1349Range",
+      "dry_pressure_kpa": 79.0,
+      "temperature_c": 25.0,
+      "temperature_source": "intake_temp_c (the ECM's intake air temperature; reads engine-bay air at low flow on this truck, where the standard means inlet air)",
+      "in_range": false,
+      "flag": "extrapolated: 79.0 kPa dry is outside J1349's range (90-105 kPa)",
+      "density_ratio": 0.797979797979798,
+      "applied_to": "applied to wheel power and torque; the formula's 1.18 and 0.18 encode an engine mechanical efficiency of 0.85 (friction taken as independent of air density), so applying it at the wheels treats the driveline loss as density-dependent output too",
+      "range_source": "J1349 range as recalled in the M01 review (90-105 kPa dry, 15-35 C), not verified against the standard's text"
+     },
+     "road_load_air": {
+      "__dataclass__": "AirScaledRoadLoad",
+      "a_n": 182.2,
+      "b_n_per_mps": 5.0,
+      "c_n_per_mps2": 0.55,
+      "c_fit_n_per_mps2": 0.55,
+      "density_ratio": 1.0,
+      "fit_baro_kpa": 80.0,
+      "fit_ambient_temp_c": 22.0,
+      "run_baro_kpa": 80.0,
+      "run_ambient_temp_c": 22.0,
+      "temperature_source": "ambient_temp_c (the road load's own record and the run's conditions); not intake_temp_c, which reads engine-bay air at low flow on this truck"
+     },
+     "road_load_mismatches": {
+      "__tuple__": [
+       {
+        "__dataclass__": "RoadLoadMismatch",
+        "field": "tire_pressure_front_kpa",
+        "status": "unstated",
+        "run": null,
+        "road_load": 240.0,
+        "detail": "the run states no front tire pressure; the road load was coasted at 240 kPa, so whether they match is unchecked"
+       },
+       {
+        "__dataclass__": "RoadLoadMismatch",
+        "field": "tire_pressure_rear_kpa",
+        "status": "unstated",
+        "run": null,
+        "road_load": 240.0,
+        "detail": "the run states no rear tire pressure; the road load was coasted at 240 kPa, so whether they match is unchecked"
+       }
+      ]
+     },
+     "speed_scale": {
+      "__dataclass__": "SpeedScale",
+      "residuals": {
+       "__tuple__": [
+        null,
+        null
+       ]
+      },
+      "speed_scale_residual": null,
+      "power_band": null,
+      "n_unchecked": 2,
+      "meaning": "speed_scale_residual is scaled / GPS speed - 1 at the fitted lag; power carries it up to squared (P = F*v, and the acceleration and the squat slope fitted on it scale too): power_band = (1 + |r|)^2 - 1, about 2x the speed error and never below |(1 + r)^2 - 1|"
      }
     }
    ],
@@ -8736,6 +8915,14 @@
           "synthetic"
          ]
         }
+       ],
+       [
+        "tire_pressure_front_kpa",
+        null
+       ],
+       [
+        "tire_pressure_rear_kpa",
+        null
        ]
       ]
      },
@@ -8753,7 +8940,53 @@
      "correction": "none",
      "correction_factor": 1.0,
      "corrected": null,
-     "correction_inputs": null
+     "correction_inputs": null,
+     "correction_range": null,
+     "road_load_air": {
+      "__dataclass__": "AirScaledRoadLoad",
+      "a_n": 182.2,
+      "b_n_per_mps": 5.0,
+      "c_n_per_mps2": 0.55,
+      "c_fit_n_per_mps2": 0.55,
+      "density_ratio": 1.0,
+      "fit_baro_kpa": 80.0,
+      "fit_ambient_temp_c": 22.0,
+      "run_baro_kpa": 80.0,
+      "run_ambient_temp_c": 22.0,
+      "temperature_source": "ambient_temp_c (the road load's own record and the run's conditions); not intake_temp_c, which reads engine-bay air at low flow on this truck"
+     },
+     "road_load_mismatches": {
+      "__tuple__": [
+       {
+        "__dataclass__": "RoadLoadMismatch",
+        "field": "tire_pressure_front_kpa",
+        "status": "unstated",
+        "run": null,
+        "road_load": 240.0,
+        "detail": "the run states no front tire pressure; the road load was coasted at 240 kPa, so whether they match is unchecked"
+       },
+       {
+        "__dataclass__": "RoadLoadMismatch",
+        "field": "tire_pressure_rear_kpa",
+        "status": "unstated",
+        "run": null,
+        "road_load": 240.0,
+        "detail": "the run states no rear tire pressure; the road load was coasted at 240 kPa, so whether they match is unchecked"
+       }
+      ]
+     },
+     "speed_scale": {
+      "__dataclass__": "SpeedScale",
+      "residuals": {
+       "__tuple__": [
+        null
+       ]
+      },
+      "speed_scale_residual": null,
+      "power_band": null,
+      "n_unchecked": 1,
+      "meaning": "speed_scale_residual is scaled / GPS speed - 1 at the fitted lag; power carries it up to squared (P = F*v, and the acceleration and the squat slope fitted on it scale too): power_band = (1 + |r|)^2 - 1, about 2x the speed error and never below |(1 + r)^2 - 1|"
+     }
     }
    ],
    [
@@ -8945,6 +9178,14 @@
           "synthetic"
          ]
         }
+       ],
+       [
+        "tire_pressure_front_kpa",
+        null
+       ],
+       [
+        "tire_pressure_rear_kpa",
+        null
        ]
       ]
      }
@@ -9139,6 +9380,14 @@
           "synthetic"
          ]
         }
+       ],
+       [
+        "tire_pressure_front_kpa",
+        null
+       ],
+       [
+        "tire_pressure_rear_kpa",
+        null
        ]
       ]
      }
@@ -11003,6 +11252,14 @@
           "synthetic"
          ]
         }
+       ],
+       [
+        "tire_pressure_front_kpa",
+        null
+       ],
+       [
+        "tire_pressure_rear_kpa",
+        null
        ]
       ]
      },
@@ -11020,7 +11277,54 @@
      "correction": "none",
      "correction_factor": 1.0,
      "corrected": null,
-     "correction_inputs": null
+     "correction_inputs": null,
+     "correction_range": null,
+     "road_load_air": {
+      "__dataclass__": "AirScaledRoadLoad",
+      "a_n": 182.2,
+      "b_n_per_mps": 5.0,
+      "c_n_per_mps2": 0.55,
+      "c_fit_n_per_mps2": 0.55,
+      "density_ratio": 1.0,
+      "fit_baro_kpa": 80.0,
+      "fit_ambient_temp_c": 22.0,
+      "run_baro_kpa": 80.0,
+      "run_ambient_temp_c": 22.0,
+      "temperature_source": "ambient_temp_c (the road load's own record and the run's conditions); not intake_temp_c, which reads engine-bay air at low flow on this truck"
+     },
+     "road_load_mismatches": {
+      "__tuple__": [
+       {
+        "__dataclass__": "RoadLoadMismatch",
+        "field": "tire_pressure_front_kpa",
+        "status": "unstated",
+        "run": null,
+        "road_load": 240.0,
+        "detail": "the run states no front tire pressure; the road load was coasted at 240 kPa, so whether they match is unchecked"
+       },
+       {
+        "__dataclass__": "RoadLoadMismatch",
+        "field": "tire_pressure_rear_kpa",
+        "status": "unstated",
+        "run": null,
+        "road_load": 240.0,
+        "detail": "the run states no rear tire pressure; the road load was coasted at 240 kPa, so whether they match is unchecked"
+       }
+      ]
+     },
+     "speed_scale": {
+      "__dataclass__": "SpeedScale",
+      "residuals": {
+       "__tuple__": [
+        null,
+        null
+       ]
+      },
+      "speed_scale_residual": null,
+      "power_band": null,
+      "n_unchecked": 2,
+      "meaning": "speed_scale_residual is scaled / GPS speed - 1 at the fitted lag; power carries it up to squared (P = F*v, and the acceleration and the squat slope fitted on it scale too): power_band = (1 + |r|)^2 - 1, about 2x the speed error and never below |(1 + r)^2 - 1|"
+     }
     }
    ]
   ]
@@ -11063,7 +11367,7 @@
    "road_load": null,
    "noise_floors": []
   },
-  "full_profile_yaml": "schema_version: 1\nmotion_sources:\n  speed:\n  - channel: decoded:SPEED\n    ratio_to_gps: 0.932\n    evidence: measured\n  rpm:\n  - decoded:ECM_RPM\n  - obd:RPM\ninertia:\n  road_wheels: 4\n  wheel_shape_factor: 0.7\n  driveline_output_kg_m2: 1.0\n  engine_side_kg_m2: 0.25\n  evidence: synthetic estimate\n  measured_engine:\n    reflected_kg_m2: 0.153\n    reflected_kg_m2_se: 0.004\n    driveline_efficiency: 0.85\n    engine_kg_m2: 0.18\n    engine_kg_m2_se: 0.004705882352941177\n    gears:\n    - 2\n    - 3\n    rpm_min: 2600.0\n    rpm_max: 5400.0\n    n_bins: 28\n    imu_pitch_offset_deg: 0.3\n    imu_reference_id: frame-a\n    squat_corrected: true\n    assumption: 'engine inertia upstream of torque-proportional driveline losses:\n      wheel force = eta*N/r*(T - I_e*alpha); the two-gear fit measures eta*I_e (reflected_kg_m2)\n      and engine_kg_m2 = reflected_kg_m2 / driveline_efficiency; eta equal in both\n      gears'\n    conditions:\n      road: r\n      date: '2026-09-26'\n      sessions:\n      - s\n      payload_kg: 127.0\n      tune_revision: ZS44A-20260920\nsquat:\n  deg_per_g: 1.2\n  offset_deg: 0.0\n  residual_sd_deg: 0.1\n  n_samples: 500\n  accel_span_g: 0.5\n  grade: 0.0\n  max_segment_grade: 0.002\n  grade_leak_deg_per_g: 0.0\n  grade_leak_se_deg_per_g: 0.1\n  altitude_noise:\n  - white_var_m2: 1.0e-08\n    correlated_var_m2: 0.0\n    tau_s: 1.0\n    alpha: 1.0\n    reference_s: 60.0\n    n_reference: 600\n  conditions:\n    payload_kg: 127.0\n    tire_pressure_front_kpa: 240.0\n    tire_pressure_rear_kpa: 240.0\n    road: synthetic flat\n    date: '2026-09-26'\n    sessions:\n    - synthetic\nroad_load:\n  a_n: 182.2\n  b_n_per_mps: 5.0\n  c_n_per_mps2: 0.55\n  a_se_n: 1.5\n  b_se_n_per_mps: 0.2\n  c_se_n_per_mps2: 0.01\n  directions: pair\n  per_direction:\n    northbound:\n      a_n: 180.0\n      b_n_per_mps: 4.0\n      c_n_per_mps2: 0.54\n      a_se_n: 2.0\n      b_se_n_per_mps: 0.3\n      c_se_n_per_mps2: 0.02\n      residual_sd_n: 9.0\n      n_samples: 250\n      speed_min_mps: 5.5\n      speed_max_mps: 31.0\n      static_pitch_deg: 0.5\n  residual_sd_n: 9.0\n  test_mass_kg: 2311.0\n  neutral_effective_mass_kg: 2330.0\n  inertia: estimated\n  squat_corrected: true\n  imu_pitch_offset_deg: 0.3\n  imu_reference_id: frame-a\n  conditions:\n    road: synthetic flat\n    date: '2026-09-26'\n    sessions:\n    - synthetic\n    payload_kg: 127.0\n    tire_pressure_front_kpa: 240.0\n    tire_pressure_rear_kpa: 240.0\n    ambient_temp_c: 18.0\nnoise_floors:\n- quantity: wheel_power_kw\n  unit: kW\n  conditions:\n    gear: 3\n    road: flat straight\n    induction: na\n    tune_revision: ZS44A-20260920\n    date: '2026-09-27'\n    baro_kpa_range:\n    - 80.1\n    - 80.1\n    intake_temp_c_range:\n    - 25.0\n    - 25.0\n    ambient_temp_c_range:\n    - 18.0\n    - 18.0\n  n_pull_pairs: 3\n  bands:\n  - rpm_min: 2500.0\n    rpm_max: 3500.0\n    sd: 1.0\n    n_points: 20\n  - rpm_min: 3500.0\n    rpm_max: 4500.0\n    sd: 1.0\n    n_points: 20\n  - rpm_min: 4500.0\n    rpm_max: 5500.0\n    sd: 1.0\n    n_points: 20\n  note: ''\n",
+  "full_profile_yaml": "schema_version: 1\nmotion_sources:\n  speed:\n  - channel: decoded:SPEED\n    ratio_to_gps: 0.932\n    evidence: measured\n  rpm:\n  - decoded:ECM_RPM\n  - obd:RPM\ninertia:\n  road_wheels: 4\n  wheel_shape_factor: 0.7\n  driveline_output_kg_m2: 1.0\n  engine_side_kg_m2: 0.25\n  evidence: synthetic estimate\n  measured_engine:\n    reflected_kg_m2: 0.153\n    reflected_kg_m2_se: 0.004\n    driveline_efficiency: 0.85\n    engine_kg_m2: 0.18\n    engine_kg_m2_se: 0.004705882352941177\n    gears:\n    - 2\n    - 3\n    rpm_min: 2600.0\n    rpm_max: 5400.0\n    n_bins: 28\n    imu_pitch_offset_deg: 0.3\n    imu_reference_id: frame-a\n    squat_corrected: true\n    assumption: 'engine inertia upstream of torque-proportional driveline losses:\n      wheel force = eta*N/r*(T - I_e*alpha); the two-gear fit measures eta*I_e (reflected_kg_m2)\n      and engine_kg_m2 = reflected_kg_m2 / driveline_efficiency; eta equal in both\n      gears'\n    conditions:\n      road: r\n      date: '2026-09-26'\n      sessions:\n      - s\n      payload_kg: 127.0\n      tune_revision: ZS44A-20260920\nsquat:\n  deg_per_g: 1.2\n  offset_deg: 0.0\n  residual_sd_deg: 0.1\n  n_samples: 500\n  accel_span_g: 0.5\n  grade: 0.0\n  max_segment_grade: 0.002\n  grade_leak_deg_per_g: 0.0\n  grade_leak_se_deg_per_g: 0.1\n  altitude_noise:\n  - white_var_m2: 1.0e-08\n    correlated_var_m2: 0.0\n    tau_s: 1.0\n    alpha: 1.0\n    reference_s: 60.0\n    n_reference: 600\n  conditions:\n    payload_kg: 127.0\n    tire_pressure_front_kpa: 240.0\n    tire_pressure_rear_kpa: 240.0\n    road: synthetic flat\n    date: '2026-09-26'\n    sessions:\n    - synthetic\nroad_load:\n  a_n: 182.2\n  b_n_per_mps: 5.0\n  c_n_per_mps2: 0.55\n  a_se_n: 1.5\n  b_se_n_per_mps: 0.2\n  c_se_n_per_mps2: 0.01\n  directions: pair\n  per_direction:\n    northbound:\n      a_n: 180.0\n      b_n_per_mps: 4.0\n      c_n_per_mps2: 0.54\n      a_se_n: 2.0\n      b_se_n_per_mps: 0.3\n      c_se_n_per_mps2: 0.02\n      residual_sd_n: 9.0\n      n_samples: 250\n      speed_min_mps: 5.5\n      speed_max_mps: 31.0\n      static_pitch_deg: 0.5\n  residual_sd_n: 9.0\n  test_mass_kg: 2311.0\n  neutral_effective_mass_kg: 2330.0\n  inertia: estimated\n  squat_corrected: true\n  imu_pitch_offset_deg: 0.3\n  imu_reference_id: frame-a\n  conditions:\n    road: synthetic flat\n    date: '2026-09-26'\n    sessions:\n    - synthetic\n    payload_kg: 127.0\n    tire_pressure_front_kpa: 240.0\n    tire_pressure_rear_kpa: 240.0\n    ambient_temp_c: 18.0\n    baro_kpa: 80.0\nnoise_floors:\n- quantity: wheel_power_kw\n  unit: kW\n  conditions:\n    gear: 3\n    road: flat straight\n    induction: na\n    tune_revision: ZS44A-20260920\n    date: '2026-09-27'\n    baro_kpa_range:\n    - 80.1\n    - 80.1\n    intake_temp_c_range:\n    - 25.0\n    - 25.0\n    ambient_temp_c_range:\n    - 18.0\n    - 18.0\n  n_pull_pairs: 3\n  bands:\n  - rpm_min: 2500.0\n    rpm_max: 3500.0\n    sd: 1.0\n    n_points: 20\n  - rpm_min: 3500.0\n    rpm_max: 4500.0\n    sd: 1.0\n    n_points: 20\n  - rpm_min: 4500.0\n    rpm_max: 5500.0\n    sd: 1.0\n    n_points: 20\n  note: ''\n",
   "full_profile_reloaded": {
    "schema_version": 1,
    "motion_sources": {
@@ -11183,7 +11487,8 @@
      "payload_kg": 127.0,
      "tire_pressure_front_kpa": 240.0,
      "tire_pressure_rear_kpa": 240.0,
-     "ambient_temp_c": 18.0
+     "ambient_temp_c": 18.0,
+     "baro_kpa": 80.0
     }
    },
    "noise_floors": [
@@ -11865,7 +12170,7 @@
     },
     "RoadLoadConditions": {
      "additionalProperties": false,
-     "description": "What road load depends on: the road, load, tires and air (H07.5).",
+     "description": "What road load depends on: the road, load, tires and air (H07.5).\n\n``baro_kpa`` is required (M01.8): ``C`` is ``\u00bd\u00b7\u03c1\u00b7Cd\u00b7A``, so it belongs to\nthe air it was fitted in, and a power run at another barometer scales it\nby ``\u03c1_run / \u03c1_fit`` (:meth:`RoadLoadCoefficients.in_air`). This truck's\nroads span 63-82 kPa; a fit at 80 kPa used unscaled at 70 kPa overstates\naero drag by 62 N at 100 km/h. The coast-down sessions' measured\nbarometer (``obd:BAROMETRIC_PRESSURE`` median over the coasts) is what\ngoes here; a record without one is refused, never given a default.",
      "properties": {
       "road": {
        "minLength": 1,
@@ -11903,6 +12208,12 @@
       "ambient_temp_c": {
        "title": "Ambient Temp C",
        "type": "number"
+      },
+      "baro_kpa": {
+       "maximum": 110.0,
+       "minimum": 45.0,
+       "title": "Baro Kpa",
+       "type": "number"
       }
      },
      "required": [
@@ -11912,7 +12223,8 @@
       "payload_kg",
       "tire_pressure_front_kpa",
       "tire_pressure_rear_kpa",
-      "ambient_temp_c"
+      "ambient_temp_c",
+      "baro_kpa"
      ],
      "title": "RoadLoadConditions",
      "type": "object"

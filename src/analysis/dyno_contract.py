@@ -189,6 +189,36 @@ def lstsq(design: FloatArray, target: FloatArray) -> tuple[FloatArray, FloatArra
 #: The absolute speed reference (H07 rules: absolute speed comes from GPS).
 GPS_SPEED_CHANNEL = "gps:speed"
 
+#: What a speed-scale residual costs a power curve (M01.10). ``P = F·v``, and
+#: both ``v`` and the inertial term's ``a`` scale with the speed ratio; so does
+#: the squat slope, which is fitted on ``a`` and absorbs a scale error as
+#: "squat" (:data:`src.analysis.dyno_squat.SQUAT_SLOPE_MEANING`). With ``r``
+#: the scaled speed's error (``scaled / GPS − 1``), power reads up to
+#: ``(1 + r)²`` times the truth. The IMU's ``m·f`` term alone does not scale,
+#: so that is the bound, not the exact error.
+#:
+#: The band ``(1 + |r|)² − 1`` bounds ``|(1 + r)² − 1|`` for either sign: for
+#: ``r ≥ 0`` the two are equal; for ``r < 0`` the error is
+#: ``1 − (1 − |r|)² = 2|r| − r²``, below the band's ``2|r| + r²`` by ``2r²``.
+#: (``r`` is defined against the scaled speed on purpose: written as
+#: ``GPS / scaled − 1`` the same band understated a −3 % ratio: 6.09 % for a
+#: true 6.28 %.)
+SPEED_SCALE_POWER_MEANING = (
+    "speed_scale_residual is scaled / GPS speed - 1 at the fitted lag; power carries it up "
+    "to squared (P = F*v, and the acceleration and the squat slope fitted on it scale too): "
+    "power_band = (1 + |r|)^2 - 1, about 2x the speed error and never below |(1 + r)^2 - 1|"
+)
+
+
+def speed_scale_power_band(residual: float) -> float:
+    """The power error a speed-scale residual implies, at most: ``(1 + |r|)² − 1``.
+
+    ``residual`` is ``scaled / GPS − 1``. Exact for a speed that reads fast,
+    conservative by ``2r²`` for one that reads slow
+    (:data:`SPEED_SCALE_POWER_MEANING`).
+    """
+    return (1.0 + abs(residual)) ** 2 - 1.0
+
 
 class SpeedSource(StrictModel):
     """A speed channel the dyno may differentiate, with its measured scale (H07.3).

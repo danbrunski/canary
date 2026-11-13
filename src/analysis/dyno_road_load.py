@@ -15,10 +15,10 @@ import datetime as dt
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
 from src.analysis.dyno_contract import (
     MIN_SAMPLES,
@@ -37,9 +37,55 @@ from src.signals.committees import STANDARD_GRAVITY
 #: SAE J2263 coasts from 115 to 15 km/h.
 COAST_MIN_SPEED_SPAN_KPH = 30.0
 
+#: Celsius to kelvin, for the ideal-gas density ratio.
+KELVIN_OFFSET = 273.15
+
+#: Plausible barometric pressure for a road-load record, kPa. Above: the
+#: sea-level record high is ~108.4 kPa. Below: ~48 kPa is the standard
+#: atmosphere at 5,800 m, above the highest paved roads. Outside it the
+#: value is in another unit (hPa or mbar read ~10x; psi and inHg read low),
+#: and a C scaled by it would be off by that factor.
+ROAD_LOAD_BARO_MIN_KPA = 45.0
+ROAD_LOAD_BARO_MAX_KPA = 110.0
+
+#: Which temperature the air-density ratio uses, stated on every result that
+#: applies it (M01.8). Ambient, not the ECM's intake air temperature: aero
+#: drag acts on the air the body moves through, and on this truck the IAT
+#: sensor reads engine-bay air at low flow (M01.9), which a coast-down in
+#: neutral is.
+ROAD_LOAD_TEMPERATURE_SOURCE = (
+    "ambient_temp_c (the road load's own record and the run's conditions); not intake_temp_c, "
+    "which reads engine-bay air at low flow on this truck"
+)
+
+
+def air_density_ratio(
+    baro_kpa: float, ambient_temp_c: float, *, ref_baro_kpa: float, ref_ambient_temp_c: float
+) -> float:
+    """``ρ / ρ_ref`` for dry air by the ideal-gas law: ``(p / p_ref)·(T_ref / T)``.
+
+    Humidity is in neither side: nothing on the truck measures it. Moist air
+    is lighter than dry air at the same pressure and temperature by
+    ``0.378·e/p``: about 1.5 % at 70 kPa, 35 °C and 50 % RH, less when cooler
+    or drier. Both sides carry the same omission, so the ratio errs only by
+    the humidity *difference* between the coast-down and the run.
+    """
+    return (baro_kpa / ref_baro_kpa) * (
+        (ref_ambient_temp_c + KELVIN_OFFSET) / (ambient_temp_c + KELVIN_OFFSET)
+    )
+
 
 class RoadLoadConditions(StrictModel):
-    """What road load depends on: the road, load, tires and air (H07.5)."""
+    """What road load depends on: the road, load, tires and air (H07.5).
+
+    ``baro_kpa`` is required (M01.8): ``C`` is ``½·ρ·Cd·A``, so it belongs to
+    the air it was fitted in, and a power run at another barometer scales it
+    by ``ρ_run / ρ_fit`` (:meth:`RoadLoadCoefficients.in_air`). This truck's
+    roads span 63-82 kPa; a fit at 80 kPa used unscaled at 70 kPa overstates
+    aero drag by 62 N at 100 km/h. The coast-down sessions' measured
+    barometer (``obd:BAROMETRIC_PRESSURE`` median over the coasts) is what
+    goes here; a record without one is refused, never given a default.
+    """
 
     road: str = Field(min_length=1)
     date: dt.date
@@ -48,6 +94,58 @@ class RoadLoadConditions(StrictModel):
     tire_pressure_front_kpa: float = Field(gt=0.0)
     tire_pressure_rear_kpa: float = Field(gt=0.0)
     ambient_temp_c: float
+    #: Bounds checked by :meth:`_baro_is_plausible` (so the refusal can name the
+    #: likely unit) and stated in the schema.
+    baro_kpa: float = Field(
+        json_schema_extra={"minimum": ROAD_LOAD_BARO_MIN_KPA, "maximum": ROAD_LOAD_BARO_MAX_KPA}
+    )
+
+    @field_validator("baro_kpa")
+    @classmethod
+    def _baro_is_plausible(cls, value: float) -> float:
+        if not ROAD_LOAD_BARO_MIN_KPA <= value <= ROAD_LOAD_BARO_MAX_KPA:
+            raise ValueError(
+                f"baro_kpa {value:g} is outside {ROAD_LOAD_BARO_MIN_KPA:g}-"
+                f"{ROAD_LOAD_BARO_MAX_KPA:g} kPa (sea level to the highest roads): a value in "
+                "hPa, mbar, psi or inHg? Record kPa"
+            )
+        return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def _baro_is_stated(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("baro_kpa") is None:
+            raise ValueError(
+                "road_load conditions carry no baro_kpa: C is 1/2*rho*Cd*A and means "
+                "nothing without the air density it was fitted in (M01.8). Record the "
+                "coast-down sessions' measured barometric pressure; none is assumed"
+            )
+        return data
+
+
+@dataclass(frozen=True)
+class AirScaledRoadLoad:
+    """A stored road load moved into a run's air: ``C`` times ``ρ_run / ρ_fit`` (M01.8).
+
+    ``A`` (rolling resistance) and ``B`` do not depend on the air and are
+    applied as stored.
+    """
+
+    a_n: float
+    b_n_per_mps: float
+    #: The stored ``C`` times :attr:`density_ratio`.
+    c_n_per_mps2: float
+    c_fit_n_per_mps2: float
+    density_ratio: float
+    fit_baro_kpa: float
+    fit_ambient_temp_c: float
+    run_baro_kpa: float
+    run_ambient_temp_c: float
+    temperature_source: str
+
+    def force(self, speed_mps: FloatArray) -> FloatArray:
+        v = np.asarray(speed_mps, dtype=np.float64)
+        return self.a_n + self.b_n_per_mps * v + self.c_n_per_mps2 * v**2
 
 
 class DirectionFit(StrictModel):
@@ -98,8 +196,30 @@ class RoadLoadCoefficients(StrictModel):
     conditions: RoadLoadConditions
 
     def force(self, speed_mps: FloatArray) -> FloatArray:
+        """Road load in the air it was *fitted* in; a run elsewhere uses :meth:`in_air`."""
         v = np.asarray(speed_mps, dtype=np.float64)
         return self.a_n + self.b_n_per_mps * v + self.c_n_per_mps2 * v**2
+
+    def in_air(self, baro_kpa: float, ambient_temp_c: float) -> AirScaledRoadLoad:
+        """This road load at a run's barometer and ambient temperature (M01.8)."""
+        ratio = air_density_ratio(
+            baro_kpa,
+            ambient_temp_c,
+            ref_baro_kpa=self.conditions.baro_kpa,
+            ref_ambient_temp_c=self.conditions.ambient_temp_c,
+        )
+        return AirScaledRoadLoad(
+            a_n=self.a_n,
+            b_n_per_mps=self.b_n_per_mps,
+            c_n_per_mps2=self.c_n_per_mps2 * ratio,
+            c_fit_n_per_mps2=self.c_n_per_mps2,
+            density_ratio=ratio,
+            fit_baro_kpa=self.conditions.baro_kpa,
+            fit_ambient_temp_c=self.conditions.ambient_temp_c,
+            run_baro_kpa=baro_kpa,
+            run_ambient_temp_c=ambient_temp_c,
+            temperature_source=ROAD_LOAD_TEMPERATURE_SOURCE,
+        )
 
 
 @dataclass(frozen=True)

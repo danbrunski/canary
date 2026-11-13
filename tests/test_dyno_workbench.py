@@ -142,6 +142,7 @@ def _profile(tmp: Path, *, measured: bool) -> Path:
                 "tire_pressure_front_kpa": 234.0,
                 "tire_pressure_rear_kpa": 234.0,
                 "ambient_temp_c": 22.0,
+                "baro_kpa": 80.0,
             },
         }
         data["squat"] = {
@@ -335,6 +336,21 @@ def test_recorded_coefficients_give_a_curve_with_conditions_flags_and_uncertaint
     # The offset is estimated from the pulls themselves, on a graded road
     # whose two legs cover different stretches: near, not equal to, 0.3 deg.
     assert abs(flags["imu_pitch_offset_deg"] - MOUNT_OFFSET_DEG) < 0.1
+    # M01.8: the road load's C moved into the run's air (80 kPa both, ambient
+    # 22 C coasted against 21 C run), and what the run did not state is named.
+    air = flags["road_load_air"]
+    assert air["fit_baro_kpa"] == 80.0 and air["run_baro_kpa"] == 80.0
+    assert air["density_ratio"] == pytest.approx(295.15 / 294.15)
+    assert air["c_applied_n_per_mps2"] == pytest.approx(C * 295.15 / 294.15)
+    assert "ambient_temp_c" in air["temperature_source"]
+    assert [(m["field"], m["status"]) for m in flags["road_load_mismatches"]] == [
+        ("tire_pressure_front_kpa", "unstated"),
+        ("tire_pressure_rear_kpa", "unstated"),
+    ]
+    # M01.10: the GPS check of each pull, and the power band it implies.
+    scale = flags["speed_scale"]
+    assert len(scale["residuals"]) == 2 and "squared" in scale["meaning"]
+    assert flags["squat_slope"].startswith("apparent squat")
     rpm = pd.Series(run["curve"]["rpm"])
     estimate = pd.Series(run["curve"]["engine_torque_nm_estimate"])
     error = (estimate / torque(rpm.to_numpy()) - 1.0).abs()

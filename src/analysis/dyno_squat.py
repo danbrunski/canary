@@ -77,6 +77,18 @@ SQUAT_GRADE_LEAK_SIGMA = 3.0
 #: slope is set by noise; the H07.12 protocol spans ~0.3 g of pull to braking.
 SQUAT_MIN_ACCEL_SPAN_G = 0.10
 
+#: What ``deg_per_g`` is (M01.10): an *apparent* slope. The fit regresses
+#: ``asin((f − a)/g)`` on ``a/g``, so besides body pitch it absorbs any scale
+#: error between the speed (``a`` is its derivative) and the IMU: a 1.3 %
+#: speed-scale or IMU-scale error is 0.74 deg/g. Removing it with the stored
+#: slope removes that error with the squat, which is why the speed scale
+#: reaches power squared. The stored key stays ``deg_per_g`` so existing
+#: ``dyno.yaml`` records read; this label goes beside it wherever it is shown.
+SQUAT_SLOPE_MEANING = (
+    "apparent squat: body pitch per g plus whatever speed-scale and IMU-scale error the "
+    "regression of asin((f - a)/g) on a/g absorbs (1.3 % of scale is 0.74 deg/g)"
+)
+
 
 class SquatConditions(StrictModel):
     """What the squat coefficient depends on: load and tires (H07.4)."""
@@ -92,7 +104,8 @@ class SquatConditions(StrictModel):
 class SquatCoefficient(StrictModel):
     """Body pitch per g of acceleration, as stored in ``dyno.yaml``."""
 
-    #: Nose-up pitch, degrees per g of acceleration.
+    #: Nose-up pitch, degrees per g of acceleration: *apparent*, not purely
+    #: squat (:data:`SQUAT_SLOPE_MEANING`, M01.10).
     deg_per_g: float
     #: Pitch at zero acceleration on the fitted stretch: that session's IMU
     #: pitch offset plus the stretch's grade. Provenance only — never applied
@@ -118,6 +131,7 @@ class SquatCoefficient(StrictModel):
 
 @dataclass(frozen=True)
 class SquatFit:
+    #: Apparent, not purely squat (:data:`SQUAT_SLOPE_MEANING`).
     deg_per_g: float
     deg_per_g_se: float
     offset_deg: float

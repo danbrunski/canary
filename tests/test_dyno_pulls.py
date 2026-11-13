@@ -86,6 +86,7 @@ def _inputs_in_gear(gear: int, *, motion: Any = None) -> Any:
         speed_mps=speed,
         demand=np.full(120, 99.0),
         motion=lambda: samples if motion is None else motion,
+        gps_check=SimpleNamespace(speed_scale_residual=0.004),
     )
 
 
@@ -113,6 +114,8 @@ def test_each_rpm_rise_becomes_a_pull_in_its_gear_with_its_course(
 
     assert [f.refusal for f in found] == [None, None]
     assert [f.pull.gear for f in found if f.pull is not None] == [3, 3]
+    # The window's GPS speed check travels with the pull into the power result (M01.10).
+    assert [f.pull.speed_scale_residual for f in found if f.pull is not None] == [0.004, 0.004]
     assert [round(f.course_deg or 0) for f in found] == [10, 190]
     for item, offset in zip(found, (0.0, 60.0), strict=True):
         # The window brackets the rise (10-16 s into each pull's trace).

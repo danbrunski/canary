@@ -146,6 +146,7 @@ def _road_conditions() -> RoadLoadConditions:
         tire_pressure_front_kpa=240.0,
         tire_pressure_rear_kpa=240.0,
         ambient_temp_c=18.0,
+        baro_kpa=80.0,
     )
 
 
@@ -453,7 +454,7 @@ def _power_cases() -> dict[str, Any]:
     out["power_none"] = tp._power([])
     out["power_conditions_gear"] = tp._power(quiet, conditions=tp._conditions(gear=2))
     out["power_single_road_load"] = tp._power(
-        quiet, road_load=dataclasses.replace(tp._pair_road_load(), directions="single")
+        quiet, road_load=tp._pair_road_load().model_copy(update={"directions": "single"})
     )
     out["power_boosted_correction"] = tp._power(
         quiet,

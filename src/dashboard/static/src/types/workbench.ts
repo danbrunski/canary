@@ -600,6 +600,39 @@ export interface DynoRunConditions {
   date: string;
   payload_kg: number;
   sessions: string[];
+  /** Not stated: the road load's tire pressures are then named as unchecked (M01.8). */
+  tire_pressure_front_kpa?: number | null;
+  tire_pressure_rear_kpa?: number | null;
+}
+
+/** The road load's C moved into the run's air: rho_run / rho_fit (M01.8). */
+export interface DynoRoadLoadAir {
+  density_ratio: number;
+  c_fit_n_per_mps2: number;
+  c_applied_n_per_mps2: number;
+  fit_baro_kpa: number;
+  fit_ambient_temp_c: number;
+  run_baro_kpa: number;
+  run_ambient_temp_c: number;
+  temperature_source: string;
+}
+
+/** A run condition that differs from the borrowed road load's, or is unstated (M01.8). */
+export interface DynoRoadLoadMismatch {
+  field: string;
+  status: "differs" | "unstated";
+  run: number | null;
+  road_load: number;
+  detail: string;
+}
+
+/** The pulls' GPS speed-scale residual and the power band it implies (M01.10). */
+export interface DynoSpeedScale {
+  residuals: Array<number | null>;
+  speed_scale_residual: number | null;
+  power_band: number | null;
+  n_unchecked: number;
+  meaning: string;
 }
 
 export interface DynoFloorBand {
@@ -637,6 +670,11 @@ export interface DynoRunOk {
     correction: "none" | "sae_j1349";
     engine_estimate: string;
     wheel_torque_convention: string;
+    /** "apparent squat: ..." when a squat slope was removed (M01.10). */
+    squat_slope: string | null;
+    road_load_air: DynoRoadLoadAir;
+    road_load_mismatches: DynoRoadLoadMismatch[];
+    speed_scale: DynoSpeedScale;
   };
   test_mass_kg: number;
   effective_mass_kg: number;

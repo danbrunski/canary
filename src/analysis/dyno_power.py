@@ -30,6 +30,7 @@ from src.analysis.dyno_comparison import (
 )
 from src.analysis.dyno_contract import (
     MIN_SAMPLES,
+    SPEED_SCALE_POWER_MEANING,
     DynoRefusal,
     FloatArray,
     MotionSamples,
@@ -37,10 +38,15 @@ from src.analysis.dyno_contract import (
     SquatLike,
     StrictModel,
     as_float_array,
+    speed_scale_power_band,
 )
 from src.analysis.dyno_driveline import Driveline, InertiaFlag
 from src.analysis.dyno_motion import PitchOffset, frame_mismatch, remove_sensor_tilt
-from src.analysis.dyno_road_load import RoadLoadCoefficients, RoadLoadFit
+from src.analysis.dyno_road_load import (
+    KELVIN_OFFSET,
+    AirScaledRoadLoad,
+    RoadLoadCoefficients,
+)
 from src.signals.committees import STANDARD_GRAVITY
 
 #: A pull's engine speed must stay within this fraction of what the stated
@@ -91,6 +97,41 @@ ENGINE_ESTIMATE_LABEL = (
 #: power and a torque curve share the rpm axis.
 WHEEL_TORQUE_CONVENTION = "wheel power / engine angular speed (chassis-dyno convention)"
 
+#: SAE J1349's reference: 99 kPa dry-air pressure, 25 °C inlet air.
+J1349_REFERENCE_DRY_KPA = 99.0
+J1349_REFERENCE_TEMP_C = 25.0
+
+#: The range of test conditions SAE J1349 is stated to cover, used to flag a
+#: correction as extrapolated (M01.9). **Not verified against the standard's
+#: text**: these are the M01 review's figures (2026-11-12), given there "from
+#: memory of the standard; check the text before quoting it", and the text was
+#: not available when this was written. They are named constants, not a quote;
+#: correct them here if the text says otherwise. Every operating point this
+#: truck has (63-82 kPa) lies below the lower bound either way.
+J1349_DRY_PRESSURE_RANGE_KPA = (90.0, 105.0)
+J1349_TEMPERATURE_RANGE_C = (15.0, 35.0)
+J1349_RANGE_SOURCE = (
+    "J1349 range as recalled in the M01 review (90-105 kPa dry, 15-35 C), not verified "
+    "against the standard's text"
+)
+
+#: Which temperature the J1349 factor is fed, stated on every corrected curve.
+#: The standard means the air at the engine's inlet; the run's
+#: ``intake_temp_c`` is the ECM's IAT, which on this truck reads engine-bay
+#: air at low flow (warm: +10 °C is +1.9 % on the factor). A WOT pull is high
+#: flow, where IAT is nearest inlet air, so it is kept; the source is said.
+J1349_TEMPERATURE_SOURCE = (
+    "intake_temp_c (the ECM's intake air temperature; reads engine-bay air at low flow on "
+    "this truck, where the standard means inlet air)"
+)
+
+#: What the J1349 factor is applied to, and what that assumes (M01.9).
+J1349_APPLIED_TO = (
+    "applied to wheel power and torque; the formula's 1.18 and 0.18 encode an engine "
+    "mechanical efficiency of 0.85 (friction taken as independent of air density), so "
+    "applying it at the wheels treats the driveline loss as density-dependent output too"
+)
+
 
 class _WotLike(Protocol):
     """The two fields of :class:`src.analysis.tuning_frame.WotCriterion` used here."""
@@ -115,6 +156,9 @@ class PowerPull:
     gear: int
     samples: MotionSamples
     demand: FloatArray | None
+    #: The window's GPS speed check, ``scaled / GPS − 1`` (M01.10); ``None``
+    #: when it was not checked, which the result names rather than reads as 0.
+    speed_scale_residual: float | None = None
 
     def __post_init__(self) -> None:
         if self.demand is not None:
@@ -133,11 +177,59 @@ class J1349Correction(StrictModel):
     pressure (the run's ``baro_kpa`` less the water-vapour pressure) and ``T``
     the run's ``intake_temp_c``. Nothing on the truck measures humidity, so the
     vapour pressure is stated, with where it came from. Defined for NA engines:
-    a boosted run is refused.
+    a boosted run is refused. Outside the standard's range the factor is still
+    computed, and the result says so (:class:`J1349Range`, M01.9).
     """
 
     vapour_pressure_kpa: float = Field(ge=0.0)
     vapour_pressure_source: str = Field(min_length=1)
+
+
+@dataclass(frozen=True)
+class J1349Range:
+    """Where a J1349 correction sits against the standard's range (M01.9).
+
+    At this truck's 63-82 kPa the factor is 1.26-1.70 and its assumed inputs
+    (mechanical efficiency, vapour pressure, which temperature) move it about
+    ±4-5 %, so a corrected curve always carries this beside it.
+    """
+
+    dry_pressure_kpa: float
+    temperature_c: float
+    temperature_source: str
+    in_range: bool
+    #: ``within ...`` or ``extrapolated: N kPa is outside J1349's range ...``.
+    flag: str
+    #: Dry-air density over J1349's reference (99 kPa, 25 °C), ideal gas: the
+    #: plain physical ratio, for showing beside (or instead of) the factor.
+    density_ratio: float
+    applied_to: str
+    range_source: str
+
+
+@dataclass(frozen=True)
+class RoadLoadMismatch:
+    """A run condition that differs from the road load it borrows, or is unstated (M01.8)."""
+
+    field: str
+    status: Literal["differs", "unstated"]
+    run: float | None
+    road_load: float
+    detail: str
+
+
+@dataclass(frozen=True)
+class SpeedScale:
+    """The pulls' GPS speed-scale residuals and the power band they imply (M01.10)."""
+
+    #: Per pull, in the order given: ``scaled / GPS − 1``, ``None`` unchecked.
+    residuals: tuple[float | None, ...]
+    #: The checked residual furthest from zero (signed); ``None`` if none was checked.
+    speed_scale_residual: float | None
+    #: ``(1 + |r|)² − 1`` for that residual: the power error it implies, at most.
+    power_band: float | None
+    n_unchecked: int
+    meaning: str = SPEED_SCALE_POWER_MEANING
 
 
 @dataclass(frozen=True)
@@ -190,6 +282,15 @@ class DynoPower:
     correction_factor: float
     corrected: PowerCurve | None
     correction_inputs: J1349Correction | None
+    #: Present exactly when :attr:`corrected` is: the range flag, temperature
+    #: source and density ratio every corrected curve carries (M01.9).
+    correction_range: J1349Range | None
+    #: The road load as applied: ``C`` moved into this run's air (M01.8).
+    road_load_air: AirScaledRoadLoad
+    #: Run conditions that differ from the road load's, or are unstated; empty
+    #: when mass, payload and both tire pressures all match (M01.8).
+    road_load_mismatches: tuple[RoadLoadMismatch, ...]
+    speed_scale: SpeedScale
 
     def dyno_curve(self, quantity: Quantity) -> DynoCurve:
         """The uncorrected curve, for :func:`record_dyno_floor` / :func:`compare_runs`.
@@ -235,6 +336,126 @@ def _j1349_factor(correction: J1349Correction, conditions: RunConditions) -> flo
             f"{conditions.baro_kpa} kPa",
         )
     return 1.18 * (99.0 / dry) * math.sqrt((conditions.intake_temp_c + 273.0) / 298.0) - 0.18
+
+
+def _j1349_range(correction: J1349Correction, conditions: RunConditions) -> J1349Range:
+    """The range flag for a factor :func:`_j1349_factor` has already accepted."""
+    dry = conditions.baro_kpa - correction.vapour_pressure_kpa
+    temp = conditions.intake_temp_c
+    p_lo, p_hi = J1349_DRY_PRESSURE_RANGE_KPA
+    t_lo, t_hi = J1349_TEMPERATURE_RANGE_C
+    outside: list[str] = []
+    if not p_lo <= dry <= p_hi:
+        outside.append(f"{dry:.1f} kPa dry is outside J1349's range ({p_lo:g}-{p_hi:g} kPa)")
+    if not t_lo <= temp <= t_hi:
+        outside.append(f"{temp:.1f} C intake air is outside J1349's range ({t_lo:g}-{t_hi:g} C)")
+    flag = (
+        "extrapolated: " + "; ".join(outside)
+        if outside
+        else f"within J1349's range ({dry:.1f} kPa dry, {temp:.1f} C)"
+    )
+    density = (dry / J1349_REFERENCE_DRY_KPA) * (
+        (J1349_REFERENCE_TEMP_C + KELVIN_OFFSET) / (temp + KELVIN_OFFSET)
+    )
+    return J1349Range(
+        dry_pressure_kpa=dry,
+        temperature_c=temp,
+        temperature_source=J1349_TEMPERATURE_SOURCE,
+        in_range=not outside,
+        flag=flag,
+        density_ratio=density,
+        applied_to=J1349_APPLIED_TO,
+        range_source=J1349_RANGE_SOURCE,
+    )
+
+
+def _differs(run: float, stored: float) -> bool:
+    return abs(run - stored) > 1e-6 * max(1.0, abs(stored))
+
+
+def road_load_mismatches(
+    road_load: RoadLoadCoefficients, *, test_mass_kg: float, conditions: RunConditions
+) -> tuple[RoadLoadMismatch, ...]:
+    """Every run condition that differs from the borrowed road load's, or is unstated (M01.8).
+
+    Not a refusal: a road load is borrowed across days by design. ``A`` is
+    mostly rolling resistance, which scales with the load and the tires, and
+    it is applied as stored, so a difference is named for the reader to weigh.
+    """
+    stored = road_load.conditions
+    out: list[RoadLoadMismatch] = []
+    for field, run, fitted, unit, what in (
+        ("test_mass_kg", test_mass_kg, road_load.test_mass_kg, "kg", "test mass"),
+        ("payload_kg", conditions.payload_kg, stored.payload_kg, "kg", "payload"),
+    ):
+        if _differs(run, fitted):
+            out.append(
+                RoadLoadMismatch(
+                    field=field,
+                    status="differs",
+                    run=run,
+                    road_load=fitted,
+                    detail=(
+                        f"the run's {what} {run:g} {unit} differs from the {fitted:g} {unit} the "
+                        f"road load was coasted at ({run - fitted:+g} {unit}); A (rolling "
+                        "resistance) scales with it and is applied as stored"
+                    ),
+                )
+            )
+    for field, run_tire, fitted, axle in (
+        (
+            "tire_pressure_front_kpa",
+            conditions.tire_pressure_front_kpa,
+            stored.tire_pressure_front_kpa,
+            "front",
+        ),
+        (
+            "tire_pressure_rear_kpa",
+            conditions.tire_pressure_rear_kpa,
+            stored.tire_pressure_rear_kpa,
+            "rear",
+        ),
+    ):
+        if run_tire is None:
+            out.append(
+                RoadLoadMismatch(
+                    field=field,
+                    status="unstated",
+                    run=None,
+                    road_load=fitted,
+                    detail=(
+                        f"the run states no {axle} tire pressure; the road load was coasted at "
+                        f"{fitted:g} kPa, so whether they match is unchecked"
+                    ),
+                )
+            )
+        elif _differs(run_tire, fitted):
+            out.append(
+                RoadLoadMismatch(
+                    field=field,
+                    status="differs",
+                    run=run_tire,
+                    road_load=fitted,
+                    detail=(
+                        f"the run's {axle} tire pressure {run_tire:g} kPa differs from the "
+                        f"{fitted:g} kPa the road load was coasted at; A (rolling resistance) "
+                        "depends on it and is applied as stored"
+                    ),
+                )
+            )
+    return tuple(out)
+
+
+def _speed_scale(pulls: Sequence[PowerPull]) -> SpeedScale:
+    residuals = tuple(pull.speed_scale_residual for pull in pulls)
+    checked = [r for r in residuals if r is not None]
+    worst = max(checked, key=abs) if checked else None
+    return SpeedScale(
+        residuals=residuals,
+        speed_scale_residual=worst,
+        power_band=None if worst is None else speed_scale_power_band(worst),
+        n_unchecked=len(residuals) - len(checked),
+    )
 
 
 @dataclass(frozen=True)
@@ -383,7 +604,7 @@ def compute_power(
     *,
     driveline: Driveline,
     test_mass_kg: float,
-    road_load: RoadLoadFit | RoadLoadCoefficients,
+    road_load: RoadLoadCoefficients,
     squat: SquatLike | None,
     pitch_offset: PitchOffset,
     wot: _WotLike,
@@ -423,9 +644,21 @@ def compute_power(
     ``squat_corrected: False``), a road load from a coast-down *pair*, the WOT
     criterion and the run's conditions.
 
+    The road load must be a *record* (:class:`RoadLoadCoefficients`), because
+    only a record says which air it was fitted in: its ``C`` is moved into
+    this run's air by ``ρ_run / ρ_fit`` from the two barometers and ambient
+    temperatures (:meth:`RoadLoadCoefficients.in_air`, M01.8), and the result
+    carries the ratio (``road_load_air``) and any mass, payload or tire
+    pressure that differs from the record or is unstated
+    (``road_load_mismatches``). A corrected curve carries its J1349 range
+    flag (``correction_range``, M01.9); every result carries the pulls' GPS
+    speed-scale residual and the power band it implies (``speed_scale``,
+    M01.10).
+
     Refusals, in order: arguments (``inputs_missing``, ``invalid_input``,
     ``conditions_mismatch``, ``single_direction`` for the road load,
-    ``correction_refused``), ``frame_mismatch``, then per pull
+    ``inputs_missing`` for an unrecorded road-load fit, ``correction_refused``),
+    ``frame_mismatch``, then per pull
     ``inputs_missing``, ``too_few_samples``, ``gear_change`` / ``clutch_slip``
     / ``gear_ratio_mismatch``, ``not_wot``, ``grade_varies``,
     ``rpm_span_too_small``, ``too_few_bins``; then ``too_many_directions``,
@@ -458,12 +691,25 @@ def compute_power(
             "the road load came from one coast-down direction: grade, wind and the IMU's "
             "pitch offset are still in its A and B",
         )
+    # Typed out, and refused at run time for an untyped caller handing over a
+    # RoadLoadFit: a fit carries no conditions, so no air to scale from.
+    if not isinstance(road_load, RoadLoadCoefficients):
+        return DynoRefusal(
+            name,
+            "inputs_missing",
+            "the road load is an unrecorded fit, so nothing says which air its C "
+            "(1/2*rho*Cd*A) was fitted in; record it with RoadLoadFit.to_record and the "
+            "coast-downs' measured baro_kpa before using it at another barometer (M01.8)",
+        )
+    air = road_load.in_air(conditions.baro_kpa, conditions.ambient_temp_c)
     factor = 1.0
+    correction_range: J1349Range | None = None
     if correction is not None:
         computed = _j1349_factor(correction, conditions)
         if isinstance(computed, DynoRefusal):
             return computed
         factor = computed
+        correction_range = _j1349_range(correction, conditions)
     mismatch = frame_mismatch(name, pitch_offset, [pull.samples for pull in pulls])
     if mismatch is not None:
         return mismatch
@@ -476,7 +722,7 @@ def compute_power(
             pull,
             driveline=driveline,
             test_mass_kg=test_mass_kg,
-            road_load=road_load,
+            road_load=air,
             squat=squat,
             pitch_offset=pitch_offset,
             wot=wot,
@@ -565,4 +811,10 @@ def compute_power(
         correction_factor=factor,
         corrected=None if correction is None else curve.scaled(factor),
         correction_inputs=correction,
+        correction_range=correction_range,
+        road_load_air=air,
+        road_load_mismatches=road_load_mismatches(
+            road_load, test_mass_kg=test_mass_kg, conditions=conditions
+        ),
+        speed_scale=_speed_scale(pulls),
     )

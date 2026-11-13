@@ -1148,6 +1148,7 @@ def test_road_load_single_direction_is_refused_unless_asked_and_then_labelled(
             tire_pressure_front_kpa=240.0,
             tire_pressure_rear_kpa=240.0,
             ambient_temp_c=20.0,
+            baro_kpa=80.0,
         )
     )
     with pytest.raises(ValidationError, match="coast-down pair"):
