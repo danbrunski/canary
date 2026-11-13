@@ -14,7 +14,7 @@ views ≤ 330 lines) and so did R08.7's single palette. The debt is in how often
 the app renders, in hand-copied API types, and in the ROM Editor tree, which
 neither earlier review covered.
 
-- [ ] **R28.1 Every WebSocket telemetry message re-renders the whole app.**
+- [~] **R28.1 Every WebSocket telemetry message re-renders the whole app.**
   `hooks/useTelemetryStream.ts` `onMessage` calls
   `setState({channels: new Map(channelsRef.current), …})` once per message.
   The daemon publishes per record, per decoded CAN row and per DID
@@ -61,15 +61,47 @@ neither earlier review covered.
     unmount leaves zero timers and no render; a reconnect state change flushes
     at once with no frame left behind; a connection-only change keeps the Map
     identity. Mutation check: flushing per message fails 3 of them.
-  - [ ] If the measurement still shows whole-tree commits: expose a
+  - [~] If the measurement still shows whole-tree commits: expose a
     `useChannel(key)` subscription (`useSyncExternalStore`) so only readers of
     a key re-render, and `memo` the Workbench pages that take no channels.
-    Not done, deliberately. Coalescing bounds commits at one per frame, but the
-    measurement that would justify more (Profiler on the Pi build) is not in.
-    `App` still rebuilds `data` each commit and nothing is memoized, so every
-    Workbench page still re-renders up to 60 times a second; and the ROM
-    Editor `Workspace` takes `channels` itself (for `LiveOverlay`), so `memo`
-    alone would not stop it, only `useChannel` would. That is a wider refactor.
+    Done in the smaller form that removes the cost, not the per-key store
+    (2026-11-13; the Pi-build Profiler count above is still owed, so this was
+    judged on structure and an offline render count). Coalescing left every
+    Workbench page re-rendering at up to 60 a second because `App` hands
+    `Workbench` a new `data` each commit and nothing was memoised.
+    (1) `panels/Workbench.tsx`: a `Pure` table holds `memo(...)` of the 32
+    pages that read no channel (every `renderItem` case except `SystemPanel`,
+    `DataSourcesPanel`, `TpmsPanel`, `ChartsPanel`, `AlarmsPanel`,
+    `CustomDashboardPanel`, `TripPanel`, `LoggingPage`, `RomEditorPage`). Their
+    other props are stable between the updates that matter to them:
+    `useCompanionSettings` now returns a `useMemo`'d object with `useCallback`
+    setters (it built a new object every render, which would have defeated the
+    memo on `ControlPanel`, `TrainingPanel` and `SessionsPanel`).
+    (2) ROM Editor: `RomEditorPage` hands `channels` to its live overlay through
+    `hooks/telemetryChannels.ts` (`TelemetryChannelsContext` and
+    `useTelemetryChannels`); `LiveOverlay` reads it and no longer takes a
+    `channels` prop; `Workspace` is `memo` and takes no channels, so the
+    500-line tree stays out of the frame-rate render and only the overlay (the
+    one thing that shows a channel, mounted behind a toggle) re-renders.
+    Not done: a per-key `useChannel` store. Channel readers (the nine pages
+    above) still render once per frame, which is what they exist to do; a
+    key-level store would cut that further and is the next step only if the
+    Pi-build Profiler shows readers are the cost. `README.md` (state
+    management) says where a new channel-free page goes.
+    Offline render counts, with the real `useTelemetryStream` under fake timers
+    and a mocked socket, 20 frames of 100 messages (2,000 messages), counting
+    commits at a `Profiler` around `Workbench` and renders of the page
+    (`panels/WorkbenchRenders.test.tsx`):
+    per-message flush (before `ca4d64bb`): 2,000 commits, 2,000 renders of every
+    page (the old hook's one `setState` per message, by construction);
+    after coalescing alone (`ca4d64bb`): 20 commits, 20 renders of Control, a
+    page that shows no channel (measured by taking `memo` off Control:
+    `expected 20 to be +0`); after this change: 20 commits, 0 renders of
+    Control, 20 of Alarms (a reader, as it must). ROM Editor
+    (`panels/tuning/RomEditorRenders.test.tsx`): 50 new `channels` Maps give 0
+    further `Workspace` renders with `memo`, 50 without (`expected 51 to be 1`).
+    Both new tests fail with the memo removed. Not measured: milliseconds per
+    commit, which needs the Pi-served build on the phone.
   - Must not change: what is stored per channel, the seed-then-stream order,
     `useTelemetryStream.test.ts`.
   - [x] Found while verifying: `AlarmsPanel` keyed its 1 s evaluation interval

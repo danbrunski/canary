@@ -1,6 +1,6 @@
 import { AreaBar } from "../components/AreaBar";
 import { PanelErrorBoundary } from "../components/PanelErrorBoundary";
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
@@ -107,6 +107,47 @@ interface WorkbenchProps {
    *  navigates instead. */
   phone?: boolean;
 }
+
+/** The pages that read no live channel, memoised. Telemetry replaces
+ *  `data.channels` up to once a frame and `App` re-renders on each, so an
+ *  unmemoised page re-renders at frame rate whether or not it shows a channel.
+ *  Their other props (token, status, tuning context, `onNavigate`) are stable
+ *  between the updates that matter to them. A page that reads `channels` is
+ *  not here: it has to render with them. */
+const Pure = {
+  AnomalyPanel: memo(AnomalyPanel),
+  UpdateCard: memo(UpdateCard),
+  TreadWearCard: memo(TreadWearCard),
+  VehicleLedgerPage: memo(VehicleLedgerPage),
+  BrainPage: memo(BrainPage),
+  ModelPanel: memo(ModelPanel),
+  BehaviorModelsPanel: memo(BehaviorModelsPanel),
+  ControlPanel: memo(ControlPanel),
+  TestSessionPanel: memo(TestSessionPanel),
+  ProfilesPanel: memo(ProfilesPanel),
+  CaptureProfileEditor: memo(CaptureProfileEditor),
+  PowerPanel: memo(PowerPanel),
+  NetworkPanel: memo(NetworkPanel),
+  PairedDevicesPanel: memo(PairedDevicesPanel),
+  DtcPanel: memo(DtcPanel),
+  DiagnosticFunctionsPage: memo(DiagnosticFunctionsPage),
+  MonitorsPanel: memo(MonitorsPanel),
+  TrendsPanel: memo(TrendsPanel),
+  ExplorePanel: memo(ExplorePanel),
+  LlmAssistPanel: memo(LlmAssistPanel),
+  TrainingPanel: memo(TrainingPanel),
+  TuningPanel: memo(TuningPanel),
+  ModelHealthPanel: memo(ModelHealthPanel),
+  SessionsPanel: memo(SessionsPanel),
+  DatasetHealthPanel: memo(DatasetHealthPanel),
+  CustomPidsPanel: memo(CustomPidsPanel),
+  ExportPanel: memo(ExportPanel),
+  LogsPage: memo(LogsPage),
+  AnalysisPage: memo(AnalysisPage),
+  RomLibraryPage: memo(RomLibraryPage),
+  CalibrationPage: memo(CalibrationPage),
+  PlaceholderPanel: memo(PlaceholderPanel),
+};
 
 /** The parked workspace: the area bar (one tab per NAV group, W10), the
  *  active area's pages in the sidebar, and the active panel. Every panel —
@@ -223,7 +264,7 @@ function renderItem(
     case "system-data-sources":
       return <DataSourcesPanel channels={d.channels} status={d.status} />;
     case "diag-anomalies":
-      return <AnomalyPanel events={d.events} token={d.token} liveScores={d.liveScores} />;
+      return <Pure.AnomalyPanel events={d.events} token={d.token} liveScores={d.liveScores} />;
     case "system-info":
       return (
         <>
@@ -233,44 +274,44 @@ function renderItem(
             statusError={d.statusError}
             onNavigate={onNavigate}
           />
-          <UpdateCard token={d.token} />
+          <Pure.UpdateCard token={d.token} />
         </>
       );
     case "diag-tpms":
       return (
         <>
           <TpmsPanel channels={d.channels} />
-          <TreadWearCard token={d.token} />
+          <Pure.TreadWearCard token={d.token} />
         </>
       );
     case "diag-ledger":
-      return <VehicleLedgerPage token={d.token} />;
+      return <Pure.VehicleLedgerPage token={d.token} />;
     case "diag-brain":
-      return <BrainPage token={d.token} />;
+      return <Pure.BrainPage token={d.token} />;
     case "models-overview":
-      return <ModelPanel status={d.status} events={d.events} />;
+      return <Pure.ModelPanel status={d.status} events={d.events} />;
     case "models-behavior":
       return (
-        <BehaviorModelsPanel
+        <Pure.BehaviorModelsPanel
           data={d.behaviorModels}
           error={d.behaviorModelsError}
           live={d.behaviorLive}
         />
       );
     case "system-control":
-      return <ControlPanel token={d.token} companion={d.companion} />;
+      return <Pure.ControlPanel token={d.token} companion={d.companion} />;
     case "system-test":
-      return <TestSessionPanel token={d.token} />;
+      return <Pure.TestSessionPanel token={d.token} />;
     case "system-profiles":
-      return <ProfilesPanel token={d.token} />;
+      return <Pure.ProfilesPanel token={d.token} />;
     case "system-capture-profiles":
-      return <CaptureProfileEditor token={d.token} status={d.status} />;
+      return <Pure.CaptureProfileEditor token={d.token} status={d.status} />;
     case "system-power":
-      return <PowerPanel token={d.token} />;
+      return <Pure.PowerPanel token={d.token} />;
     case "system-network":
-      return <NetworkPanel token={d.token} status={d.status} />;
+      return <Pure.NetworkPanel token={d.token} status={d.status} />;
     case "system-paired-devices":
-      return <PairedDevicesPanel token={d.token} />;
+      return <Pure.PairedDevicesPanel token={d.token} />;
     case "observe-charts":
       return <ChartsPanel channels={d.channels} token={d.token} />;
     case "observe-alarms":
@@ -280,31 +321,31 @@ function renderItem(
     case "observe-trip":
       return <TripPanel channels={d.channels} status={d.status} token={d.token} />;
     case "diag-dtc":
-      return <DtcPanel />;
+      return <Pure.DtcPanel />;
     case "diag-functions":
-      return <DiagnosticFunctionsPage token={d.token} />;
+      return <Pure.DiagnosticFunctionsPage token={d.token} />;
     case "diag-monitors":
-      return <MonitorsPanel />;
+      return <Pure.MonitorsPanel />;
     case "diag-trends":
-      return <TrendsPanel token={d.token} />;
+      return <Pure.TrendsPanel token={d.token} />;
     case "diag-explore":
-      return <ExplorePanel />;
+      return <Pure.ExplorePanel />;
     case "diag-llm-assist":
-      return <LlmAssistPanel />;
+      return <Pure.LlmAssistPanel />;
     case "models-training":
-      return <TrainingPanel token={d.token} companion={d.companion} />;
+      return <Pure.TrainingPanel token={d.token} companion={d.companion} />;
     case "model-thresholds":
-      return <TuningPanel token={d.token} />;
+      return <Pure.TuningPanel token={d.token} />;
     case "models-health":
-      return <ModelHealthPanel status={d.status} statusError={d.statusError} />;
+      return <Pure.ModelHealthPanel status={d.status} statusError={d.statusError} />;
     case "system-sessions":
-      return <SessionsPanel token={d.token} companion={d.companion} />;
+      return <Pure.SessionsPanel token={d.token} companion={d.companion} />;
     case "model-dataset-health":
-      return <DatasetHealthPanel token={d.token} />;
+      return <Pure.DatasetHealthPanel token={d.token} />;
     case "system-custom-pids":
-      return <CustomPidsPanel token={d.token} />;
+      return <Pure.CustomPidsPanel token={d.token} />;
     case "system-export":
-      return <ExportPanel token={d.token} />;
+      return <Pure.ExportPanel token={d.token} />;
     case "tuning-logging":
       return (
         <LoggingPage
@@ -315,13 +356,13 @@ function renderItem(
         />
       );
     case "tuning-logs":
-      return <LogsPage token={d.token} context={tuning} />;
+      return <Pure.LogsPage token={d.token} context={tuning} />;
     case "tuning-analysis":
-      return <AnalysisPage token={d.token} status={d.status} context={tuning} />;
+      return <Pure.AnalysisPage token={d.token} status={d.status} context={tuning} />;
     case "tuning-rom-library":
-      return <RomLibraryPage token={d.token} status={d.status} />;
+      return <Pure.RomLibraryPage token={d.token} status={d.status} />;
     case "tuning-calibration":
-      return <CalibrationPage token={d.token} status={d.status} />;
+      return <Pure.CalibrationPage token={d.token} status={d.status} />;
     case "tuning-rom-editor":
       return (
         <RomEditorPage
@@ -335,7 +376,7 @@ function renderItem(
       );
     case "tuning-flash":
       return (
-        <PlaceholderPanel
+        <Pure.PlaceholderPanel
           title="Flash"
           task="W07"
           summary="Module programming waits on the server-side flash interlocks."

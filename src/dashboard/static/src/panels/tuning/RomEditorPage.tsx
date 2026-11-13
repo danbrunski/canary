@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   downloadRomImage,
@@ -12,6 +12,7 @@ import {
 import { Notice } from "../../components/Notice";
 import { Panel } from "../../components/Panel";
 import { SegmentedControl, type SegmentOption } from "../../components/SegmentedControl";
+import { TelemetryChannelsContext } from "../../hooks/telemetryChannels";
 import { describeError, useControlResource } from "../../hooks/useControlResource";
 import { useIsNarrow } from "../../hooks/useMediaQuery";
 import type { ChannelSnapshot } from "../../hooks/useTelemetryStream";
@@ -324,15 +325,16 @@ export function RomEditorPage({
         </div>
       </Panel>
       {selected && (
-        <Workspace
-          key={selected.sha256}
-          token={token}
-          entry={selected}
-          channels={channels}
-          status={status}
-          selectedLogId={selectedLogId}
-          onNavigate={onNavigate}
-        />
+        <TelemetryChannelsContext.Provider value={channels}>
+          <Workspace
+            key={selected.sha256}
+            token={token}
+            entry={selected}
+            status={status}
+            selectedLogId={selectedLogId}
+            onNavigate={onNavigate}
+          />
+        </TelemetryChannelsContext.Provider>
       )}
     </section>
   );
@@ -366,17 +368,18 @@ type SimState =
   | { kind: "ok"; result: RomSimResult; run: SimRunContext }
   | { kind: "failed"; failure: SimFailure };
 
-function Workspace({
+// Memoised: telemetry replaces `channels` up to once a frame, and the page
+// above hands them down through context, so this 500-line tree renders only
+// when something it shows changes. Only the live overlay reads the channels.
+const Workspace = memo(function Workspace({
   token,
   entry,
-  channels,
   status,
   selectedLogId,
   onNavigate,
 }: {
   token: string;
   entry: RomLibraryEntry;
-  channels: Map<string, ChannelSnapshot>;
   status: StatusResponse | null;
   selectedLogId: string | null;
   onNavigate?: (item: WorkbenchItem) => void;
@@ -734,7 +737,6 @@ function Workspace({
                 <LiveOverlay
                   token={token}
                   sha={sha}
-                  channels={channels}
                   status={status}
                   selectedLogId={selectedLogId}
                   onNavigate={onNavigate}
@@ -869,4 +871,4 @@ function Workspace({
       </section>
     </div>
   );
-}
+});

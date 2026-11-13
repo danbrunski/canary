@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { readString, writeString } from "../util/storage";
 
@@ -41,17 +41,22 @@ export function useCompanionSettings(): CompanionSettings {
   const [baseUrl, setBaseUrlState] = useState(readBase);
   const [token, setTokenState] = useState(() => readString(TOKEN_KEY));
 
-  const setBaseUrl = (next: string) => {
+  const setBaseUrl = useCallback((next: string) => {
     const clean = next.trim().replace(/\/+$/, "");
     setBaseUrlState(clean);
     writeString(BASE_KEY, clean);
-  };
+  }, []);
 
-  const setToken = (next: string) => {
+  const setToken = useCallback((next: string) => {
     const clean = next.trim();
     setTokenState(clean);
     writeString(TOKEN_KEY, clean);
-  };
+  }, []);
 
-  return { baseUrl, token, setBaseUrl, setToken };
+  // The same object until a field changes: a memoised page that takes it as a
+  // prop would otherwise re-render with every render of the app.
+  return useMemo(
+    () => ({ baseUrl, token, setBaseUrl, setToken }),
+    [baseUrl, token, setBaseUrl, setToken],
+  );
 }

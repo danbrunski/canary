@@ -152,8 +152,12 @@ state shape is small. `useTelemetryStream` ingests every message into a ref
 and commits to state at most once per animation frame (a 250 ms timer stands
 in when the tab is hidden), so a 2,000-message/s tuning capture costs about 60
 renders a second, not 2,000 (R28.1). Every sample still lands in the
-channel's `history`; only `latest` is last-wins within a frame. Revisit with a
-per-channel subscription if whole-tree commits show up in the Profiler.
+channel's `history`; only `latest` is last-wins within a frame. A commit still
+re-renders `Workbench`, so the pages that show no channel are `memo`'d (the
+`Pure` table in `panels/Workbench.tsx`; add a new channel-free page there), and
+the ROM Editor hands `channels` to its live overlay through
+`hooks/telemetryChannels.ts` so its `Workspace` is not re-rendered. Revisit with
+a per-channel subscription if channel readers themselves show up in the Profiler.
 
 ## Charts
 

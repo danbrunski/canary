@@ -5,7 +5,7 @@ import { Notice } from "../../../components/Notice";
 import { useControlResource } from "../../../hooks/useControlResource";
 import { useLiveOverlay, type TableOverlay } from "../../../hooks/useLiveOverlay";
 import type { CoverageSource } from "../../../hooks/useCoverageOverlay";
-import type { ChannelSnapshot } from "../../../hooks/useTelemetryStream";
+import { useTelemetryChannels } from "../../../hooks/telemetryChannels";
 import { overlayTableOf, type OverlayTable } from "../../../lib/romOverlay";
 import type { RomTable } from "../../../lib/romMaps";
 import { describeDisagreement } from "../../../lib/romTrace";
@@ -19,7 +19,6 @@ import { CellGrid } from "./CellGrid";
 interface Props {
   token: string;
   sha: string;
-  channels: Map<string, ChannelSnapshot>;
   status: StatusResponse | null;
   /** The log picked on Logs (W02.5): the coverage overlay's subject. */
   selectedLogId: string | null;
@@ -81,7 +80,8 @@ function noOverlayNote(
 }
 
 function Overlay({ context, ...props }: Props & { context: RomTraceContext }) {
-  const { token, channels, status, selectedLogId, onNavigate, table, tables, children } = props;
+  const { token, status, selectedLogId, onNavigate, table, tables, children } = props;
+  const channels = useTelemetryChannels();
   const [drive, setDrive] = useState(false);
   // Each table of the image as the trace code reads it (null: the overlay does
   // not apply to it). Memoised so the coverage hook's effects see a stable list.
