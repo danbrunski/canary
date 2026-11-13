@@ -53,6 +53,7 @@ from src.storage.capture_manifest import (
     read_capture_manifest,
     read_capture_quality,
 )
+from src.storage.profile_expectations import ProfileExpectations
 from src.storage.session_files import PARQUET_PATTERN, count_session_rows
 
 log = logging.getLogger(__name__)
@@ -75,15 +76,11 @@ def did_channel_for(name: str) -> str | None:
 
 def member_channels(profile: Mapping[str, Any]) -> dict[str, str]:
     """Required-tuple member (profile name) -> persisted transport channel."""
-    mode01 = {str(k).upper() for k in (profile.get("mode01") or {})}
-    out: dict[str, str] = {}
-    for name in profile.get("required_tuple") or ():
-        upper = str(name).upper()
-        if upper in mode01:
-            out[upper] = upper
-        else:
-            out[upper] = did_channel_for(str(name)) or upper
-    return out
+    expect = ProfileExpectations.from_snapshot(profile)
+    return {
+        name: name if name in expect.mode01_names else did_channel_for(name) or name
+        for name in expect.required_tuple
+    }
 
 
 def _epoch(value: Any) -> float:

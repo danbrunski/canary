@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict
 from src.atomic_write import atomic_write_text
 from src.file_memo import StampedCache, file_stamp
 from src.storage.capture_losses import unknown_losses
+from src.storage.profile_expectations import ProfileExpectations
 from src.storage.sidecar import read_json_object, write_json_sidecar
 
 CAPTURE_MANIFEST_FILENAME = "capture_profile.json"
@@ -88,10 +89,7 @@ class CaptureManifest(BaseModel):
 
     @property
     def required_tuple(self) -> tuple[str, ...]:
-        raw = self.profile_snapshot.get("required_tuple") or ()
-        if not isinstance(raw, list | tuple):
-            return ()
-        return tuple(str(item).upper() for item in raw if str(item).strip())
+        return ProfileExpectations.from_snapshot(self.profile_snapshot).required_tuple
 
 
 def read_capture_manifest(session_dir: Path) -> CaptureManifest | None:

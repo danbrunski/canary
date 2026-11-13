@@ -65,6 +65,7 @@ from src.storage.capture_losses import (
     unknown_losses,
 )
 from src.storage.capture_manifest import CAPTURE_QUALITY_SCHEMA_VERSION, SCOPE_LIVE
+from src.storage.profile_expectations import ProfileExpectations
 
 #: Fraction of the requested rate a channel may fall to before it counts as a
 #: shortfall. Loose enough to absorb round scheduling jitter, tight enough that
@@ -1308,6 +1309,77 @@ def _verdict(
     return "pass"
 
 
+def _kline_notes(
+    kline_rows: list[dict[str, Any]], lifetime: Mapping[str, Any] | None
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """The K-line rows to score, and the note on how they are scored.
+
+    A verdict rebuilt from persisted rows cannot score K-line (those rows cover
+    Mode 01/22 only), so its rows are dropped and the note says so.
+    """
+    if not kline_rows:
+        return kline_rows, []
+    if (lifetime or {}).get("source") == ROWS_LIFETIME_SOURCE:
+        return [], [
+            f"{len(kline_rows)} K-line channel(s) not scored: this verdict was rebuilt from "
+            "persisted rows, which cover Mode 01/22 only; the live and stop-time verdicts "
+            "score K-line from the capture ledger."
+        ]
+    return kline_rows, [
+        "K-line channels are scored on the capture ledger: their cadence is the achieved "
+        "K-line rate. The profile names no K-line rate, so none is judged a shortfall; "
+        "CANary's own K-line session (ecm-session-kline) is acquisition time for them, "
+        "not a pause."
+    ]
+
+
+def _notes(  # noqa: PLR0913
+    *,
+    kline: list[str],
+    tuple_notes: list[str],
+    batching: list[str],
+    batching_unreported: bool,
+    has_required: bool,
+    loss_summary: Mapping[str, Any],
+    paused_s: float | None,
+) -> list[str]:
+    """Every note the evaluation adds before the verdict, in report order.
+
+    Each argument is a piece the scoring already computed; the text is asserted
+    by tests. :func:`_verdict` may append one more.
+    """
+    notes = [*kline, *tuple_notes, *batching]
+    if batching_unreported:
+        notes.append(
+            "request batching was off or unreported. Unbatched, one request carries one PID, "
+            "so the bus budget binds far sooner than the ECM does."
+        )
+    if not has_required:
+        notes.append(
+            "this profile declares no required_tuple, so only per-channel cadence and coverage "
+            "were checked — which cannot tell whether any joint analysis has usable samples."
+        )
+    dashboard = loss_summary.get("dashboard") or {}
+    if dashboard.get("lost"):
+        notes.append(
+            f"dashboard-only sinks dropped {dashboard['lost']} records during the capture; "
+            "the freshest state wins there by design and nothing on disk is affected."
+        )
+    controller = loss_summary.get(CONTROLLER) or {}
+    if controller.get("lost"):
+        notes.append(
+            f"the CAN controller overflowed {controller['lost']} frames during the capture "
+            "(can0.rx_over_errors). Reported, not failed: any capture channel it cost shows up "
+            "in that channel's cadence and coverage above."
+        )
+    if paused_s:
+        notes.append(
+            f"{paused_s:.1f}s of intentional pause excluded from coverage; "
+            "engine-off time without a pause is not excluded."
+        )
+    return notes
+
+
 def evaluate_capture_quality(  # noqa: PLR0913
     *,
     profile: Mapping[str, Any],
@@ -1343,22 +1415,11 @@ def evaluate_capture_quality(  # noqa: PLR0913
       says the capture's share is unknown rather than quoting the total.
     """
     name = str(profile.get("name") or "unknown")
-    weights = {
-        str(k).upper(): float(v)
-        for source in (
-            profile.get("mode01") or {},
-            profile.get("mode22_rate_weights") or {},
-        )
-        for k, v in source.items()
-    }
-    target = requested_rate_hz if requested_rate_hz is not None else profile.get("target_rate_hz")
-    target_f = None if target is None else float(target)
-    required = [str(item).upper() for item in (profile.get("required_tuple") or [])]
-    floor = (
-        None
-        if profile.get("min_achieved_rate_hz") is None
-        else float(profile["min_achieved_rate_hz"])
-    )
+    expect = ProfileExpectations.from_snapshot(profile, requested_rate_hz)
+    weights = expect.weights
+    target_f = expect.target_rate_hz
+    required = list(expect.required_tuple)
+    floor = expect.min_achieved_rate_hz
     scheduler = scheduler or {}
     interval, elapsed, active, windows = _interval(lifetime)
     lifetime_channels = (lifetime or {}).get("channels") or {}
@@ -1371,21 +1432,7 @@ def evaluate_capture_quality(  # noqa: PLR0913
     # K-line entries are added here, once, for every caller (live, stop,
     # recompute): no OBD scheduler plan or request table lists them (H05.8).
     kline_rows = kline_requests(profile)
-    notes: list[str] = []
-    if kline_rows and (lifetime or {}).get("source") == ROWS_LIFETIME_SOURCE:
-        notes.append(
-            f"{len(kline_rows)} K-line channel(s) not scored: this verdict was rebuilt from "
-            "persisted rows, which cover Mode 01/22 only; the live and stop-time verdicts "
-            "score K-line from the capture ledger."
-        )
-        kline_rows = []
-    elif kline_rows:
-        notes.append(
-            "K-line channels are scored on the capture ledger: their cadence is the achieved "
-            "K-line rate. The profile names no K-line rate, so none is judged a shortfall; "
-            "CANary's own K-line session (ecm-session-kline) is acquisition time for them, "
-            "not a pause."
-        )
+    kline_rows, kline_notes = _kline_notes(kline_rows, lifetime)
     listed = {str(row.get("channel") or "").upper() for row in base_requests}
     request_ledger_rows, request_ledger = _request_ledger_block(lifetime)
     # A ledger carried into a rebuild from rows is on the monotonic clock while
@@ -1424,7 +1471,6 @@ def evaluate_capture_quality(  # noqa: PLR0913
         windows=windows,
         floor=floor,
     )
-    notes += tuple_notes
     # A member the ECU never answered is already an unanswered_input; the
     # tuple could never complete and saying so twice adds nothing.
     missing_members = {row.channel.upper() for row in channels if row.status == "missing"}
@@ -1436,35 +1482,15 @@ def evaluate_capture_quality(  # noqa: PLR0913
 
     raw_batching = scheduler.get("batching")
     batching, batching_notes = scope_batching(raw_batching, batching_start, elapsed_s=elapsed)
-    notes += batching_notes
-    if scheduler and raw_batching is None:
-        notes.append(
-            "request batching was off or unreported. Unbatched, one request carries one PID, "
-            "so the bus budget binds far sooner than the ECM does."
-        )
-    if not required:
-        notes.append(
-            "this profile declares no required_tuple, so only per-channel cadence and coverage "
-            "were checked — which cannot tell whether any joint analysis has usable samples."
-        )
-    dashboard = loss_summary.get("dashboard") or {}
-    if dashboard.get("lost"):
-        notes.append(
-            f"dashboard-only sinks dropped {dashboard['lost']} records during the capture; "
-            "the freshest state wins there by design and nothing on disk is affected."
-        )
-    controller = loss_summary.get(CONTROLLER) or {}
-    if controller.get("lost"):
-        notes.append(
-            f"the CAN controller overflowed {controller['lost']} frames during the capture "
-            "(can0.rx_over_errors). Reported, not failed: any capture channel it cost shows up "
-            "in that channel's cadence and coverage above."
-        )
-    if interval.get("paused_s"):
-        notes.append(
-            f"{interval['paused_s']:.1f}s of intentional pause excluded from coverage; "
-            "engine-off time without a pause is not excluded."
-        )
+    notes = _notes(
+        kline=kline_notes,
+        tuple_notes=tuple_notes,
+        batching=batching_notes,
+        batching_unreported=bool(scheduler) and raw_batching is None,
+        has_required=bool(required),
+        loss_summary=loss_summary,
+        paused_s=interval.get("paused_s"),
+    )
 
     verdict = _verdict(elapsed=elapsed, channels=channels, failures=failures, notes=notes)
     return CaptureQuality(

@@ -17,8 +17,7 @@ function; ``tests/conftest.py`` calls it around every test.
 ``global`` statement without appearing there.
 
 Deliberately not reset (derived caches, keyed so a stale entry cannot be
-wrong): ``capture_profiles._SERVING_DID_CACHE`` and ``_SERVING_MODE01_CACHE``
-(path + mtime) and the
+wrong): ``capture_profile_serving._SERVING_CACHE`` (path + mtime) and the
 ``lru_cache`` loaders in ``obd_scheduler.spec`` (static catalogue files).
 """
 
@@ -48,7 +47,8 @@ COVERED_MODULES: frozenset[str] = frozenset(
         "bus_budget.py",
         "capture_generation.py",
         "capture_lifetime.py",
-        "capture_profiles.py",
+        "capture_profile_files.py",
+        "capture_profile_model.py",
         "discovery.py",
         "kline/actions.py",
         "kline/sessions.py",
@@ -68,7 +68,7 @@ COVERED_MODULES: frozenset[str] = frozenset(
 COVERED_GLOBALS: frozenset[tuple[str, str]] = frozenset(
     {
         ("capture_lifetime.py", "_ledger"),
-        ("capture_profiles.py", "_SHADOW_WARNED"),
+        ("capture_profile_files.py", "_SHADOW_WARNED"),
         ("discovery.py", "_remembered"),
         ("kline/actions.py", "KLINE_ACTIONS"),
         ("kline/sessions.py", "MODULE_SESSIONS"),

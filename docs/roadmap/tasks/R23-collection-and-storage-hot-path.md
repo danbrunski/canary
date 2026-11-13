@@ -442,26 +442,69 @@ session-name parser.
     action's future (`routes/control/diagnostics.py` `run()`) issues nothing
     under the claim.
 
-- [ ] **R23.11 `evaluate_capture_quality` re-parses a loose profile dict that
+- [x] **R23.11 `evaluate_capture_quality` re-parses a loose profile dict that
   two other modules also re-parse.** The first thirty of its 181 lines
   normalize `weights`, `target`, `required` and `floor` out of a
   `Mapping[str, Any]`; `storage/capture_manifest.py` and
   `analysis/capture_coverage.py` do the `required_tuple` part again. The tail
   interleaves eight independent `notes.append` blocks with scoring.
-  - [ ] A frozen `ProfileExpectations.from_snapshot(profile, requested_rate_hz)`
+  - [x] A frozen `ProfileExpectations.from_snapshot(profile, requested_rate_hz)`
     shared by the three; `_notes(…)` taking the computed pieces. The `notes`
-    text is asserted by tests and stays.
+    text is asserted by tests and stays. Done 2026-11-13.
+    `src/storage/profile_expectations.py` (storage, the lowest of the three
+    readers' layers): frozen dataclass of `weights`, `target_rate_hz`,
+    `required_tuple`, `min_achieved_rate_hz`, `mode01_names`.
+    `evaluate_capture_quality`, `CaptureManifest.required_tuple` and
+    `capture_coverage.member_channels` all take it. In `capture_quality.py` the
+    K-line note + row choice is `_kline_notes(...)` and the other seven note
+    blocks are `_notes(...)`, fed the pieces the scoring computed (the order
+    is kept: K-line, tuple, batching, then the rest; `_verdict` still appends
+    its own). Evidence: a differential over 1,600 inputs (5 profiles x 5
+    lifetimes incl. rebuilt-from-rows and pauses x 4 schedulers x 4 loss
+    shapes x 2 tuple blocks x 2 requested rates) run at HEAD and after gives
+    byte-identical `CaptureQuality.to_dict()` JSON, with every note kind
+    present; the 1,649 pre-existing tests that import the touched modules pass
+    before and after; `tests/test_profile_expectations.py` (4 tests) pins the
+    parse and that the manifest and coverage read the same tuple. One
+    normalisation now shared by all three: `required_tuple` upper-cases,
+    drops blank entries and reads a non-list as no tuple (the manifest's rule;
+    the other two kept blanks and iterated a bare string). A validated profile
+    snapshot cannot differ; `member_channels` now looks a DID up by the
+    upper-cased name.
 
-- [ ] **R23.12 `capture_profiles.py` (1,268 lines) holds the schema, the
+- [x] **R23.12 `capture_profiles.py` (1,268 lines) holds the schema, the
   catalog layering, two serving caches and the preview store.**
   `serving_mode22_dids` and `serving_mode01_channels` are the same fifteen
   lines with separate cache dicts; their consumers are trainers, and they sit
   in a module the poll loop imports.
-  - [ ] `capture_profile_model.py` (model, catalog, constants, digest),
+  - [x] `capture_profile_model.py` (model, catalog, constants, digest),
     `capture_profile_files.py` (sources, overrides, `layer_catalog`, load and
     save, `seed_catalog`), the serving readers on one `_stamp_cached` helper in
     a third. Re-export from `capture_profiles`. Same package, so
     `tests/test_layering.py` needs no new unit.
+    Done 2026-11-13. `capture_profile_model.py` (753 lines: constants,
+    `CaptureProfile`, `CaptureProfileCatalog`, `profile_digest`,
+    `channel_satisfied`), `capture_profile_files.py` (208: sources, overrides,
+    `layer_catalog`, load and save, `default_profile`, `seed_catalog`),
+    `capture_profile_serving.py` (143: `serving_mode22_dids` and
+    `serving_mode01_channels` on one `_stamp_cached(question, ...)` and one
+    `_SERVING_CACHE` keyed `(question, sources)`, replacing the two dicts).
+    `capture_profiles.py` is 282 lines: `CaptureProfileStore`, a delegating
+    `_reset_for_tests`, and re-exports of all 20 names any file in `src`,
+    `tests`, `scripts` or `tools` imports from it (swept by `ast`), plus
+    `SCHEMA_VERSION`. The two moved modules log under the name
+    `src.collection.capture_profiles` (tests and the Pi's logs address it).
+    `process_state.py` (`COVERED_MODULES`, `COVERED_GLOBALS`) and the
+    `NOT_STATE` table in `tests/test_process_state_reset.py` name the new
+    homes of `_SHADOW_WARNED`, `_broadcast_decode_warned` and the cache.
+    Evidence: every top-level definition, compared by `ast.dump` against HEAD,
+    is identical at its new home except `log`, `_reset_for_tests`, `__all__`
+    and the two serving readers (restructured onto the helper);
+    `data/capture_profiles.yaml` untouched; 1,649 tests passed at HEAD and
+    1,654 after (the four new tests, plus one test skipped in the
+    HEAD worktree that ran in this tree; not traced), including `test_layering.py`, `test_process_state_reset.py`,
+    `test_capture_profiles.py` and `test_feature_policy.py`; ruff, format and
+    mypy clean.
 
 - [ ] **R23.13 Four durable atomic writes beside `atomic_write.py`.**
   `os.fsync` appears in exactly four files, each with its own
