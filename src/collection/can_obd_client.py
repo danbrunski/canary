@@ -55,7 +55,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -95,7 +95,7 @@ from src.collection.isotp import (
     positive_response_service,
     split_batched_response,
 )
-from src.collection.obd_registry import lookup
+from src.collection.obd_registry import mode01_registry_width
 from src.collection.pid_decoders import (  # re-exported: R02.13 moved them
     PID_DECODERS,
     TIMING_ADVANCE_UNAVAILABLE,
@@ -257,6 +257,9 @@ class CanObdClient:
         self._on_frame = on_frame
         self._on_parse_error = on_parse_error
         self._parse_error_owner = parse_error_owner
+        #: Why the last :meth:`_send` raised (``"<type>: <message>"``), or
+        #: ``None`` when it went out or the gate suppressed it.
+        self._last_send_error: str | None = None
 
     def _recv(self, timeout: float) -> can.Message | None:
         return receive_frame(
@@ -299,19 +302,12 @@ class CanObdClient:
         suppressed by passive mode) — the same contract as
         :meth:`query_mode_01`.
         """
-        payload = build_batched_request_payload(0x01, pids)
-        message = can.Message(
-            arbitration_id=self._request_id,
-            data=payload,
-            is_extended_id=False,
-        )
-        try:
-            if not tx_gate.send(
-                self._bus, message, what=f"batch {len(pids)} PIDs", holder=self._tx_holder
-            ):
-                return None
-        except can.CanError:
-            log.warning("CAN send failed", extra={"service": 0x01, "batch_size": len(pids)})
+        if not self._send(
+            self._request_id,
+            build_batched_request_payload(0x01, pids),
+            what=f"batch {len(pids)} PIDs",
+            log_extra={"service": 0x01, "batch_size": len(pids)},
+        ):
             return None
 
         # pid_echo=None: the payload is a stream of pairs, not one identifier,
@@ -320,7 +316,7 @@ class CanObdClient:
         if response is None:
             return None
         readings, clean = split_batched_response(
-            response.payload, _registry_width if byte_length_for is None else byte_length_for
+            response.payload, mode01_registry_width if byte_length_for is None else byte_length_for
         )
         return BatchedMode01Response(
             readings=readings,
@@ -389,24 +385,18 @@ class CanObdClient:
         read while answering the same DIDs singly. That refusal is returned as
         ``negative_response_code`` rather than collapsed into "no response".
         """
-        payload = build_batched_did_request_payload(0x22, dids)
-        message = can.Message(
-            arbitration_id=self._request_id if request_id is None else request_id,
-            data=payload,
-            is_extended_id=False,
-        )
-        try:
-            if not tx_gate.send(
-                self._bus, message, what="request service=0x22 (batched)", holder=self._tx_holder
-            ):
-                return BatchedMode22Reply(response=None, sent=False)
-        except can.CanError:
-            log.warning("CAN send failed", extra={"service": 0x22, "batch": len(dids)})
+        arbitration_id = self._request_id if request_id is None else request_id
+        if not self._send(
+            arbitration_id,
+            build_batched_did_request_payload(0x22, dids),
+            what="request service=0x22 (batched)",
+            log_extra={"service": 0x22, "batch": len(dids)},
+        ):
             return BatchedMode22Reply(response=None, sent=False)
         # identifier=None: the assembler must not try to match one DID echo,
         # because the response carries several.
         response, nrc = self._collect_response_or_nrc(
-            service=0x22, pid_echo=None, request_id=message.arbitration_id
+            service=0x22, pid_echo=None, request_id=arbitration_id
         )
         return BatchedMode22Reply(response=response, negative_response_code=nrc)
 
@@ -444,21 +434,16 @@ class CanObdClient:
         if len(body) > 6:
             raise ValueError(f"body of {len(body)} bytes does not fit a single frame")
         frame = bytes([1 + len(body), service]) + body
-        message = can.Message(
-            arbitration_id=self._request_id if request_id is None else request_id,
-            data=frame + bytes(8 - len(frame)),
-            is_extended_id=False,
-        )
-        try:
-            if not tx_gate.send(
-                self._bus, message, what=f"probe service=0x{service:02X}", holder=self._tx_holder
-            ):
-                return RawReply(sent=False)
-        except can.CanError as exc:
-            log.warning("CAN send failed", extra={"service": service, "body": body.hex()})
-            return RawReply(sent=False, send_error=f"{type(exc).__name__}: {exc}")
+        arbitration_id = self._request_id if request_id is None else request_id
+        if not self._send(
+            arbitration_id,
+            frame + bytes(8 - len(frame)),
+            what=f"probe service=0x{service:02X}",
+            log_extra={"service": service, "body": body.hex()},
+        ):
+            return RawReply(sent=False, send_error=self._last_send_error)
         response, nrc = self._collect_response_or_nrc(
-            service=service, pid_echo=None, request_id=message.arbitration_id
+            service=service, pid_echo=None, request_id=arbitration_id
         )
         return RawReply(
             sent=True,
@@ -530,21 +515,16 @@ class CanObdClient:
         :func:`~src.collection.isotp.expected_responder`); the caller checks
         the echo of what it sent.
         """
-        message = can.Message(
-            arbitration_id=self._request_id if request_id is None else request_id,
-            data=build_body_request_payload(service, body),
-            is_extended_id=False,
-        )
-        try:
-            if not tx_gate.send(
-                self._bus, message, what=f"request service=0x{service:02X}", holder=self._tx_holder
-            ):
-                return None, None
-        except can.CanError:
-            log.warning("CAN send failed", extra={"service": service, "body": body.hex()})
+        arbitration_id = self._request_id if request_id is None else request_id
+        if not self._send(
+            arbitration_id,
+            build_body_request_payload(service, body),
+            what=f"request service=0x{service:02X}",
+            log_extra={"service": service, "body": body.hex()},
+        ):
             return None, None
         return self._collect_response_or_nrc(
-            service=service, pid_echo=None, request_id=message.arbitration_id
+            service=service, pid_echo=None, request_id=arbitration_id
         )
 
     def enter_diagnostic_session(self, subfunction: int, *, request_id: int | None = None) -> bool:
@@ -626,6 +606,35 @@ class CanObdClient:
     # Internal: ISO-TP framing
     # ------------------------------------------------------------------
 
+    def _send(
+        self,
+        arbitration_id: int,
+        data: bytes,
+        *,
+        what: str,
+        log_extra: Mapping[str, object],
+    ) -> bool:
+        """Transmit one request frame through the gate, under this client's claim.
+
+        The one place a request leaves this client, so the ECM-session holder
+        (W08.7) rides on every send. True once the frame is on the bus. False
+        when the gate suppressed it (passive, another tester's claim) or the
+        bus raised ``can.CanError``; a raise is logged as "CAN send failed"
+        with ``log_extra`` and kept in :attr:`_last_send_error` for a caller
+        that reports it. Each caller returns its own empty value on False.
+
+        ``can_obd_io``'s loop send stays separate on purpose: its
+        ``can.CanError`` has to reach the loop's reconnect, not be swallowed.
+        """
+        self._last_send_error = None
+        message = can.Message(arbitration_id=arbitration_id, data=data, is_extended_id=False)
+        try:
+            return tx_gate.send(self._bus, message, what=what, holder=self._tx_holder)
+        except can.CanError as exc:
+            log.warning("CAN send failed", extra=dict(log_extra))
+            self._last_send_error = f"{type(exc).__name__}: {exc}"
+            return False
+
     def _request(
         self,
         *,
@@ -657,25 +666,19 @@ class CanObdClient:
         ``(None, None)`` is silence or an unsent request; ``(None, nrc)`` is
         the ECU refusing — an answer, not an absence.
         """
-        request_payload = self._build_request(service=service, pid=pid)
-        message = can.Message(
-            arbitration_id=self._request_id if request_id is None else request_id,
-            data=request_payload,
-            is_extended_id=False,
-        )
-        try:
-            if not tx_gate.send(
-                self._bus, message, what=f"request service=0x{service:02X}", holder=self._tx_holder
-            ):
-                return None, None
-        except can.CanError:
-            log.warning("CAN send failed", extra={"service": service, "pid": pid})
+        arbitration_id = self._request_id if request_id is None else request_id
+        if not self._send(
+            arbitration_id,
+            self._build_request(service=service, pid=pid),
+            what=f"request service=0x{service:02X}",
+            log_extra={"service": service, "pid": pid},
+        ):
             return None, None
 
         return self._collect_response_or_nrc(
             service=service,
             pid_echo=pid if expect_pid_echo else None,
-            request_id=message.arbitration_id,
+            request_id=arbitration_id,
         )
 
     def _request_many(
@@ -697,19 +700,12 @@ class CanObdClient:
         response is reported beside any positive ones so the caller can tell
         a refusal from a silent bus (C06.5).
         """
-        request_payload = self._build_request(service=service, pid=pid)
-        message = can.Message(
-            arbitration_id=self._request_id if request_id is None else request_id,
-            data=request_payload,
-            is_extended_id=False,
-        )
-        try:
-            if not tx_gate.send(
-                self._bus, message, what=f"probe service=0x{service:02X}", holder=self._tx_holder
-            ):
-                return SupportProbe(sent=False)
-        except can.CanError:
-            log.warning("CAN send failed", extra={"service": service, "pid": pid})
+        if not self._send(
+            self._request_id if request_id is None else request_id,
+            self._build_request(service=service, pid=pid),
+            what=f"probe service=0x{service:02X}",
+            log_extra={"service": service, "pid": pid},
+        ):
             return SupportProbe(sent=False)
 
         expected_service = positive_response_service(service)
@@ -813,14 +809,6 @@ class CanObdClient:
             )
         except can.CanError:
             log.warning("CAN flow-control send failed", extra={"flow_control_id": arbitration_id})
-
-
-def _registry_width(pid: int) -> int | None:
-    """The registry's Mode 01 payload width for ``pid``, or ``None``."""
-    definition = lookup(0x01, pid)
-    if definition is None or definition.byte_length <= 0:
-        return None
-    return definition.byte_length
 
 
 # ---------------------------------------------------------------------------

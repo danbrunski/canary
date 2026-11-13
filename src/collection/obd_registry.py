@@ -1368,6 +1368,20 @@ def lookup(mode: int, pid: int) -> PidDefinition | None:
     return None
 
 
+def mode01_registry_width(pid: int) -> int | None:
+    """The registry's Mode 01 payload width for ``pid``, or ``None`` when the
+    PID is unknown or has no fixed width.
+
+    The one copy: the batched-response walk (``CanObdClient``) and the
+    width ledger (``obd_scheduler.requests.Mode01WidthLedger``) both slice by
+    it, so they cannot disagree about a PID's width.
+    """
+    definition = lookup(0x01, pid)
+    if definition is None or definition.byte_length <= 0:
+        return None
+    return definition.byte_length
+
+
 PidCoverageStatus = Literal[
     "decoded",
     "supported_not_decoded",

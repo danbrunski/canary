@@ -36,7 +36,7 @@ from src.collection.can_obd_client import (
     read_pid,
 )
 from src.collection.isotp import MAX_BATCHED_PIDS
-from src.collection.obd_scheduler import mode01_registry_width
+from src.collection.obd_registry import mode01_registry_width
 from src.log import configure_logging
 from tools._bus_tool import (
     PASSIVE_REFUSED_EXIT,

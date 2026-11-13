@@ -41,13 +41,13 @@ from src.collection.isotp import (
     split_batched_did_response,
     walk_batched_response,
 )
+from src.collection.obd_registry import mode01_registry_width
 from src.collection.obd_scheduler import (
     CanObdLoopStats,
     DidSessionSpec,
     Mode01WidthLedger,
     PollRequest,
     SessionControlResult,
-    mode01_registry_width,
 )
 
 log = logging.getLogger(__name__)

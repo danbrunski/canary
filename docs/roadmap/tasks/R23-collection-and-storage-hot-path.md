@@ -313,7 +313,7 @@ session-name parser.
 
 ## Duplication and structure
 
-- [ ] **R23.7 `_tick`, `_serve_single` and `_issue_batched_request` repeat the
+- [x] **R23.7 `_tick`, `_serve_single` and `_issue_batched_request` repeat the
   same bookkeeping.** In `can_obd_loop.py` `_CanObdLoop`:
   - the wake-up call
     `self._drain_until(_wake_for(now, self.controller, self.request_states, …).at)`
@@ -327,23 +327,66 @@ session-name parser.
     (`tuning_profile.is_active() and tuning_profile.request_eligible(…)`)
     appears three times;
   - request selection in `_tick` is three branches of one choice.
-  - [ ] `_sleep_until(now, *, budget_at=None, next_due=None)`;
+  - [x] `_sleep_until(now, *, budget_at=None, next_due=None)`;
     `_credit_answer` and `_credit_timeout` used by both serve paths;
     `_is_focused_capture(index, request)`; `_choose_request`.
-  - No behavior change. `test_bus_budget.py` counts source occurrences of
-    `_spend_budget_slot` and `bus_budget.effective`; keep those call sites.
-    Pinned by `test_memory_burst_traces.py`, `test_batch_*`, and the new
-    `test_capture_request_ledger.py`.
+    Done 2026-11-13. `_sleep_until` also takes `budget_only_for_session`
+    because the idle site passes it. It replaces all five `_wake_for` calls,
+    and `_drain_until(_wake_for(` no longer appears anywhere.
+    `_choose_request` returns `(selection, waited)`. The
+    focused-capture, answer and timeout helpers are module functions because
+    `_issue_batched_request` is one. A batch credits its round itself, in
+    `_serve_batch`, after each member's attempt, so the batch call passes no
+    `rounds`. The single path keeps the order readings_emitted,
+    rounds.on_observed, record_read, on_reading, responses/last_response_at,
+    `_update_response_state`. Its old `emitted and not silent_probe` guard
+    became unconditional, which is safe because `BatchGovernor.on_single`
+    returns `was_probe and not answered`, always False for an emitted read.
+    Two steps of the single path now run before the
+    governor/discovery/controller calls instead of after them: the
+    response-state update, and the `last_response_at` stamp, which now reads
+    the clock before `on_reading` rather than after it. Those calls touch no
+    request state, and on the fake clock the times are equal.
+    `test_bus_budget` source counts unchanged. Evidence:
+    (1) a scratch dump of all 30 `test_memory_burst_traces` scenarios. It
+    records the full trace plus every `PollRequestState`, all
+    `CanObdLoopStats` and both governors' metrics. Before (run twice: the
+    same) and after: byte-identical, 30/30, including 18 batched Mode 01
+    requests per `paced` run.
+    (2) a pytest plugin recorded the end state of every `_CanObdLoop`
+    (309 loops, 242 tests) across the 24 test files that import
+    `can_obd_loop`, at a HEAD worktree and in the tree. 231 tests were
+    identical. 9 differ only in wall-clock fields (`loop_started_at`,
+    `next_due_at`, ...); these tests use the real clock. 2 also differ
+    between two runs at HEAD itself (reconnect count, `recent_reads`).
+    (3) 664 passed, before and after.
 
-- [ ] **R23.8 `CanObdClient` sends a request in six hand-copied blocks.**
+- [x] **R23.8 `CanObdClient` sends a request in six hand-copied blocks.**
   `query_mode_01_batch`, `query_mode_22_batch`, `query_raw`,
   `query_body_or_nrc`, `_request_or_nrc`, `_request_many`: each builds a
   `can.Message`, calls `tx_gate.send(…, holder=self._tx_holder)`, catches
   `can.CanError`, logs, and returns its own empty value. W08.7's `holder`
   argument had to be threaded through all of them. `_registry_width` is
   byte-identical to `obd_scheduler/requests.mode01_registry_width`.
-  - [ ] `CanObdClient._send(arbitration_id, data, *, what) -> bool`.
-  - [ ] One width helper, in `obd_registry.py` beside `lookup`.
+  - [x] `CanObdClient._send(arbitration_id, data, *, what) -> bool`.
+    Done 2026-11-13, with a `log_extra` mapping, so each caller keeps its
+    "CAN send failed" text and extra fields exactly. A raise is kept in
+    `_last_send_error` (reset on every send), which is how `query_raw` still
+    returns `send_error`. `tx_gate.send(` and `holder=self._tx_holder` now
+    appear once each in the client, plus the flow-control send, which is not
+    one of the six and keeps its own message. Pinned by
+    `tests/test_can_obd_client.py` (12 new tests):
+    `test_a_send_the_bus_refuses_is_logged_and_returns_the_paths_empty_value`
+    checks, for each of the six paths, the empty value, the log fields and
+    `RawReply.send_error`;
+    `test_every_request_goes_out_under_the_clients_holder` checks that each
+    path passes the holder. All 12 also pass against the HEAD client.
+  - [x] One width helper, in `obd_registry.py` beside `lookup`.
+    `obd_registry.mode01_registry_width`. The client's `_registry_width` and
+    `obd_scheduler/requests.mode01_registry_width` are deleted, and the
+    `obd_scheduler` re-export is dropped. Callers (`requests.py`,
+    `can_obd_io.py`, `can_obd_client.py`, `tools/can_obd_probe.py`) import
+    it from `obd_registry`. `grep -rn _registry_width` finds only it.
   - `can_obd_io`'s send stays separate: its `CanError` has to reach the loop's
     reconnect.
 

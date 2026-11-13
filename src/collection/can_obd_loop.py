@@ -112,6 +112,9 @@ from src.collection.request_eligibility import Eligibility, SessionPhase, evalua
 
 log = logging.getLogger(__name__)
 
+#: One chosen request: its plan index, the request and its scheduler state.
+_Selection = tuple[int, PollRequest, PollRequestState]
+
 
 def _loop_request_verdict(
     controller: DidWindowController | None,
@@ -565,83 +568,32 @@ class _CanObdLoop:
         )
         if active_request_count == 0:
             self.rounds.idle(now)
-            wake = _wake_for(
+            self._sleep_until(
                 now,
-                self.controller,
-                self.request_states,
                 budget_at=self.next_budget_at,
                 next_due=_next_unsuppressed_at(
                     self.requests, self.request_states, now, eligible=eligible
                 ),
-                deadline=self.deadline,
                 budget_only_for_session=not discovery_wants_budget,
             )
-            self._drain_until(wake.at)
             return
 
         if burst is not None and burst.hold_until is not None and now < burst.hold_until:
             # The window's memory reads are owed and its slots are being paid
             # up front: wait them out, then issue every read back to back.
-            self._drain_until(
-                _wake_for(
-                    now,
-                    self.controller,
-                    self.request_states,
-                    budget_at=burst.hold_until,
-                    next_due=None,
-                    deadline=self.deadline,
-                ).at
-            )
+            self._sleep_until(now, budget_at=burst.hold_until)
             return
         if now < self.next_budget_at and (burst is None or not burst.issue_now):
-            wake = _wake_for(
-                now,
-                self.controller,
-                self.request_states,
-                budget_at=self.next_budget_at,
-                next_due=None,
-                deadline=self.deadline,
-            )
-            self._drain_until(wake.at)
+            self._sleep_until(now, budget_at=self.next_budget_at)
             return
 
         current_round = self._ensure_round(now, eligible, discovery_wants_budget)
         if current_round is None:
             return
         preferred = _preferred_members(self.requests, current_round)
-        selection = None
-        if burst is not None and burst.issue_now:
-            selection = _select_next_due_request(
-                self.requests,
-                self.request_states,
-                now,
-                eligible=burst.member,
-                among=current_round.remaining,
-                preferred=preferred,
-            )
-            if selection is None and now < self.next_budget_at:
-                # No burst member is in the open round: an ordinary request
-                # waits for its slot, as it always did.
-                self._drain_until(
-                    _wake_for(
-                        now,
-                        self.controller,
-                        self.request_states,
-                        budget_at=self.next_budget_at,
-                        next_due=None,
-                        deadline=self.deadline,
-                    ).at
-                )
-                return
-        if selection is None:
-            selection = _select_next_due_request(
-                self.requests,
-                self.request_states,
-                now,
-                eligible=eligible if burst is None else burst.outside,
-                among=current_round.remaining,
-                preferred=preferred,
-            )
+        selection, waited = self._choose_request(now, eligible, burst, current_round, preferred)
+        if waited:
+            return
         if selection is None:
             # Members remain but none is pollable any more (the DID window
             # closed, a member got suppressed): the round cannot complete and
@@ -1061,19 +1013,56 @@ class _CanObdLoop:
                 # Never spin: with active requests but nothing to open, the
                 # bus is still received until the earliest relevant deadline
                 # (or the budget slot a pending discovery probe can use).
-                wake = _wake_for(
+                self._sleep_until(
                     now,
-                    self.controller,
-                    self.request_states,
                     budget_at=self.next_budget_at if discovery_wants_budget else None,
                     next_due=wait_until,
-                    deadline=self.deadline,
                 )
-                self._drain_until(wake.at)
                 return None
         current_round = self.rounds.current
         assert current_round is not None
         return current_round
+
+    def _choose_request(
+        self,
+        now: float,
+        eligible: RequestFilter | None,
+        burst: BurstDecision | None,
+        current_round: RoundState,
+        preferred: frozenset[int],
+    ) -> tuple[_Selection | None, bool]:
+        """The open round's request this tick serves, and whether it waited instead.
+
+        A burst that may issue now takes its own members first. When none of
+        them is in the open round, an ordinary request waits for its budget
+        slot as it always did: the bus is received until then and ``waited``
+        is True. Otherwise the ordinary choice, among the requests outside the
+        burst when one is planned. ``(None, False)`` means members remain but
+        none is pollable.
+        """
+        if burst is not None and burst.issue_now:
+            selection = _select_next_due_request(
+                self.requests,
+                self.request_states,
+                now,
+                eligible=burst.member,
+                among=current_round.remaining,
+                preferred=preferred,
+            )
+            if selection is not None:
+                return selection, False
+            if now < self.next_budget_at:
+                self._sleep_until(now, budget_at=self.next_budget_at)
+                return None, True
+        selection = _select_next_due_request(
+            self.requests,
+            self.request_states,
+            now,
+            eligible=eligible if burst is None else burst.outside,
+            among=current_round.remaining,
+            preferred=preferred,
+        )
+        return selection, False
 
     def _serve_batch(
         self,
@@ -1180,21 +1169,25 @@ class _CanObdLoop:
             )
             if readings:
                 emitted = True
-                stats.readings_emitted += len(readings)
-                acquired_at = result.arrival.at if result.arrival is not None else None
-                self.rounds.on_observed(request_index, len(readings), acquired_at)
-                for reading in readings:
-                    stats.record_read(reading.pid, time.monotonic())
-                    self.on_reading(reading)
+                _credit_answer(
+                    request_index,
+                    request,
+                    request_state,
+                    readings,
+                    stats=stats,
+                    on_reading=self.on_reading,
+                    now=time.monotonic(),
+                    rounds=self.rounds,
+                    acquired_at=result.arrival.at if result.arrival is not None else None,
+                )
         answered = emitted or result.negative_response_code is not None
-        # This single is the liveness probe a silent batch asked for.
+        # This single is the liveness probe a silent batch asked for. Only a
+        # silent one says so, so an emitted read is never ``silent_probe``.
         governor = self.did_batching if request.kind == "did" else self.pid_batching
         silent_probe = governor.on_single(answered)
         if answered:
             self._on_ecu_answer()
         if emitted:
-            request_state.responses += 1
-            request_state.last_response_at = time.monotonic()
             self.discovery = self.discovery.on_contact(time.monotonic())
             if controller is not None:
                 controller.on_response(
@@ -1221,25 +1214,13 @@ class _CanObdLoop:
                 back_off=not silent_probe,
             )
         else:
-            stats.request_timeouts += 1
-            note_miss(
+            _credit_timeout(
                 request_index,
                 request,
                 request_state,
+                stats=stats,
                 now=time.monotonic(),
-                kind=MISS_TIMEOUT,
                 back_off=not silent_probe,
-            )
-        if emitted and not silent_probe:
-            _update_response_state(
-                request_state,
-                emitted=True,
-                now=time.monotonic(),
-                priority=request_is_priority(request),
-                focused_capture=(
-                    tuning_profile.is_active()
-                    and tuning_profile.request_eligible(request_index, request)
-                ),
             )
         if controller is not None:
             controller.on_request_attempted(request_index)
@@ -1349,6 +1330,29 @@ class _CanObdLoop:
     def _drain_until(self, until: float) -> None:
         _drain_frames_until(
             self.bus, self.on_frame, self.stats, self.stop_event, until, self.deadline
+        )
+
+    def _sleep_until(
+        self,
+        now: float,
+        *,
+        budget_at: float | None = None,
+        next_due: float | None = None,
+        budget_only_for_session: bool = False,
+    ) -> None:
+        """Receive the bus until the loop's next wake-up (:func:`_wake_for`):
+        ``budget_at`` and ``next_due`` folded with the session controller's
+        deadlines and the run's own."""
+        self._drain_until(
+            _wake_for(
+                now,
+                self.controller,
+                self.request_states,
+                budget_at=budget_at,
+                next_due=next_due,
+                deadline=self.deadline,
+                budget_only_for_session=budget_only_for_session,
+            ).at
         )
 
     def _log_start(self) -> None:
@@ -1982,7 +1986,7 @@ def _issue_batched_request(
             note_miss(index, request, state, now=now, kind=MISS_BATCH_UNPARSED)
             continue
         payload = result.readings.get(request.identifier)
-        emitted = False
+        readings: list[ObdReading] = []
         if payload is not None:
             # Synthesise the response the single-PID path would have seen, so
             # both paths decode through exactly the same code.
@@ -1999,26 +2003,73 @@ def _issue_batched_request(
                 response_interval_s=result.response_interval_s,
                 round_state=round_state,
             )
-            if readings:
-                emitted = True
-                observed[index] = len(readings)
-                stats.readings_emitted += len(readings)
-                for reading in readings:
-                    stats.record_read(reading.pid, time.monotonic())
-                    on_reading(reading)
-        if emitted:
-            state.responses += 1
-            state.last_response_at = now
-            _update_response_state(
-                state,
-                emitted=True,
-                now=now,
-                priority=request_is_priority(request),
-                focused_capture=(
-                    tuning_profile.is_active() and tuning_profile.request_eligible(index, request)
-                ),
+        if readings:
+            observed[index] = len(readings)
+            # The round is credited by the caller, after its attempt
+            # (``_CanObdLoop._serve_batch``).
+            _credit_answer(
+                index, request, state, readings, stats=stats, on_reading=on_reading, now=now
             )
         else:
-            stats.request_timeouts += 1
-            note_miss(index, request, state, now=now, kind=MISS_TIMEOUT)
+            _credit_timeout(index, request, state, stats=stats, now=now)
     return BatchOutcome(answered=True, observed=observed, acquired_at=arrival.at)
+
+
+def _is_focused_capture(index: int, request: PollRequest) -> bool:
+    """Whether ``request`` is one the active capture selected: its answers and
+    misses are scored under the capture's back-off (``focused_capture``)."""
+    return tuning_profile.is_active() and tuning_profile.request_eligible(index, request)
+
+
+def _credit_answer(
+    index: int,
+    request: PollRequest,
+    state: PollRequestState,
+    readings: list[ObdReading],
+    *,
+    stats: CanObdLoopStats,
+    on_reading: Callable[[ObdReading], None],
+    now: float,
+    rounds: RoundScheduler | None = None,
+    acquired_at: float | None = None,
+) -> None:
+    """One request answered with ``readings``: emit them and credit it.
+
+    The one place both serve paths (the single read and each member of a
+    batch) count readings, hand them on and clear the request's miss state, so
+    a new accounting field cannot be added to one path and forgotten in the
+    other. ``rounds`` credits the open round here, when the caller has already
+    counted the attempt; a batch credits its round itself, after each member's
+    attempt.
+    """
+    stats.readings_emitted += len(readings)
+    if rounds is not None:
+        rounds.on_observed(index, len(readings), acquired_at)
+    for reading in readings:
+        stats.record_read(reading.pid, time.monotonic())
+        on_reading(reading)
+    state.responses += 1
+    state.last_response_at = now
+    _update_response_state(
+        state,
+        emitted=True,
+        now=now,
+        priority=request_is_priority(request),
+        focused_capture=_is_focused_capture(index, request),
+    )
+
+
+def _credit_timeout(
+    index: int,
+    request: PollRequest,
+    state: PollRequestState,
+    *,
+    stats: CanObdLoopStats,
+    now: float,
+    back_off: bool = True,
+) -> None:
+    """One request sent and answered with neither readings nor a refusal: the
+    loop's timeout counter and the request's miss (``note_miss``), together.
+    ``back_off=False`` for a silent liveness probe (see ``note_miss``)."""
+    stats.request_timeouts += 1
+    note_miss(index, request, state, now=now, kind=MISS_TIMEOUT, back_off=back_off)

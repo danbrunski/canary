@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 
 import can
 import pytest
 
+from src.collection import tx_gate
 from src.collection.can_obd_client import (
     DEFAULT_REQUEST_ID,
     DEFAULT_RESPONSE_ID_MIN,
     PID_DECODERS,
+    BatchedMode22Reply,
     CanObdClient,
+    RawReply,
     decode_absolute_load,
     decode_baro,
     decode_catalyst_temp,
@@ -35,6 +39,7 @@ from src.collection.can_obd_client import (
     read_pid,
     read_pids,
 )
+from src.collection.discovery import SupportProbe
 from src.collection.isotp import split_batched_did_response
 from src.validation.scripted_ecu import FakeClock, ScriptedEcu, single_frame_reply, support_bits
 
@@ -1098,3 +1103,106 @@ def test_a_declared_response_id_is_the_pin_not_request_plus_8() -> None:
     assert response is not None
     assert response.responder_id == 0x765
     assert response.payload == bytes([0x12, 0x34])
+
+
+# ---------------------------------------------------------------------------
+# The one request send (R23.8)
+# ---------------------------------------------------------------------------
+
+
+class _RefusingBus:
+    """A bus whose every transmit raises (a full TX queue, a bus-off)."""
+
+    def send(self, msg: can.Message, timeout: float | None = None) -> None:
+        raise can.CanOperationError("Transmit buffer full")
+
+    def recv(self, timeout: float | None = None) -> can.Message | None:
+        raise AssertionError("an unsent request must not wait for an answer")
+
+
+#: Each request entry point, the empty value it returns when the frame never
+#: left, and the fields its "CAN send failed" line carries.
+_SEND_PATHS: list[tuple[str, Callable[[CanObdClient], object], object, dict[str, object]]] = [
+    (
+        "mode01_batch",
+        lambda c: c.query_mode_01_batch([0x0C, 0x0D]),
+        None,
+        {"service": 0x01, "batch_size": 2},
+    ),
+    (
+        "mode22_batch",
+        lambda c: c.query_mode_22_batch([0x1101, 0x1102]),
+        BatchedMode22Reply(response=None, sent=False),
+        {"service": 0x22, "batch": 2},
+    ),
+    (
+        "raw",
+        lambda c: c.query_raw(0x21, b"\x10"),
+        RawReply(sent=False),
+        {"service": 0x21, "body": "10"},
+    ),
+    (
+        "body_or_nrc",
+        lambda c: c.query_body_or_nrc(service=0x22, body=b"\x11\x01"),
+        (None, None),
+        {"service": 0x22, "body": "1101"},
+    ),
+    (
+        "request_or_nrc",
+        lambda c: c.query_or_nrc(service=0x01, identifier=0x0C),
+        (None, None),
+        {"service": 0x01, "pid": 0x0C},
+    ),
+    (
+        "request_many",
+        lambda c: c.probe_support(0x01, 0x00),
+        SupportProbe(sent=False),
+        {"service": 0x01, "pid": 0x00},
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("call", "empty", "fields"),
+    [path[1:] for path in _SEND_PATHS],
+    ids=[path[0] for path in _SEND_PATHS],
+)
+def test_a_send_the_bus_refuses_is_logged_and_returns_the_paths_empty_value(
+    call: Callable[[CanObdClient], object],
+    empty: object,
+    fields: dict[str, object],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = CanObdClient(_RefusingBus(), timeout_seconds=0.2)  # type: ignore[arg-type]
+    with caplog.at_level("WARNING", logger="src.collection.can_obd_client"):
+        got = call(client)
+    if isinstance(empty, RawReply):
+        # The probe tools report why: the raise, never "suppressed".
+        empty = RawReply(sent=False, send_error="CanOperationError: Transmit buffer full")
+    assert got == empty
+    [record] = [r for r in caplog.records if r.getMessage() == "CAN send failed"]
+    assert {key: record.__dict__[key] for key in fields} == fields
+
+
+@pytest.mark.parametrize(
+    ("call", "empty"),
+    [path[1:3] for path in _SEND_PATHS],
+    ids=[path[0] for path in _SEND_PATHS],
+)
+def test_every_request_goes_out_under_the_clients_holder(
+    call: Callable[[CanObdClient], object],
+    empty: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W08.7: a client transmitting under an ECM-session claim passes it on
+    every send, and a send the gate suppresses is unsent, not failed."""
+    sent: list[tuple[str, object]] = []
+
+    def suppressed(_bus: object, _msg: can.Message, *, what: str, holder: object = None) -> bool:
+        sent.append((what, holder))
+        return False
+
+    monkeypatch.setattr(tx_gate, "send", suppressed)
+    client = CanObdClient(_RefusingBus(), tx_holder="rom_backup")  # type: ignore[arg-type]
+    assert call(client) == empty
+    assert [holder for _what, holder in sent] == ["rom_backup"]

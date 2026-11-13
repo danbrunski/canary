@@ -74,7 +74,6 @@ from src.collection.obd_scheduler.requests import (
     _request_sends_judged,
     apply_mode01_support,
     build_poll_requests,
-    mode01_registry_width,
     mode06_requests,
     narrow_memory_reads,
 )
@@ -216,7 +215,6 @@ __all__ = [
     "load_repo_did_map",
     "log",
     "memory_channels",
-    "mode01_registry_width",
     "mode06_requests",
     "narrow_memory_reads",
     "note_attempt",

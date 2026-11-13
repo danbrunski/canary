@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.collection.can_obd_client import DEFAULT_REQUEST_ID, PID_DECODERS
 from src.collection.isotp import MEMORY_READ_SERVICE
-from src.collection.obd_registry import PollTier, lookup
+from src.collection.obd_registry import PollTier, lookup, mode01_registry_width
 from src.collection.obd_scheduler.spec import (
     AUTO_PIDS,
     DTC_POLL_CHANNELS,
@@ -41,14 +41,6 @@ log = logging.getLogger(__name__)
 #: cannot explain (an ECU that answers a PID alone but mangles it in a batch),
 #: so no attribution can keep ``batch_desyncs`` growing forever.
 MODE01_DESYNC_BLAME_LIMIT = 3
-
-
-def mode01_registry_width(pid: int) -> int | None:
-    """The registry's Mode 01 payload width for ``pid``, or ``None``."""
-    definition = lookup(0x01, pid)
-    if definition is None or definition.byte_length <= 0:
-        return None
-    return definition.byte_length
 
 
 @dataclass
