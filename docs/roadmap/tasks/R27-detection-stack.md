@@ -96,7 +96,7 @@ not measured.
   - Pinned by `tests/test_control_classification.py`,
     `tests/test_storage_catalog.py`.
 
-- [ ] **R27.3 `prepare_tick` rebuilds a whole-buffer DataFrame on the event
+- [~] **R27.3 `prepare_tick` rebuilds a whole-buffer DataFrame on the event
   loop every second.** `LiveFeatureSource.prepare_tick` does
   `pd.DataFrame(list(self._buffer))` over up to ~181 dicts of
   `{value, __gap, __arrived}` per channel, and `daemon/inference._snapshot`
@@ -106,25 +106,125 @@ not measured.
   worker, 0.17 ms, so the build is the cost and not the IPC.
   `docs/sustained-validation.md` already records the feature stage holding
   the loop 40–60 ms per tick. See R23 for the other things on that loop.
-  - [ ] Measure on the Pi first, with the truck's real channel count.
-  - [ ] Keep the ring buffer columnar (a float block, two bool blocks, a
+  - [~] Measure on the Pi first, with the truck's real channel count.
+    *Laptop only, 2026-11-12; the Pi measurement is owed* (no Pi access from
+    this run). Real column sets, from stored sessions driven through
+    `LiveFeatureSource` (`observe` + 1 Hz `prepare_tick`, 400 ticks, buffer
+    full at 181 rows): `2026-11-11T173212` 284 columns, `2026-10-27T173734`
+    308, `_tuning-2026-08-05T142720` 197. None reached the review's 452; a
+    copy of the 308-column buffer with 48 channels cloned is the 452 case.
+    `prepare_tick` itself at HEAD vs this change, full-buffer ticks of
+    `2026-10-27T173734` (181 × 308), two runs each: **7.27–8.10 ms → 0.58–0.71
+    ms** median. The frame build alone (quiet laptop, 120 interleaved reps,
+    medians): `pd.DataFrame(list_of_dicts)` + `to_datetime` 4.84 / 6.82 /
+    10.46 ms at 197 / 308 / 452 columns; now `append` + `rows()` on the loop
+    0.17 / 0.20 / 0.25 ms, pickling `WideRows` 0.31 / 0.33 / 0.37 ms (141 /
+    218 / 318 KB), and unpickle + `frame()` + `to_datetime` in the worker
+    1.87 / 1.96 / 2.09 ms. To do on the Pi: the same `prepare_tick` median
+    on a full buffer with the truck's live channel set.
+  - [x] Keep the ring buffer columnar (a float block, two bool blocks, a
     column list that grows when a channel first appears) and build the frame
     from the blocks, or ship the blocks and build in the worker.
+    *Done 2026-11-12:* `src/features/live.py` `WideRowRing` (replaces the
+    `deque` of dicts as `_buffer`): a float block, **one** bool block (the
+    `__gap` and `__arrived` flags together; two would only add a part to
+    concatenate), per-row dicts for the values that are neither (`timestamp`,
+    `session`, framed by pandas itself so their dtypes are its inference),
+    and a slot per key, added when the key is first seen. **Shipped, built in
+    the worker:** `PreparedLiveTick.rows` is a `WideRows` (copied blocks + a
+    cached column plan); `PreparedLiveTick.wide` is a property that builds the
+    frame where it is read, which in the daemon is the feature process.
+    Building on the loop would still cost ~2 ms a tick there (an object
+    sub-frame, a concat and a column `take`); shipping costs ~0.2 ms and the
+    pickle is the same size. `daemon/inference._snapshot` needed no change.
+    `maxlen` eviction is the ring's capacity (`_max_rows`); `reset()` installs
+    a fresh `WideRowRing`, and `WideRowRing.__eq__` (capacity, keys seen,
+    frame) lets `test_live_feature_source_reset` compare it by value. A value
+    that changes kind (float column given a bool or an int) raises
+    `TypeError`: the dict path would have changed that column's dtype.
   - Must not change: the resulting dtypes, which must equal what
     `DataFrame(list_of_dicts)` gives today. Pinned by
     `test_features_last_row_parity`, `test_batched_timing_parity`,
     `test_preprocessing_live`, `test_feature_pipeline_golden`.
+    *Met:* `tests/test_wide_row_ring.py` (18 tests) builds both ways from the
+    same rows with `assert_frame_equal(check_exact=True, check_index_type=
+    True, check_column_type=True)` plus `dtypes.equals`. Cases: a 241-tick
+    drive through the source (cold-start contract, CAN decode) where
+    `obd:MAF` first appears at tick 40 and GPS at 70, coolant goes stale at
+    120, and the buffer evicts past 181. It asserts the flag is `object` with
+    NaN while older rows lack it, sorted after their keys, and `bool` in its
+    family's place once those rows are evicted; it also checks after a pickle
+    round trip of the `PreparedLiveTick`. Start-context columns that vanish
+    on a reload and return; six random key-appear/vanish sequences on rings
+    of 1–8; int and string keys; empty ring; kind-change refusal; a snapshot
+    detached from later appends. Proven able to fail: a scratch plugin
+    casting one bool column to float64 failed 8 of 18 (the drive test on
+    `obd:RPM__gap`), and one casting the partial-flag `object` column to
+    float64 failed 8 of 18 (`obd:MAF__gap`). On real data the bench asserts
+    `check_exact` + dtypes equality on all three captured buffers. A
+    live-path A/B over `2026-10-27T173734` (400 full-transform ticks, old
+    dict build vs ring, everything else equal) gave identical feature rows
+    (400 × 521 columns), operating points and trip integrals. `pytest -m ""`
+    over the 32 test files importing `src.features.live` plus
+    `test_feature_pipeline_golden`, `test_behavior_serving_contracts` and the
+    new file: 730 passed. `pytest -m ml_training` (the whole tier,
+    `src/features/` is in `scripts/ml_paths.txt`): 125 passed, 1 skipped.
 
-- [ ] **R27.4 `ZScoreScaler.transform` loops over columns in pandas, and the
+- [x] **R27.4 `ZScoreScaler.transform` loops over columns in pandas, and the
   IF scores one row per tick through it.** `for col in self.columns:
   out[col] = (df[col] - mean) / denom` costs about 230 µs of pandas overhead
   per column: 19–20 ms for a one-row frame with 88 fitted columns, against
   0.7 ms as `(row - means) / denoms` on `scaler.vectors(cols)`.
   `TrainedIsolationForest.score` then copies the frame again.
-  - [ ] Build one `(n_rows, n_cols)` float64 block and concatenate it back in
+  - [x] Build one `(n_rows, n_cols)` float64 block and concatenate it back in
     column order; drop the second copy in `score`.
+    *Done 2026-11-12:* one block **per result dtype**, not one float64 block.
+    The served features are float32 (manifest `feature_dtypes`: 295 ×
+    float32), and the loop computed float32 in float32: pandas turns a numpy
+    scalar mean into a Python float, so it promotes weakly. A float64 block
+    is not bit-identical; the perturbation test proves it. The daemon's
+    one-row frame (`row.to_frame().T`) is all object dtype holding
+    `np.float32`, so object columns get one object block with the same
+    element arithmetic. Extension dtypes and an object column holding `None`
+    keep the Series expression. `(x - mean) / denom` stays the exact
+    expression (no reciprocal). `ZScoreScaler.transform_fitted` returns only
+    the fitted columns, and `score` uses it, so `out = frame.copy()` is the
+    only full copy. A/B against HEAD on a loaded laptop (load avg 16, medians):
+    one row × 88 cols 15.3–18.0 ms → 4.6–5.6 ms; one row × 295 cols (the real
+    artifact) 48–50 ms → 6.9–9.0 ms; `engine.observe` one row 309 ms → 35 ms;
+    a 12,959 × 894 frame `transform` 445 → 68 ms and `score` 1764 → 1112 ms.
+    Quiet in-process: one row × 295 at 1.1 ms (`transform_fitted`) to 2.3 ms
+    (`transform`, typed).
   - Acceptance is bit-equality on a real scored session, not `allclose`.
     Pinned by the IF score tests and `test_scoring_continuity`.
+    *Met:* the deployed artifact `isolation_forest_2026-09-20T054703.694923Z`
+    (`models/nissan-xterra-2008`, same manifest as `backups/pi-20261112`) was
+    run over both cached real feature frames: 12,959 rows / 10 sessions
+    (2026-09-21..23) and 11,084 rows / 15 sessions. Old and new code were
+    compared on bytes (`tobytes`) and `np.array_equal`, per column and dtype,
+    for `transform` and `score` on each whole frame and on three single
+    sessions from each. For session `2026-09-22T233855` (474 rows) the serve
+    path was compared row by row: `reconcile_feature_frame_to_spec` →
+    `engine.observe`, `feature_contributions` (326 non-empty), and the
+    object-frame `transform`. Every output was IDENTICAL. Committed pin:
+    `tests/test_zscore_block.py` (10 tests), against the old loop kept as
+    `_reference_transform`. It covers float32/float64/int64/int8/bool columns,
+    NaN, ±inf, an all-NaN column, zero std and below-floor std, `std_floor=0`
+    (÷0), interleaved passthrough, a permuted and a duplicate row index, an
+    empty frame, one-row typed and object frames, `np.float64` stats,
+    `Float64` and `None` columns, attrs/flags, the missing-column refusal,
+    and `transform_fitted` == the fitted slice. Perturbations fail it (counts
+    out of the 9 tests that existed then): reciprocal multiply (7/9 fail), all-float64 block (7/9), dropping the
+    numpy-scalar→Python conversion (1/9), and an object block via float64
+    (both object tests). `pytest -m ""` over 35 files that import the scaler
+    or IF module, `test_scoring_continuity` included (71 `ml_training` tests
+    among them): 771 passed. Independently reproduced by the verifier on two
+    other sessions (`2026-09-21T231724`, `2026-09-21T142126`): 28/28 outputs
+    identical. One refusal changed: `score` (via `transform_fitted`) now
+    raises `SchemaMismatchError` (a `ValueError`) on duplicate feature or mode
+    labels, where it raised a numpy broadcast `ValueError` or a pandas
+    grouper `ValueError`; `reconcile_feature_frame_to_spec` already refuses
+    duplicates, so no real caller reaches it.
 
 - [ ] **R27.5 The z-score rule is applied by three code paths and nothing
   pins train equal to serve.** `training_entry.build_sequence_dataset`
@@ -134,7 +234,12 @@ not measured.
   in float64 and cast afterwards. The numerical difference is irrelevant
   (4.8e-7 in z-space). The gap is that `test_scoring_continuity` compares
   serve to evaluation, not to the training dataset, and
-  `build_sequence_dataset` has no direct test.
+  `build_sequence_dataset` has no direct test. A fourth path since R27.4: the
+  IF's `transform` / `transform_fitted` scales float32 features *in float32*,
+  per dtype block, deliberately, to stay bit-identical to the old per-column
+  loop. `apply_block` must not silently move the IF onto float64 (that changes
+  served scores); either keep the IF on its own block path or make the switch
+  an explicit, measured change.
   - [ ] `ZScoreScaler.apply_block(values, columns)` beside `vectors`, used by
     all three. Keep the compact-frame memory trick in the training path.
   - [ ] One test: training-dataset values equal serve-scaled values for the
@@ -341,6 +446,23 @@ not measured.
     the corpus grows.
   - Local copies of `src.coerce.optional_str` in
     `models/retraining_policy.py` and `companion/discovery.py`.
+
+- [ ] **R27.13 The IF runs its forest twice per tick, on an object-dtype row.**
+  Found while doing R27.4 (2026-11-12), not yet measured on the Pi.
+  - `TrainedIsolationForest.score` calls `model.decision_function(x)` and then
+    `model.predict(x)`, and sklearn's `predict` calls `decision_function`
+    again. On one row with the `city` model each pass took ~13 ms on the
+    laptop. Derive the label from the score already computed
+    (`predict` is `score < offset_`-style thresholding; read
+    `.venv/.../sklearn/ensemble/_iforest.py` for the exact rule) and prove
+    labels bit-identical on a real scored session.
+  - `IsolationForestInferenceEngine.observe` (`src/models/inference.py`)
+    builds the row with `row.to_frame().T`, which turns every column into
+    object dtype, so the scaler takes its object path. Scoring
+    `aligned.iloc[[0]]` keeps the float32 dtypes. Acceptance: scores
+    bit-identical to the object path on a real session (the R27.4 scaler
+    computes float32 features in float32 either way, but prove it).
+  - Pinned by `test_scoring_continuity` and the IF score tests.
 
 The cross-cutting copies found here are in
 [R24](R24-shared-primitives.md): canonical-JSON hashing (R24.5), naive-to-UTC

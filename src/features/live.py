@@ -31,7 +31,9 @@ training. At 1 Hz with a 30 s window and 180 s lookback that's ~181 rows.
 The segmenter, derived channels and deviations still run over all of them
 each tick; the rolling features roll only the newest row (P02.9,
 ``compute_features_last_row``) — rolling the whole buffer to keep one row
-was about two fifths of a laptop tick.
+was about two fifths of a laptop tick. The buffer is stored by column
+(:class:`WideRowRing`, R27.3), and the frame is built from those blocks in
+the feature worker, not on the event loop.
 
 Decode policy intentionally matches the offline path:
 ``decode_can_rows`` emits the *raw integer* (not scaled), because the
@@ -45,8 +47,9 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
+import numpy as np
 import pandas as pd
 
 from src.behavior.accepted_baselines import AcceptedBaselines
@@ -99,6 +102,370 @@ from src.vehicle.speed_correction import trip_speed_correction
 log = logging.getLogger(__name__)
 
 
+#: Value types a column stored in :class:`WideRowRing`'s float block may hold.
+#: Every one of them is what ``pd.DataFrame(list_of_dicts)`` turns into a
+#: float64 cell; an ``int`` is not (a column of ints is int64 there).
+_FLOAT_CELL_TYPES: frozenset[type] = frozenset({float, np.float64})
+#: ...and its bool block (a column of these is ``bool`` there).
+_BOOL_CELL_TYPES: frozenset[type] = frozenset({bool, np.bool_})
+
+
+@dataclass(frozen=True, eq=False)
+class _RowSchema:
+    """The keys of one appended row, in order, split by where they are stored.
+
+    Consecutive rows nearly always share one: a schema changes only when a
+    channel is first observed or the start-context columns change (a
+    behavior-model hot reload), so it is built then and reused per tick.
+    """
+
+    keys: tuple[str, ...]
+    key_set: frozenset[str]
+    float_keys: tuple[str, ...]
+    float_slots: np.ndarray
+    bool_keys: tuple[str, ...]
+    bool_slots: np.ndarray
+    object_keys: tuple[str, ...]
+
+
+_NO_FLOATS = np.empty((0, 0))
+_NO_BOOLS = np.empty((0, 0), dtype=bool)
+
+
+@dataclass(frozen=True, eq=False)
+class _WideLayout:
+    """Where each column of the frame comes from, for one run of row schemas.
+
+    The frame is built as one sub-frame per block, concatenated in the order
+    floats, full bools, partial bools, other values, then reordered into
+    ``columns`` by ``take``. The ``Index`` objects are built here, once per
+    layout, because a pandas ``str`` index over a few hundred labels costs
+    more than the data.
+    """
+
+    columns: pd.Index
+    float_names: pd.Index
+    float_slots: np.ndarray
+    bool_names: pd.Index
+    bool_slots: np.ndarray
+    #: Flags not every held row carries: an ``object`` column each.
+    partial_bools: tuple[tuple[str, int], ...]
+    has_objects: bool
+    #: ``take`` positions from the concatenated order into ``columns``;
+    #: ``None`` when they already agree.
+    take: np.ndarray | None
+
+    EMPTY: ClassVar[_WideLayout]
+
+    @classmethod
+    def of(cls, schemas: tuple[_RowSchema, ...], slots: dict[str, tuple[str, int]]) -> _WideLayout:
+        """The plan for rows whose consecutive schemas are ``schemas``."""
+        if not schemas:
+            columns: list[str] = []
+            everywhere: frozenset[str] = frozenset()
+        elif len(schemas) == 1:
+            columns = list(schemas[0].keys)
+            everywhere = schemas[0].key_set
+        else:
+            # First appearance over the rows, oldest first: pandas' order.
+            columns = list(dict.fromkeys(key for schema in schemas for key in schema.keys))
+            everywhere = frozenset.intersection(*(schema.key_set for schema in schemas))
+        float_names: list[str] = []
+        float_slots: list[int] = []
+        bool_names: list[str] = []
+        bool_slots: list[int] = []
+        partial: list[tuple[str, int]] = []
+        object_names: list[str] = []
+        for key in columns:
+            block, slot = slots[key]
+            if block == "float":
+                float_names.append(key)
+                float_slots.append(slot)
+            elif block == "bool" and key in everywhere:
+                bool_names.append(key)
+                bool_slots.append(slot)
+            elif block == "bool":
+                partial.append((key, slot))
+            else:
+                object_names.append(key)
+        concatenated = [*float_names, *bool_names, *(key for key, _ in partial), *object_names]
+        where = {key: i for i, key in enumerate(concatenated)}
+        take = np.asarray([where[key] for key in columns], dtype=np.intp)
+        return cls(
+            columns=pd.Index(columns),
+            float_names=pd.Index(float_names),
+            float_slots=np.asarray(float_slots, dtype=np.intp),
+            bool_names=pd.Index(bool_names),
+            bool_slots=np.asarray(bool_slots, dtype=np.intp),
+            partial_bools=tuple(partial),
+            has_objects=bool(object_names),
+            take=None if concatenated == columns else take,
+        )
+
+
+_WideLayout.EMPTY = _WideLayout.of((), {})
+
+
+@dataclass(frozen=True, eq=False)
+class WideRows:
+    """One tick's wide rows by block, detached from :class:`WideRowRing`.
+
+    What :class:`PreparedLiveTick` carries to the feature worker instead of a
+    frame (R27.3): building the frame is the pandas cost, and the worker is
+    where the rest of the pandas work already happens. The arrays are copies,
+    so the ring can keep appending while the worker reads them.
+    """
+
+    layout: _WideLayout
+    n_rows: int
+    #: ``(n_rows, len(layout.float_names))``.
+    floats: np.ndarray
+    #: ``(n_rows, len(layout.bool_names))``.
+    bools: np.ndarray
+    #: One ``object`` array per ``layout.partial_bools`` entry.
+    partial_bools: tuple[np.ndarray, ...]
+    #: Per row, the values that are neither float nor bool (``timestamp``,
+    #: ``session``), as dicts: pandas infers their dtypes, exactly as it did.
+    objects: tuple[dict[str, Any], ...]
+
+    def frame(self) -> pd.DataFrame:
+        """``pd.DataFrame(list_of_row_dicts)`` over these rows."""
+        layout = self.layout
+        if self.n_rows == 0:
+            return pd.DataFrame([])
+        parts: list[pd.DataFrame] = []
+        if len(layout.float_names):
+            parts.append(pd.DataFrame(self.floats, columns=layout.float_names))
+        if len(layout.bool_names):
+            parts.append(pd.DataFrame(self.bools, columns=layout.bool_names))
+        if layout.partial_bools:
+            parts.append(
+                pd.DataFrame(
+                    {
+                        key: cells
+                        for (key, _slot), cells in zip(
+                            layout.partial_bools, self.partial_bools, strict=True
+                        )
+                    }
+                )
+            )
+        if layout.has_objects:
+            parts.append(pd.DataFrame(list(self.objects)))
+        if not parts:
+            return pd.DataFrame([{} for _ in range(self.n_rows)])
+        combined = parts[0] if len(parts) == 1 else pd.concat(parts, axis=1)
+        return combined if layout.take is None else combined.take(layout.take, axis=1)
+
+
+class WideRowRing:
+    """The live source's ring buffer of wide rows, stored by column (R27.3).
+
+    The buffer used to be a ``deque`` of row dicts, and ``prepare_tick``
+    built ``pd.DataFrame(list(deque))`` from them on the event loop every tick
+    (17-19 ms at 181 rows x 452 columns in the review; 5-7 ms on a quiet
+    laptop over real 181-row buffers of 197-308 columns, 10 ms at 452), nearly
+    all of it pandas inferring every cell. This keeps the same rows as a float
+    block, one bool block (the ``__gap`` and ``__arrived`` flags together:
+    splitting them would only add a part to concatenate) and, per row, the few
+    other values (``timestamp``, ``session``), with a column list that grows
+    when a key is first seen.
+    :meth:`rows` copies the blocks out (the loop's half); :meth:`WideRows.frame`
+    builds the frame from them (the worker's).
+
+    **The frame is the one ``pd.DataFrame(list_of_dicts)`` gives** over the
+    rows currently held, which ``tests/test_wide_row_ring.py`` pins exactly
+    (``check_exact`` and dtypes), including:
+
+    * column order is first appearance over the held rows, oldest first, so a
+      channel first seen mid-buffer sorts after every key of the older rows,
+      and moves back among its own family once those rows are evicted;
+    * a column only some held rows carry is NaN in the others: float64 for a
+      value, ``object`` (``True``/``False``/NaN) for a flag. Once the rows
+      without it are evicted, the flag column is ``bool`` again;
+    * a key no held row carries is no column at all;
+    * any value that is neither a float nor a bool goes, per row, through
+      ``pd.DataFrame`` itself, so its inference is pandas' by construction.
+
+    A key whose values change kind (a float column given a bool, or an int)
+    raises ``TypeError``: the blocks cannot hold it, and the dict path would
+    have changed that column's dtype under the models without a word.
+
+    ``capacity`` is the old deque's ``maxlen``: appending to a full ring drops
+    the oldest row.
+    """
+
+    __hash__ = None  # type: ignore[assignment]  # mutable, compared by value
+
+    def __init__(self, capacity: int) -> None:
+        if capacity < 1:
+            raise ValueError(f"WideRowRing capacity must be positive, got {capacity}")
+        self.capacity = capacity
+        self._len = 0
+        #: Position the next row is written to; the oldest held row is
+        #: ``(_next - _len) % capacity``.
+        self._next = 0
+        #: Every key seen since construction -> (block, slot). A slot is never
+        #: reused for another key, so a key evicted and seen again lands in
+        #: its old slot.
+        self._slots: dict[str, tuple[str, int]] = {}
+        self._floats = np.full((capacity, 0), np.nan)
+        self._bools = np.zeros((capacity, 0), dtype=bool)
+        self._n_float = 0
+        self._n_bool = 0
+        self._objects: list[dict[str, Any]] = [{} for _ in range(capacity)]
+        self._schemas: list[_RowSchema | None] = [None] * capacity
+        self._last_schema: _RowSchema | None = None
+        #: The column plan for the held rows' run of schemas, rebuilt only
+        #: when that run changes (a new channel, or its rows evicted).
+        self._layout: _WideLayout | None = None
+        self._layout_schemas: tuple[_RowSchema, ...] = ()
+
+    def __len__(self) -> int:
+        return self._len
+
+    def __eq__(self, other: object) -> bool:
+        """Same bound, same keys seen, and the same frame."""
+        if not isinstance(other, WideRowRing):
+            return NotImplemented
+        if (self.capacity, self._len, self._slots) != (other.capacity, other._len, other._slots):
+            return False
+        return self._len == 0 or self.frame().equals(other.frame())
+
+    def append(self, row: dict[str, Any]) -> None:
+        """Append one row; when full, the oldest row is dropped."""
+        keys = tuple(row)
+        schema = self._last_schema
+        if schema is None or schema.keys != keys:
+            schema = self._schema_for(row, keys)
+            self._last_schema = schema
+        float_values = [row[key] for key in schema.float_keys]
+        bool_values = [row[key] for key in schema.bool_keys]
+        if not (
+            set(map(type, float_values)) <= _FLOAT_CELL_TYPES
+            and set(map(type, bool_values)) <= _BOOL_CELL_TYPES
+        ):
+            raise TypeError(self._kind_change(row, schema))
+        pos = self._next
+        # A float key this row lacks reads NaN, as a missing dict key does.
+        self._floats[pos, :] = np.nan
+        self._floats[pos, schema.float_slots] = float_values
+        self._bools[pos, schema.bool_slots] = bool_values
+        self._objects[pos] = {key: row[key] for key in schema.object_keys}
+        self._schemas[pos] = schema
+        self._next = (pos + 1) % self.capacity
+        self._len = min(self._len + 1, self.capacity)
+
+    def frame(self) -> pd.DataFrame:
+        """The held rows, oldest first, as ``pd.DataFrame(list_of_dicts)``."""
+        return self.rows().frame()
+
+    def rows(self) -> WideRows:
+        """The held rows, oldest first, detached from the ring.
+
+        The cheap half of :meth:`frame`: two fancy-index copies and the row
+        bookkeeping. The pandas half is :meth:`WideRows.frame`, which the
+        daemon runs in the feature worker (R27.3).
+        """
+        n = self._len
+        if n == 0:
+            return WideRows(_WideLayout.EMPTY, 0, _NO_FLOATS, _NO_BOOLS, (), ())
+        order = (np.arange(n) + (self._next - n)) % self.capacity
+        positions = order.tolist()
+        # Runs of consecutive rows sharing a schema, oldest first.
+        runs: list[tuple[_RowSchema, int, int]] = []
+        for i, pos in enumerate(positions):
+            schema = self._schemas[pos]
+            assert schema is not None  # every held position was written
+            if runs and runs[-1][0] is schema:
+                runs[-1] = (schema, runs[-1][1], i + 1)
+            else:
+                runs.append((schema, i, i + 1))
+        schemas = tuple(schema for schema, _start, _stop in runs)
+        if self._layout is None or self._layout_schemas != schemas:
+            self._layout = _WideLayout.of(schemas, self._slots)
+            self._layout_schemas = schemas
+        layout = self._layout
+        partial: list[np.ndarray] = []
+        for key, slot in layout.partial_bools:
+            cells = self._bools[order, slot].astype(object)
+            for schema, start, stop in runs:
+                if key not in schema.key_set:
+                    cells[start:stop] = np.nan
+            partial.append(cells)
+        return WideRows(
+            layout=layout,
+            n_rows=n,
+            # Rows then columns: a third of one ``np.ix_`` gather's cost.
+            floats=self._floats.take(order, axis=0).take(layout.float_slots, axis=1),
+            bools=self._bools.take(order, axis=0).take(layout.bool_slots, axis=1),
+            partial_bools=tuple(partial),
+            # The dicts are never mutated (a written position gets a new
+            # one), so sharing them cannot let a later append leak in.
+            objects=tuple(self._objects[pos] for pos in positions) if layout.has_objects else (),
+        )
+
+    def _schema_for(self, row: dict[str, Any], keys: tuple[str, ...]) -> _RowSchema:
+        float_keys: list[str] = []
+        float_slots: list[int] = []
+        bool_keys: list[str] = []
+        bool_slots: list[int] = []
+        object_keys: list[str] = []
+        for key in keys:
+            known = self._slots.get(key)
+            block, slot = known if known is not None else self._new_slot(key, row[key])
+            if block == "float":
+                float_keys.append(key)
+                float_slots.append(slot)
+            elif block == "bool":
+                bool_keys.append(key)
+                bool_slots.append(slot)
+            else:
+                object_keys.append(key)
+        return _RowSchema(
+            keys=keys,
+            key_set=frozenset(keys),
+            float_keys=tuple(float_keys),
+            float_slots=np.asarray(float_slots, dtype=np.intp),
+            bool_keys=tuple(bool_keys),
+            bool_slots=np.asarray(bool_slots, dtype=np.intp),
+            object_keys=tuple(object_keys),
+        )
+
+    def _new_slot(self, key: str, value: object) -> tuple[str, int]:
+        """Give a first-seen key a column in the block its value belongs to."""
+        kind = type(value)
+        if kind in _BOOL_CELL_TYPES:
+            if self._n_bool == self._bools.shape[1]:
+                grown = np.zeros((self.capacity, max(8, 2 * self._n_bool)), dtype=bool)
+                grown[:, : self._n_bool] = self._bools
+                self._bools = grown
+            entry = ("bool", self._n_bool)
+            self._n_bool += 1
+        elif kind in _FLOAT_CELL_TYPES:
+            if self._n_float == self._floats.shape[1]:
+                grown = np.full((self.capacity, max(8, 2 * self._n_float)), np.nan)
+                grown[:, : self._n_float] = self._floats
+                self._floats = grown
+            entry = ("float", self._n_float)
+            self._n_float += 1
+        else:
+            entry = ("object", -1)
+        self._slots[key] = entry
+        return entry
+
+    def _kind_change(self, row: dict[str, Any], schema: _RowSchema) -> str:
+        bad = [
+            f"{key!r} ({block} column) got {type(row[key]).__name__}"
+            for key in schema.keys
+            for block, _slot in [self._slots[key]]
+            if (block == "float" and type(row[key]) not in _FLOAT_CELL_TYPES)
+            or (block == "bool" and type(row[key]) not in _BOOL_CELL_TYPES)
+        ]
+        return "a wide-row value changed kind, which would change its column's dtype: " + ", ".join(
+            bad
+        )
+
+
 @dataclass(frozen=True)
 class PreparedLiveTick:
     """Immutable input to the expensive, pure live feature transform.
@@ -106,10 +473,15 @@ class PreparedLiveTick:
     Constructed on the event loop after one telemetry snapshot is appended.
     It captures the exact config/model references for this tick so a hot reload
     cannot make preparation and computation observe different generations.
+
+    The ring buffer travels as its blocks (``rows``), not as a frame: building
+    the frame is pandas work, so it happens where :attr:`wide` is read, which
+    for the daemon is the feature worker (R27.3).
     """
 
     now: datetime
-    wide: pd.DataFrame
+    #: The ring buffer's rows at this tick, oldest first, by column block.
+    rows: WideRows
     config: CanaryConfig
     behavior_models: BehaviorModels | None
     feature_config: FeatureConfig
@@ -124,6 +496,18 @@ class PreparedLiveTick:
     #: (:class:`~src.signals.afr.RecordedClockFlashHistory`). No default, so
     #: the worker cannot featurize a replayed tick against today's flash.
     flash_history: FlashHistory
+
+    @property
+    def wide(self) -> pd.DataFrame:
+        """The buffered rows as the wide frame the transform reads: exactly
+        ``pd.DataFrame(list_of_row_dicts)``, ``timestamp`` as UTC.
+
+        Built on each read (a fresh frame, so no caller can mutate another's);
+        the worker reads it once.
+        """
+        wide = self.rows.frame()
+        wide["timestamp"] = pd.to_datetime(wide["timestamp"], utc=True)
+        return wide
 
 
 @dataclass(frozen=True)
@@ -224,7 +608,9 @@ class LiveFeatureSource:
     #: never silently swallowed, surfaced via :attr:`reject_counts`. Cleared
     #: on :meth:`reset` like every other observation-derived state.
     _reject_counts: dict[str, int] = field(default_factory=dict)
-    _buffer: deque[dict[str, Any]] = field(init=False)
+    #: The wide rows, stored by column (R27.3): ``_buffer.frame()`` is
+    #: ``pd.DataFrame(list_of_row_dicts)`` without pandas inferring each cell.
+    _buffer: WideRowRing = field(init=False)
     #: P02.16 — per ``_buffer`` row: its stamp (epoch ns) and how far that
     #: stamp is ahead of the instant the data was recorded (``None`` for live
     #: data). Replay rebases rows to wall-clock; this maps them back so the
@@ -329,7 +715,7 @@ class LiveFeatureSource:
         # sees the preceding drive); at 1 Hz that's a few hundred trivial rows.
         recent_motion_s = self.config.preprocessing.idle_transient_lookback_seconds
         self._max_rows = max(32, int(window_s * hz * 2), int(recent_motion_s * hz) + int(hz))
-        self._buffer = deque(maxlen=self._max_rows)
+        self._buffer = WideRowRing(self._max_rows)
         self._buffer_clock = deque(maxlen=self._max_rows)
         self._feature_config = FeatureConfig(window_seconds=window_s)
         # Mirror the resampler's max_gap (interval × max_gap_factor) used at
@@ -571,9 +957,12 @@ class LiveFeatureSource:
     def prepare_tick(self, now: datetime) -> PreparedLiveTick | None:
         """Snapshot loop-owned state and append one row to the ring buffer.
 
-        This is deliberately cheap and contains every mutation that must stay
+        This runs on the event loop and contains every mutation that must stay
         serialized with :meth:`observe`. The returned value is self-contained
-        and safe to pickle to the persistent feature process.
+        and safe to pickle to the persistent feature process. It builds no
+        frame (R27.3): with ``pd.DataFrame(list_of_dicts)`` here a full-buffer
+        tick of a real drive (181 x 308) took 7-8 ms on the laptop, and with
+        the column blocks appended and copied out it takes 0.6-0.7 ms.
         """
         now_utc = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
         previous_tick = self._last_tick_at
@@ -612,11 +1001,10 @@ class LiveFeatureSource:
         self._buffer.append(snapshot)
         self._buffer_clock.append((pd.Timestamp(now_utc).value, self._replay_shift_s))
 
-        wide = pd.DataFrame(list(self._buffer))
-        wide["timestamp"] = pd.to_datetime(wide["timestamp"], utc=True)
         return PreparedLiveTick(
             now=now_utc,
-            wide=wide,
+            # R27.3: the blocks, copied; the frame is built where it is read.
+            rows=self._buffer.rows(),
             config=self.config,
             behavior_models=self.behavior_models,
             feature_config=self._feature_config,
@@ -893,7 +1281,7 @@ class LiveFeatureSource:
         self._last_observed_at = {}
         self._last_tick_at = None
         self._reject_counts = {}
-        self._buffer = deque(maxlen=self._max_rows)
+        self._buffer = WideRowRing(self._max_rows)
         self._buffer_clock = deque(maxlen=self._max_rows)
         self._replay_shift_s = None
         self.latest_operating_point = None
@@ -945,5 +1333,7 @@ __all__ = [
     "BuiltLiveTick",
     "LiveFeatureSource",
     "PreparedLiveTick",
+    "WideRowRing",
+    "WideRows",
     "build_prepared_live_tick",
 ]

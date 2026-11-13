@@ -55,8 +55,8 @@ result that finishes across a replay reset is discarded.
 
 | phase | thread | what runs |
 |---|---|---|
-| **prepare** (`LiveFeatureSource.prepare_tick`) | loop | Stamp the newest observation snapshot, derive gaps, append the bounded ring and copy its frame |
-| **feature build** (`build_prepared_live_tick`) | spawned process by default | Exact shared `featurize_wide_frame` transform; returns only the newest feature row, operating point and segmenter-fallback verdict |
+| **prepare** (`LiveFeatureSource.prepare_tick`) | loop | Stamp the newest observation snapshot, derive gaps, append the columnar ring (`WideRowRing`) and copy its column blocks (`WideRows`); the frame itself is built in the feature process (R27.3) |
+| **feature build** (`build_prepared_live_tick`) | spawned process by default | Build the wide frame from the blocks, then the exact shared `featurize_wide_frame` transform; returns only the newest feature row, operating point and segmenter-fallback verdict |
 | **snapshot continuation** (`LiveInferencePipeline._snapshot`) | loop | Apply the feature result, derived-channel broadcast + Parquet write, autotag hook, segmenter-fallback health edge, vehicle-state gate, idle-shutdown observe, `GenerationToken` read, detector prepares and behavior residuals |
 | **compute** (`_compute_tick`) | worker | `_if_compute`: schema align, `IsolationForestInferenceEngine.observe` (sklearn), threshold/scale lookup, contributor ranking. `_sequence_observe`: schema align, window append, torch forward pass. Pure — returns data and its own stage durations |
 | **apply** (`_apply`) | loop | generation check → `_if_apply` (health, `/ws/scores`, persistence gate, IF emit), `SequenceDetector.apply` (`/ws/scores`, gate, LSTM emit), `BehaviorDetector.apply` (gate, `/ws/scores`, behavior emits), fusion + fused emit, timing bookkeeping |
