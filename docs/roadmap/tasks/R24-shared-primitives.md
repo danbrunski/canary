@@ -18,16 +18,56 @@ commits; items that change an output say so. Where copies differ, the
 migration keeps each caller's current output behind an explicit argument, and
 a fixture per caller proves it.
 
-- [ ] **R24.1 A refusal that carries a reason.** Eighteen exception classes
+- [x] **R24.1 A refusal that carries a reason.** Eighteen exception classes
   in `src/` hand-write `self.reason = reason` with their own `__init__`,
   some with `.message`, some with `__reduce__` and some without (an exception
   without it does not survive the trip back from a spawn child with its
   fields). Callers translate one to another by hand in about as many places.
-  - [ ] `ReasonedRefusal(Exception)` at layer 0: `reason` (a stable code),
+  - [x] `ReasonedRefusal(Exception)` at layer 0: `reason` (a stable code),
     `detail`, pickle-safe. Existing classes subclass it and keep their names,
     codes and messages.
-  - [ ] Extend `tests/test_exceptions_pickle.py` to enumerate every subclass
+    Evidence: `src/refusal.py` (new; `"refusal": 0` in `tests/test_layering.py`
+    `LAYERS`, added first). `ReasonedRefusal(reason, detail)`; `str(exc)` is
+    `"<reason>: <detail>"` through an overridable `render`; `message` is a
+    read-only alias of `detail`; `__reduce__` rebuilds through
+    `rebuild_exception(cls, args)` = `cls.__new__(cls, *args)` plus the instance
+    dict, so a subclass with a constructor of its own (the trap) round-trips with
+    no `__reduce__` of its own (checked: with the base's `__reduce__` deleted,
+    the toy subclass fails `TypeError ... missing 1 required positional
+    argument`). All 18 hand-written classes migrated, names/codes/messages/
+    `str(exc)` unchanged, each still catchable as the builtin it was
+    (`ValueError`, `RuntimeError`; a refusal raised in a pydantic validator is
+    turned into a validation error only if it is one): 11 `(reason, message)`
+    classes with `.message`, 4 without (`TimingLookupRefusalError`,
+    `AxisPairingRefusedError`, `FuelPlantRefusalError`, `SimDesignRefusalError`;
+    their `__reduce__` sliced `str(self)`), `TripEndDigestUnavailableError`
+    (`str` is the message alone), `LoadAxisUnavailableError` and
+    `_RecipeSkipError` (one argument; `str` is the reason; `candidate` kept);
+    `EditSpecRefusalError` subclasses `RomEffectRefusalError` and inherits.
+    `rg 'self\.reason = reason' src`: 18 hand-written (HEAD 912c3238) -> 2
+    (the base at `src/refusal.py:55`, and its docstring). Additive: every
+    migrated class gains `.detail`; seven gain `.message`, now a read-only
+    property; `vars(exc)` is `{reason, detail}`. No caller assigns `.message`.
+    Not covered (outside `src/` or a different shape): `scripts/canary_desk.py`
+    `DeskRefusalError`, `tools/rom_sim.py` `CliRefusalError`,
+    `nonvolatile_write.AuthorizationRefusedError` `(code, detail)`. `class \w+(Error|Refusal)\(`: 175 -> 177 (the two bases).
+    Regrowth guard: `tests/test_source_rules.py` row `hand-written-refusal-reason`
+    (AST: `self.reason = ...` in a class with an `*Error`/`*Exception`/
+    `*Refusal` base, outside `src/refusal.py`; allowlist empty; run against a
+    `git archive HEAD` tree it finds 18, now 0).
+  - [x] Extend `tests/test_exceptions_pickle.py` to enumerate every subclass
     by reflection, so a new one cannot skip the round-trip.
+    Evidence: after the existing whole-`src` enumeration (`walk_packages`
+    imports every module), `_subclasses()` walks `__subclasses__()` of both
+    bases: 19 `ReasonedRefusal` and 4 `StatusError` subclasses, asserted to be
+    exactly the named sets and a subset of `CLASSES`. Per subclass: pickle,
+    `copy.copy` and `copy.deepcopy` keep type, `args`, `str`, `vars` and
+    `reason`/`detail`/`message` (or `status`/`detail`); a subclass defining its
+    own `__reduce__` fails (`test_a_refusal_subclass_has_no_pickle_rule_of_its_own`);
+    `_RecipeSkipError` round-trips with `candidate` set; toy subclasses with a
+    different `__init__` and a keyword-only field round-trip; `str(exc)` of the
+    three non-standard classes is pinned. `pytest tests/test_exceptions_pickle.py`:
+    226 passed.
   - R29.3's `StatusError` (the four `(status, detail)` classes and the app
     exception handler) is the HTTP face of this. Design them together.
 

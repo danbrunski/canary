@@ -79,6 +79,7 @@ from src.dashboard.status import (
     compact_status,
     gather_status_sources,
 )
+from src.dashboard.status_errors import register_status_error_handler
 from src.dashboard.version import _canary_version
 from src.dashboard.websockets import _publish_on_app_loop
 from src.models.feedback import FeedbackStore
@@ -203,6 +204,9 @@ def create_app(
     if behavior_models_path is None:
         behavior_models_path = config.daemon.behavior_models
     app = FastAPI(title="CANary", version=_canary_version(), lifespan=_lifespan)
+    # A control-layer refusal (``StatusError``) answers with its own status and
+    # body from any route, so no route re-raises one as an HTTPException by hand.
+    register_status_error_handler(app)
     if enable_dev_cors:
         # `pnpm dev` serves the SPA on :5173 and proxies the backend.
         # Add CORS so a developer can also hit the backend directly from

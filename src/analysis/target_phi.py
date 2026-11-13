@@ -68,6 +68,7 @@ from src.decode.target_phi_command import (
 )
 from src.decode.target_phi_command import x_from_bfs as _x_from_bfs
 from src.paths import DIDS_YAML
+from src.refusal import ReasonedRefusal
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.signals.time_lookup import MISSING, bracketing_sample_indices
 from src.yaml_load import load_yaml
@@ -424,18 +425,8 @@ def load_twin_definition(profile_dir: Path) -> tuple[TwinDefinition, str]:
 # -- refusals -----------------------------------------------------------------
 
 
-class TwinRefusalError(ValueError):
+class TwinRefusalError(ReasonedRefusal, ValueError):
     """The twin cannot run at all; ``reason`` names why."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-        self.message = message
-
-    def __reduce__(self) -> tuple[type, tuple[str, str]]:
-        # Rebuilt from (reason, message), so it crosses a process boundary
-        # (the workbench's spawn child) intact.
-        return (type(self), (self.reason, self.message))
 
 
 # -- the resolved table -------------------------------------------------------

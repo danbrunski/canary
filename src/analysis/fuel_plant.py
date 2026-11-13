@@ -59,6 +59,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.refusal import ReasonedRefusal
 from src.yaml_load import load_yaml
 
 PLANT_FILE = "fuel_plant.yaml"
@@ -159,17 +160,8 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class FuelPlantRefusalError(ValueError):
+class FuelPlantRefusalError(ReasonedRefusal, ValueError):
     """The plant cannot evaluate what it was given; ``reason`` names why."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.reason, str(self)[len(self.reason) + 2 :]), self.__dict__)
 
 
 # -- parameter registry ------------------------------------------------------------

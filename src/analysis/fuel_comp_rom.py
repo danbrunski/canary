@@ -48,6 +48,7 @@ from src.analysis.rom_image import (
 )
 from src.analysis.rom_map import RomMap, check_program_constants, read_program_constant
 from src.decode.fuel_comp_load import LoadInputCurves, NonMonotoneCurvesError
+from src.refusal import ReasonedRefusal
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 
 #: Environment variable naming the directories ROM files are searched in,
@@ -56,18 +57,8 @@ from src.vehicle.tune_revisions import TuneRevisionRegistry
 ROM_DIRS_ENV = "CANARY_ROM_DIRS"
 
 
-class FuelCompRomRefusalError(ValueError):
+class FuelCompRomRefusalError(ReasonedRefusal, ValueError):
     """The revision's Fuel Comp bytes cannot be read; ``reason`` names why."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-        self.message = message
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.reason, self.message), self.__dict__)
 
 
 class _Strict(BaseModel):

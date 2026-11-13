@@ -101,6 +101,7 @@ from src.analysis.digest import (
 from src.analysis.rolling_circumference import measure_session, write_rolling_circumference
 from src.config import CanaryConfig
 from src.control import child_pool
+from src.refusal import ReasonedRefusal
 from src.storage.session_products import (
     SESSION_TRIP_KEY,
     list_trip_records,
@@ -125,19 +126,15 @@ log = logging.getLogger(__name__)
 DIGEST_TIMEOUT_SECONDS = 900.0
 
 
-class TripEndDigestUnavailableError(RuntimeError):
+class TripEndDigestUnavailableError(ReasonedRefusal, RuntimeError):
     """The digest produced no answer: the child failed to start, died, or
     timed out. ``reason`` is the :mod:`~src.analysis.digest` ``REASON_*``
     constant the refusal sidecar records."""
 
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(message)
-        self.reason = reason
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.reason, str(self)), self.__dict__)
+    @staticmethod
+    def render(reason: str, detail: str) -> str:
+        # ``str(exc)`` is the message alone: the sidecar records ``reason`` apart.
+        return detail
 
 
 def compute_digest_under_limit(

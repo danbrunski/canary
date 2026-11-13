@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.columns import SESSION_COLUMN, arrived_column
 from src.config import VehicleParameters
+from src.refusal import ReasonedRefusal
 from src.signals.derived import _append_dependency_gap, _selected_input, fuel_properties
 from src.signals.fuel_cut import COMMANDED_EQUIV_RATIO_COLUMN, fuel_cut_rows
 from src.signals.pairing import to_seconds
@@ -888,7 +889,7 @@ def voltage_route_refusal(calibration: AfrCalibration | None) -> str | None:
     return None
 
 
-class LoadAxisUnavailableError(ValueError):
+class LoadAxisUnavailableError(ReasonedRefusal, ValueError):
     """The target map's load axis has no verified channel in its unit (P02.13).
 
     ``reason`` starts with :data:`LOAD_AXIS_UNVERIFIED`; it is the text the
@@ -896,8 +897,11 @@ class LoadAxisUnavailableError(ValueError):
     """
 
     def __init__(self, reason: str) -> None:
-        super().__init__(reason)
-        self.reason = reason
+        super().__init__(reason, reason)
+
+    @staticmethod
+    def render(reason: str, detail: str) -> str:
+        return reason
 
 
 #: The unit a wide-frame column's values are in, per the catalogs that decoded

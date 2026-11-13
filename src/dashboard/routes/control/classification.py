@@ -19,7 +19,6 @@ from src.control.classification import (
 )
 from src.control.trends import corpus_trend_summary
 from src.control.workbench_jobs import (
-    WorkbenchRefusedError,
     capture_deferral,
     run_off_loop,
     select_sessions,
@@ -68,11 +67,8 @@ def build_router(ctx: ControlContext) -> APIRouter:
                 status_code=404,
                 detail=f"session {session_id!r} not found under {session_root}",
             )
-        try:
-            capture_deferral(config, [session_id])
-            selection = select_sessions(config, sessions=[session_id], reads="value_number")
-        except WorkbenchRefusedError as exc:
-            raise HTTPException(exc.status, exc.detail) from exc
+        capture_deferral(config, [session_id])
+        selection = select_sessions(config, sessions=[session_id], reads="value_number")
         if selection.over_budget:
             raise HTTPException(
                 409,
@@ -84,8 +80,6 @@ def build_router(ctx: ControlContext) -> APIRouter:
             )
         try:
             written = await run_off_loop("classify", {"session_id": session_id}, config)
-        except WorkbenchRefusedError as exc:
-            raise HTTPException(exc.status, exc.detail) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except FileNotFoundError as exc:

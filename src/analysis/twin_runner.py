@@ -158,6 +158,7 @@ from src.analysis.target_phi import (
 from src.analysis.target_phi import predict as predict_phi
 from src.paths import DIDS_YAML
 from src.preprocessing.loader import read_session
+from src.refusal import ReasonedRefusal
 from src.signals.pairing import PairingPolicy, match_ordered
 
 #: Bumped when a stage, the order, a state or the record shape changes
@@ -201,18 +202,8 @@ RECORD_COLUMNS: tuple[str, ...] = (
 )
 
 
-class TwinRunnerRefusalError(ValueError):
+class TwinRunnerRefusalError(ReasonedRefusal, ValueError):
     """The run as a whole cannot proceed; ``reason`` names why."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-        self.message = message
-
-    def __reduce__(self) -> tuple[type, tuple[str, str]]:
-        # Rebuilt from (reason, message), so it crosses a process boundary
-        # (the workbench's spawn child) intact.
-        return (type(self), (self.reason, self.message))
 
 
 # -- the kit and the resolved ECU ---------------------------------------------------------

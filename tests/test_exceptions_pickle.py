@@ -8,10 +8,19 @@ surfaced as an opaque 503 (E09.2c verifier, 2026-10-16). Each such class now
 has a ``__reduce__`` from its constructor's arguments. This test imports every
 ``src`` module, constructs every exception class it defines and round-trips
 it, so a new class that cannot cross a process boundary fails here.
+
+R24.1 / R29.3: the refusal classes now share two bases (``ReasonedRefusal``,
+``StatusError``) whose ``__reduce__`` rebuilds from ``__new__`` and the
+instance dict, so a subclass with a constructor signature of its own (an extra
+keyword-only field) round-trips without writing one. The tests at the end
+enumerate every ``src`` subclass of either base by reflection and hold each to
+the round trip with its fields equal, and refuse a subclass that writes a
+``__reduce__`` of its own.
 """
 
 from __future__ import annotations
 
+import copy
 import importlib
 import inspect
 import pickle
@@ -22,6 +31,8 @@ from typing import Any
 import pytest
 
 import src
+from src.control.status_error import StatusError
+from src.refusal import ReasonedRefusal
 
 #: Modules that need an optional dependency absent from the environment (CI
 #: has no torch): their classes are checked wherever the dependency exists.
@@ -58,6 +69,7 @@ def _construct_typed() -> dict[str, Any]:
             {"exit_code": 3},
         ),
         "src.analysis.llm_assist.cards.EvidenceResolutionError": ((["a", "b"],), {}),
+        "src.analysis.refit._RecipeSkipError": (("no rows",), {"candidate": ("a", "candidate")}),
         "src.analysis.noise_floor.FloorRefusedError": (
             (FloorRefusal("obd:RPM", "no_floor", "no_floor_measured", "idle"),),
             {},
@@ -138,3 +150,143 @@ def test_every_exception_class_round_trips_through_pickle(cls: type[BaseExceptio
     assert str(back) == str(exc)
     assert getattr(back, "reason", None) == getattr(exc, "reason", None)
     assert vars(back) == vars(exc)
+
+
+# -- the two refusal bases (R24.1, R29.3) ----------------------------------------
+
+
+def _subclasses(base: type[BaseException]) -> list[type[BaseException]]:
+    """Every subclass of ``base`` defined under ``src/``, found by reflection.
+
+    ``CLASSES`` above has imported every ``src`` module, so the subclass tree is
+    complete; a class defined anywhere else (this file's toys) is not a product class.
+    """
+    found: dict[str, type[BaseException]] = {}
+    stack = list(base.__subclasses__())
+    while stack:
+        cls = stack.pop()
+        stack.extend(cls.__subclasses__())
+        if cls.__module__.startswith("src."):
+            found[f"{cls.__module__}.{cls.__qualname__}"] = cls
+    return [found[k] for k in sorted(found)]
+
+
+REASONED = _subclasses(ReasonedRefusal)
+STATUS = _subclasses(StatusError)
+
+
+def test_the_bases_reach_the_classes_that_were_hand_written() -> None:
+    reasoned = {c.__name__ for c in REASONED}
+    assert {
+        "AirChargeRefusalError",
+        "ApplicationModelRefusalError",
+        "AxisPairingRefusedError",
+        "CommandChangeRefusalError",
+        "ContextRefusalError",
+        "EditSpecRefusalError",
+        "FuelCompRomRefusalError",
+        "FuelPlantRefusalError",
+        "KnockOnRefusalError",
+        "LoadAxisUnavailableError",
+        "RestoreReproductionRefusalError",
+        "RomEffectRefusalError",
+        "SimDesignRefusalError",
+        "SimulationRefusalError",
+        "TimingLookupRefusalError",
+        "TripEndDigestUnavailableError",
+        "TwinRefusalError",
+        "TwinRunnerRefusalError",
+        "_RecipeSkipError",
+    } <= reasoned
+    assert {c.__name__ for c in STATUS} == {
+        "BrainJobRefusedError",
+        "BrainReadError",
+        "ProfileCaptureError",
+        "WorkbenchRefusedError",
+    }
+    # Every one is in the whole-``src`` enumeration, so it is also round-tripped there.
+    assert set(REASONED + STATUS) <= set(CLASSES)
+
+
+@pytest.mark.parametrize("cls", REASONED + STATUS, ids=lambda c: f"{c.__module__}.{c.__qualname__}")
+def test_a_refusal_subclass_has_no_pickle_rule_of_its_own(cls: type[BaseException]) -> None:
+    """The base's ``__reduce__`` is the contract: a subclass that writes its own is
+    a second copy of the rule this module exists to hold in one place."""
+    base = ReasonedRefusal if issubclass(cls, ReasonedRefusal) else StatusError
+    assert cls.__reduce__ is base.__reduce__, f"{cls.__qualname__} defines __reduce__"
+
+
+@pytest.mark.parametrize("cls", REASONED + STATUS, ids=lambda c: f"{c.__module__}.{c.__qualname__}")
+def test_a_refusal_subclass_keeps_its_fields_through_pickle_and_copy(
+    cls: type[BaseException],
+) -> None:
+    exc = _instance(cls, _construct_typed())
+    for back in (pickle.loads(pickle.dumps(exc)), copy.copy(exc), copy.deepcopy(exc)):
+        assert type(back) is cls
+        assert back.args == exc.args
+        assert str(back) == str(exc)
+        assert vars(back) == vars(exc)
+        if isinstance(exc, ReasonedRefusal):
+            assert isinstance(back, ReasonedRefusal)
+            assert (back.reason, back.detail, back.message) == (exc.reason, exc.detail, exc.message)
+        else:
+            assert isinstance(exc, StatusError) and isinstance(back, StatusError)
+            assert (back.status, back.detail) == (exc.status, exc.detail)
+
+
+def test_a_reasoned_refusal_reads_as_reason_then_detail_and_keeps_both() -> None:
+    exc = ReasonedRefusal("no_floor", "the floor was measured under WOT")
+    assert str(exc) == "no_floor: the floor was measured under WOT"
+    assert (exc.reason, exc.detail, exc.message) == (
+        "no_floor",
+        "the floor was measured under WOT",
+        "the floor was measured under WOT",
+    )
+    back = pickle.loads(pickle.dumps(exc))
+    assert (back.reason, back.detail, str(back)) == (exc.reason, exc.detail, str(exc))
+
+
+def test_the_str_of_each_hand_written_class_is_what_it_was() -> None:
+    """``str(exc)`` is read by logs, sidecars and tests: three classes never used
+    the ``reason: detail`` form."""
+    from src.analysis.refit import _RecipeSkipError
+    from src.analysis.twin_runner import TwinRunnerRefusalError
+    from src.control.trip_end import TripEndDigestUnavailableError
+    from src.signals.afr import LoadAxisUnavailableError
+
+    assert str(TwinRunnerRefusalError("code", "text")) == "code: text"
+    assert str(TripEndDigestUnavailableError("code", "text")) == "text"
+    assert str(LoadAxisUnavailableError("code text")) == "code text"
+    assert str(_RecipeSkipError("code text")) == "code text"
+
+
+class _ToyRefusal(ReasonedRefusal):
+    """A subclass whose constructor is not ``(reason, detail)``: the trap."""
+
+    def __init__(self, code: str, text: str, *, extra: object, also: int = 3) -> None:
+        super().__init__(code, text)
+        self.extra = extra
+        self.also = also
+
+
+class _ToyStatus(StatusError[dict[str, object]]):
+    def __init__(self, detail: dict[str, object], *, status: int = 418, hint: str) -> None:
+        super().__init__(status, detail)
+        self.hint = hint
+
+
+def test_a_subclass_with_a_constructor_of_its_own_round_trips_without_a_reduce() -> None:
+    refusal = _ToyRefusal("code", "text", extra=("a", 1), also=9)
+    back = pickle.loads(pickle.dumps(refusal))
+    assert type(back) is _ToyRefusal
+    assert (back.reason, back.detail, back.extra, back.also) == ("code", "text", ("a", 1), 9)
+    assert str(back) == "code: text"
+    status = _ToyStatus({"message": "m"}, status=409, hint="h")
+    back_status = pickle.loads(pickle.dumps(status))
+    assert type(back_status) is _ToyStatus
+    assert (back_status.status, back_status.detail, back_status.hint) == (
+        409,
+        {"message": "m"},
+        "h",
+    )
+    assert str(back_status) == "m"

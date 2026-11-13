@@ -18,7 +18,6 @@ from src.control.capture_finalize import (
     recompute_quality_off_loop,
 )
 from src.control.profile_capture import (
-    ProfileCaptureError,
     ProfileCaptureStart,
 )
 from src.dashboard.routes.control.context import ControlContext, SessionDir
@@ -114,18 +113,15 @@ def build_router(ctx: ControlContext) -> APIRouter:
     async def start_profile_capture(
         request: CaptureProfileStartRequest,
     ) -> dict[str, Any]:
-        try:
-            payload = await session.start(
-                ProfileCaptureStart(
-                    profile=request.profile,
-                    tune_revision=request.tune_revision,
-                    rate_hz=request.rate_hz,
-                    bus_budget_requests_per_second=request.bus_budget_requests_per_second,
-                    bus_budget_ttl_seconds=request.bus_budget_ttl_seconds,
-                )
+        payload = await session.start(
+            ProfileCaptureStart(
+                profile=request.profile,
+                tune_revision=request.tune_revision,
+                rate_hz=request.rate_hz,
+                bus_budget_requests_per_second=request.bus_budget_requests_per_second,
+                bus_budget_ttl_seconds=request.bus_budget_ttl_seconds,
             )
-        except ProfileCaptureError as exc:
-            raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+        )
         if not payload.get("idempotent"):
             publish_control_event("capture_profile.start", "ok", payload)
         return payload
@@ -140,21 +136,18 @@ def build_router(ctx: ControlContext) -> APIRouter:
         the engine is running at or above ``coolant_min_c``, and stops it
         when the engine stops — the operator is driving and cannot do either.
         """
-        try:
-            payload = autostart.arm(
-                CaptureAutostartRule(
-                    profile=request.profile,
-                    coolant_min_c=request.coolant_min_c,
-                    rate_hz=request.rate_hz,
-                    bus_budget_requests_per_second=request.bus_budget_requests_per_second,
-                    tune_revision=request.tune_revision,
-                    start_after_ticks=request.start_after_ticks,
-                    stop_after_seconds=request.stop_after_seconds,
-                ),
-                publish=publish_control_event,
-            )
-        except ProfileCaptureError as exc:
-            raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+        payload = autostart.arm(
+            CaptureAutostartRule(
+                profile=request.profile,
+                coolant_min_c=request.coolant_min_c,
+                rate_hz=request.rate_hz,
+                bus_budget_requests_per_second=request.bus_budget_requests_per_second,
+                tune_revision=request.tune_revision,
+                start_after_ticks=request.start_after_ticks,
+                stop_after_seconds=request.stop_after_seconds,
+            ),
+            publish=publish_control_event,
+        )
         publish_control_event("capture_autostart.arm", "ok", payload)
         return payload
 
@@ -175,10 +168,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
         request: CapturePauseRequest,
     ) -> dict[str, Any]:
         """Suspend or resume polling while keeping the capture session open."""
-        try:
-            payload = session.pause(request.paused)
-        except ProfileCaptureError as exc:
-            raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+        payload = session.pause(request.paused)
         publish_control_event(
             "capture_profile.pause" if request.paused else "capture_profile.resume", "ok", payload
         )
@@ -187,10 +177,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
     @router.delete("/control/capture")
     @router.post("/control/capture/stop")
     async def stop_profile_capture() -> dict[str, Any]:
-        try:
-            payload = await session.stop("operator_stop")
-        except ProfileCaptureError as exc:
-            raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+        payload = await session.stop("operator_stop")
         if not payload.get("idempotent"):
             publish_control_event("capture_profile.stop", "ok", payload)
         return payload
@@ -206,8 +193,6 @@ def build_router(ctx: ControlContext) -> APIRouter:
         """
         try:
             quality = await session.live_quality()
-        except ProfileCaptureError as exc:
-            raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
         except CaptureQualityUnavailableError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         result: dict[str, Any] = quality.to_dict()

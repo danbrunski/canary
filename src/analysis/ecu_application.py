@@ -40,6 +40,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.refusal import ReasonedRefusal
 from src.yaml_load import load_yaml
 
 MODEL_FILE = "ecu_application_model.yaml"
@@ -60,18 +61,8 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ApplicationModelRefusalError(ValueError):
+class ApplicationModelRefusalError(ReasonedRefusal, ValueError):
     """An image or artifact the model does not apply to; ``reason`` names why."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-        self.message = message
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.reason, self.message), self.__dict__)
 
 
 # -- program identity -----------------------------------------------------------

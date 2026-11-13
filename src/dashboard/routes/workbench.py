@@ -35,7 +35,6 @@ from src.control.calibration import profile_dir
 from src.control.logs import DEFAULT_LOG_LIMIT, list_logs
 from src.control.workbench_jobs import (
     Selection,
-    WorkbenchRefusedError,
     capture_deferral,
     dyno_preflight,
     run_off_loop,
@@ -44,6 +43,7 @@ from src.control.workbench_jobs import (
 from src.dashboard.security import (
     control_auth_dependency,
 )
+from src.dashboard.status_errors import register_status_error_handler
 from src.storage.sessions import resolve_session
 
 DEFAULT_MEASURED = "obd:O2_WR_LAMBDA_S1"
@@ -70,6 +70,8 @@ def register_workbench_routes(
     dids_path: Path,
     resolved_control_token: str | None,
 ) -> None:
+    # A refusal any of these routes lets escape answers with its own status and body.
+    register_status_error_handler(app)
     authorize = control_auth_dependency(resolved_control_token)
 
     async def run(kind: str, params: dict[str, Any], names: list[str]) -> dict[str, Any]:
@@ -78,17 +80,12 @@ def register_workbench_routes(
             return await run_off_loop(
                 kind, params, config, bindings_path=bindings_path, dids_path=dids_path
             )
-        except WorkbenchRefusedError as exc:
-            raise HTTPException(exc.status, exc.detail) from exc
         except (GateError, ChannelSpecError) as exc:
             raise HTTPException(400, {"error": "analysis_refused", "message": str(exc)}) from exc
 
     def pooled(sessions: str | None, revision: str | None) -> Selection:
-        try:
-            capture_deferral(config, _split(sessions))
-            return select_sessions(config, sessions=_split(sessions), revision=revision or None)
-        except WorkbenchRefusedError as exc:
-            raise HTTPException(exc.status, exc.detail) from exc
+        capture_deferral(config, _split(sessions))
+        return select_sessions(config, sessions=_split(sessions), revision=revision or None)
 
     async def run_pooled(kind: str, selection: Selection, params: dict[str, Any]) -> dict[str, Any]:
         params = {
@@ -124,11 +121,8 @@ def register_workbench_routes(
             session = resolve_session(config.collection.storage_path, session_id)
         except FileNotFoundError as exc:
             raise HTTPException(404, str(exc)) from exc
-        try:
-            capture_deferral(config, [session_id])
-            selection = select_sessions(config, sessions=[session_id])
-        except WorkbenchRefusedError as exc:
-            raise HTTPException(exc.status, exc.detail) from exc
+        capture_deferral(config, [session_id])
+        selection = select_sessions(config, sessions=[session_id])
         if selection.over_budget:
             raise HTTPException(
                 409,
@@ -168,10 +162,7 @@ def register_workbench_routes(
             session = resolve_session(config.collection.storage_path, session_id)
         except FileNotFoundError as exc:
             raise HTTPException(404, str(exc)) from exc
-        try:
-            capture_deferral(config, [session_id])
-        except WorkbenchRefusedError as exc:
-            raise HTTPException(exc.status, exc.detail) from exc
+        capture_deferral(config, [session_id])
         # A profile fact, not a data fact: refuse before spawning a child.
         refusal = mapping_refusal(info.trace)
         if refusal is not None:
@@ -181,10 +172,7 @@ def register_workbench_routes(
                 "available": False,
                 **refusal,
             }
-        try:
-            selection = select_sessions(config, sessions=[session_id])
-        except WorkbenchRefusedError as exc:
-            raise HTTPException(exc.status, exc.detail) from exc
+        selection = select_sessions(config, sessions=[session_id])
         if selection.over_budget:
             raise HTTPException(
                 409,
@@ -267,10 +255,7 @@ def register_workbench_routes(
             allow_single_direction=allow_single_direction,
         )
         selection = pooled(sessions, revision)
-        try:
-            dyno_preflight(config, selection)
-        except WorkbenchRefusedError as exc:
-            raise HTTPException(exc.status, exc.detail) from exc
+        dyno_preflight(config, selection)
         return await run_pooled("dyno", selection, {"request": request.as_dict()})
 
     @app.get("/analysis/pull-comparison", dependencies=[Depends(authorize)])

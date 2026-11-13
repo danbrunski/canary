@@ -72,6 +72,7 @@ from src.analysis.operating_context import (
 from src.analysis.splits import Drive, group_drives
 from src.behavior.behavior_models import BehaviorModel2D
 from src.columns import SESSION_COLUMN
+from src.refusal import ReasonedRefusal
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 
 #: Bumped when a sample's fields, reasons or the summary change.
@@ -85,17 +86,8 @@ BRANCHES: tuple[Branch, ...] = ("set", "clear")
 MIN_BRANCH_DRIVES = 2
 
 
-class TimingLookupRefusalError(ValueError):
+class TimingLookupRefusalError(ReasonedRefusal, ValueError):
     """The evaluation cannot be run or claimed; ``reason`` names why."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.reason, str(self)[len(self.reason) + 2 :]), self.__dict__)
 
 
 def require_final_timing_target(provider: ContextProvider, spec: str) -> None:

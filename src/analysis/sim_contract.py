@@ -62,6 +62,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.ecu_application import ApplicationModel
+from src.refusal import ReasonedRefusal
 from src.yaml_load import load_yaml
 
 CONTRACT_FILE = "engine_sim_contract.yaml"
@@ -114,18 +115,8 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class SimulationRefusalError(ValueError):
+class SimulationRefusalError(ReasonedRefusal, ValueError):
     """A scenario or contract the simulator cannot evaluate; ``reason`` names why."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-        self.message = message
-
-    def __reduce__(self) -> tuple[type, tuple[str, str]]:
-        # Rebuilt from (reason, message), so it crosses a process boundary
-        # (the workbench's spawn child) intact.
-        return (type(self), (self.reason, self.message))
 
 
 # -- units and clocks ---------------------------------------------------------------

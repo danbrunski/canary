@@ -273,7 +273,7 @@ it; go after that work lands.
     guard also refuses a `ProcessPoolExecutor(` constructed directly anywhere
     under `src/control/` outside `child_pool.py`.
 
-- [ ] **R29.3 Four `(status, detail)` exception classes and 38 hand-written
+- [x] **R29.3 Four `(status, detail)` exception classes and 38 hand-written
   remaps to `HTTPException`; no app-level handler.**
   `WorkbenchRefusedError`, `BrainJobRefusedError` and `BrainReadError` have
   identical bodies; `ProfileCaptureError` differs by allowing a string
@@ -281,13 +281,59 @@ it; go after that work lands.
   `except <refusal> as exc: raise HTTPException(exc.status, exc.detail)`
   blocks, and no `exception_handler`. A route that forgets the `except`
   answers 500 instead of the named refusal.
-  - [ ] One `StatusError(Exception)` (status, detail, pickle-safe) in the
+  - [x] One `StatusError(Exception)` (status, detail, pickle-safe) in the
     lowest layer that needs it; the four subclass it; `create_app` registers
     one handler that returns `{"detail": …}`, the body `HTTPException`
     produces. Delete the remap-only blocks. This is the HTTP face of R24.1
     (`ReasonedRefusal`); design the two together.
-  - Pinned by `tests/test_exceptions_pickle.py` and
+    Evidence: `src/control/status_error.py` (new; layer 6, the lowest that
+    needs it: every subclass is a `control` refusal, nothing below answers
+    HTTP): `StatusError(status, detail)`, generic in the detail type
+    (`StatusError[dict[str, Any]]` for `WorkbenchRefusedError`,
+    `BrainJobRefusedError`, `BrainReadError`; `StatusError[str | dict[str, Any]]`
+    for `ProfileCaptureError`, whose `render` keeps `str(detail)` for a dict),
+    pickling through `src.refusal.rebuild_exception`. Relation to
+    `ReasonedRefusal`: siblings, not parent and child (a `ReasonedRefusal` has a
+    required stable `reason` and no status; a `StatusError` is an HTTP answer and
+    not every one has a code: a capture's refusal is a sentence). The handler is
+    `src/dashboard/status_errors.py`: it builds an `HTTPException(status, detail)`
+    and hands it to FastAPI's own `http_exception_handler`, so body, status,
+    headers and the no-body statuses are `HTTPException`'s by construction.
+    `create_app` registers it, and each registrar that mounts a route able to
+    raise one (`register_workbench_routes`, `register_rom_editor_routes`,
+    `register_public_routes`, `register_control_routes`) installs it too
+    (idempotent): the first run without that left 8 tests that build a bare
+    `FastAPI()` with one registrar answering an unhandled error
+    (`test_a_child_that_times_out_is_the_workbenchs_503` and seven more);
+    `test_every_route_module_that_can_raise_a_refusal_installs_the_handler`
+    scans the route modules so a new one cannot forget.
+    Remap blocks: `raise HTTPException(exc.status, exc.detail)` /
+    `(status_code=exc.status, detail=exc.detail)`: 18 sites in 6 files (the
+    checklist's 38 had drifted; the strict `exc.status,` spelling is 11), all
+    deleted (`workbench.py` 6, `profile_capture.py` 5, `classification.py` 2,
+    `brain.py` 2, `public.py` 2, `rom_editor.py` 1); a `try` left with no
+    handler was unwrapped. Kept: the inner `except WorkbenchRefusedError` in
+    `rom_editor.post_rom_simulate` (re-raises with a `laptop_path` field added),
+    and every `except` that changes the status or message of another exception
+    type (`GateError` 400, `UnscopedMemoryError` 503, `CaptureQualityUnavailableError`
+    503, `SimulationRefusalError` 409 with `reason`/`message`, ...). Regrowth
+    guard: `tests/test_source_rules.py` row `remap-only-http-exception` (AST;
+    allowlist empty; against a `git archive HEAD` tree it finds 18 in 6 files,
+    now 0). Behavior unchanged on HTTP: `tests/test_status_error_http.py`
+    pins `(status, body)` literally for every one of the 18 sites (12 patched
+    callees with a status of its own, plus the real capture-deferral, capture
+    session and brain refusals); it was written and passed against the tree
+    before any block was deleted (16 passed at HEAD), and the same literals pass
+    after. Equivalence of the handler with `HTTPException` (body, status, headers)
+    over nine `(status, detail)` pairs including 204 and 304.
+  - [x] Pinned by `tests/test_exceptions_pickle.py` and
     `tests/test_route_table_snapshot.py`.
+    Evidence: `pytest -m "" -n 4` over `test_exceptions_pickle` (226),
+    `test_status_error_http` (30), `test_route_table_snapshot`,
+    `test_layering`, `test_mcp_tool_snapshot` and 11 route test files: 556
+    passed, 1 failed (`test_source_rules[parquet-glob-literal]`,
+    `src/storage/telemetry_query.py` is another session's uncommitted edit);
+    `tests/fixtures/route_table_snapshot.json` untouched.
 
 - [x] **R29.4 The MCP `get_binned_analysis` tool dropped `units`.** The
   closure in `mcp_server/server.py` stops at `until`; the delegate in

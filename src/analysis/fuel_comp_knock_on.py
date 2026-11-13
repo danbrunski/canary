@@ -45,23 +45,14 @@ from src.analysis.rom_image import table_values
 from src.analysis.rom_map import RomMap
 from src.analysis.target_phi import ResolvedTable, TwinDefinition, predict, x_from_bfs
 from src.decode.ecm_lookup import lookup_2d, search_axis
+from src.refusal import ReasonedRefusal
 
 #: Bumped whenever a predicted quantity or its source changes meaning.
 KNOCK_ON_VERSION = 1
 
 
-class KnockOnRefusalError(ValueError):
+class KnockOnRefusalError(ReasonedRefusal, ValueError):
     """The knock-on tables cannot be read; ``reason`` names why."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-        self.message = message
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.reason, self.message), self.__dict__)
 
 
 @dataclass(frozen=True)

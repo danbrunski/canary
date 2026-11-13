@@ -68,6 +68,7 @@ from src.analysis.fuel_comp_inputs import FuelCompDeclaration, FuelCompInputErro
 from src.analysis.fuel_comp_rom import FuelCompCalibration
 from src.analysis.plant_validation import Boundary, InterventionCase, PredictedBand
 from src.decode.ecm_lookup import lookup_2d
+from src.refusal import ReasonedRefusal
 from src.signals.pairing import to_seconds
 
 #: Bumped whenever a point's placement, a reason or the report changes meaning.
@@ -81,18 +82,8 @@ ACQUIRED = "acquired"
 Verdict = Literal["reproduced", "contradicted", "unresolved", "no_points"]
 
 
-class RestoreReproductionRefusalError(ValueError):
+class RestoreReproductionRefusalError(ReasonedRefusal, ValueError):
     """The reproduction cannot be computed; ``reason`` names why."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-        self.message = message
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.reason, self.message), self.__dict__)
 
 
 # -- input points ---------------------------------------------------------------------

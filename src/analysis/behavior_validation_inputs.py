@@ -28,6 +28,7 @@ from src.analysis.splits import parent_session
 from src.behavior.behavior_models import AxisPairing, BehaviorModel1D, BehaviorModel2D
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
 from src.paths import BINDINGS_YAML, DIDS_YAML
+from src.refusal import ReasonedRefusal
 from src.session import SessionKind, session_kind
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.storage.corpus_eligibility import default_profile_exclusion
@@ -162,17 +163,8 @@ AXIS_SEPARATION_PREFIX = "context:axis_separation_s:"
 _PAIRABLE_BASES = frozenset({"acquired", "stored"})
 
 
-class AxisPairingRefusedError(ValueError):
+class AxisPairingRefusedError(ReasonedRefusal, ValueError):
     """A per-read pairing that cannot be built or graded; ``reason`` names why."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.reason, str(self)[len(self.reason) + 2 :]), self.__dict__)
 
 
 def axis_separation_column(axis: str) -> str:

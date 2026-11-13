@@ -62,6 +62,7 @@ from src.analysis.ecu_application import (
 from src.analysis.ecu_state_models import byte_curve16
 from src.analysis.rom_map import RomMap, check_program_constants, read_program_constant
 from src.decode import air_charge as kernel
+from src.refusal import ReasonedRefusal
 from src.signals.pairing import PairingPolicy, match_ordered
 
 #: Bumped when a gate, a pairing rule or the prediction changes. 2: inputs
@@ -89,18 +90,8 @@ PID_RPM_PER_WORD = 50
 ECM_RPM_PER_COUNT = 12.5
 
 
-class AirChargeRefusalError(ValueError):
+class AirChargeRefusalError(ReasonedRefusal, ValueError):
     """An image, calibration or input the steady-state twin cannot use."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-        self.message = message
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.reason, self.message), self.__dict__)
 
 
 @dataclass(frozen=True)

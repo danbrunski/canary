@@ -51,6 +51,7 @@ LAYERS: dict[str, int] = {
     "lsm6dsox_settings": 0,
     "operating": 0,
     "paths": 0,
+    "refusal": 0,
     "session": 0,
     "signals": 0,
     "telemetry": 0,

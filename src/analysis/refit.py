@@ -107,6 +107,7 @@ from src.behavior.session_context import (
 )
 from src.columns import MODE_COLUMN, SESSION_COLUMN
 from src.operating import ENGINE_RUNNING_MIN_RPM
+from src.refusal import ReasonedRefusal
 from src.storage.sessions import session_started_at
 
 log = logging.getLogger(__name__)
@@ -248,7 +249,7 @@ class RecipeResult:
         return self.model is not None
 
 
-class _RecipeSkipError(Exception):
+class _RecipeSkipError(ReasonedRefusal):
     """A phase of :func:`fit_recipe` refused; caught once and turned into a
     skipped :class:`RecipeResult` carrying ``reason`` (and a ``candidate``
     when a fit exists but failed held-out validation)."""
@@ -256,9 +257,12 @@ class _RecipeSkipError(Exception):
     def __init__(
         self, reason: str, *, candidate: BehaviorModel1D | BehaviorModel2D | None = None
     ) -> None:
-        super().__init__(reason)
-        self.reason = reason
+        super().__init__(reason, reason)
         self.candidate = candidate
+
+    @staticmethod
+    def render(reason: str, detail: str) -> str:
+        return reason
 
 
 def _require_sessions(frame: pd.DataFrame, reason: str) -> None:

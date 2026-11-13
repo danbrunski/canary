@@ -68,6 +68,7 @@ from src.config import CanaryConfig
 from src.control.rom_library import RomLibrary, RomMapLookupError, RomNotFoundError, valid_sha
 from src.control.workbench_jobs import WorkbenchRefusedError, capture_deferral, run_off_loop
 from src.dashboard.security import control_auth_dependency
+from src.dashboard.status_errors import register_status_error_handler
 
 #: The job kind the simulate route runs in the workbench child.
 JOB_KIND = "rom_sim"
@@ -128,6 +129,8 @@ def register_rom_editor_routes(
     """Register the preview and simulate routes on ``app``.
 
     ``register_rom_library_routes`` must have run: the images are its."""
+    # A refusal any of these routes lets escape answers with its own status and body.
+    register_status_error_handler(app)
     library: RomLibrary | None = getattr(app.state, "rom_library", None)
     if library is None:
         raise RuntimeError(
@@ -266,8 +269,6 @@ def register_rom_editor_routes(
                     exc.status, {**exc.detail, "laptop_path": _laptop_path(sha)}
                 ) from exc
             result = await run_off_loop(JOB_KIND, params, config)
-        except WorkbenchRefusedError as exc:
-            raise HTTPException(exc.status, exc.detail) from exc
         except FileNotFoundError as exc:
             raise _definition_unavailable(exc) from exc
         refused = result.get("refused")

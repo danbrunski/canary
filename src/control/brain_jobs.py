@@ -69,6 +69,7 @@ from src.collection import tuning_profile
 from src.config import CanaryConfig
 from src.control import child_pool
 from src.control.brain_state import brain_dir, reconcile_identity
+from src.control.status_error import StatusError
 from src.control.trip_end import (
     DIGEST_TIMEOUT_SECONDS,
     any_digest_in_flight,
@@ -136,19 +137,9 @@ JOBS_FILE = "jobs.jsonl"
 RESULTS_DIR = "results"
 
 
-class BrainJobRefusedError(Exception):
+class BrainJobRefusedError(StatusError[dict[str, Any]]):
     """A submission refused before anything was queued. ``status`` is the HTTP
     code the route answers with; ``detail`` its JSON body."""
-
-    def __init__(self, status: int, detail: dict[str, Any]) -> None:
-        super().__init__(str(detail.get("message", detail)))
-        self.status = status
-        self.detail = detail
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.status, self.detail), self.__dict__)
 
 
 def _now() -> datetime:

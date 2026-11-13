@@ -36,6 +36,7 @@ from src.daemon.broadcast import Broadcaster
 from src.daemon.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PATH
 from src.dashboard.routes.session_reads import build_session_read_router
 from src.dashboard.security import control_auth_dependency
+from src.dashboard.status_errors import register_status_error_handler
 from src.models.feedback import FeedbackStore
 from src.provisioning.gate import DEFAULT_WINDOW_PATH
 from src.provisioning.reader import NetworkStatusReader
@@ -150,6 +151,8 @@ def register_control_routes(
     #: ``/status``'s inference recorder, for the brain's live twin block.
     inference_timing: Any = None,
 ) -> None:
+    # A refusal any of these routes lets escape answers with its own status and body.
+    register_status_error_handler(app)
     session = profile_capture or ProfileCaptureSession(
         storage_writer=storage_writer,
         capture_controller=capture_controller,

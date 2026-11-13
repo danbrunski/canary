@@ -59,6 +59,7 @@ from src.analysis.rom_map import DTYPE_BYTES, RomMap, Table
 from src.analysis.sim_contract import SUPPLIED, SimContract
 from src.atomic_write import atomic_write_text
 from src.paths import REPO_ROOT
+from src.refusal import ReasonedRefusal
 
 #: Bump when the classification or the trace changes meaning.
 TOOL_VERSION = "1"
@@ -69,18 +70,8 @@ OutputStatus = Literal["unchanged", "changed", "unevaluable", "unknown"]
 Outcome = Literal["identical", "evaluable", "partial", "unevaluable"]
 
 
-class RomEffectRefusalError(ValueError):
+class RomEffectRefusalError(ReasonedRefusal, ValueError):
     """An image or edit the simulator cannot use; ``reason`` names why."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-        self.message = message
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.reason, self.message), self.__dict__)
 
 
 # -- what the modelled logic reads ------------------------------------------------------

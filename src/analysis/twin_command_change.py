@@ -76,6 +76,7 @@ from src.evidence.records import (
     WhatIf,
     WhatIfPoint,
 )
+from src.refusal import ReasonedRefusal
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 
 __all__ = [
@@ -113,18 +114,8 @@ ASSUMPTIONS = (
 )
 
 
-class CommandChangeRefusalError(ValueError):
+class CommandChangeRefusalError(ReasonedRefusal, ValueError):
     """A proposed change the what-if cannot compute; ``reason`` names why."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-        self.message = message
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.reason, self.message), self.__dict__)
 
 
 @dataclass(frozen=True)

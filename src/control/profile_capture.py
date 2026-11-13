@@ -39,6 +39,7 @@ from src.control.capture_finalize import (
     live_capture_quality,
     record_capture_start,
 )
+from src.control.status_error import StatusError
 from src.session import issue_isolated_id
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.capture_manifest import read_capture_manifest, stamp_capture_end
@@ -58,19 +59,14 @@ StopReason = Literal["operator_stop", "daemon_shutdown"]
 EventPublisher = Callable[[str, str, dict[str, Any]], None]
 
 
-class ProfileCaptureError(Exception):
+class ProfileCaptureError(StatusError[str | dict[str, Any]]):
     """A refused or failed transition. ``status`` is the HTTP code the route
     answers with; ``detail`` its body (a string or a structured dict)."""
 
-    def __init__(self, status: int, detail: str | dict[str, Any]) -> None:
-        super().__init__(detail if isinstance(detail, str) else str(detail))
-        self.status = status
-        self.detail = detail
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.status, self.detail), self.__dict__)
+    @staticmethod
+    def render(detail: Any) -> str:
+        # A structured body reads as its whole dict here, not its ``message``.
+        return detail if isinstance(detail, str) else str(detail)
 
 
 @dataclass(frozen=True)

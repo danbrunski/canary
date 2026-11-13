@@ -18,8 +18,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.control import brain_reads
-from src.control.brain_jobs import BrainJobRefusedError, BrainJobStore, canonical_params
-from src.control.brain_reads import BrainReadError
+from src.control.brain_jobs import BrainJobStore, canonical_params
 from src.dashboard.routes.control.context import ControlContext
 from src.evidence.ledger import UnscopedMemoryError
 
@@ -41,10 +40,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
     config = ctx.config
 
     async def read(call: Callable[[], dict[str, Any]]) -> dict[str, Any]:
-        try:
-            return await asyncio.to_thread(call)
-        except BrainReadError as exc:
-            raise HTTPException(exc.status, exc.detail) from exc
+        return await asyncio.to_thread(call)
 
     @router.get("/control/brain/status")
     async def get_brain_status() -> dict[str, Any]:
@@ -114,8 +110,6 @@ def build_router(ctx: ControlContext) -> APIRouter:
 
         try:
             payload = await asyncio.to_thread(submit)
-        except BrainJobRefusedError as exc:
-            raise HTTPException(exc.status, exc.detail) from exc
         except UnscopedMemoryError as exc:
             raise HTTPException(503, {"error": "unscoped", "message": str(exc)}) from exc
         ctx.publish_control_event("brain.job.submit", "ok", payload["job"])

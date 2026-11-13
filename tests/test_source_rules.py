@@ -210,6 +210,76 @@ def _located(pattern: re.Pattern[str], label: str) -> Finder:
     return find
 
 
+def _is_exception_class(node: ast.ClassDef) -> bool:
+    """A class with a base named ``*Error``, ``*Exception`` or ``*Refusal``."""
+    for base in node.bases:
+        name = base.id if isinstance(base, ast.Name) else getattr(base, "attr", "")
+        if name.endswith(("Error", "Exception", "Refusal")):
+            return True
+    return False
+
+
+def _hand_written_reason(rel: str, text: str) -> list[Hit]:
+    """``self.reason = ...`` in an exception class: the base's job (R24.1)."""
+    if "self.reason" not in text:
+        return []
+    tree = _parse(text)
+    hits: dict[int, str] = {}
+    for node in ast.walk(tree) if tree else ():
+        if not (isinstance(node, ast.ClassDef) and _is_exception_class(node)):
+            continue
+        for sub in ast.walk(node):
+            if not isinstance(sub, ast.Assign | ast.AnnAssign):
+                continue
+            for target in sub.targets if isinstance(sub, ast.Assign) else [sub.target]:
+                if (
+                    isinstance(target, ast.Attribute)
+                    and target.attr == "reason"
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id == "self"
+                ):
+                    hits[sub.lineno] = f"self.reason = ... in {node.name}"
+    return sorted(hits.items())
+
+
+def _is_status_attribute(node: ast.expr | None, name: str, attribute: str) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == attribute
+        and isinstance(node.value, ast.Name)
+        and node.value.id == name
+    )
+
+
+def _remap_only_http_exception(rel: str, text: str) -> list[Hit]:
+    """``except X as exc: raise HTTPException(exc.status, exc.detail)`` and nothing else."""
+    if "HTTPException" not in text:
+        return []
+    tree = _parse(text)
+    hits: list[Hit] = []
+    for node in ast.walk(tree) if tree else ():
+        if not (isinstance(node, ast.ExceptHandler) and node.name and len(node.body) == 1):
+            continue
+        raised = node.body[0]
+        if not (
+            isinstance(raised, ast.Raise)
+            and isinstance(raised.exc, ast.Call)
+            and isinstance(raised.exc.func, ast.Name)
+            and raised.exc.func.id == "HTTPException"
+        ):
+            continue
+        call = raised.exc
+        keywords = {k.arg: k.value for k in call.keywords}
+        status = call.args[0] if call.args else keywords.get("status_code")
+        detail = call.args[1] if len(call.args) > 1 else keywords.get("detail")
+        if len(call.args) + len(keywords) == 2 and (
+            _is_status_attribute(status, node.name, "status")
+            and _is_status_attribute(detail, node.name, "detail")
+        ):
+            hits.append((node.lineno, f"except ... as {node.name}: raise HTTPException(...)"))
+    return sorted(hits)
+
+
 #: ``EXAMPLE_YAML = ...`` / ``EXAMPLE_YAML: Path = ...`` in column 0: module level.
 _EXAMPLE_YAML_ASSIGNMENT = re.compile(r"^EXAMPLE_YAML\s*(?::[^=\n]+)?=(?!=)", re.MULTILINE)
 #: ``Path(__file__)`` then any ``.resolve()`` / ``.absolute()`` calls, then ``.parents[1]``,
@@ -815,6 +885,74 @@ RULES: tuple[Rule, ...] = (
         good=(
             "from src.paths import REPO_ROOT\n"
             "here = Path(__file__).resolve().parents[0]\nother = Path(x).parents[1]\n"
+        ),
+    ),
+    Rule(
+        name="hand-written-refusal-reason",
+        why=(
+            "an exception that carries a stable `reason` subclasses src.refusal.ReasonedRefusal "
+            "(R24.1): the base owns `reason`/`detail` and the pickle rule, and an exception that "
+            "wrote its own __init__ without a __reduce__ lost its fields on the trip back from "
+            "the workbench's spawn child (E09.2c). Subclass it instead of writing "
+            "`self.reason = reason`"
+        ),
+        roots=("src",),
+        suffixes=(".py",),
+        find=_hand_written_reason,
+        exempt=lambda rel: rel == "src/refusal.py",
+        allowed={},
+        bad=(
+            "class SomeRefusalError(ValueError):\n"
+            "    def __init__(self, reason: str, message: str) -> None:\n"
+            "        super().__init__(f'{reason}: {message}')\n"
+            "        self.reason = reason\n"
+        ),
+        good=(
+            "from src.refusal import ReasonedRefusal\n"
+            "class SomeRefusalError(ReasonedRefusal, ValueError):\n"
+            "    pass\n"
+            "class Tally:\n"
+            "    def __init__(self, reason: str) -> None:\n"
+            "        self.reason = reason\n"
+        ),
+    ),
+    Rule(
+        name="remap-only-http-exception",
+        why=(
+            "a control refusal is a src.control.status_error.StatusError and create_app registers "
+            "one handler that answers it with its own status and body (R29.3): an `except X as "
+            "exc: raise HTTPException(exc.status, exc.detail)` block is the hand-written copy of "
+            "that handler, and a route that forgot it answered 500. Delete the block; keep one "
+            "that changes the status, adds a field or logs"
+        ),
+        roots=("src",),
+        suffixes=(".py",),
+        find=_remap_only_http_exception,
+        allowed={},
+        bad=(
+            "try:\n"
+            "    run()\n"
+            "except Refused as exc:\n"
+            "    raise HTTPException(exc.status, exc.detail) from exc\n"
+            "try:\n"
+            "    run()\n"
+            "except Refused as err:\n"
+            "    raise HTTPException(status_code=err.status, detail=err.detail) from err\n"
+        ),
+        good=(
+            "try:\n"
+            "    run()\n"
+            "except Refused as exc:\n"
+            "    raise HTTPException(exc.status, {**exc.detail, 'laptop_path': path}) from exc\n"
+            "try:\n"
+            "    run()\n"
+            "except Refused as exc:\n"
+            "    log.warning('refused')\n"
+            "    raise HTTPException(exc.status, exc.detail) from exc\n"
+            "try:\n"
+            "    run()\n"
+            "except Refused as exc:\n"
+            "    raise HTTPException(409, exc.detail) from exc\n"
         ),
     ),
 )

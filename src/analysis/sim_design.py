@@ -109,6 +109,7 @@ from src.analysis.rom_map import RomMap, load_rom_map
 from src.analysis.sim_kit import sim_plant_version
 from src.atomic_write import atomic_write_text
 from src.paths import BINDINGS_YAML, DIDS_YAML, REPO_ROOT
+from src.refusal import ReasonedRefusal
 from src.signals.afr import load_afr_calibration
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.vehicle.tune_revisions import (
@@ -173,17 +174,8 @@ _MAF_BRACKET_DOUBLINGS = 64
 Regime = Literal["closed_loop", "enrichment", "lean_target", "unknown"]
 
 
-class SimDesignRefusalError(ValueError):
+class SimDesignRefusalError(ReasonedRefusal, ValueError):
     """A design cannot be built, written, loaded or used; ``reason`` names why."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.reason, str(self)[len(self.reason) + 2 :]), self.__dict__)
 
 
 class _Strict(BaseModel):

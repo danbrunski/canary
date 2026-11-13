@@ -89,6 +89,7 @@ from src.decode.ecm_lookup import (
 from src.decode.fuel_comp_load import BYTE_SHIFT, LOW_CURVE_MULTIPLIER, X_SPLIT
 from src.decode.slices import SENTINEL_SUFFIX, linear_factors
 from src.paths import DIDS_YAML
+from src.refusal import ReasonedRefusal
 from src.signals.pairing import to_seconds
 from src.yaml_load import load_yaml
 
@@ -115,18 +116,8 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ContextRefusalError(ValueError):
+class ContextRefusalError(ReasonedRefusal, ValueError):
     """The context cannot be resolved or evaluated at all; ``reason`` names why."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-        self.message = message
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.reason, self.message), self.__dict__)
 
 
 # -- the profile declaration -----------------------------------------------------

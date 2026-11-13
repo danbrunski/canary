@@ -27,6 +27,7 @@ from typing import Any
 from src.config import CanaryConfig
 from src.control.brain_jobs import BrainJobStore, job_id_for
 from src.control.brain_state import current_identity, recovery_report
+from src.control.status_error import StatusError
 from src.evidence.cards import evidence_payload, investigation_card
 from src.evidence.ledger import (
     ANY,
@@ -54,18 +55,8 @@ __all__ = [
 ECU_COMPUTATION = "ecu_command"
 
 
-class BrainReadError(Exception):
+class BrainReadError(StatusError[dict[str, Any]]):
     """A read refused by name. ``status`` is the HTTP code; ``detail`` the body."""
-
-    def __init__(self, status: int, detail: dict[str, Any]) -> None:
-        super().__init__(str(detail.get("message", detail)))
-        self.status = status
-        self.detail = detail
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.status, self.detail), self.__dict__)
 
 
 def _ledger(config: CanaryConfig) -> MemoryLedger:

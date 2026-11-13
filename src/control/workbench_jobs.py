@@ -52,6 +52,7 @@ from src.collection import tuning_profile
 from src.config import CanaryConfig
 from src.control import child_pool
 from src.control.child_pool import limit_address_space
+from src.control.status_error import StatusError
 from src.control.trip_end import DIGEST_TIMEOUT_SECONDS, any_digest_in_flight
 from src.session import session_sort_key
 from src.storage.session_files import count_session_rows, session_time_span_seconds
@@ -90,19 +91,9 @@ JOB_KINDS = (
 _CONFIG_ONLY_KINDS = frozenset({"classify", "rom_sim", "trip_summary"})
 
 
-class WorkbenchRefusedError(Exception):
+class WorkbenchRefusedError(StatusError[dict[str, Any]]):
     """The request was refused before any data was read. ``status`` is the
     HTTP code the route answers with; ``detail`` its JSON body."""
-
-    def __init__(self, status: int, detail: dict[str, Any]) -> None:
-        super().__init__(str(detail.get("message", detail)))
-        self.status = status
-        self.detail = detail
-
-    def __reduce__(self) -> tuple[object, ...]:
-        # Rebuilt from its constructor's arguments, so it survives a process
-        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
-        return (type(self), (self.status, self.detail), self.__dict__)
 
 
 def laptop_path(config: CanaryConfig, sessions: list[str] | None = None) -> str:

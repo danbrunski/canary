@@ -15,7 +15,7 @@ from src.control.dtc_state import DtcState
 from src.control.monitor_state import MonitorState
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
-from src.control.workbench_jobs import WorkbenchRefusedError, capture_deferral
+from src.control.workbench_jobs import capture_deferral
 from src.daemon.behavior_live import BehaviorLiveState
 from src.daemon.ups import DEFAULT_UPS_STATUS_PATH
 from src.dashboard.identity import identity_payload
@@ -37,6 +37,7 @@ from src.dashboard.status import (
     compact_status,
     gather_status_sources,
 )
+from src.dashboard.status_errors import register_status_error_handler
 from src.evidence import MemoryLedger, UnscopedMemoryError, memory_ledger_for
 from src.models.feedback import FeedbackStore, annotate_events_with_feedback
 from src.provisioning.reader import NetworkStatusReader
@@ -74,6 +75,8 @@ def register_public_routes(
     ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
     network_reader: NetworkStatusReader | None = None,
 ) -> None:
+    # A refusal any of these routes lets escape answers with its own status and body.
+    register_status_error_handler(app)
     # Owned here rather than passed in, so the vehicle-state derivation is
     # shared by both /status views of every app without any caller having to
     # remember to wire it (and never shared *between* apps, which would leak
@@ -379,10 +382,7 @@ def register_public_routes(
         # DuckDB over stored parquet, bounded only by a row limit: not run while
         # a capture records (AGENTS.md, "No analysis on the Pi while it collects";
         # R29.1). The 409 is the one the workbench routes answer.
-        try:
-            capture_deferral(config, [session] if session else None)
-        except WorkbenchRefusedError as exc:
-            raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+        capture_deferral(config, [session] if session else None)
         return binned_analysis_response(
             config,
             value=value,
@@ -434,10 +434,7 @@ def register_public_routes(
         # already on disk is served directly, capture or not.
         from src.control.trip_summary import trip_summary_off_loop
 
-        try:
-            result = await trip_summary_off_loop(config, session_id)
-        except WorkbenchRefusedError as exc:
-            raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+        result = await trip_summary_off_loop(config, session_id)
         if result is None:
             raise HTTPException(
                 status_code=404, detail=f"no trip summary for session {session_id!r}"
