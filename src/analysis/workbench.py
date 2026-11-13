@@ -20,7 +20,6 @@ BFS and moves when fuelling does (:data:`src.analysis.tuning.FORBIDDEN_AXES`).
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -56,6 +55,7 @@ from src.analysis.tuning import (
 )
 from src.analysis.tuning_context import TuningContext
 from src.analysis.tuning_frame import ProviderRegistry
+from src.jsonable import jsonable
 from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.session import TAGS_FILENAME, load_tags
 from src.storage.capture_manifest import read_capture_manifest
@@ -154,24 +154,8 @@ class Unavailable:
         }
 
 
-def _clean(value: Any) -> Any:
-    """JSON-safe scalar: NaN/inf become ``None``, numpy scalars become Python."""
-    if value is None:
-        return None
-    if isinstance(value, (bool, np.bool_)):
-        return bool(value)
-    if isinstance(value, (int, np.integer)):
-        return int(value)
-    if isinstance(value, (float, np.floating)):
-        f = float(value)
-        return f if math.isfinite(f) else None
-    if isinstance(value, pd.Timestamp):
-        return value.isoformat()
-    return value
-
-
 def _column(series: pd.Series) -> list[Any]:
-    return [_clean(v) for v in series.tolist()]
+    return [jsonable(v) for v in series.tolist()]
 
 
 # ---------------------------------------------------------------------------
@@ -780,7 +764,7 @@ def pooled_delivery_error(
                 "n": own.n,
                 "gates": own.gates,
                 "revision": identity["revision"],
-                "band_averaged_pct": _clean(own.band_averaged_pct),
+                "band_averaged_pct": jsonable(own.band_averaged_pct),
                 # Not independent evidence: this drive chose the constants.
                 "informed_constants": session.name in pairing["constants_informed_by"],
             }
@@ -844,10 +828,10 @@ def pooled_delivery_error(
             "available": result.n > 0,
             "unavailable_kind": None if result.n > 0 else "gates_removed_everything",
             "n": result.n,
-            "band_averaged_pct": _clean(result.band_averaged_pct),
-            "pooled_pct": _clean(result.pooled_pct),
-            "rpm_window": [_clean(v) for v in result.rpm_window],
-            "bands": [{k: _clean(v) for k, v in band.items()} for band in payload["bands"]],
+            "band_averaged_pct": jsonable(result.band_averaged_pct),
+            "pooled_pct": jsonable(result.pooled_pct),
+            "rpm_window": [jsonable(v) for v in result.rpm_window],
+            "bands": [{k: jsonable(v) for k, v in band.items()} for band in payload["bands"]],
             "gates": result.gates,
             "conditions": conditions_block(
                 contributing,
@@ -902,7 +886,7 @@ def _cells(
             "sparse": int(len(cell)) < min_n,
         }
         for name, column in values.items():
-            entry[name] = _clean(cell[column].mean())
+            entry[name] = jsonable(cell[column].mean())
         out.append(entry)
     return out
 
@@ -1256,7 +1240,7 @@ def pull_comparison(
     )
     if isinstance(verdict, Significance):
         for cell, sigma in zip(compared, verdict.delta_sigma, strict=True):
-            cell["delta_sigma"] = _clean(sigma)
+            cell["delta_sigma"] = jsonable(sigma)
     available = bool(compared)
     if available:
         kind = None

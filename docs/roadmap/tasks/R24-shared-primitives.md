@@ -254,7 +254,7 @@ a fixture per caller proves it.
     Pinned by `tests/test_jsonl_store.py`, `test_brain_jobs.py` and the
     ledger tests.
 
-- [ ] **R24.10 One JSON-safe converter.** Nine functions turn numpy,
+- [x] **R24.10 One JSON-safe converter.** Nine functions turn numpy,
   dataclass and pydantic values into JSON-safe ones: `_jsonable` in
   `tools/plant_validation.py`, `fuel_plant_check.py`, `manifold_check.py`,
   `replay_event_diff.py` and `src/validation/scenarios.py`; `_json_default`
@@ -264,9 +264,45 @@ a fixture per caller proves it.
   one rounds and handles `model_dump`, one does neither, one has no numpy
   handling. The same value serializes differently across the reports in
   `data/analyses/`.
-  - [ ] `src/jsonable.py`: `jsonable(value, *, ndigits=None)`, generalizing
+  - [x] `src/jsonable.py`: `jsonable(value, *, ndigits=None)`, generalizing
     the `fuel_comp_report` one. Snapshot each tool's JSON before the swap;
     rounding is the per-caller behavior to keep.
+    Done: `jsonable(value, *, ndigits=None, stringify=False)` plus
+    `json_default` (the `json.dumps(default=)` form, `stringify=True`), layer 0
+    in `tests/test_layering.py`. Nine copies deleted, plus two found by grep:
+    `validation/report._default` and `analysis/workbench._clean` (scalar copy,
+    now `jsonable`). `rom_effects._plain` stays, by name in the guard's
+    exemptions: dataclass-only, strict, and NaN-preserving, where `jsonable`
+    would write `null`. Callers: `ndigits=6` for `plant_validation` and
+    `fuel_plant_check`; exact for `manifold_check`, `scenarios`,
+    `fuel_comp_report` and `workbench`; `jsonable(report)` with no `default`
+    for `audit_artifact_lineage` (an unknown type is still refused);
+    `json_default` for `digest`, `lambda_delivery_evidence` and
+    `validation/report`; `replay_event_diff` loads `src/jsonable.py` by path
+    from its own checkout (not from `--tree`, so `ab --before-tree` an older
+    rev needs nothing added) with `stringify=True`.
+    Evidence: a 33-element corpus (numpy scalars/arrays, `np.bool_`, NaN/inf,
+    dataclass, pydantic, datetime/Timestamp/NaT, Path, Enum, set, bytes,
+    DataFrame) serialized by each old function at HEAD and by the new one.
+    Rounding and plain values are identical in every caller; it is NOT
+    byte-identical everywhere. Intended differences: inf/-inf/NaN become
+    `null` (plant_validation/fuel_plant_check/manifold_check wrote
+    `Infinity`; replay_event_diff and scenarios wrote `NaN`); a type an old copy
+    raised on (numpy arrays/`np.bool_`, dataclass, pydantic, set, datetime,
+    Path, Enum, bytes, DataFrame) now converts; sets sort; digest and
+    lambda_delivery_evidence no longer `str()` numpy scalars and containers
+    (`np.int64(7)` was `"7"`, now `7`; datetimes are ISO with `T`), and
+    `np.float32(0.1)` widens to `0.10000000149011612` where HEAD wrote the
+    string `"0.1"`; replay_event_diff `np.int64` 7 -> `7` (was `7.0`),
+    `np.bool_` -> `true` (was `1.0`), NaN -> `null`, so a stored pre-change
+    `before.json` compared with a new run shows NaN-vs-null differences in
+    score messages and counters. `np.timedelta64` and `np.datetime64` are
+    handled before the integer branch (`timedelta64` is an `np.signedinteger`),
+    to seconds and ISO, NaT to `null`.
+    `manifold_check standing|study` stdout byte-identical against a HEAD
+    worktree. `tests/test_jsonable.py` guard: no module-level converter by
+    those names under `src/`, `tools/`, `scripts/`, beyond the named exemption.
+    Gate: ruff, format, mypy clean; targeted pytest green (see report).
 
 ## Looked at and fine
 

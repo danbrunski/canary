@@ -25,7 +25,6 @@ sidecars/logs the earlier phases of this doc already compute independently:
 from __future__ import annotations
 
 import logging
-import math
 import os
 import threading
 from collections.abc import Mapping
@@ -42,6 +41,7 @@ from src.analysis.reference_epoch import read_reference_epoch
 from src.analysis.rolling_circumference import measure_session, write_rolling_circumference
 from src.analysis.session_classifier import classify_session
 from src.config import CanaryConfig
+from src.jsonable import json_default
 from src.preprocessing.loader import resample_and_segment
 from src.session import DTC_SIDECAR_FILENAME
 from src.storage.catalog import record_session_best_effort
@@ -549,7 +549,7 @@ def _file_away_current_answer(session_dir: Path) -> None:
             continue
         target = path_for(session_dir, trip_key(current.get("trip")))
         if not target.exists():
-            write_json_sidecar(target, current, default=_json_default, mkdir=True)
+            write_json_sidecar(target, current, default=json_default, mkdir=True)
 
 
 def _top_level_may_take(
@@ -608,10 +608,10 @@ def write_digest_skipped(
     with _TOP_LEVEL_LOCK:
         _file_away_current_answer(session_dir)
         write_json_sidecar(
-            trip_digest_skipped_path(session_dir, key), payload, default=_json_default, mkdir=True
+            trip_digest_skipped_path(session_dir, key), payload, default=json_default, mkdir=True
         )
         if _top_level_may_take(session_dir, skipped.trip, is_digest=False):
-            write_json_sidecar(path, payload, default=_json_default)
+            write_json_sidecar(path, payload, default=json_default)
             earlier = read_digest(session_dir)
             if earlier is not None and trip_key(earlier.get("trip")) != key:
                 with suppress(OSError):
@@ -881,22 +881,16 @@ def write_digest(session_dir: Path, digest: SessionDigest) -> Path:
                 payload[TOP_LEVEL_RANK_KEY] = rank
         _file_away_current_answer(session_dir)
         write_json_sidecar(
-            trip_digest_path(session_dir, key), payload, default=_json_default, mkdir=True
+            trip_digest_path(session_dir, key), payload, default=json_default, mkdir=True
         )
         with suppress(OSError):
             trip_digest_skipped_path(session_dir, key).unlink(missing_ok=True)
         if _top_level_may_take(session_dir, digest.trip, is_digest=True):
-            write_json_sidecar(path, payload, default=_json_default)
+            write_json_sidecar(path, payload, default=json_default)
             _clear_top_level_skipped(session_dir)
     if digest.rolling_circumference is not None:
         write_rolling_circumference(session_dir, digest.rolling_circumference)
     return path
-
-
-def _json_default(value: Any) -> Any:
-    if isinstance(value, float) and math.isnan(value):
-        return None
-    return str(value)
 
 
 def persist_digest(
@@ -977,10 +971,10 @@ def write_refreshed_tuning(
         # A newer trip's answer may have landed since ``payload`` was read; the
         # top level then is not this trip's to rewrite.
         if held is not None and trip_key(held.get("trip")) == key:
-            write_json_sidecar(session_dir / DIGEST_FILENAME, refreshed, default=_json_default)
+            write_json_sidecar(session_dir / DIGEST_FILENAME, refreshed, default=json_default)
         stored = trip_digest_path(session_dir, key)
         if stored.exists():
-            write_json_sidecar(stored, refreshed, default=_json_default)
+            write_json_sidecar(stored, refreshed, default=json_default)
     record_session_best_effort(catalog_db, session_dir)
     return read_digest(session_dir)
 

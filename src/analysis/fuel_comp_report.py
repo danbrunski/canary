@@ -23,7 +23,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from src.analysis.fuel_comp_droop import (
@@ -46,6 +45,7 @@ from src.analysis.fuel_comp_inputs import FuelCompDeclaration
 from src.analysis.fuel_comp_knock_on import KnockOnTables, knock_on, summarise_predictions
 from src.analysis.fuel_comp_rom import FuelCompCalibration
 from src.analysis.fuel_comp_samples import SAMPLES_VERSION, eligible_summary, route_counts
+from src.jsonable import jsonable
 
 #: The only files N02's tool writes. A ROM image has none of these suffixes.
 OUTPUT_SUFFIXES = (".json", ".md", ".parquet")
@@ -97,28 +97,6 @@ def write_outputs(out_dir: Path, outputs: Mapping[str, Any]) -> list[Path]:
             path.write_text(json.dumps(jsonable(payload), indent=2))
         written.append(path)
     return written
-
-
-def jsonable(value: Any) -> Any:
-    """``value`` with numpy, pandas and non-finite floats made JSON-safe."""
-    if isinstance(value, Mapping):
-        return {str(k): jsonable(v) for k, v in value.items()}
-    if isinstance(value, list | tuple):
-        return [jsonable(v) for v in value]
-    if isinstance(value, pd.DataFrame):
-        return jsonable(value.to_dict("records"))
-    if isinstance(value, np.integer):
-        return int(value)
-    if isinstance(value, np.floating | float):
-        number = float(value)
-        return number if math.isfinite(number) else None
-    if isinstance(value, np.bool_):
-        return bool(value)
-    if isinstance(value, pd.Timestamp | datetime):
-        return value.isoformat()
-    if value is pd.NA or value is pd.NaT:
-        return None
-    return value
 
 
 def _with_droop(
@@ -675,7 +653,6 @@ __all__ = [
     "OutputRefusedError",
     "build_result",
     "fit_table_frame",
-    "jsonable",
     "render_markdown",
     "write_outputs",
 ]

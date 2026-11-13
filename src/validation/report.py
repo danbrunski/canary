@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from src.jsonable import json_default
 from src.validation.evidence import analyse
 from src.validation.harness import RunArtifacts
 
@@ -243,20 +244,8 @@ def headline(
 
 def write_report(report: Mapping[str, Any], path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report, indent=2, sort_keys=True, default=_default) + "\n")
+    path.write_text(json.dumps(report, indent=2, sort_keys=True, default=json_default) + "\n")
     return path
-
-
-def _default(value: Any) -> Any:
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, (set, frozenset, tuple)):
-        return list(value)
-    if isinstance(value, (bytes, bytearray)):
-        return value.hex()
-    if hasattr(value, "item"):
-        return value.item()
-    return str(value)
 
 
 # ---------------------------------------------------------------------------

@@ -389,9 +389,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.negative_control_session is not None:
         report["negative_control"] = negative_control(args.negative_control_session.expanduser())
 
-    from src.analysis.artifact_lineage import json_default
+    from src.jsonable import jsonable
 
-    text = json.dumps(report, indent=2, sort_keys=True, default=json_default)
+    # No ``default``: a type ``jsonable`` does not know is refused, not stringified.
+    text = json.dumps(jsonable(report), indent=2, sort_keys=True)
     if args.out is not None:
         args.out.write_text(text + "\n")
     print(f"verdicts: {report['summary']}")

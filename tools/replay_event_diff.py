@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.util
 import json
 import math
 import os
@@ -71,6 +72,29 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 #: Fields that carry wall-clock measurements, not detector output.
 NONDETERMINISTIC_KEYS = frozenset({"latency_ms"})
 DEFAULT_REL_TOL = 1e-9
+
+
+def _convert(value: Any) -> Any:
+    """:func:`src.jsonable.jsonable` of *this checkout*, not of ``--tree``.
+
+    ``run`` imports ``src`` from the tree under test, and ``ab --before-tree``
+    may be a revision older than ``src/jsonable.py``. The converter is the
+    tool's own instrument, not part of what is measured, so it is loaded from
+    the tool's checkout by path: both sides of an ``ab`` serialize alike, and
+    an old tree needs nothing added to it.
+    """
+    global _CONVERTER
+    if _CONVERTER is None:
+        path = REPO_ROOT / "src" / "jsonable.py"
+        spec = importlib.util.spec_from_file_location("_replay_event_diff_jsonable", path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _CONVERTER = module.jsonable
+    return _CONVERTER(value, stringify=True)
+
+
+_CONVERTER: Callable[..., Any] | None = None
 DEFAULT_ABS_TOL = 1e-12
 
 
@@ -206,23 +230,6 @@ def _session_start(session: Path) -> float:
     return float(stamps.min().timestamp())
 
 
-def _jsonable(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {str(k): _jsonable(v) for k, v in value.items()}
-    if isinstance(value, list | tuple):
-        return [_jsonable(v) for v in value]
-    if hasattr(value, "model_dump"):
-        return _jsonable(value.model_dump(mode="json"))
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, float | int | str | bool) or value is None:
-        return value
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return str(value)
-
-
 async def drive_session(
     session: Path,
     *,
@@ -274,7 +281,7 @@ async def drive_session(
     publish = components.scores_broadcaster.publish
 
     def _record_score(message: Any) -> int:
-        scores.append(_jsonable(message))
+        scores.append(_convert(message))
         return publish(message)
 
     components.scores_broadcaster.publish = _record_score  # type: ignore[method-assign]
@@ -342,7 +349,7 @@ async def drive_session(
                 "source": "replay_manifest",
             },
         },
-        "counters": _jsonable(
+        "counters": _convert(
             counters.to_dict() if hasattr(counters, "to_dict") else vars(counters)
         ),
         "events": events,

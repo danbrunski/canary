@@ -17,6 +17,7 @@ from typing import Any
 
 from src.collection.capture_profiles import CaptureProfile
 from src.collection.obd_scheduler import CanObdSpec
+from src.jsonable import jsonable
 from src.validation.synthetic_bus import BroadcastPlan
 
 #: Every Mode 01 channel the synthetic ECU answers, by registry name.
@@ -270,8 +271,8 @@ class ScenarioSpec:
             "profile": dict(self.profile),
             "duration_s": self.duration_s,
             "warmup_s": self.warmup_s,
-            "spec_overrides": {k: _jsonable(v) for k, v in self.spec_overrides.items()},
-            "ecu": {k: _jsonable(v) for k, v in self.ecu.items()},
+            "spec_overrides": {k: jsonable(v) for k, v in self.spec_overrides.items()},
+            "ecu": {k: jsonable(v) for k, v in self.ecu.items()},
             "broadcast": self.broadcast.__dict__,
             "timeline": [
                 {"at_s": a.at_s, "action": a.action, "profile": a.profile and a.profile["name"]}
@@ -289,14 +290,6 @@ class ScenarioSpec:
             "replay_speed": self.replay_speed,
             "live_gps_hz": self.live_gps_hz,
         }
-
-
-def _jsonable(value: Any) -> Any:
-    if isinstance(value, (tuple, list, set, frozenset)):
-        return [_jsonable(v) for v in value]
-    if isinstance(value, dict):
-        return {str(k): _jsonable(v) for k, v in value.items()}
-    return value
 
 
 def build_profile(mapping: Mapping[str, Any]) -> tuple[CaptureProfile, list[str]]:

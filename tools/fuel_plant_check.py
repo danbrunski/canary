@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -55,25 +54,11 @@ from src.analysis.fuel_plant_eval import (
     ve_samples,
     without_pressure_correction,
 )
+from src.jsonable import jsonable
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_PROFILE = REPO / "data" / "nissan-xterra-2008"
 DEFAULT_SESSIONS = Path.home() / "canary-data" / "sessions" / "nissan-xterra-2008"
-
-
-def _jsonable(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {str(k): _jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(v) for v in value]
-    if isinstance(value, (np.floating, float)):
-        f = float(value)
-        return None if math.isnan(f) else round(f, 6)
-    if isinstance(value, np.integer):
-        return int(value)
-    if hasattr(value, "model_dump"):
-        return _jsonable(value.model_dump(mode="json"))
-    return value
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -152,7 +137,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             "per_session": per,
         }
-    print(json.dumps(_jsonable(result), indent=2))
+    print(json.dumps(jsonable(result, ndigits=6), indent=2))
     return 0
 
 
@@ -163,7 +148,7 @@ def _compare(args: argparse.Namespace, profiles: list[FuelPlantProfile]) -> int:
         dict.fromkeys(n for p in profiles for n in [*p.split.identification, *p.spent()])
     )
     frames = [build_samples(args.sessions_root / n, profiles[0], delay) for n in names]
-    print(json.dumps(_jsonable(compare_versions(frames, profiles, delay)), indent=2))
+    print(json.dumps(jsonable(compare_versions(frames, profiles, delay), ndigits=6), indent=2))
     return 0
 
 

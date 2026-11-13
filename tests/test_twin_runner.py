@@ -79,6 +79,7 @@ from src.analysis.twin_runner import (
 )
 from src.decode import air_charge as air_kernel
 from src.decode.target_phi_command import GATE_STATE_UNKNOWN, target_command, x_from_bfs
+from src.jsonable import jsonable
 from src.preprocessing.loader import read_session
 from tests.test_target_phi import EXPECT, _session, _table, fixture_frame, record_lines
 from tools import fuel_plant_check
@@ -1115,7 +1116,7 @@ def test_the_identification_numbers_through_the_runner_and_the_cli(
     ident = [runs[n] for n in plant.split.identification]
     # Handed in any order: the runner concatenates in the split's order.
     result = twin_runner.identify_plant(ident[::-1], kit_v, sessions_root=SESSIONS)
-    ours = json.dumps(fuel_plant_check._jsonable(result), indent=2)
+    ours = json.dumps(jsonable(result, ndigits=6), indent=2)
     argv = ["identify", "--plant-version", version, "--sessions-root", str(SESSIONS)]
     assert fuel_plant_check.main(argv) == 0
     assert ours == capsys.readouterr().out.rstrip("\n")  # byte for byte

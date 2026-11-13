@@ -52,6 +52,7 @@ from src.analysis.lambda_delivery import (  # noqa: E402
     target_source_agreement,
 )
 from src.analysis.noise_floor import load_noise_floor  # noqa: E402
+from src.jsonable import json_default  # noqa: E402
 from src.paths import DIDS_YAML  # noqa: E402
 from src.preprocessing.loader import read_session  # noqa: E402
 from src.signals.afr import AfrCalibration, load_afr_calibration  # noqa: E402
@@ -467,8 +468,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.sessions, declaration, calibration=calibration
         )
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(report, indent=2, default=_json_default) + "\n")
-    print(json.dumps(report, indent=1, default=_json_default)[:20000])
+    args.out.write_text(json.dumps(report, indent=2, default=json_default) + "\n")
+    print(json.dumps(report, indent=1, default=json_default)[:20000])
     return 0
 
 
@@ -486,14 +487,6 @@ def _negative_control(session: Path | pd.DataFrame, a: str, b: str, tol: float) 
         if m.n_pairs
         else None,
     }
-
-
-def _json_default(value: Any) -> Any:
-    if isinstance(value, (np.floating, np.integer)):
-        return value.item()
-    if isinstance(value, np.bool_):
-        return bool(value)
-    return str(value)
 
 
 if __name__ == "__main__":

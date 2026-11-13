@@ -15,15 +15,11 @@ stored sessions only; writes nothing.
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import json
-import math
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
-
-import numpy as np
 
 from src.analysis.fuel_plant import load_b06, load_fuel_plant
 from src.analysis.plant_validation import (
@@ -35,29 +31,13 @@ from src.analysis.plant_validation import (
     resolve_boundary,
     verify_prediction_of_record,
 )
+from src.jsonable import jsonable
 from src.vehicle.tune_revisions import load_tune_revisions
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_PROFILE = REPO / "data" / "nissan-xterra-2008"
 DEFAULT_SESSIONS = Path.home() / "canary-data" / "sessions" / "nissan-xterra-2008"
 DEFAULT_CASE = "fuel-comp-restore-2026-10-04"
-
-
-def _jsonable(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {str(k): _jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(v) for v in value]
-    if isinstance(value, (np.floating, float)):
-        f = float(value)
-        return None if math.isnan(f) else round(f, 6)
-    if isinstance(value, np.integer):
-        return int(value)
-    if isinstance(value, np.bool_):
-        return bool(value)
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return _jsonable(dataclasses.asdict(value))
-    return value
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -108,7 +88,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         result["prediction_of_record_check"] = verify_prediction_of_record(
             case.prediction_of_record
         )
-    print(json.dumps(_jsonable(result), indent=2))
+    print(json.dumps(jsonable(result, ndigits=6), indent=2))
     return 0
 
 

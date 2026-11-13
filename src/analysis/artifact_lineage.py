@@ -1604,14 +1604,6 @@ def summarize(lineages: Sequence[ArtifactLineage]) -> dict[str, int]:
     return {key: counts.get(key, 0) for key in ("affected", "unaffected", "unverifiable")}
 
 
-def json_default(value: Any) -> Any:
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, set | frozenset | tuple):
-        return sorted(value) if isinstance(value, set | frozenset) else list(value)
-    raise TypeError(f"not JSON serialisable: {type(value).__name__}")
-
-
 # --------------------------------------------------------------------------
 # Build-time derived definitions (parsed, never imported)
 # --------------------------------------------------------------------------
