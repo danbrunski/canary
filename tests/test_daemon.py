@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -27,7 +29,7 @@ from src.daemon import (
 )
 from src.daemon.broadcast import Broadcaster
 from src.daemon.health import HealthMonitor
-from src.models.manager import ModelManager
+from src.models.manager import ModelManager, SwapAttempt
 from src.models.manifest import CURRENT_MANIFEST_FORMAT_VERSION
 from src.paths import ANOMALIES_DIR
 from src.storage.async_writer import AsyncParquetTelemetryWriter
@@ -514,6 +516,53 @@ async def test_poll_swallows_manager_exceptions(tmp_path: Path) -> None:
         stop.set()
     # Task should still terminate cleanly via stop_event, despite the manager's exception.
     await settle(poll_task)
+
+
+async def test_poll_reports_a_manager_whose_binary_disagrees_with_its_manifest() -> None:
+    """The partial-deploy detector end to end: each poll hands the manager's served
+    version and its manifest's to the health monitor under the manager's own name,
+    and the entry clears on the poll after the binary lands. Two managers, so an
+    entry filed under the wrong name, or for the wrong manager, fails."""
+
+    class _Manager:
+        def __init__(self, serving: str, manifest: str) -> None:
+            self.serving = serving
+            self.current = self
+            self.manifest = SimpleNamespace(model_version=manifest)
+
+        @property
+        def serving_version(self) -> str:
+            return self.serving
+
+        def poll(self) -> Any:
+            return SwapAttempt(kind="no_change")
+
+    stale = _Manager(serving="v1", manifest="v2")  # the manifest landed, the binary did not
+    agreeing = _Manager(serving="v7", manifest="v7")
+    health = HealthMonitor()
+
+    def _mismatches() -> dict[str, Any]:
+        return cast(
+            "dict[str, Any]", health.snapshot(now_epoch=0.0).get("model_version_mismatches", {})
+        )
+
+    stop = asyncio.Event()
+    poll_task = asyncio.create_task(
+        poll_model_managers(
+            {"lstm_autoencoder": stale, "isolation_forest": agreeing},  # type: ignore[dict-item]
+            stop,
+            interval_seconds=0.02,
+            health=health,
+        )
+    )
+    try:
+        await wait_until(lambda: bool(_mismatches()), what="the stale manager being reported")
+        assert _mismatches() == {"lstm_autoencoder": {"serving": "v1", "manifest": "v2"}}
+        stale.serving = "v2"  # the binary lands
+        await wait_until(lambda: not _mismatches(), what="the entry clearing once they agree")
+    finally:
+        stop.set()
+        await settle(poll_task)
 
 
 # ---------------------------------------------------------------------------
@@ -2018,6 +2067,41 @@ async def test_run_live_inference_flags_segmenter_fallback_on_status(
         await settle(task)
 
 
+async def test_run_live_inference_warns_once_when_the_segmenter_falls_back(
+    config: CanaryConfig, caplog: pytest.LogCaptureFixture
+) -> None:
+    """4.7 — the warning is edge-triggered: one line when the fallback starts,
+    not one per tick for as long as it lasts. The monitor stores the flag; the
+    pipeline reads it before setting it, which is where the edge is found."""
+    from src.daemon import build_live_feature_source, run_live_inference
+
+    components = build_components(config)
+    source = build_live_feature_source(components)
+    source.observe(TelemetryRecord.obd(datetime.now(UTC).timestamp(), "RPM", 800.0, "rpm"))
+
+    ticks: list[bool] = []
+    real_set = components.health_monitor.set_detector_block
+
+    def _set(name: Any, value: Any, *, key: str | None = None) -> None:
+        if name == "segmenter_fallback":
+            ticks.append(value)
+        real_set(name, value, key=key)
+
+    components.health_monitor.set_detector_block = _set  # type: ignore[method-assign]
+    stop = asyncio.Event()
+    with caplog.at_level(logging.WARNING, logger="src.daemon.inference"):
+        task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
+        try:
+            await wait_until(lambda: len(ticks) >= 4, what="four ticks with the fallback held")
+        finally:
+            stop.set()
+            await settle(task)
+
+    assert all(ticks)
+    falls = [r for r in caplog.records if "segmenter fell back" in r.getMessage()]
+    assert len(falls) == 1
+
+
 async def test_run_live_inference_does_not_flag_fallback_with_full_segmenter_inputs(
     config: CanaryConfig,
 ) -> None:
@@ -2039,13 +2123,14 @@ async def test_run_live_inference_does_not_flag_fallback_with_full_segmenter_inp
     # Count the ticks that reported a fallback state, so the negative below
     # is read after the flag was actually evaluated, not after N ms.
     observed: list[bool] = []
-    real_observe = components.health_monitor.observe_segmenter_fallback
+    real_set = components.health_monitor.set_detector_block
 
-    def _observe(active: bool) -> bool:
-        observed.append(active)
-        return real_observe(active)
+    def _set(name: Any, value: Any, *, key: str | None = None) -> None:
+        if name == "segmenter_fallback":
+            observed.append(value)
+        real_set(name, value, key=key)
 
-    components.health_monitor.observe_segmenter_fallback = _observe  # type: ignore[method-assign]
+    components.health_monitor.set_detector_block = _set  # type: ignore[method-assign]
     stop = asyncio.Event()
     task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
     try:

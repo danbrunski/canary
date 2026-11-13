@@ -794,7 +794,7 @@ async def _start_collector(
         return bus  # type: ignore[return-value]
 
     def on_metrics(metrics: ObdSchedulerMetrics) -> None:
-        health.observe_obd_scheduler(metrics)
+        health.set_detector_block("obd_scheduler", metrics)
         artifacts.scheduler_metrics = metrics.to_dict()
         artifacts.scheduler_snapshots += 1
 

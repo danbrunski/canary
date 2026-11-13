@@ -13,7 +13,7 @@ from src.behavior.behavior_models import (
 )
 from src.collection import bus_budget, tx_gate
 from src.config import CanaryConfig, UnscopedConfigError, require_profile_scoped
-from src.daemon.health import HealthMonitor
+from src.daemon.health import HealthMonitor, VersionPair
 from src.models.manager import ModelManager
 from src.vehicle.profiles import rescope_like
 
@@ -124,10 +124,13 @@ async def poll_model_managers(
                 current = manager.current
                 if current is not None:
                     health.startup.mark_keyed("model_loaded", name)
-                    health.observe_model_version_mismatch(
-                        name,
-                        serving=current.serving_version,
-                        manifest=current.manifest.model_version,
+                    health.set_detector_block(
+                        "model_version_mismatch",
+                        VersionPair(
+                            serving=current.serving_version,
+                            manifest=current.manifest.model_version,
+                        ),
+                        key=name,
                     )
             if attempt.kind == "swapped":
                 log.info(

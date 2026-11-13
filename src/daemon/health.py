@@ -7,15 +7,26 @@ quietly mismatched, half the windows missing features) is worse than no
 detector — it looks healthy on the dashboard while missing real events.
 This module is the observability layer that makes that visible.
 
-Two parts:
+:class:`HealthMonitor` is a facade (R29.10) over three owners and keeps the one
+job that is its own:
 
-* **Pure functions** — :func:`system_metrics` and the host probes here, and the
-  model drift functions (:func:`feature_drift`, :func:`reconstruction_error_drift`)
-  in :mod:`src.models.drift`. No state, no daemon coupling; testable in isolation.
-* **`HealthMonitor`** — a small rolling accumulator the daemon feeds from the
-  paths it already runs (inference tick → latency / missing-feature flag /
-  data freshness; model-manager poll → swap outcomes). :meth:`snapshot`
-  folds in the system + drift metrics and is what ``/status`` surfaces.
+* **Inference accounting** — here. A small rolling accumulator the daemon feeds
+  from the paths it already runs (inference tick → latency / missing-feature
+  flag / data freshness; model-manager poll → swap outcomes).
+* **Detector-state blocks** — here, one :meth:`HealthMonitor.set_detector_block`
+  for the values something else decides and ``/status`` echoes (the OBD
+  scheduler's snapshot, detector roles, the capture-profile gate, …).
+* **The host** — :mod:`src.daemon.host_metrics`: load, memory, temperature, the
+  CPU sampler, ``vcgencmd`` power flags and the can0 counters.
+* **Sinks, queues and loss epochs** — :mod:`src.daemon.sink_health`.
+
+:meth:`HealthMonitor.snapshot` folds those and the model drift metrics
+(:func:`feature_drift`, :func:`reconstruction_error_drift` in
+:mod:`src.models.drift`) into what ``/status`` surfaces. The names importers
+took from this module before the split are all still here, except the three host
+readers (``system_metrics``, ``power_status``, ``can0_counters``): their one
+importer now takes them from :mod:`src.daemon.host_metrics`, and a name
+re-exported here would let a test patch it where nothing looks it up.
 
 Drift uses the scaler the model already persisted (IF manifest's z-score
 ``means``/``stds``): live-vs-training mean distance in training-σ units is a
@@ -26,374 +37,171 @@ enough to fire a "retrain me" warning.
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
-import subprocess
-import threading
 import time
-import weakref
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from src.cgroup_memory import CGROUP_ROOT as CGROUP_ROOT
 from src.cgroup_memory import memory_limit_status as memory_limit_status
 from src.collection import capture_lifetime
+from src.daemon.host_metrics import DEFAULT_CAN0_STATS_PATH as DEFAULT_CAN0_STATS_PATH
+from src.daemon.host_metrics import HostCpuSampler as HostCpuSampler
+from src.daemon.host_metrics import HostMetrics
+from src.daemon.sink_health import CaptureQualityInputs as CaptureQualityInputs
+from src.daemon.sink_health import SinkHealth
 from src.models.drift import FeatureDriftReport as FeatureDriftReport
 from src.models.drift import feature_drift as feature_drift
 from src.models.drift import reconstruction_error_drift as reconstruction_error_drift
 from src.startup import StartupTimeline
-from src.storage.capture_losses import CAN0_LOSS_FIELDS, LOSS_FIELDS, LossEpoch
+from src.storage.capture_losses import LossEpoch
 
 log = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_CAN0_STATS_PATH",
+    "DETECTOR_BLOCKS",
     "CaptureQualityInputs",
+    "DetectorBlock",
     "HealthMonitor",
     "HostCpuSampler",
-    "can0_counters",
+    "VersionPair",
     "feature_drift",
     "memory_limit_status",
-    "power_status",
     "reconstruction_error_drift",
-    "system_metrics",
 ]
 
 
 # ---------------------------------------------------------------------------
-# System metrics — best-effort, no psutil dependency (Pi target)
+# Detector-state blocks — values something else decides, echoed by /status
 # ---------------------------------------------------------------------------
 
-
-def system_metrics() -> dict[str, float | None]:
-    """Coarse host load/memory/temperature. Linux ``/proc`` + ``getloadavg``
-    + thermal ``/sys``; ``None`` for any field the platform doesn't expose
-    (never raises). Note: ``cpu_percent`` (a delta over time) is
-    :class:`HostCpuSampler`'s, not here — these reads are all single-shot."""
-    out: dict[str, float | None] = {
-        "load_1m": None,
-        "cpu_count": None,
-        "load_per_cpu": None,
-        "mem_used_fraction": None,
-        "mem_total_mb": None,
-        "cpu_temp_c": _cpu_temp_c(),
-    }
-    try:
-        load1 = os.getloadavg()[0]
-        out["load_1m"] = round(load1, 3)
-        cpus = os.cpu_count()
-        if cpus:
-            out["cpu_count"] = float(cpus)
-            out["load_per_cpu"] = round(load1 / cpus, 3)
-    except (OSError, AttributeError):
-        pass
-    try:
-        meminfo: dict[str, float] = {}
-        with open("/proc/meminfo") as fh:
-            for line in fh:
-                key, _, rest = line.partition(":")
-                meminfo[key.strip()] = float(rest.strip().split()[0])  # kB
-        total = meminfo.get("MemTotal")
-        available = meminfo.get("MemAvailable")
-        if total:
-            out["mem_total_mb"] = round(total / 1024, 1)
-            if available is not None:
-                out["mem_used_fraction"] = round((total - available) / total, 4)
-    except (OSError, ValueError, IndexError):
-        pass
-    return out
+#: The blocks :meth:`HealthMonitor.set_detector_block` takes. A closed set, so a
+#: misspelt name is an error at the call (and a type error before it runs)
+#: rather than a block that is stored and never shown.
+DetectorBlock = Literal[
+    "model_version_mismatch",
+    "sequence_suppression",
+    "sequence_cadence_refusal",
+    "detector_roles",
+    "obd_scheduler",
+    "capture_profile_gate",
+    "segmenter_fallback",
+]
 
 
-def _cpu_temp_c() -> float | None:
-    """SoC temperature in °C from the Linux thermal sysfs — the Raspberry Pi
-    exposes its CPU zone at ``thermal_zone0``. ``None`` when no thermal zone
-    is present (e.g. a dev laptop / container)."""
-    try:
-        with open("/sys/class/thermal/thermal_zone0/temp") as fh:
-            milli = float(fh.read().strip())
-    except (OSError, ValueError):
+def _copy_out(stored: Any) -> Any:
+    """What ``snapshot()`` returns for a stored value: a copy of a mapping, else the value."""
+    return dict(stored) if isinstance(stored, Mapping) else stored
+
+
+@dataclass(frozen=True)
+class _BlockSpec:
+    """How one block is stored and where ``snapshot()`` shows it."""
+
+    #: Value given to ``set_detector_block`` → what is stored (a copy), or
+    #: ``None`` to clear the block.
+    coerce: Callable[[Any], Any]
+    #: The key ``snapshot()`` carries it under; ``None`` for a block read
+    #: through a property (``capture_profile_gate``, ``segmenter_fallback_active``).
+    snapshot_key: str | None = None
+    #: Stored value → the independent copy ``snapshot()`` returns.
+    render: Callable[[Any], Any] = _copy_out
+    #: One entry per ``key`` (the model manager), not one value.
+    keyed: bool = False
+    #: Placed after ``system`` / ``power`` rather than before them, which is
+    #: where ``/status`` has always carried the OBD scheduler.
+    tail: bool = False
+
+
+def _as_is(value: Any) -> Any:
+    return value
+
+
+def _copy_mapping(value: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    return None if value is None else dict(value)
+
+
+def _scheduler_metrics(value: Any) -> dict[str, Any] | None:
+    """The collector hands over its metrics object; a test or the harness a mapping."""
+    if value is None:
         return None
-    return round(milli / 1000.0, 1)
+    return dict(value.to_dict()) if hasattr(value, "to_dict") else dict(value)
 
 
-def _read_cpu_times() -> tuple[float, float] | None:
-    """``(idle_jiffies, total_jiffies)`` from ``/proc/stat``'s aggregate
-    ``cpu`` line, or ``None`` when unavailable. A single reading is
-    meaningless — the caller diffs two to get utilization over the interval."""
-    try:
-        with open("/proc/stat") as fh:
-            fields = fh.readline().split()
-    except OSError:
+@dataclass(frozen=True)
+class VersionPair:
+    """What one model manager serves against what its manifest sidecar claims.
+
+    A typed value, not a mapping: ``set_detector_block`` reads a *missing or
+    misspelt* key as "unknown" and an unknown side clears the entry, so a
+    ``{"servng": ..., "manifest": ...}`` would have switched the partial-deploy
+    detector off without a word. Here a wrong field name is a ``TypeError`` at
+    the call, and a mypy error before it runs."""
+
+    serving: str | None
+    manifest: str | None
+
+
+def _version_pair(value: VersionPair | None) -> dict[str, str] | None:
+    """A served-binary vs manifest-sidecar disagreement, or ``None`` once they agree.
+
+    Recorded per model manager each poll; clears itself when the pair agrees
+    again (the missing binary finally landed), and records nothing while
+    either side is unknown. Surfaced so a partial deploy is visible on
+    ``/status`` instead of only in a startup log line."""
+    if value is None:
         return None
-    if len(fields) < 5 or fields[0] != "cpu":
-        return None
-    try:
-        vals = [float(x) for x in fields[1:]]
-    except ValueError:
-        return None
-    idle = vals[3] + (vals[4] if len(vals) > 4 else 0.0)  # idle + iowait
-    return idle, sum(vals)
-
-
-#: How often :class:`HostCpuSampler` reads ``/proc/stat``, and how far back the
-#: busy fraction it reports reaches. A read is ~30 µs, so the interval is about
-#: resolution, not cost; the window is about what the number means.
-HOST_SAMPLE_INTERVAL_SECONDS = 1.0
-HOST_CPU_WINDOW_SECONDS = 5.0
-
-
-class HostCpuSampler:
-    """The host's CPU utilization, sampled on this object's own clock (R29.9).
-
-    Utilization is a *delta* between two ``/proc/stat`` readings, and the delta
-    has to be over a span someone chose. ``HealthMonitor`` used to keep the
-    previous reading and diff against it on every ``snapshot()``, so the span
-    was "since whoever last polled": every ``/status`` and MCP ``get_status``
-    moved the baseline for the next one, and two pollers on different cadences
-    each saw a window set by the other (down to a few milliseconds, where one
-    jiffy of noise reads as 0 % or 100 %).
-
-    Here the readings are taken by :meth:`sample` on a fixed interval (a small
-    daemon thread after :meth:`start`) into a ring, and :meth:`cpu_percent` only
-    *reads* the ring: the busy fraction between the newest sample and the oldest
-    one still inside the window. Reading never writes, so any number of
-    pollers, at any rate, get the same value until the next sample lands.
-
-    ``None`` means "no measurement", never zero: fewer than two samples, a
-    platform without ``/proc/stat``, or a newest sample older than three
-    intervals (the sampler stopped, or its thread died). A stale number
-    presented as current is the failure this refuses.
-
-    The thread holds only a weak reference to the sampler and ends when the
-    sampler is collected, so a monitor built by a test and dropped leaves
-    nothing running.
-    """
-
-    def __init__(
-        self,
-        *,
-        interval_seconds: float = HOST_SAMPLE_INTERVAL_SECONDS,
-        window_seconds: float = HOST_CPU_WINDOW_SECONDS,
-        read: Callable[[], tuple[float, float] | None] | None = None,
-        clock: Callable[[], float] = time.monotonic,
-    ) -> None:
-        if interval_seconds <= 0 or window_seconds < interval_seconds:
-            raise ValueError("need 0 < interval_seconds <= window_seconds")
-        self._interval = interval_seconds
-        self._window = window_seconds
-        self._read = read
-        self._clock = clock
-        #: (clock seconds, idle jiffies, total jiffies), oldest first. Long
-        #: enough for the window plus the baseline just outside it.
-        self._ring: deque[tuple[float, float, float]] = deque(
-            maxlen=int(window_seconds / interval_seconds) + 2
+    if not isinstance(value, VersionPair):
+        raise TypeError(
+            f"model_version_mismatch takes a VersionPair or None, not {type(value).__name__}"
         )
-        self._lock = threading.Lock()
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-
-    def sample(self) -> None:
-        """Take one reading now. The thread calls this; so can a test."""
-        reading = (self._read or _read_cpu_times)()
-        if reading is None:
-            return
-        with self._lock:
-            self._append(reading)
-
-    def _append(self, reading: tuple[float, float]) -> None:
-        """Add a reading to the ring; the caller holds the lock."""
-        self._ring.append((self._clock(), reading[0], reading[1]))
-
-    def cpu_percent(self) -> float | None:
-        """Busy fraction (0..1) of total CPU time over the trailing window.
-
-        Pure read: never samples and never moves a baseline.
-        """
-        with self._lock:
-            samples = list(self._ring)
-        if len(samples) < 2:
-            return None
-        newest = samples[-1]
-        if self._clock() - newest[0] > 3 * self._interval:
-            return None
-        baseline = next(item for item in samples if newest[0] - item[0] <= self._window)
-        d_idle = newest[1] - baseline[1]
-        d_total = newest[2] - baseline[2]
-        if baseline is newest or d_total <= 0:
-            return None
-        return round(max(0.0, min(1.0, 1.0 - d_idle / d_total)), 4)
-
-    def start(self) -> None:
-        """Take a baseline reading and sample every ``interval`` until :meth:`stop`.
-
-        Idempotent and safe to call from any number of threads at once (sixteen
-        concurrent ``/status`` requests used to start seven samplers, and
-        :meth:`stop` could reach only the last): the check, the baseline and
-        the thread start are one step under the lock. A sampler that was
-        stopped but whose thread has not yet noticed starts a new one.
-        Not started by the constructor: a monitor that is built and never read
-        (most of the test suite) must not start a thread.
-        """
-        with self._lock:
-            if self._thread is not None and self._thread.is_alive() and not self._stop.is_set():
-                return
-            self._stop = threading.Event()
-            reading = (self._read or _read_cpu_times)()
-            if reading is not None:
-                self._append(reading)  # a baseline now: the first value needs one interval
-            thread = threading.Thread(
-                target=_run_sampler,
-                args=(weakref.ref(self), self._stop, self._interval),
-                name="canary-host-sampler",
-                daemon=True,
-            )
-            thread.start()
-            self._thread = thread
-
-    def stop(self) -> None:
-        """End the thread. The ring stays, and ages out as stale."""
-        self._stop.set()
-
-    @property
-    def running(self) -> bool:
-        thread = self._thread
-        return thread is not None and thread.is_alive()
+    if value.serving is None or value.manifest is None or value.serving == value.manifest:
+        return None
+    return {"serving": value.serving, "manifest": value.manifest}
 
 
-def _run_sampler(
-    ref: weakref.ReferenceType[HostCpuSampler], stop: threading.Event, interval: float
-) -> None:
-    """The sampler thread's body: sample, wait, until stopped or the sampler is gone."""
-    while not stop.wait(interval):
-        sampler = ref()
-        if sampler is None:
-            return
-        sampler.sample()
-        del sampler  # do not hold it across the wait: that would keep it alive
+def _sorted_pairs(entries: Mapping[str, Mapping[str, str]]) -> dict[str, dict[str, str]]:
+    return {name: dict(pair) for name, pair in sorted(entries.items())}
 
 
-# ---------------------------------------------------------------------------
-# Power / throttling — Raspberry Pi firmware status (vcgencmd get_throttled)
-# ---------------------------------------------------------------------------
-
-#: ``vcgencmd get_throttled`` returns a bitmask. The low nibble is *live*
-#: conditions; bits 16-19 latch "has occurred since boot" (sticky until reboot).
-#: Under-voltage is a power-supply problem, not heat — so we surface it
-#: distinctly from the thermal soft-limit. See [[project_daemon_shutdown_hang]]
-#: (separate issue) and the 2026-05-24 under-voltage incident.
-_THROTTLE_BITS_NOW: dict[int, str] = {
-    0: "under_voltage",
-    1: "arm_frequency_capped",
-    2: "currently_throttled",
-    3: "soft_temp_limit",
+DETECTOR_BLOCKS: dict[str, _BlockSpec] = {
+    # The order is the order ``snapshot()`` emits the head blocks in.
+    "model_version_mismatch": _BlockSpec(
+        _version_pair,
+        snapshot_key="model_version_mismatches",
+        render=_sorted_pairs,
+        keyed=True,
+    ),
+    #: A01.5 — the serving sequence engine's suppress list against the one its
+    #: artifact was trained with; cleared (``None``) while no engine is built.
+    "sequence_suppression": _BlockSpec(_copy_mapping, snapshot_key="sequence_suppression"),
+    #: A06.6 — why the sequence detector is not served (its A02.3 level was
+    #: chosen at another forward cadence); ``None`` while it serves.
+    "sequence_cadence_refusal": _BlockSpec(_as_is, snapshot_key="sequence_cadence_refusal"),
+    #: A06.5 — each learned detector's configured and effective role and why
+    #: (``DetectorRoleGate``): an ``alert`` role serves only with an accepted
+    #: alert-budget verdict for the artifact's sha256.
+    "detector_roles": _BlockSpec(_copy_mapping, snapshot_key="detector_roles"),
+    #: The latest adaptive OBD scheduler snapshot.
+    "obd_scheduler": _BlockSpec(_scheduler_metrics, snapshot_key="obd_scheduler", tail=True),
+    #: R03.12 — the latest tick's capture-profile gate verdict
+    #: (``{scoring_allowed, profile, source, …}``), ``None`` before the first
+    #: scorable row. ``/status`` detectors surface it so a withheld IF/sequence
+    #: stream names the profile that withheld it.
+    "capture_profile_gate": _BlockSpec(_copy_mapping),
+    #: 4.7 — whether the live segmenter is on its constant-mode fallback, which
+    #: silences every mode-gated behavior surface for as long as it lasts.
+    "segmenter_fallback": _BlockSpec(bool),
 }
-_THROTTLE_BITS_SINCE_BOOT: dict[int, str] = {
-    16: "under_voltage",
-    17: "arm_frequency_capped",
-    18: "throttling",
-    19: "soft_temp_limit",
-}
-
-
-def power_status() -> dict[str, Any] | None:
-    """Decode ``vcgencmd get_throttled`` into current + since-boot power flags.
-
-    Returns ``{"raw": int, "now": {...}, "since_boot": {...}}`` where each inner
-    dict maps a condition name to a bool. ``None`` when ``vcgencmd`` is absent
-    or fails (a dev laptop / container) — never raises. The since-boot flags are
-    the "past-detected" anomalies: once the firmware throttles or browns out,
-    the bit stays set until the next reboot.
-    """
-    raw = _read_throttled_raw()
-    if raw is None:
-        return None
-    return {
-        "raw": raw,
-        "now": {name: bool(raw & (1 << bit)) for bit, name in _THROTTLE_BITS_NOW.items()},
-        "since_boot": {
-            name: bool(raw & (1 << bit)) for bit, name in _THROTTLE_BITS_SINCE_BOOT.items()
-        },
-    }
-
-
-# ---------------------------------------------------------------------------
-# can0 rx-overrun counter (Task 6.8) — a passive capture-health tripwire
-# ---------------------------------------------------------------------------
-
-#: SocketCAN interfaces expose the standard Linux net-device statistics under
-#: sysfs. ``rx_over_errors``/``rx_dropped`` are what actually matter for the
-#: capture-architecture question (frames the kernel couldn't hand off in
-#: time); ``rx_errors`` is the broader bucket they roll up into.
-DEFAULT_CAN0_STATS_PATH = Path("/sys/class/net/can0/statistics")
-
-_CAN0_COUNTER_NAMES: tuple[str, ...] = ("rx_over_errors", "rx_dropped", "rx_errors")
-
-
-def can0_counters(stats_path: Path = DEFAULT_CAN0_STATS_PATH) -> dict[str, int] | None:
-    """Read can0's rx overrun/drop/error counters straight from sysfs.
-
-    Passive read only — per the roadmap doc, nonzero *growth* during a drive
-    is the only intended trigger to revisit the capture architecture; this
-    function just surfaces the raw numbers for a human to notice that growth,
-    it does not alert on its own. Returns ``None`` when the interface isn't
-    present (a dev laptop, or a Pi before the CAN HAT/can0 comes up) — the
-    caller must treat that as "no data available", never a crash.
-    """
-    if not stats_path.is_dir():
-        return None
-    counters: dict[str, int] = {}
-    for name in _CAN0_COUNTER_NAMES:
-        try:
-            counters[name] = int((stats_path / name).read_text().strip())
-        except (OSError, ValueError):
-            return None
-    return counters
-
-
-def _read_throttled_raw() -> int | None:
-    """Raw integer from ``vcgencmd get_throttled`` (format ``throttled=0x...``),
-    or ``None`` when vcgencmd is missing/errors/times out."""
-    try:
-        completed = subprocess.run(
-            ["vcgencmd", "get_throttled"],
-            capture_output=True,
-            text=True,
-            timeout=2.0,
-            check=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    _, _, value = completed.stdout.strip().partition("=")
-    try:
-        return int(value, 16)
-    except ValueError:
-        return None
 
 
 # ---------------------------------------------------------------------------
 # Rolling monitor — fed from the daemon's existing paths
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class CaptureQualityInputs:
-    """What a capture verdict is scored on, taken at one instant (C03.5).
-
-    ``scheduler`` is the latest live scheduler payload (request table and
-    *trailing* rates), ``lifetime`` the capture-lifetime ledger (arm to now)
-    or ``None`` when no capture is active, and ``loss_epoch`` every loss
-    counter as it reads right now — to be reconciled against the epoch taken
-    at arm time, never quoted on its own.
-    """
-
-    scheduler: dict[str, Any]
-    lifetime: dict[str, Any] | None
-    loss_epoch: LossEpoch
-    sinks: dict[str, dict[str, Any]]
 
 
 @dataclass
@@ -414,12 +222,14 @@ _MODE_BLIND_WINDOW = 8
 
 
 class HealthMonitor:
-    """Rolling inference-health accumulator.
+    """Rolling inference-health accumulator, and the facade over the host and
+    sink accounting (R29.10).
 
     Single-writer (the daemon's inference task) like the emitter — not
     independently locked. Cheap: bounded deques, integer counters. The
     daemon calls :meth:`observe_inference` per tick, :meth:`note_swap` from
-    the model-manager poll, and exposes :meth:`snapshot` through ``/status``.
+    the model-manager poll, :meth:`set_detector_block` for the values other
+    code decides, and exposes :meth:`snapshot` through ``/status``.
     """
 
     def __init__(
@@ -432,79 +242,47 @@ class HealthMonitor:
         self._last_data_ts: float | None = None
         self._swaps: dict[str, int] = {"swapped": 0, "rejected": 0, "unchanged": 0, "error": 0}
         self._last_swap_version: str | None = None
-        self._model_version_mismatches: dict[str, dict[str, str]] = {}
-        #: A01.5 — the serving sequence engine's suppress list against the one
-        #: its artifact was trained with; ``None`` until an engine is built.
-        self._sequence_suppression: dict[str, Any] | None = None
-        #: A06.6 — why the sequence detector is not served (its A02.3 level was
-        #: chosen at another forward cadence); ``None`` while it serves.
-        self._sequence_cadence_refusal: str | None = None
-        self._detector_roles: dict[str, Any] | None = None
-        self._obd_scheduler: dict[str, Any] | None = None
-        self._telemetry_sinks: dict[str, dict[str, Any]] = {}
-        #: Owns the CPU baseline and samples on its own clock (R29.9), so no
-        #: poll of ``snapshot()`` moves it. Started by :meth:`start_host_sampler`
-        #: (the daemon, at boot) or by the first ``snapshot()``.
-        self.host_cpu = HostCpuSampler() if host_cpu is None else host_cpu
-        self._start_host_cpu_on_read = host_cpu is None
-        #: (monotonic_ts, value) cache so /status polling doesn't spawn a
-        #: vcgencmd subprocess every call — the flags barely move at a glance.
-        self._power_cache: tuple[float, dict[str, Any] | None] | None = None
+        #: Stored values of the :data:`DETECTOR_BLOCKS`, by block name. A keyed
+        #: block holds ``{key: value}``; a cleared one is absent.
+        self._blocks: dict[str, Any] = {}
+        #: Load, memory, temperature, the CPU baseline (sampled on its own
+        #: clock, R29.9, so no poll of ``snapshot()`` moves it), ``vcgencmd``
+        #: behind a TTL and the can0 counters as first observed (6.8).
+        self._host = HostMetrics(can0_stats_path=can0_stats_path, cpu=host_cpu)
+        #: Sink state, the queues a capture stop waits on, loss epochs.
+        self._sinks = SinkHealth()
         #: Task 2.1 — per operating-mode rolling missing-feature window (IF)
         #: and the mode's latched blind state, keyed by mode name.
         self._if_mode_missing: dict[str, deque[bool]] = {}
         self._if_mode_blind: dict[str, bool] = {}
-        #: 4.7 — latest live tick's segmenter-fallback state (edge-triggered
-        #: like ``if_blind_modes``, same pattern).
-        self._segmenter_fallback_active: bool = False
-        #: R03.12 — the latest tick's capture-profile gate verdict
-        #: (``{scoring_allowed, profile, source}``), or ``None`` before the
-        #: first scorable row. ``/status`` detectors surface it so a withheld
-        #: IF/sequence stream names the profile that withheld it.
-        self._capture_profile_gate: dict[str, Any] | None = None
-        #: Task 6.8 — the counters as first observed (baseline "since this
-        #: monitor started watching"), so a delta is visible without needing
-        #: a second daemon to remember the counter's value at boot.
-        self._can0_stats_path = can0_stats_path
-        self._can0_baseline: dict[str, int] | None = None
-        #: The queue objects the sinks report on, so a capture stop can wait
-        #: for the ingest and storage queues to drain (C03.8) without a
-        #: second plumbing path to the daemon's queues.
-        self._queues: dict[str, Any] = {}
         #: S01.1 — when each startup stage was reached, served as ``/status``'s
         #: ``startup`` block. Replaced by ``run_daemon(startup=...)`` with the
         #: timeline ``src.main`` began before the daemon existed.
         self.startup = StartupTimeline()
 
-    #: How long a cached power_status() reading stays fresh (seconds).
-    _POWER_TTL_SECONDS = 5.0
+    # -- host -------------------------------------------------------------
 
-    def _power_status_cached(self) -> dict[str, Any] | None:
-        """`power_status()` behind a short TTL — snapshot() runs on every
-        /status poll, and a subprocess per poll would be wasteful on the Pi."""
-        now = time.monotonic()
-        if self._power_cache is not None and now - self._power_cache[0] < self._POWER_TTL_SECONDS:
-            return self._power_cache[1]
-        status = power_status()
-        self._power_cache = (now, status)
-        return status
+    @property
+    def host_cpu(self) -> HostCpuSampler:
+        """The CPU sampler, for the daemon and for tests that drive it by hand.
+
+        Read-only: it is the one :class:`~src.daemon.host_metrics.HostMetrics`
+        reads, so a sampler is handed to the constructor. Assigning here would
+        replace a name nothing reads and change nothing."""
+        return self._host.cpu
 
     def start_host_sampler(self) -> None:
         """Start the host sampler (idempotent). The daemon calls it at boot so the
         first ``/status`` already has a value; ``snapshot()`` starts it otherwise."""
-        self.host_cpu.start()
+        self._host.start_sampler()
 
     def _cpu_percent(self) -> float | None:
         """Busy fraction (0..1) of total CPU time over the sampler's trailing
         window (:class:`HostCpuSampler`), or ``None`` until it has two samples.
+        A sampler the constructor was handed is the caller's to start."""
+        return self._host.cpu_percent()
 
-        A read of the sampler's ring, not a delta against the previous call:
-        the value no longer depends on who polled last, and polling it twice
-        returns the same number. A sampler the constructor was handed is the
-        caller's to start (a test drives it by hand)."""
-        if self._start_host_cpu_on_read:
-            self.host_cpu.start()
-        return self.host_cpu.cpu_percent()
+    # -- inference --------------------------------------------------------
 
     def observe_inference(
         self,
@@ -562,77 +340,74 @@ class HealthMonitor:
             if window
         }
 
-    def observe_segmenter_fallback(self, active: bool) -> bool:
-        """Record this tick's segmenter-fallback state (4.7).
-
-        Returns ``True`` exactly on the tick that transitions into fallback
-        (edge-triggered, mirrors :meth:`_observe_if_mode_missing`) so the
-        caller can log a fresh warning instead of spamming one per tick —
-        every mode-gated behavior surface silently stops firing for as long
-        as this is active.
-        """
-        was_active = self._segmenter_fallback_active
-        self._segmenter_fallback_active = active
-        return active and not was_active
-
-    @property
-    def segmenter_fallback_active(self) -> bool:
-        """Whether the live segmenter is currently constant-mode-fallback
-        (4.7) — ``/status`` surfaces this alongside ``if_blind_modes``."""
-        return self._segmenter_fallback_active
-
-    def observe_capture_profile_gate(self, verdict: dict[str, Any]) -> None:
-        """Record this tick's R03.12 capture-profile gate verdict."""
-        self._capture_profile_gate = dict(verdict)
-
-    @property
-    def capture_profile_gate(self) -> dict[str, Any] | None:
-        """The latest capture-profile gate verdict, or ``None`` before one."""
-        return None if self._capture_profile_gate is None else dict(self._capture_profile_gate)
-
     def note_swap(self, kind: str, *, version: str | None = None) -> None:
         self._swaps[kind] = self._swaps.get(kind, 0) + 1
         if kind == "swapped" and version is not None:
             self._last_swap_version = version
 
-    def observe_model_version_mismatch(
-        self, name: str, *, serving: str | None, manifest: str | None
+    # -- detector-state blocks ---------------------------------------------
+
+    def set_detector_block(
+        self, name: DetectorBlock, value: Any, *, key: str | None = None
     ) -> None:
-        """Track a served-binary vs manifest-sidecar version disagreement.
+        """Store ``value`` as the ``name`` block, replacing the last one; ``None`` clears it.
 
-        Recorded per model manager each poll; clears itself once the pair
-        agrees again (i.e. after the missing binary finally lands). Surfaced
-        in the snapshot so a partial deploy is visible on ``/status`` instead
-        of only in a startup log line."""
-        if serving is None or manifest is None or serving == manifest:
-            self._model_version_mismatches.pop(name, None)
+        What each block holds is :data:`DETECTOR_BLOCKS`. ``model_version_mismatch``
+        is per model manager and takes the manager as ``key`` with a
+        :class:`VersionPair`: a pair that agrees (or has an unknown side) clears
+        that manager's entry, so the caller passes what it read and never
+        decides what counts as a mismatch. Every other block
+        takes no key. Values are copied in and copied out, so neither side can
+        change the other's.
+
+        ``segmenter_fallback`` is a flag, and its rising edge is the caller's
+        to find (read :attr:`segmenter_fallback_active` before setting), since
+        only the caller knows what to log.
+        """
+        spec = DETECTOR_BLOCKS.get(name)
+        if spec is None:
+            raise ValueError(f"unknown detector block {name!r}; known: {sorted(DETECTOR_BLOCKS)}")
+        if spec.keyed and key is None:
+            raise ValueError(f"detector block {name!r} needs a key (the model manager)")
+        if not spec.keyed and key is not None:
+            raise ValueError(f"detector block {name!r} takes no key")
+        stored = spec.coerce(value)
+        if key is not None:
+            entries: dict[str, Any] = self._blocks.setdefault(name, {})
+            if stored is None:
+                entries.pop(key, None)
+            else:
+                entries[key] = stored
+        elif stored is None:
+            self._blocks.pop(name, None)
         else:
-            self._model_version_mismatches[name] = {"serving": serving, "manifest": manifest}
+            self._blocks[name] = stored
 
-    def observe_sequence_suppression(self, comparison: Mapping[str, Any] | None) -> None:
-        """Record the loaded sequence engine's training-vs-serving suppress
-        lists (A01.5), so a difference is on ``/status`` and not only in the
-        load-time log line. ``None`` clears it (no engine loaded)."""
-        self._sequence_suppression = None if comparison is None else dict(comparison)
+    def _block_entries(self, *, tail: bool) -> dict[str, Any]:
+        """The set blocks ``snapshot()`` carries, in registry order; head or tail group."""
+        entries: dict[str, Any] = {}
+        for name, spec in DETECTOR_BLOCKS.items():
+            if spec.snapshot_key is None or spec.tail != tail:
+                continue
+            stored = self._blocks.get(name)
+            if stored is None or (spec.keyed and not stored):
+                continue
+            entries[spec.snapshot_key] = spec.render(stored)
+        return entries
 
-    def observe_sequence_cadence_refusal(self, reason: str | None) -> None:
-        """Record why the sequence engine was refused for the configured
-        forward cadence (A06.6), so ``/status`` names it and not only the log.
-        ``None`` clears it."""
-        self._sequence_cadence_refusal = reason
+    @property
+    def segmenter_fallback_active(self) -> bool:
+        """Whether the live segmenter is currently constant-mode-fallback
+        (4.7) — ``/status`` surfaces this alongside ``if_blind_modes``."""
+        return bool(self._blocks.get("segmenter_fallback", False))
 
-    def observe_detector_roles(self, roles: Mapping[str, Any] | None) -> None:
-        """Record each learned detector's configured and effective role and
-        why (A06.5, ``DetectorRoleGate``): an ``alert`` role serves only with
-        an accepted alert-budget verdict for the artifact's sha256."""
-        self._detector_roles = None if roles is None else dict(roles)
+    @property
+    def capture_profile_gate(self) -> dict[str, Any] | None:
+        """The latest capture-profile gate verdict, or ``None`` before one."""
+        gate = self._blocks.get("capture_profile_gate")
+        return None if gate is None else dict(gate)
 
-    def observe_obd_scheduler(self, metrics: Any) -> None:
-        """Record the latest adaptive OBD scheduler snapshot for ``/status``."""
-        if hasattr(metrics, "to_dict"):
-            self._obd_scheduler = dict(metrics.to_dict())
-        else:
-            self._obd_scheduler = dict(metrics)
+    # -- sinks, queues and loss epochs --------------------------------------
 
     def capture_quality_inputs(self, *, now: float | None = None) -> CaptureQualityInputs:
         """Everything a capture verdict is scored on, at one instant.
@@ -646,97 +421,44 @@ class HealthMonitor:
         monotonic = time.monotonic() if now is None else now
         lifetime = capture_lifetime.snapshot(monotonic)
         return CaptureQualityInputs(
-            scheduler=dict(self._obd_scheduler or {}),
+            scheduler=dict(self._blocks.get("obd_scheduler") or {}),
             lifetime=None if lifetime is None else lifetime.to_dict(),
             loss_epoch=self.loss_epoch(now=monotonic),
-            sinks={name: dict(state) for name, state in self._telemetry_sinks.items()},
+            sinks=self._sinks.states(),
         )
 
     def loss_counters(self) -> dict[str, int | None]:
-        """Every attributable loss counter, cumulative, ``None`` = unavailable.
-
-        Keys are ``<sink>.<field>``; :mod:`src.storage.capture_losses`
-        assigns each a scope. The kernel's ``can0`` counters are included so
-        a receive overrun during a capture is visible, and reported as
-        ``None`` (unknown) on a host without the interface — never as zero.
-        """
-        counters: dict[str, int | None] = {}
-        for sink, state in self._telemetry_sinks.items():
-            for field_name in LOSS_FIELDS:
-                value = state.get(field_name)
-                counters[f"{sink}.{field_name}"] = None if value is None else int(value)
-        can0 = can0_counters(self._can0_stats_path)
-        for field_name in CAN0_LOSS_FIELDS:
-            counters[f"can0.{field_name}"] = None if can0 is None else can0.get(field_name)
-        return counters
+        """Every attributable loss counter, cumulative, ``None`` = unavailable
+        (:meth:`SinkHealth.loss_counters`, with the kernel's can0 counters)."""
+        return self._sinks.loss_counters(self._host.can0_raw())
 
     def loss_epoch(self, *, now: float | None = None) -> LossEpoch:
         """Snapshot every loss counter (C03.5). Take one at arm, one at stop."""
-        return LossEpoch(
-            taken_at_monotonic=time.monotonic() if now is None else now,
-            taken_at_wall=_now(),
-            counters=self.loss_counters(),
+        return self._sinks.loss_epoch(
+            monotonic=time.monotonic() if now is None else now,
+            wall=_now(),
+            can0=self._host.can0_raw(),
         )
 
     def observe_telemetry_queue(self, name: str, queue: Any) -> None:
-        """Record queue depth and its high-water mark for one telemetry sink.
-
-        ``queue_depth`` alone is the depth at the last observation, so a sink
-        whose consumer wedged, filled its queue, dropped records and then
-        recovered reported depth 0 — the peak that explains the loss was gone
-        before anything read it (C10.5; seen in the C10 storage-stall
-        scenario, where a 256-deep queue dropped 3,742 records and still
-        reported ``queue_depth: 0``). The fanout observes every sink's queue
-        after each batch, including while its consumer is blocked, so the
-        monotonic max over those samples is the high-water mark.
-        """
-        state = self._sink_state(name)
-        depth = int(queue.qsize())
-        state["queue_depth"] = depth
-        state["queue_high_water"] = max(int(state.get("queue_high_water") or 0), depth)
-        state["queue_max_size"] = int(queue.maxsize)
-        self._queues[name] = queue
+        """Record queue depth and its high-water mark for one telemetry sink."""
+        self._sinks.observe_telemetry_queue(name, queue)
 
     async def wait_for_queues_idle(
         self, names: Sequence[str] = ("ingest", "storage"), *, timeout: float
     ) -> dict[str, Any]:
-        """Wait, bounded, for the named queues to be fully consumed (C03.8).
-
-        Uses ``asyncio.Queue.join`` — every ``get`` must be matched by
-        ``task_done``, which the fanout and the storage sink do. Returns which
-        queues drained and which timed out or were never observed; a queue
-        that never reported is *unknown*, not drained.
-        """
-        drained: list[str] = []
-        timed_out: list[str] = []
-        unobserved: list[str] = []
-        deadline = time.monotonic() + max(0.0, timeout)
-        for name in names:
-            queue = self._queues.get(name)
-            if queue is None or not hasattr(queue, "join"):
-                unobserved.append(name)
-                continue
-            remaining = max(0.0, deadline - time.monotonic())
-            try:
-                await asyncio.wait_for(queue.join(), timeout=remaining)
-            except TimeoutError:
-                timed_out.append(name)
-            else:
-                drained.append(name)
-        return {"drained": drained, "timed_out": timed_out, "unobserved": unobserved}
+        """Wait, bounded, for the named queues to be fully consumed (C03.8)."""
+        return await self._sinks.wait_for_queues_idle(names, timeout=timeout)
 
     def note_telemetry_drop(self, name: str, *, count: int = 1) -> None:
         """Record explicit data loss at a telemetry sink."""
-        state = self._sink_state(name)
-        state["dropped_records"] = int(state.get("dropped_records", 0)) + count
+        self._sinks.note_telemetry_drop(name, count=count)
 
     def note_telemetry_error(self, name: str, exc: BaseException) -> None:
         """Record the latest exception from one telemetry sink."""
-        state = self._sink_state(name)
-        state["errors"] = int(state.get("errors", 0)) + 1
-        state["last_error"] = f"{type(exc).__name__}: {exc}"
+        self._sinks.note_telemetry_error(name, exc)
 
-    def observe_receive_path(
+    def observe_receive_path(  # noqa: PLR0913
         self,
         name: str,
         *,
@@ -749,26 +471,18 @@ class HealthMonitor:
         batches: int,
         reconnects: int = 0,
     ) -> None:
-        """Record a collector receive path's producer-buffer pressure (C07.5).
-
-        A named entry under ``telemetry_sinks`` (e.g. ``can_receive``) so
-        loss *before* the ingest queue is attributable on its own, never
-        folded into ``storage``. ``dropped_records`` is the total explicit
-        loss at this stage; ``buffer_dropped`` (loop too slow to drain the
-        thread handoff) and ``queue_dropped`` (ingest queue full) break it
-        down by cause. Values are cumulative counters from the collector,
-        so they are assigned, not summed.
-        """
-        state = self._sink_state(name)
-        state["records_processed"] = received
-        state["parse_errors"] = parse_errors
-        state["buffer_dropped"] = buffer_dropped
-        state["buffer_high_water"] = buffer_high_water
-        state["buffer_capacity"] = buffer_capacity
-        state["queue_dropped"] = queue_dropped
-        state["dropped_records"] = buffer_dropped + queue_dropped
-        state["batches"] = batches
-        state["reconnects"] = reconnects
+        """Record a collector receive path's producer-buffer pressure (C07.5)."""
+        self._sinks.observe_receive_path(
+            name,
+            received=received,
+            parse_errors=parse_errors,
+            buffer_dropped=buffer_dropped,
+            buffer_high_water=buffer_high_water,
+            buffer_capacity=buffer_capacity,
+            queue_dropped=queue_dropped,
+            batches=batches,
+            reconnects=reconnects,
+        )
 
     def observe_collector_handoff(  # noqa: PLR0913
         self,
@@ -784,30 +498,19 @@ class HealthMonitor:
         derived_records: int,
         reconnects: int = 0,
     ) -> None:
-        """Record a polling collector's thread handoff (C03.6, ``obd_collect``).
-
-        The Canable collector's ``QueueDropCounter`` and ``ThreadHandoff``
-        counters used to be logged and never reached ``/status``, so a record
-        dropped between the poll thread and the ingest queue vanished from the
-        capture verdict. ``derived_records`` counts what the collector pushed
-        (a batched Mode 01 response producing N readings is N records);
-        ``raw_responses`` counts ECU responses, when the loop reports them, so
-        the two are never confused.
-        """
-        self.observe_receive_path(
+        """Record a polling collector's thread handoff (C03.6, ``obd_collect``)."""
+        self._sinks.observe_collector_handoff(
             name,
-            received=accepted + buffer_dropped,
-            parse_errors=0,
+            accepted=accepted,
             buffer_dropped=buffer_dropped,
             buffer_high_water=buffer_high_water,
             buffer_capacity=buffer_capacity,
             queue_dropped=queue_dropped,
             batches=batches,
+            raw_responses=raw_responses,
+            derived_records=derived_records,
             reconnects=reconnects,
         )
-        state = self._sink_state(name)
-        state["raw_responses"] = raw_responses
-        state["derived_records"] = derived_records
 
     def observe_telemetry_write(
         self,
@@ -818,59 +521,15 @@ class HealthMonitor:
         flushes: int = 0,
     ) -> None:
         """Record durable-writer throughput without retaining every sample."""
-        state = self._sink_state(name)
-        elapsed_ms = max(0.0, elapsed_seconds) * 1000.0
-        state["write_calls"] = int(state.get("write_calls", 0)) + 1
-        state["records_processed"] = int(state.get("records_processed", 0)) + records
-        state["flushes"] = int(state.get("flushes", 0)) + flushes
-        state["last_batch_size"] = records
-        state["max_batch_size"] = max(int(state.get("max_batch_size", 0)), records)
-        state["last_write_ms"] = round(elapsed_ms, 3)
-        state["max_write_ms"] = round(max(float(state.get("max_write_ms", 0.0)), elapsed_ms), 3)
-        state["last_write_records_per_second"] = (
-            round(records / elapsed_seconds, 1) if elapsed_seconds > 0 else None
+        self._sinks.observe_telemetry_write(
+            name, records=records, elapsed_seconds=elapsed_seconds, flushes=flushes
         )
-        if flushes:
-            state["last_flushing_write_ms"] = round(elapsed_ms, 3)
-            state["max_flushing_write_ms"] = round(
-                max(float(state.get("max_flushing_write_ms", 0.0)), elapsed_ms), 3
-            )
 
     def observe_storage_publish(self, name: str, stats: dict[str, Any]) -> None:
-        """The durable writer's chunk publishes (``PublishStats``): with
-        background publishing, ``max_publish_ms`` is the disk's stall and the
-        write timings above are not."""
-        self._sink_state(name).update(stats)
+        """The durable writer's chunk publishes (``PublishStats``)."""
+        self._sinks.observe_storage_publish(name, stats)
 
-    def _sink_state(self, name: str) -> dict[str, Any]:
-        return self._telemetry_sinks.setdefault(
-            name,
-            {
-                "queue_depth": None,
-                "queue_high_water": None,
-                "queue_max_size": None,
-                "dropped_records": 0,
-                "errors": 0,
-                "last_error": None,
-            },
-        )
-
-    def _can0_status(self) -> dict[str, Any] | None:
-        """`can0` counters + delta since this monitor first saw them (6.8).
-
-        `None` (the field is omitted from the snapshot) when there's no can0
-        interface — this laptop's real environment tonight, and any Pi before
-        the CAN HAT/socketcan interface is up.
-        """
-        counters = can0_counters(self._can0_stats_path)
-        if counters is None:
-            return None
-        if self._can0_baseline is None:
-            self._can0_baseline = dict(counters)
-        return {
-            **counters,
-            "since_start": {name: counters[name] - self._can0_baseline[name] for name in counters},
-        }
+    # -- /status ------------------------------------------------------------
 
     def snapshot(
         self,
@@ -906,53 +565,26 @@ class HealthMonitor:
             ),
             "model_swaps": dict(self._swaps),
             "active_model_version": self._last_swap_version,
-            **(
-                {
-                    "model_version_mismatches": {
-                        name: dict(pair)
-                        for name, pair in sorted(self._model_version_mismatches.items())
-                    }
-                }
-                if self._model_version_mismatches
-                else {}
-            ),
-            **(
-                {"sequence_suppression": dict(self._sequence_suppression)}
-                if self._sequence_suppression is not None
-                else {}
-            ),
-            **(
-                {"sequence_cadence_refusal": self._sequence_cadence_refusal}
-                if self._sequence_cadence_refusal is not None
-                else {}
-            ),
-            **(
-                {"detector_roles": dict(self._detector_roles)}
-                if self._detector_roles is not None
-                else {}
-            ),
-            "system": {**system_metrics(), **memory_limit_status()},
-            "power": self._power_status_cached(),
+            **self._block_entries(tail=False),
+            "system": self._host.system(),
+            "power": self._host.power(),
         }
-        snap["system"]["cpu_percent"] = self._cpu_percent()
-        if self._obd_scheduler is not None:
-            snap["obd_scheduler"] = dict(self._obd_scheduler)
+        snap.update(self._block_entries(tail=True))
         lifetime = capture_lifetime.snapshot(time.monotonic())
         if lifetime is not None:
             # Arm-to-now statistics for the active capture (C03.2), beside —
             # never inside — the scheduler's trailing 60 s numbers.
             snap["capture_lifetime"] = lifetime.to_dict(events=False)
-        if self._telemetry_sinks:
-            snap["telemetry_sinks"] = {
-                name: dict(state) for name, state in sorted(self._telemetry_sinks.items())
-            }
+        sinks = self._sinks.snapshot()
+        if sinks:
+            snap["telemetry_sinks"] = sinks
         if scaler is not None and live_means is not None:
             snap["feature_drift"] = feature_drift(live_means, scaler).to_dict()
         if lstm_thresholds is not None:
             snap["reconstruction_error_drift"] = reconstruction_error_drift(
                 live_mean_recon_error, lstm_thresholds
             )
-        can0 = self._can0_status()
+        can0 = self._host.can0_status()
         if can0 is not None:
             snap["can0"] = can0
         return snap

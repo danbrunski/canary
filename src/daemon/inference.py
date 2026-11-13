@@ -722,9 +722,9 @@ class LiveInferencePipeline:
         # every mode-gated behavior surface silently never fires; make
         # that visible instead of nowhere, same edge-triggered pattern as
         # IF's blind_modes (2.1).
-        newly_fallback = components.health_monitor.observe_segmenter_fallback(
-            source.last_segmenter_fallback
-        )
+        health = components.health_monitor
+        newly_fallback = source.last_segmenter_fallback and not health.segmenter_fallback_active
+        health.set_detector_block("segmenter_fallback", source.last_segmenter_fallback)
         if newly_fallback:
             log.warning(
                 "operating-mode segmenter fell back to constant %r mode — segmenter "
@@ -739,11 +739,12 @@ class LiveInferencePipeline:
         # R03.12 — asked every tick: the behavior detector obeys it even on a
         # tick with no feature row (R03.12b).
         profile_gate = capture_profile_gate(components)
-        components.health_monitor.observe_capture_profile_gate(
+        health.set_detector_block(
+            "capture_profile_gate",
             {
                 **profile_gate.to_dict(),
                 "behavior_residuals_withheld": self._behavior.withheld_by_capture_profile,
-            }
+            },
         )
         if row is not None:
             vehicle_state = _live_vehicle_state(source, components, now)

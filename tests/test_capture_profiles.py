@@ -340,10 +340,15 @@ def _capture_app(
     """An app whose capture clocks are ``clock`` and whose can0 counters exist."""
     import src.collection.tuning_profile as tuning_profile_mod
     import src.daemon.health as health_mod
+    import src.daemon.sink_health as sink_health_mod
     from src.daemon.health import HealthMonitor
 
     monkeypatch.setattr(tuning_profile_mod, "time", clock)
+    # The monitor's clock is read in two modules since R29.10: the facade (the
+    # capture lifetime and every epoch's instant) and the sink accounting (the
+    # drain deadline of ``wait_for_queues_idle``).
     monkeypatch.setattr(health_mod, "time", clock)
+    monkeypatch.setattr(sink_health_mod, "time", clock)
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     config = config.model_copy(
         update={
@@ -364,7 +369,9 @@ def _capture_app(
     for name in ("rx_over_errors", "rx_dropped", "rx_errors"):
         (stats / name).write_text("0")
     health = HealthMonitor(can0_stats_path=stats)
-    health.observe_obd_scheduler({"achieved_hz_capture": {}, "requests": [], "batching": {}})
+    health.set_detector_block(
+        "obd_scheduler", {"achieved_hz_capture": {}, "requests": [], "batching": {}}
+    )
     # The daemon's sinks register their queues with health when they start
     # (drain.py); the finalizer treats an unregistered queue as unobserved,
     # which is an unverified verdict, not a pass. Mirror the daemon here.

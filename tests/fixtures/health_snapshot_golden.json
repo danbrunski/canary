@@ -1,0 +1,718 @@
+{
+ "empty": {
+  "observed": 0,
+  "inference_latency_ms": {
+   "mean": null,
+   "p95": null,
+   "max": null
+  },
+  "missing_feature_rate": null,
+  "data_freshness_seconds": null,
+  "model_swaps": {
+   "swapped": 0,
+   "rejected": 0,
+   "unchanged": 0,
+   "error": 0
+  },
+  "active_model_version": null,
+  "system": {
+   "load_1m": 0.52,
+   "cpu_count": 4.0,
+   "load_per_cpu": 0.13,
+   "mem_used_fraction": 0.4123,
+   "mem_total_mb": 7943.5,
+   "cpu_temp_c": 51.2,
+   "memory_limits_enforced": true,
+   "memory_max_bytes": 6442450944,
+   "memory_max_source": "/sys/fs/cgroup/system.slice/canary.service/memory.max",
+   "cpu_percent": null
+  },
+  "power": {
+   "raw": 327685,
+   "now": {
+    "under_voltage": true,
+    "arm_frequency_capped": false,
+    "currently_throttled": true,
+    "soft_temp_limit": false
+   },
+   "since_boot": {
+    "under_voltage": true,
+    "arm_frequency_capped": false,
+    "throttling": true,
+    "soft_temp_limit": false
+   }
+  },
+  "can0": {
+   "rx_over_errors": 1,
+   "rx_dropped": 2,
+   "rx_errors": 0,
+   "since_start": {
+    "rx_over_errors": 0,
+    "rx_dropped": 0,
+    "rx_errors": 0
+   }
+  }
+ },
+ "driven": {
+  "observed": 19,
+  "inference_latency_ms": {
+   "mean": 9.5,
+   "p95": 14.0,
+   "max": 14.0
+  },
+  "missing_feature_rate": 0.6316,
+  "data_freshness_seconds": 1.0,
+  "model_swaps": {
+   "swapped": 1,
+   "rejected": 1,
+   "unchanged": 0,
+   "error": 1
+  },
+  "active_model_version": "if_v7",
+  "model_version_mismatches": {
+   "isolation_forest": {
+    "serving": "a",
+    "manifest": "b"
+   },
+   "lstm_autoencoder": {
+    "serving": "v1",
+    "manifest": "v2"
+   }
+  },
+  "sequence_suppression": {
+   "trained": [
+    "a"
+   ],
+   "serving": [
+    "a",
+    "b"
+   ]
+  },
+  "sequence_cadence_refusal": "alert level chosen at another cadence",
+  "detector_roles": {
+   "isolation_forest": {
+    "effective": "alert"
+   }
+  },
+  "system": {
+   "load_1m": 0.52,
+   "cpu_count": 4.0,
+   "load_per_cpu": 0.13,
+   "mem_used_fraction": 0.4123,
+   "mem_total_mb": 7943.5,
+   "cpu_temp_c": 51.2,
+   "memory_limits_enforced": true,
+   "memory_max_bytes": 6442450944,
+   "memory_max_source": "/sys/fs/cgroup/system.slice/canary.service/memory.max",
+   "cpu_percent": 0.625
+  },
+  "power": {
+   "raw": 327685,
+   "now": {
+    "under_voltage": true,
+    "arm_frequency_capped": false,
+    "currently_throttled": true,
+    "soft_temp_limit": false
+   },
+   "since_boot": {
+    "under_voltage": true,
+    "arm_frequency_capped": false,
+    "throttling": true,
+    "soft_temp_limit": false
+   }
+  },
+  "obd_scheduler": {
+   "active_requests": 3,
+   "requests": [
+    {
+     "c": "RPM"
+    }
+   ]
+  },
+  "telemetry_sinks": {
+   "can_receive": {
+    "queue_depth": null,
+    "queue_high_water": null,
+    "queue_max_size": null,
+    "dropped_records": 8,
+    "errors": 0,
+    "last_error": null,
+    "records_processed": 1000,
+    "parse_errors": 2,
+    "buffer_dropped": 3,
+    "buffer_high_water": 40,
+    "buffer_capacity": 512,
+    "queue_dropped": 5,
+    "batches": 90,
+    "reconnects": 1
+   },
+   "ingest": {
+    "queue_depth": 2,
+    "queue_high_water": 3,
+    "queue_max_size": 256,
+    "dropped_records": 0,
+    "errors": 0,
+    "last_error": null
+   },
+   "obd_collect": {
+    "queue_depth": null,
+    "queue_high_water": null,
+    "queue_max_size": null,
+    "dropped_records": 3,
+    "errors": 0,
+    "last_error": null,
+    "records_processed": 501,
+    "parse_errors": 0,
+    "buffer_dropped": 1,
+    "buffer_high_water": 7,
+    "buffer_capacity": 128,
+    "queue_dropped": 2,
+    "batches": 60,
+    "reconnects": 0,
+    "raw_responses": null,
+    "derived_records": 620
+   },
+   "storage": {
+    "queue_depth": null,
+    "queue_high_water": null,
+    "queue_max_size": null,
+    "dropped_records": 5,
+    "errors": 1,
+    "last_error": "RuntimeError: disk full",
+    "write_calls": 3,
+    "records_processed": 160,
+    "flushes": 1,
+    "last_batch_size": 10,
+    "max_batch_size": 100,
+    "last_write_ms": 0.0,
+    "max_write_ms": 500.0,
+    "last_write_records_per_second": null,
+    "last_flushing_write_ms": 250.0,
+    "max_flushing_write_ms": 250.0,
+    "publishes": 3,
+    "max_publish_ms": 12.5
+   }
+  },
+  "feature_drift": {
+   "per_feature_sigma": {
+    "a": 10.0,
+    "b": 0.25
+   },
+   "max_sigma": 10.0,
+   "drifted_features": [
+    "a"
+   ],
+   "missing_features": [],
+   "schema_mismatch": false
+  },
+  "reconstruction_error_drift": {
+   "live_mean_error": 0.3,
+   "ratio": 3.0,
+   "sigma_above_train": 4.0
+  },
+  "can0": {
+   "rx_over_errors": 3,
+   "rx_dropped": 5,
+   "rx_errors": 0,
+   "since_start": {
+    "rx_over_errors": 2,
+    "rx_dropped": 3,
+    "rx_errors": 0
+   }
+  }
+ },
+ "properties": {
+  "edges": [
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   true
+  ],
+  "if_blind_modes": [
+   "cruise"
+  ],
+  "if_missing_feature_rate_by_mode": {
+   "idle": 0.375,
+   "cruise": 1.0,
+   "city": 0.0
+  },
+  "segmenter_fallback_active": true,
+  "capture_profile_gate": {
+   "scoring_allowed": false,
+   "profile": "tuning",
+   "source": "live"
+  }
+ },
+ "loss": {
+  "counters": {
+   "ingest.dropped_records": 0,
+   "ingest.errors": 0,
+   "storage.dropped_records": 5,
+   "storage.errors": 1,
+   "can_receive.dropped_records": 8,
+   "can_receive.errors": 0,
+   "obd_collect.dropped_records": 3,
+   "obd_collect.errors": 0,
+   "can0.rx_dropped": 5,
+   "can0.rx_over_errors": 3
+  },
+  "epoch_monotonic": 50.0,
+  "epoch_counters": {
+   "ingest.dropped_records": 0,
+   "ingest.errors": 0,
+   "storage.dropped_records": 5,
+   "storage.errors": 1,
+   "can_receive.dropped_records": 8,
+   "can_receive.errors": 0,
+   "obd_collect.dropped_records": 3,
+   "obd_collect.errors": 0,
+   "can0.rx_dropped": 5,
+   "can0.rx_over_errors": 3
+  },
+  "inputs_epoch_counters": {
+   "ingest.dropped_records": 0,
+   "ingest.errors": 0,
+   "storage.dropped_records": 5,
+   "storage.errors": 1,
+   "can_receive.dropped_records": 8,
+   "can_receive.errors": 0,
+   "obd_collect.dropped_records": 3,
+   "obd_collect.errors": 0,
+   "can0.rx_dropped": 5,
+   "can0.rx_over_errors": 3
+  },
+  "inputs_scheduler": {
+   "active_requests": 3,
+   "requests": [
+    {
+     "c": "RPM"
+    }
+   ]
+  },
+  "inputs_lifetime": null,
+  "inputs_sinks": {
+   "ingest": {
+    "queue_depth": 2,
+    "queue_high_water": 3,
+    "queue_max_size": 256,
+    "dropped_records": 0,
+    "errors": 0,
+    "last_error": null
+   },
+   "storage": {
+    "queue_depth": null,
+    "queue_high_water": null,
+    "queue_max_size": null,
+    "dropped_records": 5,
+    "errors": 1,
+    "last_error": "RuntimeError: disk full",
+    "write_calls": 3,
+    "records_processed": 160,
+    "flushes": 1,
+    "last_batch_size": 10,
+    "max_batch_size": 100,
+    "last_write_ms": 0.0,
+    "max_write_ms": 500.0,
+    "last_write_records_per_second": null,
+    "last_flushing_write_ms": 250.0,
+    "max_flushing_write_ms": 250.0,
+    "publishes": 3,
+    "max_publish_ms": 12.5
+   },
+   "can_receive": {
+    "queue_depth": null,
+    "queue_high_water": null,
+    "queue_max_size": null,
+    "dropped_records": 8,
+    "errors": 0,
+    "last_error": null,
+    "records_processed": 1000,
+    "parse_errors": 2,
+    "buffer_dropped": 3,
+    "buffer_high_water": 40,
+    "buffer_capacity": 512,
+    "queue_dropped": 5,
+    "batches": 90,
+    "reconnects": 1
+   },
+   "obd_collect": {
+    "queue_depth": null,
+    "queue_high_water": null,
+    "queue_max_size": null,
+    "dropped_records": 3,
+    "errors": 0,
+    "last_error": null,
+    "records_processed": 501,
+    "parse_errors": 0,
+    "buffer_dropped": 1,
+    "buffer_high_water": 7,
+    "buffer_capacity": 128,
+    "queue_dropped": 2,
+    "batches": 60,
+    "reconnects": 0,
+    "raw_responses": null,
+    "derived_records": 620
+   }
+  }
+ },
+ "replaced": {
+  "observed": 19,
+  "inference_latency_ms": {
+   "mean": 9.5,
+   "p95": 14.0,
+   "max": 14.0
+  },
+  "missing_feature_rate": 0.6316,
+  "data_freshness_seconds": 1.0,
+  "model_swaps": {
+   "swapped": 1,
+   "rejected": 1,
+   "unchanged": 0,
+   "error": 1
+  },
+  "active_model_version": "if_v7",
+  "model_version_mismatches": {
+   "isolation_forest": {
+    "serving": "a",
+    "manifest": "b"
+   }
+  },
+  "system": {
+   "load_1m": 0.52,
+   "cpu_count": 4.0,
+   "load_per_cpu": 0.13,
+   "mem_used_fraction": 0.4123,
+   "mem_total_mb": 7943.5,
+   "cpu_temp_c": 51.2,
+   "memory_limits_enforced": true,
+   "memory_max_bytes": 6442450944,
+   "memory_max_source": "/sys/fs/cgroup/system.slice/canary.service/memory.max",
+   "cpu_percent": 0.625
+  },
+  "power": {
+   "raw": 327685,
+   "now": {
+    "under_voltage": true,
+    "arm_frequency_capped": false,
+    "currently_throttled": true,
+    "soft_temp_limit": false
+   },
+   "since_boot": {
+    "under_voltage": true,
+    "arm_frequency_capped": false,
+    "throttling": true,
+    "soft_temp_limit": false
+   }
+  },
+  "obd_scheduler": {
+   "active_requests": 2,
+   "requests": [
+    {
+     "channel": "RPM"
+    }
+   ],
+   "batching": {
+    "on": true
+   }
+  },
+  "telemetry_sinks": {
+   "can_receive": {
+    "queue_depth": null,
+    "queue_high_water": null,
+    "queue_max_size": null,
+    "dropped_records": 8,
+    "errors": 0,
+    "last_error": null,
+    "records_processed": 1000,
+    "parse_errors": 2,
+    "buffer_dropped": 3,
+    "buffer_high_water": 40,
+    "buffer_capacity": 512,
+    "queue_dropped": 5,
+    "batches": 90,
+    "reconnects": 1
+   },
+   "ingest": {
+    "queue_depth": 2,
+    "queue_high_water": 3,
+    "queue_max_size": 256,
+    "dropped_records": 0,
+    "errors": 0,
+    "last_error": null
+   },
+   "obd_collect": {
+    "queue_depth": null,
+    "queue_high_water": null,
+    "queue_max_size": null,
+    "dropped_records": 3,
+    "errors": 0,
+    "last_error": null,
+    "records_processed": 501,
+    "parse_errors": 0,
+    "buffer_dropped": 1,
+    "buffer_high_water": 7,
+    "buffer_capacity": 128,
+    "queue_dropped": 2,
+    "batches": 60,
+    "reconnects": 0,
+    "raw_responses": null,
+    "derived_records": 620
+   },
+   "storage": {
+    "queue_depth": null,
+    "queue_high_water": null,
+    "queue_max_size": null,
+    "dropped_records": 5,
+    "errors": 1,
+    "last_error": "RuntimeError: disk full",
+    "write_calls": 3,
+    "records_processed": 160,
+    "flushes": 1,
+    "last_batch_size": 10,
+    "max_batch_size": 100,
+    "last_write_ms": 0.0,
+    "max_write_ms": 500.0,
+    "last_write_records_per_second": null,
+    "last_flushing_write_ms": 250.0,
+    "max_flushing_write_ms": 250.0,
+    "publishes": 3,
+    "max_publish_ms": 12.5
+   }
+  },
+  "can0": {
+   "rx_over_errors": 3,
+   "rx_dropped": 5,
+   "rx_errors": 0,
+   "since_start": {
+    "rx_over_errors": 2,
+    "rx_dropped": 3,
+    "rx_errors": 0
+   }
+  }
+ },
+ "replaced_properties": {
+  "segmenter_fallback_active": false,
+  "capture_profile_gate": {
+   "scoring_allowed": true,
+   "profile": "default",
+   "source": "live"
+  }
+ },
+ "capturing": {
+  "observed": 19,
+  "inference_latency_ms": {
+   "mean": 9.5,
+   "p95": 14.0,
+   "max": 14.0
+  },
+  "missing_feature_rate": 0.6316,
+  "data_freshness_seconds": 1.0,
+  "model_swaps": {
+   "swapped": 1,
+   "rejected": 1,
+   "unchanged": 0,
+   "error": 1
+  },
+  "active_model_version": "if_v7",
+  "model_version_mismatches": {
+   "isolation_forest": {
+    "serving": "a",
+    "manifest": "b"
+   }
+  },
+  "system": {
+   "load_1m": 0.52,
+   "cpu_count": 4.0,
+   "load_per_cpu": 0.13,
+   "mem_used_fraction": 0.4123,
+   "mem_total_mb": 7943.5,
+   "cpu_temp_c": 51.2,
+   "memory_limits_enforced": true,
+   "memory_max_bytes": 6442450944,
+   "memory_max_source": "/sys/fs/cgroup/system.slice/canary.service/memory.max",
+   "cpu_percent": 0.625
+  },
+  "power": {
+   "raw": 327685,
+   "now": {
+    "under_voltage": true,
+    "arm_frequency_capped": false,
+    "currently_throttled": true,
+    "soft_temp_limit": false
+   },
+   "since_boot": {
+    "under_voltage": true,
+    "arm_frequency_capped": false,
+    "throttling": true,
+    "soft_temp_limit": false
+   }
+  },
+  "obd_scheduler": {
+   "active_requests": 2,
+   "requests": [
+    {
+     "channel": "RPM"
+    }
+   ],
+   "batching": {
+    "on": true
+   }
+  },
+  "capture_lifetime": {
+   "source": "live",
+   "profile": "fuel-map",
+   "generation_at_start": 2,
+   "started_monotonic": 0.0,
+   "started_wall": 0.0,
+   "elapsed_s": 10.0,
+   "paused_s": 0,
+   "intended_active_s": 10.0,
+   "pause_windows": [],
+   "pause_reasons": [],
+   "channels": {
+    "RPM": {
+     "channel": "RPM",
+     "observations": 1,
+     "first_observed_at": 1.0,
+     "last_observed_at": 1.0,
+     "missing_initial_s": 1.0,
+     "missing_final_s": 9.0,
+     "max_interarrival_s": null,
+     "max_gap_s": 9.0,
+     "median_interarrival_s": null,
+     "p95_interarrival_s": null,
+     "cadence_hz": null,
+     "interarrival_samples": 0,
+     "long_gaps": [],
+     "long_gap_count": 0,
+     "long_gap_total_s": 0.0,
+     "clock_regressions": 0
+    }
+   },
+   "requests": {},
+   "request_event_capacity": 64
+  },
+  "telemetry_sinks": {
+   "can_receive": {
+    "queue_depth": null,
+    "queue_high_water": null,
+    "queue_max_size": null,
+    "dropped_records": 8,
+    "errors": 0,
+    "last_error": null,
+    "records_processed": 1000,
+    "parse_errors": 2,
+    "buffer_dropped": 3,
+    "buffer_high_water": 40,
+    "buffer_capacity": 512,
+    "queue_dropped": 5,
+    "batches": 90,
+    "reconnects": 1
+   },
+   "ingest": {
+    "queue_depth": 2,
+    "queue_high_water": 3,
+    "queue_max_size": 256,
+    "dropped_records": 0,
+    "errors": 0,
+    "last_error": null
+   },
+   "obd_collect": {
+    "queue_depth": null,
+    "queue_high_water": null,
+    "queue_max_size": null,
+    "dropped_records": 3,
+    "errors": 0,
+    "last_error": null,
+    "records_processed": 501,
+    "parse_errors": 0,
+    "buffer_dropped": 1,
+    "buffer_high_water": 7,
+    "buffer_capacity": 128,
+    "queue_dropped": 2,
+    "batches": 60,
+    "reconnects": 0,
+    "raw_responses": null,
+    "derived_records": 620
+   },
+   "storage": {
+    "queue_depth": null,
+    "queue_high_water": null,
+    "queue_max_size": null,
+    "dropped_records": 5,
+    "errors": 1,
+    "last_error": "RuntimeError: disk full",
+    "write_calls": 3,
+    "records_processed": 160,
+    "flushes": 1,
+    "last_batch_size": 10,
+    "max_batch_size": 100,
+    "last_write_ms": 0.0,
+    "max_write_ms": 500.0,
+    "last_write_records_per_second": null,
+    "last_flushing_write_ms": 250.0,
+    "max_flushing_write_ms": 250.0,
+    "publishes": 3,
+    "max_publish_ms": 12.5
+   }
+  },
+  "can0": {
+   "rx_over_errors": 3,
+   "rx_dropped": 5,
+   "rx_errors": 0,
+   "since_start": {
+    "rx_over_errors": 2,
+    "rx_dropped": 3,
+    "rx_errors": 0
+   }
+  }
+ },
+ "capturing_inputs_lifetime": {
+  "source": "live",
+  "profile": "fuel-map",
+  "generation_at_start": 2,
+  "started_monotonic": 0.0,
+  "started_wall": 0.0,
+  "elapsed_s": 10.0,
+  "paused_s": 0,
+  "intended_active_s": 10.0,
+  "pause_windows": [],
+  "pause_reasons": [],
+  "channels": {
+   "RPM": {
+    "channel": "RPM",
+    "observations": 1,
+    "first_observed_at": 1.0,
+    "last_observed_at": 1.0,
+    "missing_initial_s": 1.0,
+    "missing_final_s": 9.0,
+    "max_interarrival_s": null,
+    "max_gap_s": 9.0,
+    "median_interarrival_s": null,
+    "p95_interarrival_s": null,
+    "cadence_hz": null,
+    "interarrival_samples": 0,
+    "long_gaps": [],
+    "long_gap_count": 0,
+    "long_gap_total_s": 0.0,
+    "clock_regressions": 0
+   }
+  },
+  "requests": {},
+  "request_event_capacity": 64
+ }
+}

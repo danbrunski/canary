@@ -10,6 +10,7 @@ on the alarm path — the shape of the 2026-09-10 flood.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -245,7 +246,10 @@ def test_the_live_fusion_source_carries_the_effective_role(tmp_path: Path) -> No
 def test_status_shows_configured_and_effective_roles(tmp_path: Path) -> None:
     health = HealthMonitor()
     gate = DetectorRoleGate({"isolation_forest": "alert", "lstm_autoencoder": "evidence"})
-    gate.bind(lambda _source: None, on_change=health.observe_detector_roles)
+    gate.bind(
+        lambda _source: None,
+        on_change=functools.partial(health.set_detector_block, "detector_roles"),
+    )
 
     roles = health.snapshot()["detector_roles"]
 

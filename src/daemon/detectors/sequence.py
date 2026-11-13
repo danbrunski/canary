@@ -213,9 +213,8 @@ def _cadence_refusal(loaded: Any, forward_every_n_ticks: int) -> str | None:
 def _publish_cadence_refusal(components: Any, reason: str | None) -> None:
     """Put a cadence refusal on ``/status`` (``health.sequence_cadence_refusal``)."""
     health = getattr(components, "health_monitor", None)
-    observe = getattr(health, "observe_sequence_cadence_refusal", None)
-    if observe is not None:
-        observe(reason)
+    if health is not None:
+        health.set_detector_block("sequence_cadence_refusal", reason)
 
 
 def _publish_sequence_suppression(components: Any, engine: Any) -> None:
@@ -227,7 +226,9 @@ def _publish_sequence_suppression(components: Any, engine: Any) -> None:
     if health is None:
         return
     comparison = getattr(engine, "suppression", None)
-    health.observe_sequence_suppression(comparison.to_dict() if comparison is not None else None)
+    health.set_detector_block(
+        "sequence_suppression", comparison.to_dict() if comparison is not None else None
+    )
 
 
 #: ``(artifact version, cadence)`` pairs whose cadence refusal was logged; the

@@ -635,7 +635,9 @@ async def run_daemon(
     else:
         active_collectors = _default_collectors(
             config,
-            obd_scheduler_metrics_callback=components.health_monitor.observe_obd_scheduler,
+            obd_scheduler_metrics_callback=functools.partial(
+                components.health_monitor.set_detector_block, "obd_scheduler"
+            ),
             freeze_frame_trigger=components.freeze_frame_trigger,
             force_poll_trigger=components.force_poll_trigger,
             can_receive_stats_callback=can_receive_stats_observer(components.health_monitor),

@@ -10,15 +10,15 @@ from fastapi.testclient import TestClient
 
 import src.daemon.health as health_mod
 from src.config import CanaryConfig
+from src.daemon import host_metrics
 from src.daemon.health import (
     HealthMonitor,
     HostCpuSampler,
-    can0_counters,
+    VersionPair,
     feature_drift,
-    power_status,
     reconstruction_error_drift,
-    system_metrics,
 )
+from src.daemon.host_metrics import can0_counters, power_status, system_metrics
 from src.dashboard.api import build_status, create_app
 from tests.configs import isolated_config
 
@@ -65,7 +65,7 @@ def test_cpu_percent_reads_the_real_proc_stat() -> None:
 def test_power_status_decodes_throttled_bitmask(monkeypatch: pytest.MonkeyPatch) -> None:
     # 0x50000 = under-voltage + throttling have occurred since boot, nothing live
     # (the exact 2026-05-24 incident reading).
-    monkeypatch.setattr(health_mod, "_read_throttled_raw", lambda: 0x50000)
+    monkeypatch.setattr(host_metrics, "_read_throttled_raw", lambda: 0x50000)
     assert power_status() == {
         "raw": 0x50000,
         "now": {
@@ -84,7 +84,7 @@ def test_power_status_decodes_throttled_bitmask(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_power_status_flags_live_under_voltage(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(health_mod, "_read_throttled_raw", lambda: 0x10001)  # bit0 + bit16
+    monkeypatch.setattr(host_metrics, "_read_throttled_raw", lambda: 0x10001)  # bit0 + bit16
     status = power_status()
     assert status is not None
     assert status["now"]["under_voltage"] is True
@@ -92,7 +92,7 @@ def test_power_status_flags_live_under_voltage(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_power_status_none_when_vcgencmd_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(health_mod, "_read_throttled_raw", lambda: None)
+    monkeypatch.setattr(host_metrics, "_read_throttled_raw", lambda: None)
     assert power_status() is None
 
 
@@ -103,7 +103,7 @@ def test_snapshot_includes_power_behind_a_ttl_cache(monkeypatch: pytest.MonkeyPa
         calls["n"] += 1
         return 0x0
 
-    monkeypatch.setattr(health_mod, "_read_throttled_raw", _fake_raw)
+    monkeypatch.setattr(host_metrics, "_read_throttled_raw", _fake_raw)
     mon = HealthMonitor()
     snap = mon.snapshot(now_epoch=0.0)
     assert snap["power"] == {
@@ -227,16 +227,22 @@ def test_model_version_mismatch_surfaces_and_clears() -> None:
     manifest shows up on the snapshot until the versions agree again."""
     mon = HealthMonitor()
     # Consistent pair → nothing recorded.
-    mon.observe_model_version_mismatch("isolation_forest", serving="v1", manifest="v1")
+    mon.set_detector_block(
+        "model_version_mismatch", VersionPair("v1", "v1"), key="isolation_forest"
+    )
     assert "model_version_mismatches" not in mon.snapshot(now_epoch=0.0)
     # Stale binary vs fresh manifest → surfaced.
-    mon.observe_model_version_mismatch("lstm_autoencoder", serving="v1", manifest="v2")
+    mon.set_detector_block(
+        "model_version_mismatch", VersionPair("v1", "v2"), key="lstm_autoencoder"
+    )
     snap = mon.snapshot(now_epoch=0.0)
     assert snap["model_version_mismatches"] == {
         "lstm_autoencoder": {"serving": "v1", "manifest": "v2"}
     }
     # Binary lands → clears on the next poll.
-    mon.observe_model_version_mismatch("lstm_autoencoder", serving="v2", manifest="v2")
+    mon.set_detector_block(
+        "model_version_mismatch", VersionPair("v2", "v2"), key="lstm_autoencoder"
+    )
     assert "model_version_mismatches" not in mon.snapshot(now_epoch=0.0)
 
 
@@ -335,34 +341,37 @@ def test_observe_inference_without_operating_mode_never_blinds() -> None:
     assert mon.if_blind_modes == ()
 
 
-def test_observe_segmenter_fallback_is_edge_triggered() -> None:
-    """4.7 — mirrors the IF blind-mode edge-triggered pattern: the
-    transition into fallback reports True exactly once, not every tick."""
+def test_segmenter_fallback_flag_follows_what_was_last_set() -> None:
+    """4.7 — the flag ``/status`` serves is the last value set. The rising edge
+    (warn once, not every tick) is the live pipeline's, which reads the flag
+    before setting it: ``tests/test_daemon.py`` drives that through
+    ``run_live_inference``."""
     mon = HealthMonitor()
     assert mon.segmenter_fallback_active is False
 
-    assert mon.observe_segmenter_fallback(True) is True  # rising edge
+    mon.set_detector_block("segmenter_fallback", True)
     assert mon.segmenter_fallback_active is True
-    assert mon.observe_segmenter_fallback(True) is False  # already active
+    mon.set_detector_block("segmenter_fallback", True)  # a held fallback stays one
     assert mon.segmenter_fallback_active is True
 
-    assert mon.observe_segmenter_fallback(False) is False  # recovers
+    mon.set_detector_block("segmenter_fallback", False)  # recovers
     assert mon.segmenter_fallback_active is False
 
-    assert mon.observe_segmenter_fallback(True) is True  # re-latches
+    mon.set_detector_block("segmenter_fallback", True)  # re-latches
     assert mon.segmenter_fallback_active is True
 
 
 def test_monitor_snapshots_obd_scheduler_metrics() -> None:
     mon = HealthMonitor()
-    mon.observe_obd_scheduler(
+    mon.set_detector_block(
+        "obd_scheduler",
         {
             "configured_poll_rate_hz": 1.0,
             "bus_budget_requests_per_second": 8.0,
             "active_requests": 3,
             "backed_off_requests": 1,
             "requests": [{"channel": "RPM", "poll_tier": "fast"}],
-        }
+        },
     )
 
     snap = mon.snapshot(now_epoch=0.0)
@@ -435,7 +444,7 @@ def test_status_exposes_segmenter_fallback_flag(tmp_path: Path) -> None:
     snap = build_status(config, health_monitor=mon).to_dict()
     assert snap["detectors"]["segmenter"]["fallback_active"] is False
 
-    mon.observe_segmenter_fallback(True)
+    mon.set_detector_block("segmenter_fallback", True)
     snap = build_status(config, health_monitor=mon).to_dict()
     assert snap["detectors"]["segmenter"]["fallback_active"] is True
 
@@ -531,7 +540,7 @@ def test_snapshot_carries_the_capture_lifetime_beside_the_trailing_scheduler() -
     capture_lifetime._reset_for_tests()
     try:
         mon = HealthMonitor()
-        mon.observe_obd_scheduler({"achieved_hz_capture": {"RPM": 4.0}})
+        mon.set_detector_block("obd_scheduler", {"achieved_hz_capture": {"RPM": 4.0}})
         assert "capture_lifetime" not in mon.snapshot(now_epoch=0.0)
         capture_lifetime.begin(0.0, profile="fuel-map", generation=2)
         capture_lifetime.observe("RPM", 1.0)

@@ -16,7 +16,7 @@ from itertools import count
 
 import pytest
 
-import src.daemon.health as health_mod
+from src.daemon import host_metrics
 from src.daemon.health import HealthMonitor, HostCpuSampler
 
 
@@ -216,7 +216,7 @@ def test_concurrent_starts_make_exactly_one_thread(monkeypatch: pytest.MonkeyPat
         started.append(stop)
         stop.wait(10.0)
 
-    monkeypatch.setattr(health_mod, "_run_sampler", parked)
+    monkeypatch.setattr(host_metrics, "_run_sampler", parked)
 
     def slow_read() -> tuple[float, float]:
         time.sleep(0.02)  # /proc/stat on a busy Pi; widens the check-then-start window

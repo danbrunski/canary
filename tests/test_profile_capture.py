@@ -72,7 +72,9 @@ def _session(tmp_path: Path) -> tuple[ProfileCaptureSession, AsyncParquetTelemet
     for name in ("rx_over_errors", "rx_dropped", "rx_errors"):
         (stats / name).write_text("0")
     health = HealthMonitor(can0_stats_path=stats)
-    health.observe_obd_scheduler({"achieved_hz_capture": {}, "requests": [], "batching": {}})
+    health.set_detector_block(
+        "obd_scheduler", {"achieved_hz_capture": {}, "requests": [], "batching": {}}
+    )
     for name in ("ingest", "storage"):
         health.observe_telemetry_queue(name, asyncio.Queue())
     session = ProfileCaptureSession(
@@ -266,8 +268,8 @@ async def test_an_http_started_capture_ended_by_daemon_shutdown_reports_its_epoc
     for name in ("rx_over_errors", "rx_dropped", "rx_errors"):
         (stats / name).write_text("0")
     components.health_monitor = HealthMonitor(can0_stats_path=stats)
-    components.health_monitor.observe_obd_scheduler(
-        {"achieved_hz_capture": {}, "requests": [], "batching": {}}
+    components.health_monitor.set_detector_block(
+        "obd_scheduler", {"achieved_hz_capture": {}, "requests": [], "batching": {}}
     )
     stop = asyncio.Event()
     task = asyncio.create_task(
@@ -397,8 +399,8 @@ async def test_run_daemon_shutdown_with_a_digest_holding_the_slot_fits_the_unit_
     for name in ("rx_over_errors", "rx_dropped", "rx_errors"):
         (stats / name).write_text("0")
     components.health_monitor = HealthMonitor(can0_stats_path=stats)
-    components.health_monitor.observe_obd_scheduler(
-        {"achieved_hz_capture": {}, "requests": [], "batching": {}}
+    components.health_monitor.set_detector_block(
+        "obd_scheduler", {"achieved_hz_capture": {}, "requests": [], "batching": {}}
     )
     stop = asyncio.Event()
     task = asyncio.create_task(

@@ -247,7 +247,7 @@ def build_components(config: CanaryConfig, *, load_models: bool = True) -> Daemo
     components.role_gate = role_gate
     role_gate.bind(
         functools.partial(_loaded_for_source, components),
-        on_change=components.health_monitor.observe_detector_roles,
+        on_change=functools.partial(components.health_monitor.set_detector_block, "detector_roles"),
     )
     return components
 
