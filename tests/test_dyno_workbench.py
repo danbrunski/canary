@@ -376,7 +376,13 @@ def test_recorded_coefficients_give_a_curve_with_conditions_flags_and_uncertaint
     assert set(run["per_heading"]) == {"course-000", "course-180"}
 
 
-def _tire_run(tmp_path: Path, found_pulls: list[list[FoundPull]], **tires: float) -> dict[str, Any]:
+def _tire_run(
+    tmp_path: Path,
+    found_pulls: list[list[FoundPull]],
+    *,
+    tire_pressure_front_kpa: float | None = None,
+    tire_pressure_rear_kpa: float | None = None,
+) -> dict[str, Any]:
     profile = _profile(tmp_path, measured=True)
     session = _session(tmp_path / "storage")
     found_pulls.append(_found())
@@ -384,7 +390,13 @@ def _tire_run(tmp_path: Path, found_pulls: list[list[FoundPull]], **tires: float
         [session],
         inputs=_inputs(profile, providers=_providers(tmp_path)),
         vehicle=VEHICLE,
-        request=DynoRequest(road="synthetic road", payload_kg=127.0, induction="na", **tires),
+        request=DynoRequest(
+            road="synthetic road",
+            payload_kg=127.0,
+            induction="na",
+            tire_pressure_front_kpa=tire_pressure_front_kpa,
+            tire_pressure_rear_kpa=tire_pressure_rear_kpa,
+        ),
     )
     (run,) = result["runs"]
     assert run["available"] is True
