@@ -9,6 +9,7 @@ import { pauseProfileCapture, startProfileCapture, stopProfileCapture } from "..
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { TableScroll } from "../components/TableScroll";
+import { useLiveFullStatus } from "../hooks/statusDemand";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { useCaptureCatalog } from "../hooks/useCaptureCatalog";
 import { useNow } from "../hooks/useNow";
@@ -87,6 +88,8 @@ export function CaptureRunner({
   /** Live values, so a running capture shows what it is recording. */
   channels?: Map<string, ChannelSnapshot>;
 }) {
+  // The scheduler's request table and the rows written are in the full `/status`.
+  useLiveFullStatus();
   const { catalog, error: catalogError } = useCaptureCatalog(token);
   const profiles = catalog?.profiles ?? [];
   const [selectedName, setSelectedName] = useState("default");

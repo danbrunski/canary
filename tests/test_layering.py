@@ -46,6 +46,7 @@ LAYERS: dict[str, int] = {
     "columns": 0,
     "config": 0,
     "dataframe_utils": 0,
+    "file_memo": 0,
     "jsonl_store": 0,
     "log": 0,
     "lsm6dsox_settings": 0,

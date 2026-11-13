@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { getCaptureProfiles } from "../api/http";
+import { useLiveFullStatus } from "./statusDemand";
 import type { GridOverlay } from "../panels/cellOverlay";
 import { liveValue, streamRow, tracePosition } from "../lib/romMaps";
 import type { RomTable } from "../lib/romMaps";
@@ -81,6 +82,11 @@ export function useLiveOverlay({
   /** The tables the overlay applies to (see `overlayTableOf`). */
   tables: RomTable[];
 }) {
+  // The trace gate calls nothing an active cell while the daemon contradicts
+  // the ROM (`calibration_matches_registry`, `registry_revision`), and its
+  // "not answering" message quotes the scheduler's request counters: all in
+  // the full `/status`, so a reflash must not wait out the slow cadence.
+  useLiveFullStatus();
   // The operator's assertion that this ROM is running. It is about the image,
   // not about the slot being looked at: the overlay's subject is fixed at
   // `context.map_slot` whichever slot the page shows, so changing the slot

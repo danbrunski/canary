@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { TableScroll } from "../components/TableScroll";
 
 import { Sparkline } from "../components/Sparkline";
+import { useLiveFullStatus } from "../hooks/statusDemand";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import {
   isEmptyRawCan,
@@ -27,6 +28,9 @@ import { readJson, writeJson } from "../util/storage";
 import { formatAge } from "../util/time";
 
 export { renderChannel } from "../lib/telemetryDisplay";
+
+/** How often the full `/status` is fetched while this is the only live panel. */
+const FULL_STATUS_INTERVAL_MS = 15_000;
 
 interface TelemetryPanelProps {
   channels: Map<string, ChannelSnapshot>;
@@ -95,6 +99,12 @@ export function TelemetryPanel({
   scheduler,
   compact = false,
 }: TelemetryPanelProps) {
+  // The freshness and "slow" chips read the scheduler's `achieved_hz_60s` (a 60 s
+  // trailing mean) and request table from the full `/status`, so 15 s loses
+  // nothing. This is also the Drive screen's panel, so the Drive screen's
+  // full-payload cost on the Pi is set here; a panel that needs 5 s next to it
+  // still gets 5 s (the shortest cadence asked for wins).
+  useLiveFullStatus(FULL_STATUS_INTERVAL_MS);
   const [query, setQuery] = useState("");
   const [pinned, setPinned] = useState<string[] | null>(() => loadStoredKeys(PIN_STORAGE_KEY));
   const [pinnedOnly, setPinnedOnly] = useState(false);

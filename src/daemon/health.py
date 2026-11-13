@@ -30,9 +30,11 @@ import asyncio
 import logging
 import os
 import subprocess
+import threading
 import time
+import weakref
 from collections import deque
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -52,6 +54,7 @@ __all__ = [
     "DEFAULT_CAN0_STATS_PATH",
     "CaptureQualityInputs",
     "HealthMonitor",
+    "HostCpuSampler",
     "can0_counters",
     "feature_drift",
     "memory_limit_status",
@@ -69,8 +72,8 @@ __all__ = [
 def system_metrics() -> dict[str, float | None]:
     """Coarse host load/memory/temperature. Linux ``/proc`` + ``getloadavg``
     + thermal ``/sys``; ``None`` for any field the platform doesn't expose
-    (never raises). Note: ``cpu_percent`` (a delta over time) lives on
-    :class:`HealthMonitor`, not here — these reads are all single-shot."""
+    (never raises). Note: ``cpu_percent`` (a delta over time) is
+    :class:`HostCpuSampler`'s, not here — these reads are all single-shot."""
     out: dict[str, float | None] = {
         "load_1m": None,
         "cpu_count": None,
@@ -134,6 +137,143 @@ def _read_cpu_times() -> tuple[float, float] | None:
         return None
     idle = vals[3] + (vals[4] if len(vals) > 4 else 0.0)  # idle + iowait
     return idle, sum(vals)
+
+
+#: How often :class:`HostCpuSampler` reads ``/proc/stat``, and how far back the
+#: busy fraction it reports reaches. A read is ~30 µs, so the interval is about
+#: resolution, not cost; the window is about what the number means.
+HOST_SAMPLE_INTERVAL_SECONDS = 1.0
+HOST_CPU_WINDOW_SECONDS = 5.0
+
+
+class HostCpuSampler:
+    """The host's CPU utilization, sampled on this object's own clock (R29.9).
+
+    Utilization is a *delta* between two ``/proc/stat`` readings, and the delta
+    has to be over a span someone chose. ``HealthMonitor`` used to keep the
+    previous reading and diff against it on every ``snapshot()``, so the span
+    was "since whoever last polled": every ``/status`` and MCP ``get_status``
+    moved the baseline for the next one, and two pollers on different cadences
+    each saw a window set by the other (down to a few milliseconds, where one
+    jiffy of noise reads as 0 % or 100 %).
+
+    Here the readings are taken by :meth:`sample` on a fixed interval (a small
+    daemon thread after :meth:`start`) into a ring, and :meth:`cpu_percent` only
+    *reads* the ring: the busy fraction between the newest sample and the oldest
+    one still inside the window. Reading never writes, so any number of
+    pollers, at any rate, get the same value until the next sample lands.
+
+    ``None`` means "no measurement", never zero: fewer than two samples, a
+    platform without ``/proc/stat``, or a newest sample older than three
+    intervals (the sampler stopped, or its thread died). A stale number
+    presented as current is the failure this refuses.
+
+    The thread holds only a weak reference to the sampler and ends when the
+    sampler is collected, so a monitor built by a test and dropped leaves
+    nothing running.
+    """
+
+    def __init__(
+        self,
+        *,
+        interval_seconds: float = HOST_SAMPLE_INTERVAL_SECONDS,
+        window_seconds: float = HOST_CPU_WINDOW_SECONDS,
+        read: Callable[[], tuple[float, float] | None] | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if interval_seconds <= 0 or window_seconds < interval_seconds:
+            raise ValueError("need 0 < interval_seconds <= window_seconds")
+        self._interval = interval_seconds
+        self._window = window_seconds
+        self._read = read
+        self._clock = clock
+        #: (clock seconds, idle jiffies, total jiffies), oldest first. Long
+        #: enough for the window plus the baseline just outside it.
+        self._ring: deque[tuple[float, float, float]] = deque(
+            maxlen=int(window_seconds / interval_seconds) + 2
+        )
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def sample(self) -> None:
+        """Take one reading now. The thread calls this; so can a test."""
+        reading = (self._read or _read_cpu_times)()
+        if reading is None:
+            return
+        with self._lock:
+            self._append(reading)
+
+    def _append(self, reading: tuple[float, float]) -> None:
+        """Add a reading to the ring; the caller holds the lock."""
+        self._ring.append((self._clock(), reading[0], reading[1]))
+
+    def cpu_percent(self) -> float | None:
+        """Busy fraction (0..1) of total CPU time over the trailing window.
+
+        Pure read: never samples and never moves a baseline.
+        """
+        with self._lock:
+            samples = list(self._ring)
+        if len(samples) < 2:
+            return None
+        newest = samples[-1]
+        if self._clock() - newest[0] > 3 * self._interval:
+            return None
+        baseline = next(item for item in samples if newest[0] - item[0] <= self._window)
+        d_idle = newest[1] - baseline[1]
+        d_total = newest[2] - baseline[2]
+        if baseline is newest or d_total <= 0:
+            return None
+        return round(max(0.0, min(1.0, 1.0 - d_idle / d_total)), 4)
+
+    def start(self) -> None:
+        """Take a baseline reading and sample every ``interval`` until :meth:`stop`.
+
+        Idempotent and safe to call from any number of threads at once (sixteen
+        concurrent ``/status`` requests used to start seven samplers, and
+        :meth:`stop` could reach only the last): the check, the baseline and
+        the thread start are one step under the lock. A sampler that was
+        stopped but whose thread has not yet noticed starts a new one.
+        Not started by the constructor: a monitor that is built and never read
+        (most of the test suite) must not start a thread.
+        """
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive() and not self._stop.is_set():
+                return
+            self._stop = threading.Event()
+            reading = (self._read or _read_cpu_times)()
+            if reading is not None:
+                self._append(reading)  # a baseline now: the first value needs one interval
+            thread = threading.Thread(
+                target=_run_sampler,
+                args=(weakref.ref(self), self._stop, self._interval),
+                name="canary-host-sampler",
+                daemon=True,
+            )
+            thread.start()
+            self._thread = thread
+
+    def stop(self) -> None:
+        """End the thread. The ring stays, and ages out as stale."""
+        self._stop.set()
+
+    @property
+    def running(self) -> bool:
+        thread = self._thread
+        return thread is not None and thread.is_alive()
+
+
+def _run_sampler(
+    ref: weakref.ReferenceType[HostCpuSampler], stop: threading.Event, interval: float
+) -> None:
+    """The sampler thread's body: sample, wait, until stopped or the sampler is gone."""
+    while not stop.wait(interval):
+        sampler = ref()
+        if sampler is None:
+            return
+        sampler.sample()
+        del sampler  # do not hold it across the wait: that would keep it alive
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +422,12 @@ class HealthMonitor:
     the model-manager poll, and exposes :meth:`snapshot` through ``/status``.
     """
 
-    def __init__(self, *, can0_stats_path: Path = DEFAULT_CAN0_STATS_PATH) -> None:
+    def __init__(
+        self,
+        *,
+        can0_stats_path: Path = DEFAULT_CAN0_STATS_PATH,
+        host_cpu: HostCpuSampler | None = None,
+    ) -> None:
         self._roll = _Rolling()
         self._last_data_ts: float | None = None
         self._swaps: dict[str, int] = {"swapped": 0, "rejected": 0, "unchanged": 0, "error": 0}
@@ -297,7 +442,11 @@ class HealthMonitor:
         self._detector_roles: dict[str, Any] | None = None
         self._obd_scheduler: dict[str, Any] | None = None
         self._telemetry_sinks: dict[str, dict[str, Any]] = {}
-        self._cpu_prev: tuple[float, float] | None = None
+        #: Owns the CPU baseline and samples on its own clock (R29.9), so no
+        #: poll of ``snapshot()`` moves it. Started by :meth:`start_host_sampler`
+        #: (the daemon, at boot) or by the first ``snapshot()``.
+        self.host_cpu = HostCpuSampler() if host_cpu is None else host_cpu
+        self._start_host_cpu_on_read = host_cpu is None
         #: (monotonic_ts, value) cache so /status polling doesn't spawn a
         #: vcgencmd subprocess every call — the flags barely move at a glance.
         self._power_cache: tuple[float, dict[str, Any] | None] | None = None
@@ -340,22 +489,22 @@ class HealthMonitor:
         self._power_cache = (now, status)
         return status
 
+    def start_host_sampler(self) -> None:
+        """Start the host sampler (idempotent). The daemon calls it at boot so the
+        first ``/status`` already has a value; ``snapshot()`` starts it otherwise."""
+        self.host_cpu.start()
+
     def _cpu_percent(self) -> float | None:
-        """Busy fraction (0..1) of total CPU time since the previous
-        snapshot. ``None`` on the first call (no baseline yet) or where
-        ``/proc/stat`` is absent. Stateful by necessity — utilization is a
-        delta between two readings, not an instantaneous level."""
-        sample = _read_cpu_times()
-        if sample is None:
-            return None
-        prev, self._cpu_prev = self._cpu_prev, sample
-        if prev is None:
-            return None
-        d_idle = sample[0] - prev[0]
-        d_total = sample[1] - prev[1]
-        if d_total <= 0:
-            return None
-        return round(max(0.0, min(1.0, 1.0 - d_idle / d_total)), 4)
+        """Busy fraction (0..1) of total CPU time over the sampler's trailing
+        window (:class:`HostCpuSampler`), or ``None`` until it has two samples.
+
+        A read of the sampler's ring, not a delta against the previous call:
+        the value no longer depends on who polled last, and polling it twice
+        returns the same number. A sampler the constructor was handed is the
+        caller's to start (a test drives it by hand)."""
+        if self._start_host_cpu_on_read:
+            self.host_cpu.start()
+        return self.host_cpu.cpu_percent()
 
     def observe_inference(
         self,

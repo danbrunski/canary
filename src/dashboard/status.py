@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +22,7 @@ from src.daemon.ups import (
     read_keepalive_remaining,
     read_watchdog_status,
 )
+from src.file_memo import StampedCache, file_stamp
 from src.models.feature_spec_health import load_audit_snapshot, structural_blindness_snapshot
 from src.storage.capture_manifest import latest_capture_summary
 from src.storage.monitor import free_space_mb
@@ -187,9 +189,8 @@ def _free_mb(path: Path) -> float:
         return 0.0
 
 
-def _model_version(manifest_path: Path) -> str | None:
-    """Read the version field from a model manifest JSON, or ``None``."""
-    data = read_json_object(manifest_path)
+def _model_version(data: dict[str, Any] | None) -> str | None:
+    """The version field of a parsed model manifest, or ``None``."""
     if data is None:
         return None
     version = (
@@ -200,15 +201,14 @@ def _model_version(manifest_path: Path) -> str | None:
     return str(version) if version is not None else None
 
 
-def _model_provenance(manifest_path: Path) -> dict[str, Any] | None:
-    """Read the provenance fields off a model manifest JSON, or ``None``.
+def _model_provenance(data: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The provenance fields of a parsed model manifest, or ``None``.
 
     Deliberately as forgiving as :func:`_model_version` (plain ``json.loads``
     + ``.get``, not the strict :func:`src.models.manifest.validate_manifest_common`
     gate) — a malformed/partial manifest shouldn't take ``/status`` down, it
     should just show up as an absent field for an operator to notice.
     """
-    data = read_json_object(manifest_path)
     if data is None:
         return None
     return {
@@ -218,6 +218,52 @@ def _model_provenance(manifest_path: Path) -> dict[str, Any] | None:
         "training_sessions": data.get("training_sessions", []),
         "artifact_format_version": data.get("artifact_format_version"),
     }
+
+
+#: ``(model_versions, model_provenance)`` per models directory, valid while the
+#: manifests found under it keep their ``(path, mtime_ns, size)`` (R29.9). A
+#: full poll used to list and parse every manifest twice.
+_manifest_cache: StampedCache[tuple[dict[str, str | None], dict[str, dict[str, Any] | None]]] = (
+    StampedCache()
+)
+
+
+def model_manifest_summary(
+    models_dir: Path,
+) -> tuple[dict[str, str | None], dict[str, dict[str, Any] | None]]:
+    """Every model's version and provenance, read off the manifests under ``models_dir``.
+
+    Artifacts live one dir down: ``<models_dir>/<name>/model.manifest.json``
+    (matches ``daemon.isolation_forest_artifact`` / ``lstm_artifact``). Recurse
+    so the nested layout is found; fall back to the flat
+    ``<models_dir>/<name>.manifest.json`` convention when the manifest sits
+    directly in ``models_dir``.
+
+    The *listing* runs on every call and the parse only when a manifest was
+    added, removed or rewritten: the cache key is each manifest's
+    ``(path, mtime_ns, size)`` (:class:`src.file_memo.StampedCache`, with its
+    racy-window rule), so ``canaryctl models upload`` shows on the next poll.
+    The result is a copy: nothing a caller does to it reaches the cache.
+    """
+    manifests = sorted(models_dir.rglob("*.manifest.json"))
+    stamps = [file_stamp(manifest) for manifest in manifests]
+
+    def read() -> tuple[dict[str, str | None], dict[str, dict[str, Any] | None]]:
+        versions: dict[str, str | None] = {}
+        provenance: dict[str, dict[str, Any] | None] = {}
+        for manifest in manifests:
+            name = (
+                manifest.stem.removesuffix(".manifest")
+                if manifest.parent == models_dir
+                else manifest.parent.name
+            )
+            data = read_json_object(manifest)
+            versions[name] = _model_version(data)
+            provenance[name] = _model_provenance(data)
+        return versions, provenance
+
+    versions, provenance = _manifest_cache.get(str(models_dir), stamps, read)
+    return dict(versions), copy.deepcopy(provenance)
 
 
 def _resolve_latest_session(storage_path: Path) -> Path | None:
@@ -584,19 +630,7 @@ def build_status(
     model_versions: dict[str, str | None] = {}
     model_provenance: dict[str, dict[str, Any] | None] = {}
     if models_dir is not None:
-        # Artifacts live one dir down: <models_dir>/<name>/model.manifest.json
-        # (matches daemon.isolation_forest_artifact / lstm_artifact). Recurse so
-        # the nested layout is found; fall back to the flat
-        # <models_dir>/<name>.manifest.json convention when the manifest sits
-        # directly in models_dir.
-        for manifest in sorted(models_dir.rglob("*.manifest.json")):
-            name = (
-                manifest.stem.removesuffix(".manifest")
-                if manifest.parent == models_dir
-                else manifest.parent.name
-            )
-            model_versions[name] = _model_version(manifest)
-            model_provenance[name] = _model_provenance(manifest)
+        model_versions, model_provenance = model_manifest_summary(models_dir)
     detectors: dict[str, Any] | None = None
     if health_monitor is not None:
         detectors = {

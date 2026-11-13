@@ -416,7 +416,7 @@ it; go after that work lands.
     `workbench_jobs`, doing resolve, defer and budget off the loop.
   - [ ] `run_off_loop` calls `capture_deferral` itself.
 
-- [ ] **R29.9 The dashboard polls the full `/status` every 5 s.**
+- [~] **R29.9 The dashboard polls the full `/status` every 5 s.**
   `hooks/useStatus.ts` calls `getStatus`, which requests `/status` with no
   `view`. The `get_status` tool's docstring records the full payload at
   1.3–2.6 s on the Pi and points pollers at `view=compact` (about a tenth of
@@ -427,15 +427,233 @@ it; go after that work lands.
   defect rides on it: `HealthMonitor._cpu_percent` is the delta since the
   previous `snapshot()`, and every `/status` and MCP `get_status` calls
   `snapshot()`, so the reading depends on who polled last.
-  - [ ] Time `GET /status` against `?view=compact` on the Pi and record both
+  - [~] Time `GET /status` against `?view=compact` on the Pi and record both
     here.
-  - [ ] The dashboard polls `view=compact` and fetches the full block only
+    **Pi numbers not taken (no Pi reachable from the implementing session);
+    the Pi timing is still owed.** Laptop numbers on a realistic state
+    (2026-11-12), script `time_status.py` in the session scratchpad
+    (`r299/`): the real corpus read only (`~/canary-data/sessions/nissan-xterra-2008`,
+    264 directories), the repo's `models/nissan-xterra-2008` (2 manifests), the
+    Xterra's tracked `tune_revisions.yaml` (10 kB, running `ZS44A-20261111-2`),
+    the repo DID catalog (`data/dids.yaml`), `vehicle_state` from a stub live source as inside the
+    daemon, `TestClient` over one persistent portal, median of 40 requests
+    after a warm-up, HEAD (a throwaway worktree) and the working tree
+    alternated. The laptop was loaded by other sessions (load average 11-15
+    for the final rounds), so the absolute figures are inflated; read the
+    ratios.
+
+    | | HEAD (`5af2d779`) | working tree |
+    |---|---|---|
+    | `GET /status` (full), load ~5, before the capture-summary memo | 40.1 / 40.4 / 41.0 ms | 26.6 / 27.7 / 28.2 ms |
+    | `GET /status` (full), load 11-15, all memos | 99.1 / 102.5 / 108.5 ms | 35.0 / 35.4 / 40.9 ms |
+    | `GET /status?view=compact` | 1.9 ms (load ~5), 3.5-5.0 ms (loaded) | 1.8-1.9 ms (load ~5), 2.4-3.8 ms (loaded) |
+
+    Per block, median over 30 calls (loaded laptop, HEAD then working tree):
+    `latest_capture_summary` 50-61 -> 5-8 ms; model manifests (list, parse
+    twice) 15-16 -> 0.15 ms; `calibration_status` (tune registry) 1.9-2.0 ->
+    0.2-0.3 ms; `memory_verify_summary` 9.5-11.5 -> 0.07-0.1 ms;
+    `build_status` without the source gather 105-107 -> 27-34 ms. **Not
+    memoized, on re-measure: `latest_session`**, 8-17 ms on the loaded laptop
+    (R23.2 measured 4.4 ms quiet), now the largest block of the full payload.
+    `src/storage/sessions.py` stays as R23.2 left it, and a memo of "the newest
+    session holding data" cannot be keyed on the root directory's mtime alone:
+    the first chunk flush into the newest directory changes the answer without
+    touching the root. The dashboard no longer calls it every 5 s (compact does
+    not), so it is the full payload's cost to carry. Compact is the same
+    before and after: the memos are in the full payload's blocks.
+  - [x] The dashboard polls `view=compact` and fetches the full block only
     where a panel shows it.
-  - [ ] Memoize the near-static blocks on file identity
+    `useStatus` (`hooks/useStatus.ts`) polls `getStatusCompact`
+    (`/status?view=compact`) every 5 s and the full `getStatus` every
+    **30 s**, **5 s while a panel that shows a full-only moving field is
+    mounted** (`useLiveFullStatus()` in `hooks/statusDemand.ts`: `SystemPanel`
+    for GPS, IMU, power and detector blind modes; `DataSourcesPanel`'s GPS tab;
+    `CaptureRunner` for the scheduler request table and `rows_written`;
+    `ModelHealthPanel` for latency and drift), and **at once** when
+    `compactChangeKey` moves (vehicle state, replay id, capture active or name,
+    passive switch or ECM session owner: a replay or capture starting is seen
+    within one compact poll, as before). The panels still read one
+    `StatusResponse`: `lib/statusView.overlayCompact` lays the compact fields
+    over the last full payload, a `null` in compact never erasing a block the
+    full payload has. `status` is `null` until the first full payload lands
+    (StatusStrip reads `health.inference_latency_ms.mean`, which compact
+    lacks), so first paint waits as long as before. No API shape changed;
+    `getStatus` is unchanged and `getStatusCompact` is new.
+    **Fields and where they now come from.** Compact, fresh every 5 s:
+    `vehicle_state` (DashboardShell badge, LoggingPage, CalibrationPage,
+    romLibrary, romTrace), `free_mb`, `emitter_counters` (StatusStrip,
+    ModelPanel), `passive` (romLibrary), `capture_profile.name` and `.active`
+    (shell banner, TuningContextBar, CalibrationPage, useLiveOverlay, capture
+    pages), `health.system` (SystemPanel, StatusStrip CPU), `health.can0`,
+    `health.telemetry_sinks`, the `obd_scheduler` counters,
+    `detectors.inference`. Full, every 30 s and on a change: `latest_session`
+    (TripPanel), `storage_path`, `storage_warning_mb`, `vehicle`, `profile`
+    (TuningContextBar, LoggingPage), `model_versions` and `sequence_detector`
+    (ModelPanel, StatusStrip), `accepted_baseline_overrides`, `replay`
+    (ReplayBanner, StatusStrip), `last_capture`, `capture_profile` beyond
+    name/active (shell banner, DataSourcesPanel plan, useLiveOverlay),
+    `registry_revision`, `ecu_calibration_id`, `calibration_matches_registry`,
+    `ecu_calibration_changed` (AnalysisPage, TuningContextBar, LiveOverlay,
+    romTrace), `tuning_readiness` (TuningContextBar), `network`,
+    `health.inference_latency_ms`, `missing_feature_rate` (StatusStrip),
+    `health.obd_scheduler.requests` (romTrace's "not answering" message).
+    Full, every 5 s only while the panel is open: `gps` (SystemPanel,
+    DataSourcesPanel GPS tab), `imu`, `health.power`,
+    `detectors.isolation_forest` (SystemPanel), the scheduler table,
+    `achieved_hz_capture` and `capture_profile.rows_written` (CaptureRunner),
+    `health` latency and drift (ModelHealthPanel),
+    `health.obd_scheduler.achieved_hz_60s` (TelemetryPanel's freshness and
+    "slow" chips, mounted by DriveScreen, so the Drive screen is covered), and
+    `calibration_matches_registry` / `registry_revision` / `requests` for the
+    ROM trace gate (`useLiveOverlay`, mounted by `LiveOverlay`: a reflash must
+    not wait 30 s to be seen, because the gate calls nothing active while the
+    daemon contradicts the ROM). **Lags up to 30 s by design** (the change key
+    does not move for these): StatusStrip's `inference_latency_ms.mean`,
+    `missing_feature_rate` and `model_versions`; TuningContextBar's readiness
+    chips (`ups_soc`, `storage_free_mb`, `memory_channels`, `calibration`) and
+    `RunningCalibration` (key-on moves `vehicle_state`, which fetches the full
+    payload at once, but the ECU calibration id is read a few seconds after
+    that, so its chip can lag up to 30 s); TripPanel's `latest_session`;
+    AnalysisPage's `registry_revision`; NetworkPanel. Pi cost of the
+    dashboard's `/status` polling: 12 full polls a minute become 2 (the shell
+    alone) plus 12 compact; a live panel open puts it back to 12 full for as
+    long as it is open. **Per-panel cadence (operator decision, 2026-11-12,
+    option b):** `useLiveFullStatus(intervalMs = 5000)` takes an optional
+    cadence and the shortest one asked for by any mounted panel wins, never
+    slower than the 30 s idle cadence. `TelemetryPanel`, which DriveScreen
+    renders and which reads only `achieved_hz_60s` (a 60 s trailing mean) and
+    the request table, asks for **15 s**, so a drive costs 4 full polls a
+    minute rather than 12. Every other live panel (`SystemPanel`,
+    `DataSourcesPanel` GPS tab, `CaptureRunner`, `ModelHealthPanel`) and
+    `useLiveOverlay` (the ROM trace gate) keep **5 s**, and one of them
+    mounted beside TelemetryPanel brings the poll back to 5 s. A cadence is
+    never under 1 s (`MIN_LIVE_INTERVAL_MS`: `useLiveFullStatus(0)` would be a
+    back-to-back loop), and a value that is not a number is the 5 s default.
+    **A cadence change never restarts the poll** (verifier N2; the first
+    version restarted `usePolling`'s effect on every `intervalMs` change,
+    which aborted the in-flight full request and issued another: 41 full calls
+    and 40 aborts for 20 page flips at 300 ms, and an aborted `/status` still
+    computes for 1.3-2.6 s on the Pi, so they queue). `usePolling` now keeps
+    the request in flight and re-arms only its timer, `delay` after the last
+    fetch *settled*: a slower cadence (an unmount) fetches nothing, a faster
+    one (a mount) fetches at once only when the last payload is already older
+    than the new interval and otherwise waits out the remainder, and a first
+    load on a live page makes one full request. Only a new `fetcher`,
+    `enabled`, `refresh` (the change-key fetch) or `intervalMs` going to or
+    from `null` restarts it. Every other `usePolling` caller shares this
+    (`UpdateCard`'s idle/running cadence, `useControlResource`): a cadence
+    change there no longer fetches at once either.
+    **Behaviour a caller will notice**: `usePolling` gained an optional
+    `retryMs`: a failed poll is retried after it, and `useStatus` passes the
+    compact cadence, so a failed first full fetch (and the error it raised)
+    is retried within 5 s rather than 30 s. `overlayCompact` semantics: a
+    compact `null` replaces a scalar leaf (`rpm`, `coolant_temp`,
+    `cpu_percent`, the passive disarm fields: a stale value is never shown
+    in place of "unknown") but never erases a record, array or
+    absent-from-compact block; a block compact carries **whole** replaces the
+    full payload's copy instead of merging with it (verifier N1:
+    `passive.ecm_session_claims {foreign: 5}` over a compact `{}` stayed):
+    `vehicle_state`, `emitter_counters`, `passive`, `health.system`,
+    `health.can0`, and the maps inside the narrowed blocks
+    (`obd_scheduler.profile_start_withheld`, `.receive`,
+    `detectors.inference.missed_by_reason`); the blocks it *narrows*
+    (`health`, `health.obd_scheduler`, `detectors`, `detectors.inference`,
+    `capture_profile`, and each telemetry sink's three fields) merge key by
+    key, and the sink set itself is replaced (a sink compact no longer lists is
+    gone). The two lists, `NARROWED` and `KEYED` in `lib/statusView.ts`, are
+    the paths `compact_status` builds (`src/dashboard/status.py`); a block
+    compact grows later is whole by default. And when the compact `capture_profile` name or
+    `active` differs from the full payload's, the full payload's plan is
+    dropped until the next full fetch lands (a profile switch or a capture
+    ending no longer shows the previous plan, `started_at` and
+    `rows_written`; CaptureRunner's plan summary may read "0 Mode 01 channels"
+    for one full-fetch latency after a start).
+    Tests: `src/hooks/useStatus.test.ts` (20, rewritten: compact cadence, full
+    null until it lands, 30 s / 5 s cadence with a mounted panel and back
+    (nothing fetched on a mount just after a fetch or on an unmount), a mount
+    beside a payload older than its cadence fetching at once, TelemetryPanel
+    alone at 15 s with a 5 s panel beside it dropping the poll to 5 s and its
+    leaving restoring 15 s then 30 s, a panel asking 120 s held to the 30 s
+    idle cadence, `useLiveFullStatus(0)` and `(NaN)` floored at 1 s, a first
+    load on a live page making exactly one full request, twenty mounts and
+    unmounts over an in-flight full request and after it landing with no abort
+    and never two in flight, an immediate full fetch on a state change, compact
+    over full, either poll's error, a failed first full fetch retried within
+    one compact interval and kept retrying, no overlap, stop on unmount),
+    `src/lib/statusView.test.ts` (20: the overlay, nulls over scalar leaves,
+    whole blocks replacing and narrowed ones merging, a dropped telemetry sink,
+    capture-profile drop on a switch or an end and kept when unchanged, and
+    `compactChangeKey`). Mutations caught: the change-key refresh removed, the
+    live cadence removed, `retryMs` removed (2 failed), the null and
+    capture-profile rules reverted (4 failed), TelemetryPanel's 15 s request
+    dropped (1 failed), shortest-wins turned into longest-wins (1 failed),
+    `intervalMs` put back in the poll effect's dependencies (5 failed: the
+    cadence, Telemetry, first-load and both flap tests), the 1 s floor removed
+    (1 failed), every block merged again (1 failed), the sink set merged again
+    (2 failed). `pnpm typecheck`, `pnpm format:check`,
+    `pnpm lint` clean (no suppression changes); final run after N1-N3:
+    `vitest run` 131 files / 1432 tests passed, `tsc` and `eslint
+    --max-warnings 0` on hooks, lib, panels, components, api and types clean,
+    `prettier --check src e2e` clean. `pnpm e2e` was last run before the
+    `usePolling` re-arm change (46 passed, 3 skipped, the existing skips,
+    including `emptyDaemon.spec.ts`); **not re-run since**.
+  - [x] Memoize the near-static blocks on file identity
     (`(path, mtime_ns, size)`, as `dids._parsed_yaml` does). R24.3 is the
     shared helper.
-  - [ ] A host sampler that owns the CPU baseline and samples on its own
+    New `src/file_memo.py` (`FileStamp`, `file_stamp`, `StampedCache`, layer 0
+    in `tests/test_layering.py`): `yaml_load.load_yaml_model`'s key extended
+    to a set of files, with the same racy-window rule (a value computed within
+    `RACY_WINDOW_NS` of its newest file's mtime is recomputed until it
+    settles), so a same-size rewrite in one clock tick is never served stale.
+    Model manifests: `status.model_manifest_summary` lists with `rglob` on
+    every call and parses only when a manifest was added, removed or
+    rewritten (it used to parse each twice), returning copies. Tune registry:
+    `load_tune_revisions` now goes through `load_yaml_model` (R24.3's own
+    cache), so `active_registry` / `calibration_status` parse once per edit; a
+    bad file raises `YamlModelError`, still a `ValueError`. DID catalog:
+    `calibration.memory_verify_summary` is a `StampedCache` over the catalog
+    and the verify record (the catalog's parse was already cached by
+    `load_did_map`; the count that asks every channel against every relation
+    was not). Beyond the three named: `latest_capture_summary` now stats each
+    directory's `capture_profile.json` (and the newest capture's quality
+    sidecar) and reads manifests only on a change (50-61 -> 5-8 ms).
+    `tests/test_status_memo.py` (26): parse-once for each block;
+    **an uploaded manifest shows on the next call, as does a replaced
+    one, a removed one, a same-size replacement inside the racy window, an
+    edited flash registry, a verify record just written, a capture stopping, a
+    quality verdict written after the stop**; callers cannot corrupt the
+    cache; and the same through `GET /status` between two polls. Mutation
+    caught: the racy-window rule removed (2 failed).
+  - [x] A host sampler that owns the CPU baseline and samples on its own
     clock.
+    `HostCpuSampler` (`daemon/health.py`; R29.10 moves it to `host_metrics.py`):
+    a daemon thread reads `/proc/stat` every 1 s into a ring, and
+    `cpu_percent()` is the busy fraction over the trailing 5 s, computed by
+    *reading* the ring, never sampling, so no poller moves it. `None` for
+    fewer than two samples, no `/proc/stat`, or a newest sample older than
+    three intervals (a stopped sampler reads as unknown, not as its last
+    value). `HealthMonitor._cpu_percent` delegates; `run_daemon` starts the
+    sampler at boot (`start_host_sampler`) and the first `snapshot()` starts it
+    for any other monitor; the thread holds a weak reference and ends when
+    the monitor is collected; a sampler handed to the constructor is not
+    started behind the caller's back. `start()` takes the sampler's lock for
+    the whole decision (is a live thread there, new stop event, baseline,
+    spawn), so concurrent `/status` requests cannot start more than one
+    thread. `tests/test_host_sampler.py` (17):
+    two back-to-back `snapshot()` calls and 50 polls return the same value and
+    take no sample; the value is the busy fraction of the sampled interval
+    (25 % then 100 % reads 62.5 %), forgets load older than the window, moves
+    only when the sampler samples; the thread samples until stopped, one
+    thread, none left after the monitor is dropped (asserted on the sampler's
+    own thread, not on a global thread count another test's monitor could
+    move), sixteen concurrent `start()` calls make exactly one thread (mutation:
+    the lock removed gave 16 threads, test failed), and a
+    `start()` after `stop()` starts a fresh one even before the old thread
+    noticed. `tests/test_health.py::test_cpu_percent_needs_a_baseline_then_reports_a_fraction`
+    was vacuous (it always read `None`); it now scripts the `/proc/stat`
+    reader and asserts `None` with no sample, `None` with one, and 0.7 for 30
+    idle of 100 after two, with a separate smoke test on the real
+    `/proc/stat`. The `/status` shape is unchanged (`health.system.cpu_percent`).
 
 - [ ] **R29.10 `HealthMonitor` is five jobs in one class.** 534 lines, 31
   methods: inference latency accounting; detector-state mailboxes that stash a
@@ -490,6 +708,16 @@ it; go after that work lands.
   - [x] `rom_backup_recipe.py`, `rom_backup_wire.py` (a reader with a counters
     dataclass), `rom_backup_store.py`. `RomBackupJob` and `BackupRefusedError`
     stay importable from `src.control.rom_backup`.
+    `rom_backup_recipe.py` holds the schema, `load_backup_recipe` and
+    `recipe_extent`. `rom_backup_wire.py` holds `MemoryReader`, one per read:
+    the frame tap, listen, session enter/exit, block read with retries, the
+    re-read and the early extent stop. It owns a `ReadCounters` dataclass in
+    place of the `counters` dict. `rom_backup_store.py` holds `store_image`,
+    `integrity` and `size_caveat`. `rom_backup.py` is 695 lines, down from
+    1,284: the job's lifecycle, preconditions, mid-read re-check and
+    polling-resume wait. Every name importers use still imports from
+    `src.control.rom_backup`, and `job._store` / `job._integrity` are thin
+    delegates the tests patch and call.
   - This is a read path (service 0x23), not a non-volatile write. Behavior
     identical; pinned by the scripted-ECU tests.
     The existing tests in `tests/test_rom_backup.py` are unchanged and pass
@@ -656,13 +884,3 @@ The path-keyed lock registry and locked JSONL append found here
 `src/provisioning/{bluez,netsock}.py`; `inference_worker.py` internals;
 `twin_live.py` body; `daemon/detectors/`; the bodies of `replay_control.py`,
 `update_runner.py` and `routes/companion_link.py`.
-    `rom_backup_recipe.py` holds the schema, `load_backup_recipe` and
-    `recipe_extent`. `rom_backup_wire.py` holds `MemoryReader`, one per read:
-    the frame tap, listen, session enter/exit, block read with retries, the
-    re-read and the early extent stop. It owns a `ReadCounters` dataclass in
-    place of the `counters` dict. `rom_backup_store.py` holds `store_image`,
-    `integrity` and `size_caveat`. `rom_backup.py` is 695 lines, down from
-    1,284: the job's lifecycle, preconditions, mid-read re-check and
-    polling-resume wait. Every name importers use still imports from
-    `src.control.rom_backup`, and `job._store` / `job._integrity` are thin
-    delegates the tests patch and call.

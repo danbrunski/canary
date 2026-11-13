@@ -545,6 +545,9 @@ async def run_daemon(
         components.health_monitor.startup = startup
     timeline = components.health_monitor.startup
     timeline.mark("components_built")
+    # R29.9: the host CPU baseline is sampled from here on its own clock, so the
+    # first /status after boot already has a value and no poll moves it.
+    components.health_monitor.start_host_sampler()
     timeline.expect(
         "collector_tasks_created", "first_record_stored", "models_polled", "app_built", "http_bound"
     )

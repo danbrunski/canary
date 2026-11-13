@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.yaml_load import load_yaml
+from src.yaml_load import load_yaml_model
 
 
 class _Strict(BaseModel):
@@ -236,10 +236,19 @@ def calibration_matches(
 
 
 def load_tune_revisions(path: Path) -> TuneRevisionRegistry | None:
-    """Load the registry, or ``None`` when the vehicle has none recorded."""
+    """Load the registry, or ``None`` when the vehicle has none recorded.
+
+    Cached by the file's identity (:func:`src.yaml_load.load_yaml_model`, with
+    its racy-window re-check), so ``/status``, which reads it on every poll,
+    parses it once per edit. A bad file raises
+    :class:`~src.yaml_load.YamlModelError`, a ``ValueError`` naming the file.
+    The registry is shared between callers: none mutates it
+    (``append_flash`` builds a new one), and one that must should
+    ``model_copy(deep=True)`` first.
+    """
     if not path.exists():
         return None
-    return TuneRevisionRegistry.model_validate(load_yaml(path.read_text()))
+    return load_yaml_model(path, TuneRevisionRegistry).model
 
 
 #: What makes two entries with one ``revision`` name the same flash. ``notes``

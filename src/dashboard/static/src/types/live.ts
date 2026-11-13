@@ -215,6 +215,25 @@ export interface StatusResponse {
   network?: NetworkSummary | null;
 }
 
+/** Response from `GET /status?view=compact` (`compact_status`): the pollable
+ *  projection of `StatusResponse`. Each field sits at the path it has in the
+ *  full payload but may carry fewer keys (`capture_profile` is `{name, active}`,
+ *  `health.obd_scheduler` has its counters and no request table,
+ *  `detectors` only `inference`). `null` is "not instrumented", never zero.
+ *  `lib/statusView.ts` overlays it onto the last full payload. */
+export interface CompactStatusResponse {
+  view: "compact";
+  /** When the daemon read the counters, so a poll can bound its own window. */
+  served_at: string;
+  vehicle_state: VehicleState;
+  free_mb: number;
+  emitter_counters: StatusResponse["emitter_counters"];
+  passive: PassiveGateStatus | null;
+  capture_profile: { name: string; active: boolean };
+  health: Partial<StatusHealth> | null;
+  detectors: { inference: Record<string, unknown> } | null;
+}
+
 /** One `/status.tuning_readiness` entry. `ok: null` = reported but not
  *  judged (amber); `value: null` = not reported (grey), never green. */
 export interface ReadinessEntry {

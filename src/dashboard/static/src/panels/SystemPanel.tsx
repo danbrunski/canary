@@ -1,4 +1,5 @@
 import { Panel } from "../components/Panel";
+import { useLiveFullStatus } from "../hooks/statusDemand";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import {
   cn,
@@ -104,6 +105,8 @@ export function imuHealth(imu: ImuStatus): { label: string; tone: Tone | undefin
  *  surface "stale" so the operator knows the daemon stopped emitting
  *  (vs. just "no anomalies"). */
 export function SystemPanel({ status, channels, statusError, onNavigate }: SystemPanelProps) {
+  // GPS, IMU, power and the detector blind modes are in the full `/status`.
+  useLiveFullStatus();
   const freshness = computeFreshness(channels);
   const stale = freshness !== null && freshness > STALE_THRESHOLD_MS;
   const system = status?.health?.system ?? null;

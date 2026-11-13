@@ -20,6 +20,7 @@ from src.decode.dids import (
     load_did_map,
     memory_checks,
 )
+from src.file_memo import StampedCache, file_stamp
 from src.vehicle.profiles import (
     active_registry,
     active_registry_path,
@@ -223,6 +224,13 @@ def _read_verify_results(config: CanaryConfig) -> dict[str, dict[str, str]]:
     }
 
 
+#: :func:`memory_verify_summary` per ``(catalog, verify record)`` pair, valid while
+#: both files keep their ``(path, mtime_ns, size)`` (R29.9). ``/status`` reads it on
+#: every poll, and the count asks "is this channel checkable" of every channel
+#: against every relation in the catalog.
+_verify_summary_cache: StampedCache[dict[str, int]] = StampedCache()
+
+
 def memory_verify_summary(config: CanaryConfig, source: Path) -> dict[str, int]:
     """Catalogued channels by their last known-answer verify: passed/failed/never ran.
 
@@ -231,22 +239,40 @@ def memory_verify_summary(config: CanaryConfig, source: Path) -> dict[str, int]:
     held without discriminating, or the bus refused the read). They count as
     neither passed nor failed, and are reported on their own so "never ran"
     means exactly that.
+
+    Recomputed when the catalog or the verify record is added, removed or
+    rewritten (:class:`src.file_memo.StampedCache`), so a verify that just
+    finished shows on the next call. The result is a copy.
     """
-    did_map = load_did_map(active_memory_path(config, source))
-    results = _read_verify_results(config)
-    counts = {"total": 0, "passed": 0, "failed": 0, "unverifiable": 0, "never_ran": 0}
-    for channel in did_map.memory:
-        counts["total"] += 1
-        outcome = results.get(channel.name, {}).get("outcome")
-        if outcome == "pass":
-            counts["passed"] += 1
-        elif outcome == "fail":
-            counts["failed"] += 1
-        elif outcome == "unverifiable" or not is_memory_checkable(channel, did_map.memory):
-            counts["unverifiable"] += 1
-        else:
-            counts["never_ran"] += 1
-    return counts
+    catalog_path = active_memory_path(config, source)
+    verify_path = operational_file(config, "memory_verify.json")
+
+    def count() -> dict[str, int]:
+        did_map = load_did_map(catalog_path)
+        results = _read_verify_results(config)
+        counts = {"total": 0, "passed": 0, "failed": 0, "unverifiable": 0, "never_ran": 0}
+        for channel in did_map.memory:
+            counts["total"] += 1
+            outcome = results.get(channel.name, {}).get("outcome")
+            if outcome == "pass":
+                counts["passed"] += 1
+            elif outcome == "fail":
+                counts["failed"] += 1
+            elif outcome == "unverifiable" or not is_memory_checkable(channel, did_map.memory):
+                counts["unverifiable"] += 1
+            else:
+                counts["never_ran"] += 1
+        return counts
+
+    # A catalog that does not exist or parse still raises, as it did: ``count``
+    # raises and a failure is never cached.
+    return dict(
+        _verify_summary_cache.get(
+            (str(catalog_path), str(verify_path)),
+            [file_stamp(catalog_path), None if verify_path is None else file_stamp(verify_path)],
+            count,
+        )
+    )
 
 
 def seed_operational_memory(config: CanaryConfig, source: Path) -> Path:

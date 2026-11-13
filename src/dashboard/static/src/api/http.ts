@@ -25,6 +25,7 @@ import type {
   CaptureTagResponse,
   CurrentCaptureResponse,
   CompanionDiscoverResponse,
+  CompactStatusResponse,
   CompanionStatusResponse,
   CustomPid,
   CustomPidImportResponse,
@@ -133,8 +134,18 @@ export function cancelPairingRequest(request: PairingRequestCreated): Promise<un
   });
 }
 
+/** `GET /status`: the full payload. On the Pi it costs 1.3–2.6 s and carries
+ *  the whole scheduler request table, so `useStatus` asks for it on a slow
+ *  cadence and only faster while a panel that shows it is mounted (R29.9). */
 export function getStatus(signal?: AbortSignal): Promise<StatusResponse> {
   return fetchJson<StatusResponse>("/status", { signal });
+}
+
+/** `GET /status?view=compact`: the pollable projection (about a tenth of the
+ *  cost). Every field sits at the path it has in the full payload; see
+ *  `lib/statusView.ts` for which ones a poll refreshes. */
+export function getStatusCompact(signal?: AbortSignal): Promise<CompactStatusResponse> {
+  return fetchJson<CompactStatusResponse>("/status?view=compact", { signal });
 }
 
 /** `GET /identity` (no token): who answers on this origin. `host_kind`

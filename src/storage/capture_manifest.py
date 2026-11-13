@@ -11,6 +11,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 from src.atomic_write import atomic_write_text
+from src.file_memo import StampedCache, file_stamp
 from src.storage.capture_losses import unknown_losses
 from src.storage.sidecar import read_json_object, write_json_sidecar
 
@@ -195,16 +196,47 @@ def recover_interrupted_capture(
     )
 
 
-def latest_capture_summary(storage_root: Path) -> dict[str, Any] | None:
-    """Return the newest capture by parsed start time, prefixes ignored."""
-    from src.storage.sessions import session_started_at
+#: :func:`latest_capture_summary` per storage root, valid while every child's
+#: ``capture_profile.json`` (and the newest capture's ``capture_quality.json``)
+#: keeps its ``(path, mtime_ns, size)`` (R29.9). ``/status`` is polled, and the
+#: answer used to open and parse one file per directory on disk, nearly all of
+#: which are not captures.
+_summary_cache: StampedCache[dict[str, Any] | None] = StampedCache()
 
+
+def latest_capture_summary(storage_root: Path) -> dict[str, Any] | None:
+    """Return the newest capture by parsed start time, prefixes ignored.
+
+    One ``stat`` per directory decides whether anything changed since the last
+    call; the manifests are read and parsed only when one was added, rewritten
+    or removed (:class:`src.file_memo.StampedCache`), which is a capture
+    starting or stopping. A capture's stop rewrites its manifest, so the next
+    call sees it. The result is a copy.
+    """
     root = Path(storage_root)
-    rows: list[tuple[datetime, Path, CaptureManifest]] = []
     try:
         children = list(root.iterdir())
     except OSError:
         return None
+    manifests = [file_stamp(child / CAPTURE_MANIFEST_FILENAME) for child in children]
+    # The verdict beside the newest manifest is part of the answer, and which
+    # directory is newest is only known after reading them: key on every
+    # capture's verdict file, which only the directories holding a manifest have.
+    qualities = [
+        file_stamp(child / CAPTURE_QUALITY_FILENAME)
+        for child, stamp in zip(children, manifests, strict=True)
+        if stamp is not None
+    ]
+    summary = _summary_cache.get(
+        str(root), [*manifests, *qualities], lambda: _scan_latest_capture(children)
+    )
+    return None if summary is None else dict(summary)
+
+
+def _scan_latest_capture(children: list[Path]) -> dict[str, Any] | None:
+    from src.storage.sessions import session_started_at
+
+    rows: list[tuple[datetime, Path, CaptureManifest]] = []
     for child in children:
         manifest = read_capture_manifest(child)
         if manifest is None:

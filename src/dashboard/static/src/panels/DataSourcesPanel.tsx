@@ -4,6 +4,7 @@ import { getCanCoverage, getDids, getObdCoverage } from "../api/http";
 import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
 import { TableScroll } from "../components/TableScroll";
+import { useLiveFullStatus } from "../hooks/statusDemand";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { useControlResource } from "../hooks/useControlResource";
 import { streamKey } from "../lib/romMaps";
@@ -598,6 +599,8 @@ function CanTab({ channels, view }: { channels: Map<string, ChannelSnapshot>; vi
 // ---------------------------------------------------------------------------
 
 function GpsTab({ status }: { status: StatusResponse | null }) {
+  // The fix is in the full `/status`: fetch it fast while this tab is open.
+  useLiveFullStatus();
   const gps = status?.gps ?? null;
   if (!gps) {
     return <p className={placeholderClass}>no GPS configured.</p>;

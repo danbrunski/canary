@@ -1,5 +1,6 @@
 import { MeterBar, MetricTile } from "../components/MetricTile";
 import { Panel } from "../components/Panel";
+import { useLiveFullStatus } from "../hooks/statusDemand";
 import { describeError } from "../hooks/useControlResource";
 import {
   cn,
@@ -19,6 +20,8 @@ interface ModelHealthPanelProps {
 }
 
 export function ModelHealthPanel({ status, statusError }: ModelHealthPanelProps) {
+  // Latency, drift and missing-feature rates are in the full `/status`.
+  useLiveFullStatus();
   const health = status?.health ?? null;
 
   return (

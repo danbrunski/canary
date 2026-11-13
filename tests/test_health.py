@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ import src.daemon.health as health_mod
 from src.config import CanaryConfig
 from src.daemon.health import (
     HealthMonitor,
+    HostCpuSampler,
     can0_counters,
     feature_drift,
     power_status,
@@ -32,12 +34,32 @@ def test_system_metrics_is_safe_and_shaped() -> None:
 
 
 def test_cpu_percent_needs_a_baseline_then_reports_a_fraction() -> None:
-    mon = HealthMonitor()
-    # First snapshot has no prior /proc/stat reading to diff against.
+    """The quantity itself: the busy fraction of the jiffies between two readings."""
+    readings = iter([(900.0, 1000.0), (930.0, 1100.0)])  # 100 jiffies later, 30 of them idle
+    now = [0.0]
+    sampler = HostCpuSampler(read=lambda: next(readings), clock=lambda: now[0])
+    mon = HealthMonitor(host_cpu=sampler)
+    # Nothing sampled yet.
     assert mon.snapshot(now_epoch=0.0)["system"]["cpu_percent"] is None
-    # Second snapshot can diff; on Linux that's a 0..1 fraction, None elsewhere.
-    cpu = mon.snapshot(now_epoch=1.0)["system"]["cpu_percent"]
-    assert cpu is None or 0.0 <= cpu <= 1.0
+    # One reading is a baseline, not a rate.
+    sampler.sample()
+    assert mon.snapshot(now_epoch=0.0)["system"]["cpu_percent"] is None
+    now[0] = 1.0
+    sampler.sample()
+    assert mon.snapshot(now_epoch=1.0)["system"]["cpu_percent"] == 0.7
+
+
+@pytest.mark.skipif(not Path("/proc/stat").exists(), reason="needs /proc/stat")
+def test_cpu_percent_reads_the_real_proc_stat() -> None:
+    mon = HealthMonitor()
+    mon.host_cpu.sample()
+    cpu: float | None = None
+    deadline = time.monotonic() + 5.0
+    while cpu is None and time.monotonic() < deadline:
+        time.sleep(0.05)  # the kernel's counters advance a jiffy at a time
+        mon.host_cpu.sample()
+        cpu = mon.host_cpu.cpu_percent()
+    assert cpu is not None and 0.0 <= cpu <= 1.0
 
 
 def test_power_status_decodes_throttled_bitmask(monkeypatch: pytest.MonkeyPatch) -> None:
