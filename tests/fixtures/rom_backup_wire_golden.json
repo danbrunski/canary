@@ -1,0 +1,1575 @@
+{
+ "clean": {
+  "frames": [
+   "7E0#0210850000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000000003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000003f003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000007e003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000000bd003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000000fc003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000013b003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000017a003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000001b9003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000001f8003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000237003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000276003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000002b5003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000002f4003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000333003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000372003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000003b1003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000003f0003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000042f003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000046e003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000004ad003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000004ec003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000052b003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000056a003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000005a9003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000005e8003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000627003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000666003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000006a5003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000006e4003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000723003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000762003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000007a1003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000007e00020",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000000003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000013b003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000237003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000372003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000046e003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000005a9003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000006a5003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000007e00020",
+   "7E0#3000000000000000",
+   "7E0#0210810000000000"
+  ],
+  "filters": [
+   [
+    {
+     "can_id": 2015,
+     "can_mask": 2047,
+     "extended": false
+    },
+    {
+     "can_id": 2016,
+     "can_mask": 2047,
+     "extended": false
+    },
+    {
+     "can_id": 2024,
+     "can_mask": 2047,
+     "extended": false
+    }
+   ]
+  ],
+  "queries": [
+   "0x10 85 request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000000003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000003f003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000007e003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000000bd003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000000fc003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000013b003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000017a003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000001b9003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000001f8003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000237003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000276003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000002b5003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000002f4003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000333003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000372003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000003b1003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000003f0003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000042f003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000046e003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000004ad003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000004ec003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000052b003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000056a003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000005a9003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000005e8003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000627003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000666003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000006a5003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000006e4003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000723003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000762003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000007a1003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000007e00020 request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000000003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000013b003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000237003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000372003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000046e003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000005a9003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000006a5003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000007e00020 request_id=0x7E0",
+   "0x10 81 request_id=0x7E0"
+  ],
+  "clients": [
+   {
+    "on_frame": true,
+    "parse_error_owner": "rom-backup",
+    "request_id": 2016,
+    "response_id_max": 2024,
+    "response_id_min": 2024,
+    "timeout_seconds": 1.0,
+    "tx_holder": "rom_backup"
+   },
+   {
+    "parse_error_owner": "rom-backup",
+    "request_id": 2016,
+    "response_id_max": 2024,
+    "response_id_min": 2024,
+    "timeout_seconds": 1.0,
+    "tx_holder": "rom_backup"
+   }
+  ],
+  "state": {
+   "state": "done",
+   "reason": null,
+   "phase": null,
+   "blocks_done": 33,
+   "blocks_total": 33,
+   "bytes": 2048,
+   "bytes_total": 2048,
+   "elapsed_s": "<volatile>",
+   "eta_s": 0.0,
+   "retries": 0,
+   "requests": 83,
+   "timeouts": 0,
+   "send_errors": 0,
+   "negative_responses": {},
+   "started_at": "<volatile>",
+   "ended_at": "<volatile>",
+   "stored": true,
+   "sha256": "3f90b66bf303f69ac42a4e08c5abc3edfb72020312ed0c631c131aa3fced7c78",
+   "verified": true,
+   "integrity": {
+    "checksum": {
+     "ok": true,
+     "stored": {
+      "sum": "0x761AE052",
+      "xor": "0x46301A48"
+     },
+     "computed": {
+      "sum": "0x761AE052",
+      "xor": "0x46301A48"
+     },
+     "reason": null,
+     "algorithm": "be32_sum_xor"
+    },
+    "calibration_id": {
+     "image": "1ZS44A00000",
+     "ecu": "1ZS44A00000",
+     "ok": true,
+     "offset": "0x000100"
+    },
+    "reread": {
+     "blocks": 8,
+     "mismatches": []
+    },
+    "extent": null
+   },
+   "revision_match": {
+    "revision": null,
+    "status": "unrecognised",
+    "reference": null
+   },
+   "polling_resumed_s": "<volatile>",
+   "polling_resume_note": "an OBD reading arrived after the release",
+   "preconditions": [
+    {
+     "id": "backup",
+     "ok": true,
+     "detail": "no backup running"
+    },
+    {
+     "id": "recipe",
+     "ok": true,
+     "detail": "<tmp>/p0/profile/rom_backup.yaml: 33 reads"
+    },
+    {
+     "id": "obd_source",
+     "ok": true,
+     "detail": "collection.obd_source canable"
+    },
+    {
+     "id": "vehicle_state",
+     "ok": true,
+     "detail": "ignition_only (key on, engine off)"
+    },
+    {
+     "id": "engine_watch",
+     "ok": true,
+     "detail": "broadcast engine speed is fresh"
+    },
+    {
+     "id": "passive",
+     "ok": true,
+     "detail": "passive mode is off"
+    },
+    {
+     "id": "foreign_tester",
+     "ok": true,
+     "detail": "no other tester heard recently"
+    },
+    {
+     "id": "ecm_session",
+     "ok": true,
+     "detail": "the ECM session is free"
+    },
+    {
+     "id": "capture",
+     "ok": true,
+     "detail": "no capture active"
+    }
+   ],
+   "can_start": true,
+   "blocked_by": null
+  },
+  "events": [
+   [
+    "rom_backup.start",
+    "ok",
+    {
+     "blocks_total": 33,
+     "range": [
+      "0x000000",
+      "0x0007FF"
+     ],
+     "block_size": 63,
+     "request_id": "0x7E0",
+     "response_id": "0x7E8",
+     "recipe": "<tmp>/p0/profile/rom_backup.yaml",
+     "rom_map": true
+    }
+   ],
+   [
+    "rom_backup.end",
+    "done",
+    {
+     "started_at": "<volatile>",
+     "ended_at": "<volatile>",
+     "duration_s": "<volatile>",
+     "requests": 83,
+     "retries": 0,
+     "timeouts": 0,
+     "send_errors": 0,
+     "negative_responses": {},
+     "frames_excluded": 0,
+     "state": "done",
+     "reason": null,
+     "stored": true,
+     "sha256": "3f90b66bf303f69ac42a4e08c5abc3edfb72020312ed0c631c131aa3fced7c78",
+     "verified": true,
+     "revision_match": {
+      "revision": null,
+      "status": "unrecognised",
+      "reference": null
+     },
+     "blocks_done": 33,
+     "blocks_total": 33,
+     "polling_resumed_s": "<volatile>",
+     "polling_resume_note": "an OBD reading arrived after the release"
+    }
+   ]
+  ],
+  "read_meta": {
+   "block_size": 63,
+   "blocks": 33,
+   "duration_s": "<volatile>",
+   "ended_at": "<volatile>",
+   "frames_excluded": 0,
+   "integrity": {
+    "calibration_id": {
+     "ecu": "1ZS44A00000",
+     "image": "1ZS44A00000",
+     "offset": "0x000100",
+     "ok": true
+    },
+    "checksum": {
+     "algorithm": "be32_sum_xor",
+     "computed": {
+      "sum": "0x761AE052",
+      "xor": "0x46301A48"
+     },
+     "ok": true,
+     "reason": null,
+     "stored": {
+      "sum": "0x761AE052",
+      "xor": "0x46301A48"
+     }
+    },
+    "extent": null,
+    "reread": {
+     "blocks": 8,
+     "mismatches": []
+    }
+   },
+   "negative_responses": {},
+   "range": [
+    "0x000000",
+    "0x0007FF"
+   ],
+   "recipe": "<tmp>/p0/profile/rom_backup.yaml",
+   "request_id": "0x7E0",
+   "requests": 83,
+   "response_id": "0x7E8",
+   "retries": 0,
+   "revision_match": {
+    "reference": null,
+    "revision": null,
+    "status": "unrecognised"
+   },
+   "send_errors": 0,
+   "started_at": "<volatile>",
+   "timeouts": 0,
+   "unverified_reason": null,
+   "verified": true
+  }
+ },
+ "timeout_retry": {
+  "frames": [
+   "7E0#0210850000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000000003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000003f003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000007e003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000000bd003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000000fc003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000013b003f",
+   "7E0#0210fb0000000000",
+   "7E0#07230000013b003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000017a003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000001b9003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000001f8003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000237003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000276003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000002b5003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000002f4003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000333003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000372003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000003b1003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000003f0003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000042f003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000046e003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000004ad003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000004ec003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000052b003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000056a003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000005a9003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000005e8003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000627003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000666003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000006a5003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000006e4003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000723003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000762003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000007a1003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000007e00020",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000000003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000013b003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000237003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000372003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000046e003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000005a9003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000006a5003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000007e00020",
+   "7E0#3000000000000000",
+   "7E0#0210810000000000"
+  ],
+  "filters": [
+   [
+    {
+     "can_id": 2015,
+     "can_mask": 2047,
+     "extended": false
+    },
+    {
+     "can_id": 2016,
+     "can_mask": 2047,
+     "extended": false
+    },
+    {
+     "can_id": 2024,
+     "can_mask": 2047,
+     "extended": false
+    }
+   ]
+  ],
+  "queries": [
+   "0x10 85 request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000000003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000003f003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000007e003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000000bd003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000000fc003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000013b003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000013b003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000017a003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000001b9003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000001f8003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000237003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000276003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000002b5003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000002f4003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000333003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000372003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000003b1003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000003f0003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000042f003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000046e003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000004ad003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000004ec003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000052b003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000056a003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000005a9003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000005e8003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000627003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000666003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000006a5003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000006e4003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000723003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000762003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000007a1003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000007e00020 request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000000003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000013b003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000237003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000372003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000046e003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000005a9003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000006a5003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000007e00020 request_id=0x7E0",
+   "0x10 81 request_id=0x7E0"
+  ],
+  "clients": [
+   {
+    "on_frame": true,
+    "parse_error_owner": "rom-backup",
+    "request_id": 2016,
+    "response_id_max": 2024,
+    "response_id_min": 2024,
+    "timeout_seconds": 0.2,
+    "tx_holder": "rom_backup"
+   },
+   {
+    "parse_error_owner": "rom-backup",
+    "request_id": 2016,
+    "response_id_max": 2024,
+    "response_id_min": 2024,
+    "timeout_seconds": 0.2,
+    "tx_holder": "rom_backup"
+   }
+  ],
+  "state": {
+   "state": "done",
+   "reason": null,
+   "phase": null,
+   "blocks_done": 33,
+   "blocks_total": 33,
+   "bytes": 2048,
+   "bytes_total": 2048,
+   "elapsed_s": "<volatile>",
+   "eta_s": 0.0,
+   "retries": 1,
+   "requests": 85,
+   "timeouts": 1,
+   "send_errors": 0,
+   "negative_responses": {},
+   "started_at": "<volatile>",
+   "ended_at": "<volatile>",
+   "stored": true,
+   "sha256": "3f90b66bf303f69ac42a4e08c5abc3edfb72020312ed0c631c131aa3fced7c78",
+   "verified": true,
+   "integrity": {
+    "checksum": {
+     "ok": true,
+     "stored": {
+      "sum": "0x761AE052",
+      "xor": "0x46301A48"
+     },
+     "computed": {
+      "sum": "0x761AE052",
+      "xor": "0x46301A48"
+     },
+     "reason": null,
+     "algorithm": "be32_sum_xor"
+    },
+    "calibration_id": {
+     "image": "1ZS44A00000",
+     "ecu": "1ZS44A00000",
+     "ok": true,
+     "offset": "0x000100"
+    },
+    "reread": {
+     "blocks": 8,
+     "mismatches": []
+    },
+    "extent": null
+   },
+   "revision_match": {
+    "revision": null,
+    "status": "unrecognised",
+    "reference": null
+   },
+   "polling_resumed_s": "<volatile>",
+   "polling_resume_note": "an OBD reading arrived after the release",
+   "preconditions": [
+    {
+     "id": "backup",
+     "ok": true,
+     "detail": "no backup running"
+    },
+    {
+     "id": "recipe",
+     "ok": true,
+     "detail": "<tmp>/p1/profile/rom_backup.yaml: 33 reads"
+    },
+    {
+     "id": "obd_source",
+     "ok": true,
+     "detail": "collection.obd_source canable"
+    },
+    {
+     "id": "vehicle_state",
+     "ok": true,
+     "detail": "ignition_only (key on, engine off)"
+    },
+    {
+     "id": "engine_watch",
+     "ok": true,
+     "detail": "broadcast engine speed is fresh"
+    },
+    {
+     "id": "passive",
+     "ok": true,
+     "detail": "passive mode is off"
+    },
+    {
+     "id": "foreign_tester",
+     "ok": true,
+     "detail": "no other tester heard recently"
+    },
+    {
+     "id": "ecm_session",
+     "ok": true,
+     "detail": "the ECM session is free"
+    },
+    {
+     "id": "capture",
+     "ok": true,
+     "detail": "no capture active"
+    }
+   ],
+   "can_start": true,
+   "blocked_by": null
+  },
+  "events": [
+   [
+    "rom_backup.start",
+    "ok",
+    {
+     "blocks_total": 33,
+     "range": [
+      "0x000000",
+      "0x0007FF"
+     ],
+     "block_size": 63,
+     "request_id": "0x7E0",
+     "response_id": "0x7E8",
+     "recipe": "<tmp>/p1/profile/rom_backup.yaml",
+     "rom_map": true
+    }
+   ],
+   [
+    "rom_backup.end",
+    "done",
+    {
+     "started_at": "<volatile>",
+     "ended_at": "<volatile>",
+     "duration_s": "<volatile>",
+     "requests": 85,
+     "retries": 1,
+     "timeouts": 1,
+     "send_errors": 0,
+     "negative_responses": {},
+     "frames_excluded": 0,
+     "state": "done",
+     "reason": null,
+     "stored": true,
+     "sha256": "3f90b66bf303f69ac42a4e08c5abc3edfb72020312ed0c631c131aa3fced7c78",
+     "verified": true,
+     "revision_match": {
+      "revision": null,
+      "status": "unrecognised",
+      "reference": null
+     },
+     "blocks_done": 33,
+     "blocks_total": 33,
+     "polling_resumed_s": "<volatile>",
+     "polling_resume_note": "an OBD reading arrived after the release"
+    }
+   ]
+  ],
+  "read_meta": {
+   "block_size": 63,
+   "blocks": 33,
+   "duration_s": "<volatile>",
+   "ended_at": "<volatile>",
+   "frames_excluded": 0,
+   "integrity": {
+    "calibration_id": {
+     "ecu": "1ZS44A00000",
+     "image": "1ZS44A00000",
+     "offset": "0x000100",
+     "ok": true
+    },
+    "checksum": {
+     "algorithm": "be32_sum_xor",
+     "computed": {
+      "sum": "0x761AE052",
+      "xor": "0x46301A48"
+     },
+     "ok": true,
+     "reason": null,
+     "stored": {
+      "sum": "0x761AE052",
+      "xor": "0x46301A48"
+     }
+    },
+    "extent": null,
+    "reread": {
+     "blocks": 8,
+     "mismatches": []
+    }
+   },
+   "negative_responses": {},
+   "range": [
+    "0x000000",
+    "0x0007FF"
+   ],
+   "recipe": "<tmp>/p1/profile/rom_backup.yaml",
+   "request_id": "0x7E0",
+   "requests": 85,
+   "response_id": "0x7E8",
+   "retries": 1,
+   "revision_match": {
+    "reference": null,
+    "revision": null,
+    "status": "unrecognised"
+   },
+   "send_errors": 0,
+   "started_at": "<volatile>",
+   "timeouts": 1,
+   "unverified_reason": null,
+   "verified": true
+  }
+ },
+ "nrc_abort": {
+  "frames": [
+   "7E0#0210850000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000000003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000003f003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000007e003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000000bd003f",
+   "7E0#0210fb0000000000",
+   "7E0#0723000000bd003f",
+   "7E0#0210fb0000000000",
+   "7E0#0723000000bd003f",
+   "7E0#0210810000000000"
+  ],
+  "filters": [
+   [
+    {
+     "can_id": 2015,
+     "can_mask": 2047,
+     "extended": false
+    },
+    {
+     "can_id": 2016,
+     "can_mask": 2047,
+     "extended": false
+    },
+    {
+     "can_id": 2024,
+     "can_mask": 2047,
+     "extended": false
+    }
+   ]
+  ],
+  "queries": [
+   "0x10 85 request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000000003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000003f003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000007e003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000000bd003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000000bd003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000000bd003f request_id=0x7E0",
+   "0x10 81 request_id=0x7E0"
+  ],
+  "clients": [
+   {
+    "on_frame": true,
+    "parse_error_owner": "rom-backup",
+    "request_id": 2016,
+    "response_id_max": 2024,
+    "response_id_min": 2024,
+    "timeout_seconds": 1.0,
+    "tx_holder": "rom_backup"
+   },
+   {
+    "parse_error_owner": "rom-backup",
+    "request_id": 2016,
+    "response_id_max": 2024,
+    "response_id_min": 2024,
+    "timeout_seconds": 1.0,
+    "tx_holder": "rom_backup"
+   }
+  ],
+  "state": {
+   "state": "failed",
+   "reason": "read at 0x0000BD (63 bytes) failed after 3 attempts; last: read: negative response 0x31 (requestOutOfRange)",
+   "phase": null,
+   "blocks_done": 3,
+   "blocks_total": 33,
+   "bytes": 189,
+   "bytes_total": 2048,
+   "elapsed_s": "<volatile>",
+   "eta_s": null,
+   "retries": 2,
+   "requests": 13,
+   "timeouts": 0,
+   "send_errors": 0,
+   "negative_responses": {
+    "0x31": 3
+   },
+   "started_at": "<volatile>",
+   "ended_at": "<volatile>",
+   "stored": false,
+   "sha256": null,
+   "verified": null,
+   "integrity": null,
+   "revision_match": null,
+   "polling_resumed_s": "<volatile>",
+   "polling_resume_note": "an OBD reading arrived after the release",
+   "preconditions": [
+    {
+     "id": "backup",
+     "ok": true,
+     "detail": "no backup running"
+    },
+    {
+     "id": "recipe",
+     "ok": true,
+     "detail": "<tmp>/p2/profile/rom_backup.yaml: 33 reads"
+    },
+    {
+     "id": "obd_source",
+     "ok": true,
+     "detail": "collection.obd_source canable"
+    },
+    {
+     "id": "vehicle_state",
+     "ok": true,
+     "detail": "ignition_only (key on, engine off)"
+    },
+    {
+     "id": "engine_watch",
+     "ok": true,
+     "detail": "broadcast engine speed is fresh"
+    },
+    {
+     "id": "passive",
+     "ok": true,
+     "detail": "passive mode is off"
+    },
+    {
+     "id": "foreign_tester",
+     "ok": true,
+     "detail": "no other tester heard recently"
+    },
+    {
+     "id": "ecm_session",
+     "ok": true,
+     "detail": "the ECM session is free"
+    },
+    {
+     "id": "capture",
+     "ok": true,
+     "detail": "no capture active"
+    }
+   ],
+   "can_start": true,
+   "blocked_by": null
+  },
+  "events": [
+   [
+    "rom_backup.start",
+    "ok",
+    {
+     "blocks_total": 33,
+     "range": [
+      "0x000000",
+      "0x0007FF"
+     ],
+     "block_size": 63,
+     "request_id": "0x7E0",
+     "response_id": "0x7E8",
+     "recipe": "<tmp>/p2/profile/rom_backup.yaml",
+     "rom_map": true
+    }
+   ],
+   [
+    "rom_backup.end",
+    "failed",
+    {
+     "started_at": "<volatile>",
+     "ended_at": "<volatile>",
+     "duration_s": "<volatile>",
+     "requests": 13,
+     "retries": 2,
+     "timeouts": 0,
+     "send_errors": 0,
+     "negative_responses": {
+      "0x31": 3
+     },
+     "frames_excluded": 0,
+     "state": "failed",
+     "reason": "read at 0x0000BD (63 bytes) failed after 3 attempts; last: read: negative response 0x31 (requestOutOfRange)",
+     "stored": false,
+     "sha256": null,
+     "verified": null,
+     "revision_match": null,
+     "blocks_done": 3,
+     "blocks_total": 33,
+     "polling_resumed_s": "<volatile>",
+     "polling_resume_note": "an OBD reading arrived after the release"
+    }
+   ]
+  ],
+  "read_meta": null
+ },
+ "send_error": {
+  "frames": [
+   "7E0#0210850000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000000003f (send error)",
+   "7E0#0210fb0000000000",
+   "7E0#072300000000003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000003f003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000007e003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000000bd003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000000fc003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000013b003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000017a003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000001b9003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000001f8003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000237003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000276003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000002b5003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000002f4003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000333003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000372003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000003b1003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000003f0003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000042f003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000046e003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000004ad003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000004ec003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000052b003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000056a003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000005a9003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000005e8003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000627003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000666003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000006a5003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000006e4003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000723003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000762003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000007a1003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000007e00020",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000000003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000013b003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000237003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#072300000372003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#07230000046e003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000005a9003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000006a5003f",
+   "7E0#3000000000000000",
+   "7E0#0210fb0000000000",
+   "7E0#0723000007e00020",
+   "7E0#3000000000000000",
+   "7E0#0210810000000000"
+  ],
+  "filters": [
+   [
+    {
+     "can_id": 2015,
+     "can_mask": 2047,
+     "extended": false
+    },
+    {
+     "can_id": 2016,
+     "can_mask": 2047,
+     "extended": false
+    },
+    {
+     "can_id": 2024,
+     "can_mask": 2047,
+     "extended": false
+    }
+   ]
+  ],
+  "queries": [
+   "0x10 85 request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000000003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000000003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000003f003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000007e003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000000bd003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000000fc003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000013b003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000017a003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000001b9003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000001f8003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000237003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000276003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000002b5003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000002f4003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000333003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000372003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000003b1003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000003f0003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000042f003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000046e003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000004ad003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000004ec003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000052b003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000056a003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000005a9003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000005e8003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000627003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000666003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000006a5003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000006e4003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000723003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000762003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000007a1003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000007e00020 request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000000003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000013b003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000237003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 00000372003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 0000046e003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000005a9003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000006a5003f request_id=0x7E0",
+   "0x10 fb request_id=0x7E0",
+   "0x23 000007e00020 request_id=0x7E0",
+   "0x10 81 request_id=0x7E0"
+  ],
+  "clients": [
+   {
+    "on_frame": true,
+    "parse_error_owner": "rom-backup",
+    "request_id": 2016,
+    "response_id_max": 2024,
+    "response_id_min": 2024,
+    "timeout_seconds": 1.0,
+    "tx_holder": "rom_backup"
+   },
+   {
+    "parse_error_owner": "rom-backup",
+    "request_id": 2016,
+    "response_id_max": 2024,
+    "response_id_min": 2024,
+    "timeout_seconds": 1.0,
+    "tx_holder": "rom_backup"
+   }
+  ],
+  "state": {
+   "state": "done",
+   "reason": null,
+   "phase": null,
+   "blocks_done": 33,
+   "blocks_total": 33,
+   "bytes": 2048,
+   "bytes_total": 2048,
+   "elapsed_s": "<volatile>",
+   "eta_s": 0.0,
+   "retries": 1,
+   "requests": 84,
+   "timeouts": 0,
+   "send_errors": 1,
+   "negative_responses": {},
+   "started_at": "<volatile>",
+   "ended_at": "<volatile>",
+   "stored": true,
+   "sha256": "3f90b66bf303f69ac42a4e08c5abc3edfb72020312ed0c631c131aa3fced7c78",
+   "verified": true,
+   "integrity": {
+    "checksum": {
+     "ok": true,
+     "stored": {
+      "sum": "0x761AE052",
+      "xor": "0x46301A48"
+     },
+     "computed": {
+      "sum": "0x761AE052",
+      "xor": "0x46301A48"
+     },
+     "reason": null,
+     "algorithm": "be32_sum_xor"
+    },
+    "calibration_id": {
+     "image": "1ZS44A00000",
+     "ecu": "1ZS44A00000",
+     "ok": true,
+     "offset": "0x000100"
+    },
+    "reread": {
+     "blocks": 8,
+     "mismatches": []
+    },
+    "extent": null
+   },
+   "revision_match": {
+    "revision": null,
+    "status": "unrecognised",
+    "reference": null
+   },
+   "polling_resumed_s": "<volatile>",
+   "polling_resume_note": "an OBD reading arrived after the release",
+   "preconditions": [
+    {
+     "id": "backup",
+     "ok": true,
+     "detail": "no backup running"
+    },
+    {
+     "id": "recipe",
+     "ok": true,
+     "detail": "<tmp>/p3/profile/rom_backup.yaml: 33 reads"
+    },
+    {
+     "id": "obd_source",
+     "ok": true,
+     "detail": "collection.obd_source canable"
+    },
+    {
+     "id": "vehicle_state",
+     "ok": true,
+     "detail": "ignition_only (key on, engine off)"
+    },
+    {
+     "id": "engine_watch",
+     "ok": true,
+     "detail": "broadcast engine speed is fresh"
+    },
+    {
+     "id": "passive",
+     "ok": true,
+     "detail": "passive mode is off"
+    },
+    {
+     "id": "foreign_tester",
+     "ok": true,
+     "detail": "no other tester heard recently"
+    },
+    {
+     "id": "ecm_session",
+     "ok": true,
+     "detail": "the ECM session is free"
+    },
+    {
+     "id": "capture",
+     "ok": true,
+     "detail": "no capture active"
+    }
+   ],
+   "can_start": true,
+   "blocked_by": null
+  },
+  "events": [
+   [
+    "rom_backup.start",
+    "ok",
+    {
+     "blocks_total": 33,
+     "range": [
+      "0x000000",
+      "0x0007FF"
+     ],
+     "block_size": 63,
+     "request_id": "0x7E0",
+     "response_id": "0x7E8",
+     "recipe": "<tmp>/p3/profile/rom_backup.yaml",
+     "rom_map": true
+    }
+   ],
+   [
+    "rom_backup.end",
+    "done",
+    {
+     "started_at": "<volatile>",
+     "ended_at": "<volatile>",
+     "duration_s": "<volatile>",
+     "requests": 84,
+     "retries": 1,
+     "timeouts": 0,
+     "send_errors": 1,
+     "negative_responses": {},
+     "frames_excluded": 0,
+     "state": "done",
+     "reason": null,
+     "stored": true,
+     "sha256": "3f90b66bf303f69ac42a4e08c5abc3edfb72020312ed0c631c131aa3fced7c78",
+     "verified": true,
+     "revision_match": {
+      "revision": null,
+      "status": "unrecognised",
+      "reference": null
+     },
+     "blocks_done": 33,
+     "blocks_total": 33,
+     "polling_resumed_s": "<volatile>",
+     "polling_resume_note": "an OBD reading arrived after the release"
+    }
+   ]
+  ],
+  "read_meta": {
+   "block_size": 63,
+   "blocks": 33,
+   "duration_s": "<volatile>",
+   "ended_at": "<volatile>",
+   "frames_excluded": 0,
+   "integrity": {
+    "calibration_id": {
+     "ecu": "1ZS44A00000",
+     "image": "1ZS44A00000",
+     "offset": "0x000100",
+     "ok": true
+    },
+    "checksum": {
+     "algorithm": "be32_sum_xor",
+     "computed": {
+      "sum": "0x761AE052",
+      "xor": "0x46301A48"
+     },
+     "ok": true,
+     "reason": null,
+     "stored": {
+      "sum": "0x761AE052",
+      "xor": "0x46301A48"
+     }
+    },
+    "extent": null,
+    "reread": {
+     "blocks": 8,
+     "mismatches": []
+    }
+   },
+   "negative_responses": {},
+   "range": [
+    "0x000000",
+    "0x0007FF"
+   ],
+   "recipe": "<tmp>/p3/profile/rom_backup.yaml",
+   "request_id": "0x7E0",
+   "requests": 84,
+   "response_id": "0x7E8",
+   "retries": 1,
+   "revision_match": {
+    "reference": null,
+    "revision": null,
+    "status": "unrecognised"
+   },
+   "send_errors": 1,
+   "started_at": "<volatile>",
+   "timeouts": 0,
+   "unverified_reason": null,
+   "verified": true
+  }
+ }
+}

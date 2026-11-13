@@ -40,6 +40,14 @@ every block, so a wedged reader cannot hold the ECM past it. Afterwards the
 job waits (bounded) for an OBD observation newer than the release, as the
 evidence that normal polling resumed.
 
+**Layout** (R29.13). This module is the job: its lifecycle, the start
+preconditions and the mid-read re-check. The recipe schema is
+:mod:`src.control.rom_backup_recipe`, the wire protocol (one
+:class:`~src.control.rom_backup_wire.MemoryReader` per read, owning its
+counters) :mod:`src.control.rom_backup_wire`, and the post-processing that
+needs no bus :mod:`src.control.rom_backup_store`. Every name this module
+exported before the split is still importable from here.
+
 **Telemetry.** The read's frames are excluded from raw capture while it runs
 (:mod:`src.collection.private_traffic`); one start event and one end event,
 with the summary, go to the control-event log.
@@ -71,41 +79,34 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import can
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.analysis.rom_extent import ExtentReading, ExtentSpec, early_extent, read_extent
-from src.analysis.rom_image import (
-    checksum_verdict,
-    map_applies,
-    read_calibration_id,
-    sha256_hex,
-)
 from src.analysis.rom_map import RomMap
 from src.collection import private_traffic, tx_gate
-from src.collection.can_obd_client import CanObdClient, RawReply
-from src.collection.isotp import DEFAULT_REQUEST_ID, nrc_name
+from src.control.rom_backup_recipe import (
+    ROM_BACKUP_FILE,
+    BackupRecipe,
+    load_backup_recipe,
+    recipe_extent,
+)
+from src.control.rom_backup_store import BackupStateName, integrity, store_image
+from src.control.rom_backup_wire import (
+    CLAIM_TTL_SECONDS,
+    HOLDER,
+    MemoryReader,
+    ReadAbortedError,
+    ReadCancelledError,
+    counters_summary,
+)
 from src.control.rom_library import RomLibrary
 from src.vehicle.platforms import VehicleDataFile
 from src.vehicle_state import engine_running_evidence
-from src.yaml_load import load_yaml
 
 log = logging.getLogger(__name__)
 
-#: File name of the recipe in a vehicle profile or platform directory.
-ROM_BACKUP_FILE = "rom_backup.yaml"
-#: The ECM-session holder name, and the private-traffic owner.
-HOLDER: tx_gate.EcmSessionHolder = "rom_backup"
-#: DiagnosticSessionControl and ReadMemoryByAddress.
-SESSION_SERVICE = 0x10
-MEMORY_READ_SERVICE = 0x23
-#: The claim's TTL, renewed every block: a reader wedged in bus I/O cannot keep
-#: the poll loop paused for longer than this.
-CLAIM_TTL_SECONDS = 30.0
 #: How often the read re-checks vehicle state and captures.
 RECHECK_SECONDS = 0.5
 #: A tester heard on K-line this recently refuses the start.
@@ -117,148 +118,6 @@ POLLING_RESUME_TIMEOUT_SECONDS = 60.0
 #: On daemon shutdown, how long to wait for a cancelled read to send its exit
 #: sequence and release the ECM. Bounded: an in-flight attempt plus the exit.
 SHUTDOWN_JOIN_SECONDS = 5.0
-
-BackupStateName = Literal["idle", "refused", "running", "done", "failed", "cancelled"]
-
-
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class RecipeSession(_Strict):
-    """DiagnosticSessionControl sub-functions, in order."""
-
-    enter_once: list[int] = Field(default_factory=list)
-    before_each_read: list[int] = Field(default_factory=list)
-    #: Sent after the read, on every exit path that entered a session: back to
-    #: the session CANary's normal polling expects.
-    exit: list[int] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def _bytes(self) -> RecipeSession:
-        for value in (*self.enter_once, *self.before_each_read, *self.exit):
-            if not 0 <= value <= 0xFF:
-                raise ValueError(f"session sub-function 0x{value:X} is not a byte")
-        return self
-
-
-class RecipeRead(_Strict):
-    start: int = Field(ge=0)
-    #: Inclusive.
-    end: int = Field(ge=0)
-    #: Bytes per ReadMemoryByAddress; the last read is shorter when the range
-    #: is not a multiple.
-    block_size: int = Field(ge=1, le=0xFFE)
-
-    @model_validator(mode="after")
-    def _range(self) -> RecipeRead:
-        if self.end < self.start or self.end > 0xFFFFFFFF:
-            raise ValueError("read range must run start..end within 32-bit addresses")
-        return self
-
-    @property
-    def size(self) -> int:
-        """Bytes in the image: the range, which starts at 0
-        (:func:`load_backup_recipe`)."""
-        return self.end + 1 - self.start
-
-    def blocks(self) -> list[tuple[int, int]]:
-        """``(address, length)`` for every read, in address order."""
-        return [
-            (address, min(self.block_size, self.end + 1 - address))
-            for address in range(self.start, self.end + 1, self.block_size)
-        ]
-
-
-class RecipePacing(_Strict):
-    min_cycle_seconds: float = Field(ge=0)
-    request_timeout_seconds: float = Field(gt=0, le=10)
-    retries_per_block: int = Field(ge=0, le=10)
-
-
-class RecipeVerify(_Strict):
-    reread_blocks: int = Field(ge=0)
-
-
-class RecipeProvenance(_Strict):
-    capture: str = Field(min_length=1)
-    evidence: str = Field(min_length=1)
-
-
-class BackupRecipe(_Strict):
-    schema_version: Literal[1]
-    request_id: int = Field(ge=0, le=0x7FF)
-    response_id: int = Field(ge=0, le=0x7FF)
-    session: RecipeSession
-    read: RecipeRead
-    pacing: RecipePacing
-    verify: RecipeVerify
-    provenance: RecipeProvenance
-    #: Frames the ECM broadcasts by itself whenever it is powered, at least
-    #: one of them faster than ``pacing.request_timeout_seconds``. Empty: a
-    #: timeout is reported without saying whether the ECM went silent.
-    ecm_broadcast_ids: list[int] = Field(default_factory=list)
-    #: What the image says about its own size, read offline from the bytes
-    #: (:mod:`src.analysis.rom_extent`). ``None``: the size goes unchecked.
-    extent: ExtentSpec | None = None
-
-    @model_validator(mode="after")
-    def _broadcast_ids(self) -> BackupRecipe:
-        diagnostic = {self.request_id, self.response_id, DEFAULT_REQUEST_ID}
-        for value in self.ecm_broadcast_ids:
-            if not 0 <= value <= 0x7FF:
-                raise ValueError(f"ecm_broadcast_ids 0x{value:X} is not an 11-bit CAN id")
-            if value in diagnostic:
-                raise ValueError(
-                    f"ecm_broadcast_ids 0x{value:03X} is a diagnostic id; list frames the ECM "
-                    "broadcasts by itself"
-                )
-        return self
-
-
-def load_backup_recipe(path: Path, rom_map: RomMap | None) -> BackupRecipe:
-    """The recipe at ``path``, refused when it would not produce a whole image.
-
-    The range must start at 0, so that image offsets are flash addresses. With
-    a map it must also cover the map's image exactly; without one, the range is
-    the image.
-    """
-    recipe = BackupRecipe.model_validate(load_yaml(path.read_text()))
-    span = recipe.read.size
-    if rom_map is not None and (recipe.read.start != 0 or span != rom_map.image_size):
-        raise ValueError(
-            f"{ROM_BACKUP_FILE} reads 0x{recipe.read.start:06X}-0x{recipe.read.end:06X} "
-            f"({span:,} bytes); the image is 0x000000-0x{rom_map.image_size - 1:06X}"
-        )
-    if recipe.read.start != 0:
-        raise ValueError(
-            f"{ROM_BACKUP_FILE} reads from 0x{recipe.read.start:06X}; an image starts at "
-            "0x000000, so that its offsets are flash addresses"
-        )
-    extent = recipe.extent
-    if extent is not None and extent.tables_end > span:
-        raise ValueError(
-            f"{ROM_BACKUP_FILE} extent: a vector table runs to 0x{extent.tables_end:06X}, past "
-            f"the {span:,} bytes the recipe reads"
-        )
-    if extent is not None and extent.ram_from <= recipe.read.end:
-        raise ValueError(
-            f"{ROM_BACKUP_FILE} extent: ram_from 0x{extent.ram_from:08X} is inside the read "
-            f"range, which ends at 0x{recipe.read.end:06X}"
-        )
-    return recipe
-
-
-def recipe_extent(recipe_file: Callable[[], VehicleDataFile]) -> ExtentSpec | None:
-    """The vehicle recipe's ``extent``, or ``None`` when no recipe loads.
-
-    For the library, which reads every image's extent: a missing or broken
-    recipe is the backup card's refusal to name, not a reason a listing fails.
-    """
-    try:
-        return load_backup_recipe(recipe_file().path, None).extent
-    except (FileNotFoundError, ValueError, yaml.YAMLError):
-        return None
 
 
 @dataclass(frozen=True)
@@ -281,23 +140,6 @@ class VehicleReading:
 
 class BackupRefusedError(RuntimeError):
     """A start refused by a precondition; the message names every cause."""
-
-
-class _AbortError(Exception):
-    """End the read as failed, with a reason."""
-
-
-class _CancelledError(Exception):
-    pass
-
-
-@dataclass(frozen=True)
-class _Failure:
-    """One failed request: what to report, and whether the ECM said nothing."""
-
-    cause: str
-    #: Sent, and neither a reply nor a negative response came back in time.
-    no_answer: bool
 
 
 def _engine_running(reading: VehicleReading) -> str | None:
@@ -393,10 +235,8 @@ class RomBackupJob:
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
         self._shutting_down = threading.Event()
-        self._foreign_can: int | None = None
-        self._watched_ids: frozenset[int] = frozenset()
-        self._ecm_ids: frozenset[int] = frozenset()
-        self._ecm_heard_at: float | None = None
+        #: The running (or last) read's wire side: its frame tap and counters.
+        self._reader: MemoryReader | None = None
         self._started_mono = 0.0
         #: Where the running read's recipe came from, for its records.
         self._recipe_source = ROM_BACKUP_FILE
@@ -546,8 +386,7 @@ class RomBackupJob:
             blocks = recipe.read.blocks()
             wall = time.time()
             self._cancel.clear()
-            self._foreign_can = None
-            self._ecm_heard_at = None
+            self._reader = None
             self._state = {
                 **_idle_state(),
                 "state": "running",
@@ -619,27 +458,14 @@ class RomBackupJob:
         except Exception:  # noqa: BLE001 - an event sink must not fail the read
             log.exception("could not publish %s", action)
 
-    def _tap(self, message: can.Message) -> None:
-        """Every frame the read's own bus receives: the ECM still broadcasting,
-        or another tester on CAN?
-
-        This socket never hears its own transmissions, and the daemon's poll
-        loop sends nothing while the claim stands, so a frame on a request id
-        is another tester.
-        """
-        arbitration_id = int(message.arbitration_id)
-        if arbitration_id in self._ecm_ids:
-            self._ecm_heard_at = time.monotonic()
-        elif self._foreign_can is None and arbitration_id in self._watched_ids:
-            self._foreign_can = arbitration_id
-
     def _midread_problem(self, *, check_vehicle: bool) -> str | None:
+        """Why the read must stop now, or ``None``; the reader asks before every
+        block and retry. Raises :class:`ReadCancelledError` on a cancel."""
         if self._cancel.is_set():
-            raise _CancelledError
-        if self._foreign_can is not None:
-            return (
-                f"another tester transmitted on CAN (id 0x{self._foreign_can:03X}) during the read"
-            )
+            raise ReadCancelledError
+        foreign_can = None if self._reader is None else self._reader.foreign_can
+        if foreign_can is not None:
+            return f"another tester transmitted on CAN (id 0x{foreign_can:03X}) during the read"
         gate = tx_gate.snapshot()
         if gate["enabled"]:
             return f"passive mode was armed during the read (source {gate['source']})"
@@ -674,13 +500,15 @@ class RomBackupJob:
     def _run(self, recipe: BackupRecipe, rom_map: RomMap | None, started_wall: float) -> None:
         started = time.monotonic()
         self._started_mono = started
-        counters: dict[str, Any] = {
-            "requests": 0,
-            "retries": 0,
-            "timeouts": 0,
-            "send_errors": 0,
-            "nrcs": {},
-        }
+        reader = MemoryReader(
+            recipe,
+            midread_problem=self._midread_problem,
+            update=self._update,
+            cancel=self._cancel,
+            listen_seconds=self._listen_seconds,
+            recheck_seconds=self._recheck_seconds,
+        )
+        self._reader = reader
         image: bytearray | None = None
         result: BackupStateName = "failed"
         reason: str | None = None
@@ -688,50 +516,30 @@ class RomBackupJob:
         bus: can.BusABC | None = None
         entered = False
         frames_excluded = 0
-        self._watched_ids = frozenset({recipe.request_id, DEFAULT_REQUEST_ID})
-        self._ecm_ids = frozenset(recipe.ecm_broadcast_ids)
         try:
             tx_gate.claim_ecm_session(HOLDER, ttl_seconds=CLAIM_TTL_SECONDS)
             private_traffic.hold(HOLDER, {recipe.request_id, recipe.response_id})
             try:
                 bus = self._open_bus()
             except (OSError, can.CanError) as exc:
-                raise _AbortError(f"could not open the CAN bus: {exc}") from exc
-            try:
-                bus.set_filters(
-                    [
-                        {"can_id": i, "can_mask": 0x7FF, "extended": False}
-                        for i in sorted({recipe.response_id, *self._watched_ids, *self._ecm_ids})
-                    ]
-                )
-            except (NotImplementedError, can.CanError, OSError):
-                log.debug("CAN filters unavailable on this interface; filtering in software")
-            client = CanObdClient(
-                bus,
-                request_id=recipe.request_id,
-                response_id_min=recipe.response_id,
-                response_id_max=recipe.response_id,
-                timeout_seconds=recipe.pacing.request_timeout_seconds,
-                on_frame=self._tap,
-                parse_error_owner="rom-backup",
-                tx_holder=HOLDER,
-            )
+                raise ReadAbortedError(f"could not open the CAN bus: {exc}") from exc
+            client = reader.attach(bus)
             self._update(phase="listening")
-            self._listen(bus)
+            reader.listen(bus)
             problem = self._midread_problem(check_vehicle=True)
             if problem:
-                raise _AbortError(problem)
+                raise ReadAbortedError(problem)
             self._update(phase="entering session")
             entered = True
             for sub in recipe.session.enter_once:
-                self._enter_session(client, recipe, sub, counters)
+                reader.enter_session(client, sub)
             self._update(phase="reading")
-            image = self._read_all(client, recipe, counters, started)
+            image = reader.read_all(client, started)
             if recipe.verify.reread_blocks:
                 self._update(phase="verifying")
-                reread_mismatches = self._reread(client, recipe, image, counters)
+                reread_mismatches = reader.reread(client, image)
             result = "done"
-        except _CancelledError:
+        except ReadCancelledError:
             result = "cancelled"
             reason = (
                 "cancelled: the daemon is shutting down"
@@ -739,7 +547,7 @@ class RomBackupJob:
                 else "cancelled by the operator"
             )
             image = None
-        except _AbortError as exc:
+        except ReadAbortedError as exc:
             result, reason = "failed", str(exc)
             image = None
         except Exception as exc:  # noqa: BLE001 - every exit path still releases the bus
@@ -750,7 +558,7 @@ class RomBackupJob:
             if bus is not None:
                 if entered:
                     self._update(phase="exiting session")
-                    self._exit_session(bus, recipe)
+                    reader.exit_session(bus)
                 try:
                     bus.shutdown()
                 except Exception:  # noqa: BLE001 - the release below must still run
@@ -763,11 +571,7 @@ class RomBackupJob:
             "started_at": _now_iso(started_wall),
             "ended_at": _now_iso(ended_wall),
             "duration_s": round(released - started, 2),
-            "requests": counters["requests"],
-            "retries": counters["retries"],
-            "timeouts": counters["timeouts"],
-            "send_errors": counters["send_errors"],
-            "negative_responses": dict(counters["nrcs"]),
+            **counters_summary(reader.counters),
             "frames_excluded": frames_excluded,
         }
         resumed: float | None = None
@@ -815,282 +619,6 @@ class RomBackupJob:
                 },
             )
 
-    def _listen(self, bus: can.BusABC) -> None:
-        """Before the first request: is another tester already talking on CAN?"""
-        deadline = time.monotonic() + self._listen_seconds
-        while time.monotonic() < deadline and self._foreign_can is None:
-            try:
-                message = bus.recv(timeout=min(0.05, max(0.0, deadline - time.monotonic())))
-            except (ValueError, IndexError):
-                continue
-            if message is not None:
-                self._tap(message)
-
-    def _send(
-        self,
-        client: CanObdClient,
-        recipe: BackupRecipe,
-        service: int,
-        body: bytes,
-        counters: dict[str, Any],
-    ) -> RawReply:
-        reply = client.query_raw(service, body, request_id=recipe.request_id)
-        if not reply.sent and reply.send_error is not None:
-            # The bus refused the frame (a full TX queue, bus-off): a failed
-            # attempt, retried like a timeout and named as what it is.
-            counters["send_errors"] += 1
-            self._update(send_errors=counters["send_errors"])
-            return reply
-        if not reply.sent:
-            owner = tx_gate.ecm_session_owner()
-            cause = (
-                "passive mode is armed"
-                if tx_gate.passive_armed()
-                else f"the ECM session is held by {owner}"
-            )
-            raise _AbortError(f"transmit suppressed by the gate: {cause}")
-        counters["requests"] += 1
-        if reply.negative_response_code is not None:
-            code = f"0x{reply.negative_response_code:02X}"
-            counters["nrcs"][code] = counters["nrcs"].get(code, 0) + 1
-        elif not reply.positive:
-            counters["timeouts"] += 1
-        self._update(
-            requests=counters["requests"],
-            timeouts=counters["timeouts"],
-            negative_responses=dict(counters["nrcs"]),
-        )
-        return reply
-
-    @staticmethod
-    def _cause(what: str, reply: RawReply, timeout: float) -> _Failure:
-        if reply.send_error is not None:
-            return _Failure(f"{what}: CAN send failed ({reply.send_error})", no_answer=False)
-        if reply.negative_response_code is not None:
-            code = reply.negative_response_code
-            return _Failure(
-                f"{what}: negative response 0x{code:02X} ({nrc_name(code)})", no_answer=False
-            )
-        return _Failure(f"{what}: no response within {timeout:g} s", no_answer=True)
-
-    def _explain(self, detail: str, last: _Failure | None, timeout: float) -> str:
-        """``detail``, with what the ECM's broadcasts say about a silent failure.
-
-        Nothing heard on any of them for a whole request timeout is an ECM
-        that is off, not one ignoring the request: at least one broadcasts
-        faster than that.
-        """
-        if last is None or not last.no_answer or not self._ecm_ids:
-            return detail
-        names = ", ".join(f"0x{i:03X}" for i in sorted(self._ecm_ids))
-        heard = self._ecm_heard_at
-        if heard is None:
-            return (
-                f"{detail}; the ECM's broadcasts ({names}) were never heard during the read, so "
-                "a key-off cannot be told apart from an ECM that stopped answering"
-            )
-        quiet = time.monotonic() - heard
-        if quiet >= timeout:
-            return (
-                f"the ECM went silent (key off?): none of its broadcasts ({names}) heard for "
-                f"{quiet:.1f} s; {detail}"
-            )
-        return (
-            f"{detail}; the ECM was still broadcasting (heard {quiet:.2f} s before this "
-            "failure), so it is powered but not answering"
-        )
-
-    def _session_step(
-        self, client: CanObdClient, recipe: BackupRecipe, sub: int, counters: dict[str, Any]
-    ) -> _Failure | None:
-        reply = self._send(client, recipe, SESSION_SERVICE, bytes([sub]), counters)
-        if reply.positive:
-            return None
-        return self._cause(f"session 0x{sub:02X}", reply, recipe.pacing.request_timeout_seconds)
-
-    def _enter_session(
-        self, client: CanObdClient, recipe: BackupRecipe, sub: int, counters: dict[str, Any]
-    ) -> None:
-        last: _Failure | None = None
-        for attempt in range(recipe.pacing.retries_per_block + 1):
-            if attempt:
-                counters["retries"] += 1
-                self._update(retries=counters["retries"])
-            problem = self._midread_problem(check_vehicle=False)
-            if problem:
-                raise _AbortError(problem)
-            last = self._session_step(client, recipe, sub, counters)
-            if last is None:
-                return
-        detail = f"could not enter the session: {last.cause if last else None}"
-        raise _AbortError(self._explain(detail, last, recipe.pacing.request_timeout_seconds))
-
-    def _read_block(
-        self,
-        client: CanObdClient,
-        recipe: BackupRecipe,
-        address: int,
-        length: int,
-        counters: dict[str, Any],
-    ) -> bytes:
-        last: _Failure | None = None
-        timeout = recipe.pacing.request_timeout_seconds
-        for attempt in range(recipe.pacing.retries_per_block + 1):
-            if attempt:
-                counters["retries"] += 1
-                self._update(retries=counters["retries"])
-                problem = self._midread_problem(check_vehicle=False)
-                if problem:
-                    raise _AbortError(problem)
-            last = None
-            for sub in recipe.session.before_each_read:
-                last = self._session_step(client, recipe, sub, counters)
-                if last is not None:
-                    break
-            if last is not None:
-                continue
-            body = address.to_bytes(4, "big") + length.to_bytes(2, "big")
-            reply = self._send(client, recipe, MEMORY_READ_SERVICE, body, counters)
-            if reply.payload is not None and len(reply.payload) == length:
-                return reply.payload
-            if reply.payload is not None:
-                last = _Failure(
-                    f"read: {len(reply.payload)} bytes back for a {length}-byte read",
-                    no_answer=False,
-                )
-            else:
-                last = self._cause("read", reply, timeout)
-        detail = (
-            f"read at 0x{address:06X} ({length} bytes) failed after "
-            f"{recipe.pacing.retries_per_block + 1} attempts; last: {last.cause if last else None}"
-        )
-        raise _AbortError(self._explain(detail, last, timeout))
-
-    def _read_all(
-        self,
-        client: CanObdClient,
-        recipe: BackupRecipe,
-        counters: dict[str, Any],
-        started: float,
-    ) -> bytearray:
-        blocks = recipe.read.blocks()
-        image = bytearray(recipe.read.size)
-        next_check = 0.0
-        last_cycle = 0.0
-        done_bytes = 0
-        # The vector tables are read once their bytes are in (minutes before
-        # the end): an image that points past the range stops the read there.
-        extent_pending = recipe.extent is not None
-        for index, (address, length) in enumerate(blocks):
-            now = time.monotonic()
-            problem = self._midread_problem(check_vehicle=now >= next_check)
-            if now >= next_check:
-                next_check = now + self._recheck_seconds
-            if problem:
-                raise _AbortError(problem)
-            tx_gate.claim_ecm_session(HOLDER, ttl_seconds=CLAIM_TTL_SECONDS)
-            wait = last_cycle + recipe.pacing.min_cycle_seconds - time.monotonic()
-            if wait > 0:
-                self._cancel.wait(wait)  # a cancel or shutdown ends the pause
-            last_cycle = time.monotonic()
-            data = self._read_block(client, recipe, address, length, counters)
-            offset = address - recipe.read.start
-            image[offset : offset + length] = data
-            done_bytes += length
-            done = index + 1
-            if extent_pending and recipe.extent is not None:
-                if done_bytes >= recipe.extent.tables_end:
-                    extent_pending = False
-                    self._check_extent_early(image, recipe, done, len(blocks))
-            elapsed = time.monotonic() - started
-            rate = done / elapsed if elapsed > 0 else 0.0
-            self._update(
-                blocks_done=done,
-                bytes=done_bytes,
-                elapsed_s=round(elapsed, 2),
-                eta_s=round((len(blocks) - done) / rate, 1) if rate > 0 else None,
-            )
-        return image
-
-    @staticmethod
-    def _check_extent_early(image: bytearray, recipe: BackupRecipe, done: int, total: int) -> None:
-        """Abort when the vector tables already read point past the range.
-
-        Offline: the bytes are the ones just read. A read of the rest could
-        only produce an image known to be short, so it stops here and says
-        what the recipe needs.
-        """
-        spec = recipe.extent
-        if spec is None:
-            return
-        reading = early_extent(bytes(image[: spec.tables_end]), spec, image_size=len(image))
-        if reading.verdict != "larger":
-            return
-        raise _AbortError(
-            f"stopped at block {done:,} of {total:,}: {reading.summary()}. The recipe reads "
-            f"0x{recipe.read.start:06X}-0x{recipe.read.end:06X}; this ECM needs a "
-            f"{ROM_BACKUP_FILE} in its own profile with the flash's real size. Nothing was stored"
-        )
-
-    def _reread(
-        self,
-        client: CanObdClient,
-        recipe: BackupRecipe,
-        image: bytearray,
-        counters: dict[str, Any],
-    ) -> list[str]:
-        """Re-read blocks spread across the image; the addresses that differ."""
-        blocks = recipe.read.blocks()
-        count = min(recipe.verify.reread_blocks, len(blocks))
-        if count == 1:
-            picks = [0]
-        else:
-            picks = sorted({round(i * (len(blocks) - 1) / (count - 1)) for i in range(count)})
-        mismatches = []
-        for number, index in enumerate(picks, start=1):
-            problem = self._midread_problem(check_vehicle=True)
-            if problem:
-                raise _AbortError(problem)
-            tx_gate.claim_ecm_session(HOLDER, ttl_seconds=CLAIM_TTL_SECONDS)
-            address, length = blocks[index]
-            data = self._read_block(client, recipe, address, length, counters)
-            offset = address - recipe.read.start
-            if bytes(image[offset : offset + length]) != data:
-                mismatches.append(f"0x{address:06X}")
-            self._update(phase=f"verifying ({number}/{len(picks)})")
-        return mismatches
-
-    def _exit_session(self, bus: can.BusABC, recipe: BackupRecipe) -> None:
-        """Best effort, one try each: the claim is released whatever happens."""
-        if not recipe.session.exit:
-            return
-        client = CanObdClient(
-            bus,
-            request_id=recipe.request_id,
-            response_id_min=recipe.response_id,
-            response_id_max=recipe.response_id,
-            timeout_seconds=recipe.pacing.request_timeout_seconds,
-            parse_error_owner="rom-backup",
-            tx_holder=HOLDER,
-        )
-        for sub in recipe.session.exit:
-            try:
-                reply = client.query_raw(
-                    SESSION_SERVICE, bytes([sub]), request_id=recipe.request_id
-                )
-            except Exception:  # noqa: BLE001 - exit is best effort
-                log.exception("ROM backup: session exit 0x%02X failed", sub)
-                continue
-            if not reply.positive:
-                log.warning(
-                    "ROM backup: session exit 0x%02X not acknowledged (sent=%s, nrc=%s, "
-                    "send_error=%s)",
-                    sub,
-                    reply.sent,
-                    reply.negative_response_code,
-                    reply.send_error,
-                )
-
     def _store(
         self,
         image: bytes,
@@ -1099,62 +627,19 @@ class RomBackupJob:
         summary: dict[str, Any],
         reread_mismatches: list[str],
     ) -> tuple[BackupStateName, str | None]:
-        """Add the image to the library, then report its integrity.
-
-        Unverified is kept, never hidden: ``failed`` when a check disagreed,
-        ``done`` with the reason when a check had nothing to check against.
-        Nothing that can raise runs before
-        :meth:`RomLibrary.add_image`: the integrity checks are wrapped (a
-        failure there is itself a reason the image is unverified) and the
-        revision match cannot raise (a broken flash history reads ``unknown``
-        with its reason), so a bad registry or a callback error can no longer
-        lose a ten-minute read.
-        """
-        unchecked: list[str] = []
-        try:
-            integrity, failures, unchecked = self._integrity(
-                image, recipe, rom_map, reread_mismatches
-            )
-        except Exception as exc:  # noqa: BLE001 - recorded as the reason, never raised
-            log.exception("ROM backup: integrity check failed")
-            integrity = None
-            failures = [f"the integrity check failed: {type(exc).__name__}: {exc}"]
-        problems = failures + unchecked
-        verified = not problems
-        sha = sha256_hex(image)
-        match = self.library.revision_match(sha)
-        read_meta = {
-            **summary,
-            "blocks": len(recipe.read.blocks()),
-            "block_size": recipe.read.block_size,
-            "range": [f"0x{recipe.read.start:06X}", f"0x{recipe.read.end:06X}"],
-            "request_id": f"0x{recipe.request_id:03X}",
-            "response_id": f"0x{recipe.response_id:03X}",
-            "recipe": self._recipe_source,
-            "verified": verified,
-            "unverified_reason": None if verified else "; ".join(problems),
-            "integrity": integrity,
-            "revision_match": match,
-        }
-        try:
-            self.library.add_image(image, source="ecu_read", read_meta=read_meta)
-        except Exception as exc:  # noqa: BLE001 - named in the state; nothing was stored
-            log.exception("could not store the ECU read")
-            self._update(stored=False, sha256=None, verified=verified, integrity=integrity)
-            return "failed", (
-                f"the read finished but the image could not be stored "
-                f"({type(exc).__name__}: {exc}); nothing was kept"
-            )
-        self._update(
-            stored=True,
-            sha256=sha,
-            verified=verified,
-            integrity=integrity,
-            revision_match=match,
+        """:func:`src.control.rom_backup_store.store_image`, with this job's
+        library, recipe source, ECM calibration ID and state."""
+        return store_image(
+            image,
+            recipe,
+            rom_map,
+            summary,
+            reread_mismatches,
+            library=self.library,
+            recipe_source=self._recipe_source,
+            ecu_calibration_id=self._ecu_calibration_id,
+            update=self._update,
         )
-        if verified:
-            return "done", None
-        return ("failed" if failures else "done"), "unverified: " + "; ".join(problems)
 
     def _integrity(
         self,
@@ -1163,82 +648,8 @@ class RomBackupJob:
         rom_map: RomMap | None,
         reread_mismatches: list[str],
     ) -> tuple[dict[str, Any], list[str], list[str]]:
-        """Checksums, calibration ID against the ECM's, and the re-read.
-
-        Returns the payload, the *failures* (a check ran and disagreed) and
-        the *unchecked* (a check had nothing to check against).
-        """
-        failures: list[str] = []
-        unchecked: list[str] = []
-        calibration_id = read_calibration_id(image, rom_map)
-        no_map = map_applies(calibration_id, rom_map)
-        checksum = None
-        if rom_map is None or no_map is not None:
-            unchecked.append(f"{no_map}: checksums not checked")
-        else:
-            checksum = checksum_verdict(image, rom_map.checksums)
-            if not checksum["ok"]:
-                failures.append(checksum["reason"] or "checksum mismatch")
-        extent = read_extent(image, recipe.extent) if recipe.extent is not None else None
-        if extent is not None and extent.verdict == "larger":
-            failures.append(extent.summary())
-        elif rom_map is None:
-            unchecked.append(self._size_caveat(recipe, extent))
-        # Blank is as good as unreported: an empty string is found anywhere.
-        ecu_id = (self._ecu_calibration_id() or "").strip() or None
-        offset: int | None = None
-        if rom_map is not None:
-            # The map says where the ID lives, whether or not it describes this
-            # calibration: a different ID there is the image disagreeing with
-            # the ECM, which is exactly what makes the map not apply.
-            offset = rom_map.calibration_id.offset
-        elif ecu_id is not None and ecu_id.isascii() and ecu_id.isprintable():
-            # Nothing says where the ID lives: look for the ECM's own as ASCII.
-            found = image.find(ecu_id.encode("ascii"))
-            if found >= 0:
-                offset, calibration_id = found, ecu_id
-        if ecu_id is None:
-            unchecked.append(
-                "the ECM has not reported its calibration ID (/status calibration), so the "
-                f"image's {calibration_id or 'calibration ID'} could not be checked against it"
-            )
-        elif rom_map is not None and ecu_id != calibration_id:
-            failures.append(f"image calibration ID {calibration_id} != ECM-reported {ecu_id}")
-        elif rom_map is None and offset is None:
-            unchecked.append(
-                f"the ECM reports calibration ID {ecu_id}, and the image does not hold it as ASCII"
-            )
-        if reread_mismatches:
-            failures.append(
-                f"{len(reread_mismatches)} re-read block(s) differ: {', '.join(reread_mismatches)}"
-            )
-        integrity = {
-            "checksum": checksum,
-            "calibration_id": {
-                "image": calibration_id,
-                "ecu": ecu_id,
-                "ok": ecu_id is not None and ecu_id == calibration_id,
-                "offset": None if offset is None else f"0x{offset:06X}",
-            },
-            "reread": {
-                "blocks": min(recipe.verify.reread_blocks, len(recipe.read.blocks())),
-                "mismatches": reread_mismatches,
-            },
-            "extent": None if extent is None else extent.to_dict(),
-        }
-        return integrity, failures, unchecked
-
-    @staticmethod
-    def _size_caveat(recipe: BackupRecipe, extent: ExtentReading | None) -> str:
-        """Without a map, what (if anything) checked the image's size."""
-        size = f"{recipe.read.size:,}"
-        if extent is not None and extent.verdict == "no_sign":
-            return (
-                f"with no map, only the image's own pointers check its size: {extent.summary()}; "
-                f"a sign, not proof, that the recipe's {size} bytes are the whole flash"
-            )
-        caveat = f"with no map, nothing confirms the recipe's {size} bytes are the whole flash"
-        return caveat if extent is None else f"{caveat} ({extent.summary()})"
+        """:func:`src.control.rom_backup_store.integrity` against this job's ECM."""
+        return integrity(image, recipe, rom_map, reread_mismatches, self._ecu_calibration_id)
 
     def _wait_for_polling(self, released: float) -> tuple[float | None, str]:
         """Seconds until an OBD observation newer than the release, or why none came.

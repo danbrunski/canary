@@ -481,19 +481,32 @@ it; go after that work lands.
   - [ ] `validation/harness._start_pipeline` is a second composition root;
     give both one `start_pipeline(components, …)`.
 
-- [ ] **R29.13 `RomBackupJob` is a 920-line class.** Lifecycle (~150 lines),
+- [~] **R29.13 `RomBackupJob` is a 920-line class.** Lifecycle (~150 lines),
   preconditions (90), the wire protocol (~275: `_listen`, `_send`,
   `_session_step`, `_read_block`, `_reread`, …) and post-processing that needs
   no bus (~150: `_store`, `_integrity`, `_size_caveat`). A
   `counters: dict[str, Any]` is threaded through six methods and mutated by
   key. The recipe schema is another 140 lines above it.
-  - [ ] `rom_backup_recipe.py`, `rom_backup_wire.py` (a reader with a counters
+  - [x] `rom_backup_recipe.py`, `rom_backup_wire.py` (a reader with a counters
     dataclass), `rom_backup_store.py`. `RomBackupJob` and `BackupRefusedError`
     stay importable from `src.control.rom_backup`.
   - This is a read path (service 0x23), not a non-volatile write. Behavior
     identical; pinned by the scripted-ECU tests.
-  - `brain_jobs.py` (1,155 lines) splits the same way: store and index, kind
-    runners and `precheck`, scheduler.
+    The existing tests in `tests/test_rom_backup.py` are unchanged and pass
+    (75 with the new one). The new
+    `test_the_split_job_sends_and_reports_exactly_what_the_single_class_did`
+    compares four scripted reads (clean, timeout+retry, NRC abort, send
+    error) with `tests/fixtures/rom_backup_wire_golden.json`, which was
+    recorded from a HEAD worktree (`47662349`, identical over 3 runs). It
+    checks every frame sent, in order (125 / 127 / 17 / 127), every
+    `query_raw` call, each client's ids and `timeout_seconds`, the bus
+    filters, and the job state, events and `read_meta`, with key order.
+    The only services requested are 0x10 and 0x23. A grep of the moved code
+    for 0x2E/0x31/0x34/0x36/0x3B/0x3E/0x27 finds only an NRC `"0x31"` in a
+    comment.
+  - [ ] `brain_jobs.py` (1,155 lines) splits the same way: store and index, kind
+    runners and `precheck`, scheduler. Not attempted (out of the R29.13
+    dispatch's scope, 2026-11-12).
 
 - [x] **R29.14 "Engine running" is defined three ways, and the non-volatile
   write guard uses the weakest.** `classify_vehicle_state` uses the OBD rpm
@@ -643,3 +656,13 @@ The path-keyed lock registry and locked JSONL append found here
 `src/provisioning/{bluez,netsock}.py`; `inference_worker.py` internals;
 `twin_live.py` body; `daemon/detectors/`; the bodies of `replay_control.py`,
 `update_runner.py` and `routes/companion_link.py`.
+    `rom_backup_recipe.py` holds the schema, `load_backup_recipe` and
+    `recipe_extent`. `rom_backup_wire.py` holds `MemoryReader`, one per read:
+    the frame tap, listen, session enter/exit, block read with retries, the
+    re-read and the early extent stop. It owns a `ReadCounters` dataclass in
+    place of the `counters` dict. `rom_backup_store.py` holds `store_image`,
+    `integrity` and `size_caveat`. `rom_backup.py` is 695 lines, down from
+    1,284: the job's lifecycle, preconditions, mid-read re-check and
+    polling-resume wait. Every name importers use still imports from
+    `src.control.rom_backup`, and `job._store` / `job._integrity` are thin
+    delegates the tests patch and call.

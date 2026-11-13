@@ -1646,3 +1646,132 @@ def test_shutdown_during_the_resume_wait_still_records_the_end(
         ("rom_backup.end", "done"),
     ]
     _assert_released()
+
+
+# -- the wire sequence, pinned (R29.13) ------------------------------------------
+
+#: Recorded at the commit before ``RomBackupJob`` was split into recipe, wire
+#: and store modules (R29.13): for four scripted reads, every frame the job put
+#: on its bus (in order), every ``query_raw`` call, every client it built and
+#: its timing, the bus filters, and the job state, events and stored
+#: ``read_meta`` it reported. The split had to leave every one identical.
+WIRE_GOLDEN = Path(__file__).parent / "fixtures" / "rom_backup_wire_golden.json"
+#: Wall-clock and elapsed-time fields: present or absent is pinned, the value is not.
+_VOLATILE = frozenset({"started_at", "ended_at", "elapsed_s", "duration_s", "polling_resumed_s"})
+
+
+def _pinned(value: Any, tmp: str) -> Any:
+    if isinstance(value, dict):
+        return {
+            k: "<volatile>" if k in _VOLATILE and v is not None else _pinned(v, tmp)
+            for k, v in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_pinned(v, tmp) for v in value]
+    if isinstance(value, str):
+        return value.replace(tmp, "<tmp>")
+    return value
+
+
+def _scripted_read(
+    rig_factory: Callable[..., Rig],
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+    tmp: str,
+) -> dict[str, Any]:
+    from src.collection.can_obd_client import CanObdClient
+
+    frames: list[str] = []
+    filters: list[Any] = []
+    queries: list[str] = []
+    clients: list[dict[str, Any]] = []
+
+    def record(bus: can.BusABC) -> can.BusABC:
+        real_send, real_filters = bus.send, bus.set_filters
+
+        def send(message: can.Message, timeout: float | None = None) -> None:
+            frames.append(f"{message.arbitration_id:03X}#{bytes(message.data).hex()}")
+            try:
+                real_send(message, timeout)
+            except can.CanError:
+                frames[-1] += " (send error)"
+                raise
+
+        def set_filters(spec: Any = None) -> None:
+            filters.append(spec)
+            real_filters(spec)
+
+        bus.send = send  # type: ignore[method-assign, assignment]
+        bus.set_filters = set_filters  # type: ignore[method-assign, assignment]
+        return bus
+
+    real_init, real_query = CanObdClient.__init__, CanObdClient.query_raw
+
+    def init(self: CanObdClient, bus: can.BusABC, **kwargs: Any) -> None:
+        clients.append(
+            {k: (v is not None if k == "on_frame" else v) for k, v in sorted(kwargs.items())}
+        )
+        real_init(self, bus, **kwargs)
+
+    def query(self: CanObdClient, service: int, body: bytes, **kwargs: Any) -> Any:
+        options = " ".join(f"{k}=0x{v:03X}" for k, v in sorted(kwargs.items()))
+        queries.append(f"0x{service:02X} {body.hex()} {options}")
+        return real_query(self, service, body, **kwargs)
+
+    monkeypatch.setattr(CanObdClient, "__init__", init)
+    monkeypatch.setattr(CanObdClient, "query_raw", query)
+    wrapper = record
+    profile: dict[str, Any] = {}
+    if scenario == "send_error":
+        fails = _send_fails(1)
+        wrapper = lambda bus: record(fails(bus))  # noqa: E731 - the recorder sees the attempt
+    if scenario == "timeout_retry":
+        profile["timeout"] = 0.2
+    rig = rig_factory(_small_image(), bus_wrapper=wrapper, **profile)
+    if scenario == "timeout_retry":
+        rig.ecu.fail_first = {63 * 5: 1}
+    if scenario == "nrc_abort":
+        rig.ecu.nrc_reads = {63 * 3: 0x31}
+    state = rig.run()
+    _assert_released()
+    read_meta = rig.library.entry(state["sha256"])["read_meta"] if state["stored"] else None
+    observed: dict[str, Any] = _pinned(
+        {
+            "frames": frames,
+            "filters": filters,
+            "queries": queries,
+            "clients": clients,
+            "state": state,
+            "events": [list(event) for event in rig.events],
+            "read_meta": read_meta,
+        },
+        tmp,
+    )
+    return observed
+
+
+def _wire_observations(
+    rig_factory: Callable[..., Rig], monkeypatch: pytest.MonkeyPatch, tmp: str
+) -> dict[str, Any]:
+    return {
+        scenario: _scripted_read(rig_factory, monkeypatch, scenario, tmp)
+        for scenario in ("clean", "timeout_retry", "nrc_abort", "send_error")
+    }
+
+
+def test_the_split_job_sends_and_reports_exactly_what_the_single_class_did(
+    rig_factory: Callable[..., Rig], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """R29.13: frames, order, timing parameters, retries, re-reads, counters,
+    refusal reasons and payload keys, against the recording made before the
+    split. Only 0x10 (DiagnosticSessionControl) and 0x23
+    (ReadMemoryByAddress) are ever requested."""
+    import json
+
+    observed = json.loads(json.dumps(_wire_observations(rig_factory, monkeypatch, str(tmp_path))))
+    golden = json.loads(WIRE_GOLDEN.read_text())
+    assert observed == golden
+    # Key order too: a payload is read by humans and by the dashboard.
+    assert json.dumps(observed, indent=1) == json.dumps(golden, indent=1)
+    services = {query.split()[0] for run in observed.values() for query in run["queries"]}
+    assert services == {"0x10", "0x23"}
