@@ -119,11 +119,27 @@ events:
     meaning: 'ECU reset: volatile RAM (closed-loop trim, filters) restarts; UpRev init runs.'
     evidence: 'ecu_application_model.yaml uprev_init; E05.3 state models'
   - id: ecu_reflash
-    meaning: 'A calibration flash: the learned long-term trim is reset.'
-    evidence: 'LTFT read 0.00 after the 2026-09-20 flash until relearned (project notes; tune_revisions.yaml)'
+    meaning: >-
+      A calibration flash re-initialises the battery-backed RAM block. The
+      learned long-term trim maps return to 1.0 and trouble-code and
+      readiness state is cleared. The throttle and pedal closed positions and
+      the idle-air integrator come back from the serial EEPROM as saved at the
+      last key-off. The effect is the same as battery_disconnect.
+    evidence: >-
+      LTFT read 0.00 after the 2026-09-20 flash until relearned (project
+      notes; tune_revisions.yaml). Code: the K-line download entry 0x035784
+      zeroes 0xFFFF1000-0xFFFF6AC7, and the next power-up check 0x0275EC
+      re-initialises through 0x0276D6 (docs/ecu-firmware-analysis.md, F01.11).
+      A read across a flash is owed.
   - id: battery_disconnect
-    meaning: 'Non-volatile learned values (idle air, throttle closed position) may be lost.'
-    evidence: 'Learned idle air has an inverted backup copy (docs/ecu-firmware-analysis.md); the loss condition is not decoded.'
+    meaning: >-
+      RAM is lost, so the block is re-initialised as for ecu_reflash. The
+      EEPROM-backed values survive only if the after-run save finished before
+      the disconnect.
+    evidence: >-
+      Backup RAM signature 0xFFFF6ACA = 0xAA55 and checksum 0xFFFF6AC8 checked
+      at power-up (0x0275EC); restore list in 0x02D1F4
+      (docs/ecu-firmware-analysis.md, F01.11).
 
 hardware_configurations:
   - id: na_stock_injectors_2026_10

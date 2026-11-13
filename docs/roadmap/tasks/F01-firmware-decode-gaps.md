@@ -328,6 +328,32 @@ Same conventions as the other task files: task-level truth is the checkboxes,
   - *Answers:* which relearn procedures a flash actually requires.
   - **Accept:** the backup-RAM validity check and its consumers are listed;
     one before/after read across an operator flash confirms it.
+  - [~] 2026-11-12: the desk half is done. The read across a flash is owed.
+    Firmware doc: "What a flash or a battery disconnect clears".
+    - **The check.** The battery-backed block is `0xFFFF4C10`–`6AC7`. It is
+      guarded by a signature (`6ACA` = `0xAA55`), a clean-shutdown marker
+      (`6ACC` = `0x6997`) and a byte sum (`6AC8`).
+    - **Without the marker**, the block survives only if three tests pass:
+      trim maps in range, `52DA` in range, and seven complement pairs
+      intact. Otherwise `0x0276D6` zeroes it and restores from the EEPROM.
+    - **Why a flash clears it.** UpRev's `34 80` makes the ECM's own
+      download entry (`0x035784`) zero `0xFFFF1000`–`6AC7`. At the restart
+      the zeroed trim maps fail the range test, so the flash ends exactly
+      like a battery disconnect.
+    - **Reset:** both 8 × 8 learned trim maps and all trouble-code and
+      readiness state.
+    - **Restored from the serial EEPROM** (as saved at the last key-off):
+      the throttle closed positions, the pedal released positions
+      (inferred), the idle-air integrator, and the VIN (inferred), with
+      three unidentified words.
+    - **Answer:** a flash needs no throttle, pedal or idle-air relearn, only
+      LTFT time. A throttle-body swap still needs both relearns, because
+      the old values are restored.
+    - UpRev's `A0 84 D8 F0 0D` writes EEPROM record 0xD8 = 0xF00D
+      (inferred), a marker the ECM never reads.
+    - **Owed (truck):** at KOEO, read the list at the end of the doc
+      section before the next flash, after the flash, and after its key
+      cycle.
 
 - [ ] **F01.12 Barometric pressure: when it updates.** The chain is traced
   (`0xFFFF4C30` from a slew-gated slow filter, PID `0x33` from it). That the

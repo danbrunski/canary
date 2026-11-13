@@ -485,10 +485,23 @@ What the FSM doesn't cover:
 - **A battery disconnect is not a listed trigger** for any of these. It clears
   diagnostic memory within 24 h (EC-60) and, on this truck, the learned fuel
   trim (`labelled_events.yaml`).
-- **The FSM says nothing about reflashing.** An UpRev flash is observed to reset
-  learned fuel trim. Whether it also clears throttle or idle learning is
-  unknown. If idle is unstable or off-spec after a flash, run the three learnings
-  above.
+- **The FSM says nothing about reflashing.** The firmware does (2026-11-12,
+  `docs/ecu-firmware-analysis.md`, "What a flash or a battery disconnect
+  clears"; a read across a flash is still owed):
+  - An UpRev flash re-initialises the battery-backed RAM exactly as a battery
+    disconnect does. Learned fuel trim and all trouble-code state start
+    over.
+  - The ECM then restores the throttle closed positions, the pedal released
+    positions and the idle-air learning from its serial EEPROM, as saved at
+    the last key-off. So neither event needs the three learnings above.
+  - The exceptions are an EEPROM fault (P0605) and a disconnect made before
+    the after-run save finished. Key off, and wait for the ECM relay to drop
+    before disconnecting.
+- **Clearing learned trim, in the code.** Both FSM routes reset the trim
+  maps, by two separate mechanisms:
+  - CONSULT's clear sets a one-shot (inferred to be K-line `31 06`).
+  - The MAF-unplug substitute works because a failing MAF item resets each
+    bank's map to 1.0.
 - **The 75 mm throttle body is an ECM-visible part swap.** Do all three
   learnings after fitting it. UpRev also says a larger throttle needs its
   "Throttle Opening Area / Duct Area Calculation" table recalibrated; the

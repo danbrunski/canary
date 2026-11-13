@@ -35,8 +35,13 @@ general, put it there instead.
    (`src.vehicle.tune_revisions.resolve_session_revision`). The calibration
    id does **not** change on an UpRev flash (it stays `1ZS44A00000`), so
    comparing ids cannot detect an unrecorded flash. Every flash resets the
-   learned fuel trim (below). Whether it also clears throttle and idle learning
-   is unknown; if idle is off after a flash, run the FSM relearns
+   learned fuel trim (below) and all trouble-code state, exactly as a battery
+   disconnect does: the ECM's download entry wipes its battery-backed RAM.
+   The throttle closed positions, the pedal released positions and the
+   idle-air learning are restored from the ECM's serial EEPROM, as saved at
+   the last key-off. A flash therefore needs none of the FSM relearns (firmware,
+   2026-11-12, F01.11; a read across a flash is owed). New throttle hardware
+   still does, because the old values are restored
    (`references/engine-and-ecu.md`).
 2. **Hardware.** The build arrives in parts. **Fitted:** the Aeromotive 340
    pump assembly, between 2026-10-10 and 2026-10-26 (a window; nothing records

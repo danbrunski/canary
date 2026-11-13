@@ -1320,9 +1320,11 @@ the order `0x054606`, `0x0549BE`, `0x054C24`, `0x054D6E`.
   - The cycle copy carries it to `0xFFFF63FC`, which the air model
     subtracts (`0x03C5AA`).
 - **What survives a key cycle.**
-  - At start-up `0x05455C` reads non-volatile records 0x71/0x72 into
-    `0xFFFF5EA0`, keeping them only if they are complements. Otherwise it
-    uses 0.
+  - `0xFFFF5EA0` sits in the battery-backed RAM block, so it survives a key
+    cycle on its own. `0x05455C` reads EEPROM records 0x71/0x72 into it
+    only when that block is re-initialised or a RAM complement pair breaks,
+    and only if the two records are complements. Otherwise it uses 0 (F01.11
+    below; corrected 2026-11-12 from "at start-up").
   - The power-up init `0x0591B8` (reached from `0x028E14`, inferred to be
     the start-up path) sets the integrator from `0xFFFF5EA0` and zeroes the
     learned term.
@@ -1361,6 +1363,169 @@ the order `0x054606`, `0x0549BE`, `0x054C24`, `0x054D6E`.
   - idle spark feedback;
   - the four flags named above;
   - the three lost fault item ids.
+
+### What a flash or a battery disconnect clears (F01.11, 2026-11-12)
+
+The ECM keeps learned state in two places: a battery-backed RAM block, and
+an external serial EEPROM. **An UpRev flash clears the same things a
+battery disconnect does**, because the ECM's own download entry wipes the
+RAM block. What survives either one is what the ECM restores from the
+EEPROM. Everything below is verified from code unless marked inferred. A
+read across a flash has not been made yet (F01.11 checklist).
+
+**The battery-backed block** is `0xFFFF4C10`–`0xFFFF6AC7` (7,864 bytes).
+Three words above it guard it:
+
+- `0xFFFF6ACA` = `0xAA55` is the signature, written when the block is
+  initialised.
+- `0xFFFF6ACC` = `0x6997` is the clean-shutdown marker. `0x027578` writes
+  it at the end of the after-run (`0x028BF8`, `0x0AC960`). The power-up
+  check zeroes it.
+- `0xFFFF6AC8` is an 8-bit sum of every byte of the block plus the two
+  words above, written with the marker.
+
+**The power-up check** is `0x0275EC`, the first call of `0x028C9C`:
+
+- If `0xFFFFF75E` bit 4 is clear, nothing is checked or cleared. That is an
+  input port bit, inferred to be the ignition sense: the after-run wait
+  `0x0AC960` calls the restart trap while it is set.
+- If the signature and the marker are both present, the checksum must
+  match.
+- If the signature is present but the marker is not, the program stopped
+  without its after-run. Three plausibility tests must then all pass:
+  1. every cell of both learned trim maps is within 0x5A00–0x6E00
+     (`0x02766E`);
+  2. `0xFFFF52DA` is within 0x7900–0x8700, unless `0xFFFF4858` bit 3 is set
+     (`0x068358`);
+  3. seven RAM complement pairs are intact (`0x027798`): `4C72`/`625C`,
+     `4C74`/`625E`, `6172`/`614A`, `5EA0`/`52CE`, `618C`/`6256`,
+     `618E`/`6258` and `52C8`/`52B2`.
+- Anything else re-initialises the block: a missing signature, a checksum
+  mismatch or a failed test. `0x0276D6` then:
+  1. zeroes the whole block;
+  2. runs the defaults below;
+  3. writes the signature;
+  4. sets `0xFFFF6958` bit 7, "re-initialised this power-up". A validated
+     start clears that bit.
+- `0x028E30` repeats test 1 after the volatile RAM is cleared, and
+  re-initialises on a failure.
+- `0x0276D6` has one more caller. Request 0x61 of the Nissan service 0xA0
+  (`0x0314E8` queues it, `0x0D986A` runs it) re-initialises the block and
+  then spins until a reset.
+
+**Why a flash clears it.** UpRev opens its download with K-line `34 80`.
+That reaches `0x035784`, which zeroes `0xFFFF84A0`–`0xFFFFA33F` (where the
+loader is uploaded, 32 bytes per `36` block) **and `0xFFFF1000`–`0xFFFF6AC7`**.
+That second range takes in the whole battery-backed block, but not the three
+guard words.
+
+When the loader's `67` restarts the program, the signature is still there
+and the marker is not. So the plausibility tests decide, and test 1 fails on
+the zeroed trim maps. The block is re-initialised exactly as after a battery
+disconnect.
+
+The `34 83` form skips the wipe. It needs further conditions (`0x035230`),
+and UpRev does not use it.
+
+**What is reset.** `0x02D1F4` sets the defaults:
+
+- **Learned fuel trim**, both banks, back to 1.0. `0x059680` sets the maps
+  `0xFFFF5460` and `0xFFFF54E0` to `0x6400` and zeroes their per-cell
+  counters at `0xFFFF52F5` and `0xFFFF5335`.
+  - Each map is 8 × 8: load (`0xFFFF1038` against `0xD290`) by rpm/50
+    against `0xD372`. The clamp is 0x5A00–0x6E00, ±10 %.
+  - The lookup is `0x057954` and the learning step is `0x057CF8`. The
+    lookup puts the current cell in `0xFFFF26E2`/`26E4`.
+  - A bank's whole map also resets to 1.0 when one of its cells leaves the
+    clamp, when diagnostic item 0x114 (MAF) is failing, or on the one-shot
+    `0xFFFF47B2` bit 7 (`0x0578E8`). That one-shot comes from request byte
+    `0xFFFF99E4` bit 5, which K-line service `31` routine 6 sets
+    (`0x034D98`, table `0x022F06`; the CAN side is `0x0D2E48`, table
+    `0x0252FE`). That is inferred to be Consult's self-learning clear.
+    UpRev does not send it.
+  - The FSM's generic-tool substitute for that clear (EC-179: unplug the
+    MAF until P0102 sets, then erase it) works through the MAF-item branch
+    above. That agreement is a known answer from outside this analysis.
+- **Every trouble code, freeze frame and readiness state.** The item status
+  table `0xFFFF657C` is inside the block. UpRev's `14 FF 00` after the key
+  cycle clears them as well.
+- Everything else in the block that is not on the restore list below.
+
+**What survives.** The defaults then restore these values from the EEPROM.
+Each restore is skipped, leaving the default shown, while diagnostic item
+0x72 is failing.
+
+| RAM | EEPROM records | What it is | Default |
+|---|---|---|---|
+| `0xFFFF4C72` / `4C74` | 0 / 1, complements 0x78 / 0x79 (`0x0D90CC`) | Throttle sensor A / B closed positions (the `w2CC8` row above): the FSM's throttle valve closed position learning | 0x78 |
+| `0xFFFF618C` / `618E` | 3 / 4, complements 0x7B / 0x7C (`0x06FC5C`) | Accelerator pedal released positions (inferred: `0xFFFF28A2` bit 7, pedal released, is set while the pedal reading `0xFFFF2C26` is below `618E` + 14 counts, `0x06FD16`) | 200 |
+| `0xFFFF6172` | 2, complement 0x7A | Unidentified. `0x03F84C` subtracts it × 64 from `0xFFFF3FC8` | 0xE6 |
+| `0xFFFF5EA0` | 0x71 / 0x72, a complement pair (`0x05455C`) | The idle-air integrator: the result of Idle Air Volume Learning (F01.10) | 0 |
+| `0xFFFF52C8` | 0x75 / 0x4F, a complement pair (`0x04497C`) | Unidentified | — |
+| `0xFFFF6548` | 0x73 / 0x4E, a complement pair (`0x0544A4`) | Unidentified | 0 |
+| `0xFFFF6568`–`6578` | 0xE0–0xE8 (`0x035E96`) | 17 bytes, inferred to be the VIN | — |
+
+A periodic task, `0x027724` (task table `0x0218C4`), also tests the seven
+RAM complement pairs. If one breaks, it reloads the first four rows from the
+EEPROM and sets `0xFFFF6958` bit 7.
+
+**The EEPROM.**
+
+- It is an SPI part on SCI2 in clocked-synchronous mode (`0xFFFFF013`–`F015`),
+  chip select `0xFFFFF73E` bit 4.
+- `0x067DA0` reads one word per record: command 0x03 and a 16-bit address
+  of record × 2. Record ids run to at least 0xF9.
+- **Writing.** The after-run save `0x0AD1BE` writes 29 records in turn from
+  the table at `0x023E9E` (ids), `0x023EE2` (width) and `0x023EFF` (source
+  pointer): records 0–4 and their complements, 5, 7, 0x71, 0x72, 0x75,
+  0x76, 0x4F, 0xE0–0xE8, 0xF3, 0xF4 and 0xF5.
+  - It starts on `0xFFFF478E` bit 7 with `0xFFFF4785` bit 7 clear. That is
+    inferred to be ignition off, during the after-run.
+  - `0xFFFF6952` bit 5 is held while it runs, and is set after a
+    re-initialisation until the next complete save.
+  - A failed write sets item 0x71; a complete save clears it.
+- **Checking.** `0x0ACDB8` re-reads records 0–4 against complements
+  0x78–0x7C and sets item 0x72 on a mismatch. Items 0x70–0x74 all report
+  P0605.
+- **The restored values are those of the last completed after-run save**,
+  not those of the moment before the flash. Learning since the last key-off
+  is lost.
+- **UpRev's `A0 84 D8 F0 0D`** (`docs/skunkworks/uprev-flash-procedure.md`)
+  is service 0xA0 request 0x84. That queues an EEPROM word write
+  (`0x0D986A`: `0xFFFF33BD` = record, `0xFFFF33D0` = data). By the
+  handler's byte positions it writes **record 0xD8 = 0xF00D** (inferred).
+  Neither the ECM's program nor UpRev's in-ROM code (`0x0DE1A4`–`0x0DE428`)
+  reads record 0xD8. It is a marker for UpRev's own use. The neighbouring
+  requests 0x81–0x98 are the same service's EEPROM and memory accessors,
+  not decoded further.
+
+**What this means for relearning.**
+
+- After a flash, only the learned fuel trim and the trouble-code state
+  start over.
+- The throttle closed positions, the pedal released positions and the
+  idle-air integrator come back from the EEPROM, as saved at the last
+  key-off. So none of the FSM's three relearns is needed because of a
+  flash.
+- The exceptions are an EEPROM fault (item 0x71 or 0x72, with the defaults
+  in the table above) and changed hardware. **After the 75 mm throttle-body
+  swap, the stored closed positions and integrator belong to the old throttle
+  and will be restored as such.** Run throttle valve closed position learning
+  and Idle Air Volume Learning then (FSM EC).
+- A battery disconnect behaves the same way, provided the after-run save
+  finished first: key off, and wait for the ECM relay to drop.
+
+**Read across the next flash** (`query_memory`, KOEO, before and after; the
+F01.11 acceptance):
+
+- `0xFFFF6ACA`, `6ACC` and `6958`: after the flash, bit 7 of `6958` must
+  be set if the block was re-initialised.
+- Several cells of each trim map, in `0xFFFF5460`–`54DF` and
+  `0xFFFF54E0`–`555F`.
+- `0xFFFF4C72`/`4C74`, `618C`/`618E` and `5EA0`: these must come back
+  unchanged.
+- A read before the flash's key cycle and one after it separates the
+  re-initialisation from the next validated start.
 
 ### Throttle area units: not settleable at the desk (F01.9, 2026-11-12)
 

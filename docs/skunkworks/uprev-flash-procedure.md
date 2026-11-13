@@ -21,9 +21,9 @@ Times are the 2026-11-11 flash (UTC); the K-line column is what
 | connected | K-line | UpRev polls DID 0x1103 at about 3.6 Hz the whole time it is connected (2,778 frames from 17:37:51). |
 | operator starts the flash | CAN 0x7E0 | Pre-checks (10-04 capture; this one started later): `10 FB`, then `23` reads of 16 bytes at 0x080000, 0x0C0000 and 0x020004, and one at 0x100000 that the ECM refuses (`7F 23 22`, past the end of flash). |
 | 17:44:15 | K-line | Polling stops. Four wake-up attempts, the last answered at 17:44:21.5. |
-| 17:44:21.6 | K-line | `A0 84 D8 F0 0D` → `E0 84` (unexplained; `A0 34 …` is refused first). `27 03` → a 4-byte seed, `27 04` + 4-byte key → `67 02`. `34 80` → `74 80`. |
+| 17:44:21.6 | K-line | `A0 84 D8 F0 0D` → `E0 84`: an EEPROM word write, record 0xD8 = 0xF00D (inferred), which the ECM itself never reads (`A0 34 …` is refused first). `27 03` → a 4-byte seed, `27 04` + 4-byte key → `67 02`. `34 80` → `74 80`; the ECM's download entry then zeroes its RAM up to `0xFFFF6AC7`, battery-backed learning included. |
 | 17:44:21.8 – 28.5 | K-line | The loader: 132 `36` blocks of 32 bytes, numbered 0–131, each acknowledged `76`. 4,224 bytes in 6.7 s. Its sha256 is `ca8f06a0…f959406c`, the same bytes as on 2026-09-20. The ECM's own program stops as the upload begins: its broadcast frames (0x23D and the rest) leave the bus (on 2026-10-04, 6.9 s before the loader's first CAN frame). |
-| 17:44:28.58 | K-line | `37` + 3 bytes → `7F 37 78` (pending) → `77`. `BF 00` → `FF 00`, `BF 01` → `FF 01`. The loader is now running. |
+| 17:44:28.58 | K-line | `37` + 3 bytes → `7F 37 78` (pending) → `77`. `BF 00` → `FF 00` (acknowledged only), `BF 01` → `FF 01`, which makes the ECM's download loop jump to the uploaded code at `0xFFFF84A0`. The loader is now running. |
 | 17:44:28.63 | CAN 0x742 / 0x762 | `04` → `04 00 00 26 1C`; `65` → `65`. |
 | 17:44:28.65 – 29.20 | CAN | Sixteen range CRCs (`20`) over the whole image: eight 4 KiB spans, 0x8000–0x1FFFF, then seven 128 KiB spans. All sixteen matched the image that was running. |
 | 17:44:29.21 – 30.13 | CAN | Erase sector 15 (0xE0000–0xFFFFF, 0.28 s), then sector 8 (0x8000–0x1FFFF, 0.64 s). Only those two, every time. |
@@ -41,7 +41,15 @@ being erased or written for 4.4 of them.
 
 ## What a flash resets
 
-- Long-term fuel trim, back to 0.00.
+From the firmware (`docs/ecu-firmware-analysis.md`, "What a flash or a
+battery disconnect clears"); a read across a flash is still owed.
+
+- The ECM's battery-backed RAM, exactly as a battery disconnect would. The
+  `34 80` download entry zeroes it, and the restart re-initialises it.
+- Long-term fuel trim, back to 0.00 (both 8 × 8 learned maps return to 1.0).
+- **Not** the throttle closed positions, the pedal released positions or
+  the idle-air learning. The ECM restores those from its serial EEPROM, as
+  saved at the last key-off, so a flash needs none of the FSM relearns.
 - The readiness monitors and stored codes, by UpRev's own `14 FF 00` after the
   key cycle. With any monitor incomplete the MIL blinks for 10 s at key-on
   (FSM EC-52), which is what the operator saw on 2026-11-11. It is not a fault.
@@ -91,8 +99,10 @@ understanding, not observation:
   algorithm that turns a seed into a key has not been worked out.
 - **The loader.** The 4,224 bytes UpRev uploads are UpRev's program. Running
   the same sequence means either sending their loader or writing one.
-- **Three commands nobody has explained:** K-line `A0 84 D8 F0 0D` and `BF 00`
-  / `BF 01`, and the loader's `65`.
+- **One command nobody has explained:** the loader's `65`. K-line
+  `A0 84 D8 F0 0D` (an EEPROM marker write) and `BF 00` / `BF 01` (start the
+  uploaded code) are read from the ECM's handlers (`0x0314E8`, `0x03557C`,
+  `0x035784`).
 - **Which sectors a different edit needs.** Every flash so far touched sectors
   8 and 15 only, because every edit was in the map slots (0xE0000) and moved
   the checksum words (0x9598, 0x95A0). An edit anywhere else has never been
