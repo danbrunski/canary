@@ -150,6 +150,63 @@ async def test_the_cell_residency_route_reads_the_session_off_the_loop(
     assert stall < MAX_GAP, f"the loop stalled {stall:.2f}s inside the cell-residency route"
 
 
+def _usable_selection(*args: Any, **kwargs: Any) -> Any:
+    return SimpleNamespace(usable=[Path("s")], over_budget=[], as_dict=lambda: {})
+
+
+async def _no_child(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    return {}
+
+
+POOLED_ROUTES = [
+    ("/analysis/delivery-error", {"sessions": SESSION}),
+    ("/analysis/trim-surface", {"sessions": SESSION}),
+    ("/analysis/timing", {"sessions": SESSION}),
+    ("/analysis/dyno", {"sessions": SESSION}),
+    ("/analysis/pull-comparison", {"revision_a": "a", "revision_b": "b"}),
+]
+
+
+@pytest.mark.parametrize(("path", "params"), POOLED_ROUTES, ids=[p for p, _ in POOLED_ROUTES])
+async def test_the_pooled_routes_open_the_sessions_off_the_loop(
+    path: str,
+    params: dict[str, str],
+    config: CanaryConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``pooled()`` defers and opens every selected session's parquet footers
+    (``select_sessions``); five async handlers called it on the loop."""
+    monkeypatch.setattr(workbench_routes, "select_sessions", _slow(_usable_selection))
+    monkeypatch.setattr(workbench_routes, "dyno_preflight", lambda *a, **k: None)
+    monkeypatch.setattr(workbench_routes, "run_off_loop", _no_child)
+    responses: list[httpx.Response] = []
+
+    async def request(client: httpx.AsyncClient) -> None:
+        responses.append(await client.get(path, params=params))
+
+    stall = await _longest_stall(request, _app(config, tmp_path))
+    assert responses[0].status_code == 200, responses[0].text
+    assert stall < MAX_GAP, f"the loop stalled {stall:.2f}s opening the sessions for {path}"
+
+
+async def test_the_dyno_preflight_counts_rows_off_the_loop(
+    config: CanaryConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``dyno_preflight`` counts every selected session's rows."""
+    monkeypatch.setattr(workbench_routes, "select_sessions", _usable_selection)
+    monkeypatch.setattr(workbench_routes, "dyno_preflight", _slow(lambda *a, **k: None))
+    monkeypatch.setattr(workbench_routes, "run_off_loop", _no_child)
+    responses: list[httpx.Response] = []
+
+    async def request(client: httpx.AsyncClient) -> None:
+        responses.append(await client.get("/analysis/dyno", params={"sessions": SESSION}))
+
+    stall = await _longest_stall(request, _app(config, tmp_path))
+    assert responses[0].status_code == 200, responses[0].text
+    assert stall < MAX_GAP, f"the loop stalled {stall:.2f}s counting rows for the dyno"
+
+
 async def test_the_classification_route_reads_the_session_off_the_loop(
     config: CanaryConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

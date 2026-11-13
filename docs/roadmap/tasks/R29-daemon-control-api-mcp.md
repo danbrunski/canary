@@ -479,7 +479,7 @@ it; go after that work lands.
     boolean tuning-mode endpoint"); `/control/capture` is the lifecycle with
     session isolation (`enter_capture_mode`).
 
-- [~] **R29.8 Four `async def` handlers do file work on the event loop, and
+- [x] **R29.8 Four `async def` handlers do file work on the event loop, and
   the deferral preamble is copied.** `routes/workbench.py`
   `get_session_frame` and `get_cell_residency`,
   `routes/control/classification.py` `post_session_classification` and
@@ -519,13 +519,17 @@ it; go after that work lands.
     `workbench.run`, `post_session_classification` and `trip_summary_off_loop`
     are gone (`rom_editor` keeps its own first, for its own `laptop_path`).
     `test_run_off_loop_defers_while_a_capture_records_without_the_route_asking`.
-  - [ ] `pooled()` in `routes/workbench.py` still calls `select_sessions`
-    (opens every parquet footer of each session) and, in `get_dyno`,
-    `dyno_preflight` (`count_session_rows`) on the event loop, inside the async
-    handlers `get_delivery_error`, `get_trim_surface`, `get_timing`,
-    `get_dyno` and `get_pull_comparison` (twice, once per revision). Move them
-    into `asyncio.to_thread` (or a `prepare_pooled_job` beside
-    `prepare_single_session_job`) with the same off-loop proof.
+  - [x] `pooled()` in `routes/workbench.py` called `select_sessions` (parquet
+    footers) and, in `get_dyno`, `dyno_preflight` (`count_session_rows`) on the
+    event loop inside `get_delivery_error`, `get_trim_surface`, `get_timing`,
+    `get_dyno` and `get_pull_comparison` (twice). `pooled` is now `async` and
+    runs the deferral and `select_sessions` in one `asyncio.to_thread`; the
+    five handlers `await` it and `get_dyno` runs `dyno_preflight` in
+    `to_thread`. Order, statuses and bodies unchanged (`test_status_error_http`
+    pins the pooled and dyno refusals). Proof `tests/test_workbench_off_loop.py`
+    (14): a 0.4 s blocking read per handler plus the dyno row count, ticker
+    stall < 0.2 s; with `pooled` and `dyno_preflight` called directly again 6
+    of them fail (the 5 pooled routes and the preflight).
 
 - [~] **R29.9 The dashboard polls the full `/status` every 5 s.**
   `hooks/useStatus.ts` calls `getStatus`, which requests `/status` with no

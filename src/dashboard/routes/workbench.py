@@ -88,9 +88,13 @@ def register_workbench_routes(
         except (GateError, ChannelSpecError) as exc:
             raise HTTPException(400, {"error": "analysis_refused", "message": str(exc)}) from exc
 
-    def pooled(sessions: str | None, revision: str | None) -> Selection:
+    def _pooled(sessions: str | None, revision: str | None) -> Selection:
         capture_deferral(config, _split(sessions))
         return select_sessions(config, sessions=_split(sessions), revision=revision or None)
+
+    async def pooled(sessions: str | None, revision: str | None) -> Selection:
+        """Defer, then open every selected session's parquet footers, off the loop."""
+        return await asyncio.to_thread(_pooled, sessions, revision)
 
     async def run_pooled(kind: str, selection: Selection, params: dict[str, Any]) -> dict[str, Any]:
         params = {
@@ -184,7 +188,7 @@ def register_workbench_routes(
         floor = _optional_float(min_load)
         return await run_pooled(
             "delivery_error",
-            pooled(sessions, revision),
+            await pooled(sessions, revision),
             {"measured": measured, "min_load": floor},
         )
 
@@ -198,7 +202,7 @@ def register_workbench_routes(
     ) -> dict[str, Any]:
         return await run_pooled(
             "trim_surface",
-            pooled(sessions, revision),
+            await pooled(sessions, revision),
             {"rpm": rpm, "airflow": airflow, "min_n": min_n},
         )
 
@@ -213,7 +217,7 @@ def register_workbench_routes(
     ) -> dict[str, Any]:
         return await run_pooled(
             "timing",
-            pooled(sessions, revision),
+            await pooled(sessions, revision),
             {"timing": timing, "rpm": rpm, "airflow": airflow, "min_n": min_n},
         )
 
@@ -253,8 +257,8 @@ def register_workbench_routes(
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        selection = pooled(sessions, revision)
-        dyno_preflight(config, selection)
+        selection = await pooled(sessions, revision)
+        await asyncio.to_thread(dyno_preflight, config, selection)
         return await run_pooled("dyno", selection, {"request": request.as_dict()})
 
     @app.get("/analysis/pull-comparison", dependencies=[Depends(authorize)])
@@ -276,7 +280,7 @@ def register_workbench_routes(
         names = set(_split(sessions))
         sides: dict[str, Selection] = {}
         for side, revision in (("a", revision_a), ("b", revision_b)):
-            selection = pooled(None, revision)
+            selection = await pooled(None, revision)
             if names:
                 selection.usable = [p for p in selection.usable if p.name in names]
             sides[side] = selection
