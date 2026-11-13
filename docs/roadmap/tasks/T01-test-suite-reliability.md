@@ -1033,3 +1033,28 @@ measurement in hand.
   Fix: run the launcher against a pinned copy of the checkout
   (`tests/pinned_checkout_harness.py`, as the T01 item that introduced it did),
   so the before/after listing covers a tree nothing else edits.
+- [ ] **T01.36 The `slow` tier's xdist workers are OOM-killed when another
+  session's gate runs beside it (2026-11-12).** It is T01.18's cause in the
+  tier T01.18 did not cap: `pytest_xdist_auto_num_workers` caps only
+  `ml_training` selections, so `pytest -m slow` still starts one worker per
+  core (12 here, on 15 GB RAM and 8 GB swap).
+  - **Seen** twice in by-hand `pytest -m slow` runs on `c735096c`, in a clean
+    worktree, after a push gate that was green:
+    - 21:58:08 MDT. One failure,
+      `tests/test_twin_runner.py::test_fuel_mv_2_against_fuel_mv_1_per_sample_through_the_runner`
+      (589 passed). The test passed alone (`-n0`, 210 s), and its file passed
+      24 of 24 at `-n auto`.
+    - 22:25:38 MDT. "worker 'gw10' crashed" in
+      `tests/test_sim_montecarlo.py::test_cached_and_vectorised_equals_the_plain_run_paired_loop_exactly`
+      (589 passed, 1,541 s). Another session's `scripts/push.sh` gate was
+      running at the same time.
+  - **Cause:** the global OOM killer, read from `journalctl -k`. Both times
+    the kernel logged `Free swap = 0kB` and killed one of this run's
+    workers: pid 465037 (anon-rss 721 MB, 43.9 GB virtual) and pid 517860
+    (1.16 GB, 43.0 GB virtual). The first kill also took user `systemd` at
+    21:56:31.
+  - **Do:** measure the slow tier's per-worker peak RSS, as T01.18 did for
+    `ml_training` (`/usr/bin/time -v`, and `MemAvailable` over a run). Then
+    extend `pytest_xdist_auto_num_workers` to `slow` selections, with a cap
+    the measurement justifies. A worker count from `MemAvailable` ÷ measured
+    peak would also cover a second session's gate, which a fixed cap does not.
