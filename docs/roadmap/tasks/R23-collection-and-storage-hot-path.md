@@ -250,17 +250,36 @@ session-name parser.
     `ThreadHandoff`; parse each line once.
   - [ ] Check `hat_adc_collector.py` for the same shape (not reviewed).
 
-- [ ] **R23.5 The last two `iterrows` loops in `src/`.**
+- [x] **R23.5 The last two `iterrows` loops in `src/`.**
   `collection/replay.py` `_read_chunk` and `decode/dids.py` `decode_did_rows`.
   `decode/dbc.py` already records what this costs ("building a Series per
   frame was ~90 % of this function's time", 2026-09-25). `decode_did_rows`
   runs on every session load that carries raw `DID_<hex>` rows.
-  - [ ] Column lists in both; in `decode_did_rows`, decode each distinct
-    `(channel, value_text)` once.
-  - [ ] A source test that refuses `.iterrows()` under `src/`, next to
-    `tests/test_yaml_load.py`. This has now been found three times.
+  - [x] Column lists in both; in `decode_did_rows`, decode each distinct
+    `(channel, value_text)` once (keyed `(source, channel, value_text)`; the
+    source is constant after the foreign-source filter). Evidence (2026-11-13):
+    both functions run at `HEAD` (worktree) and in the new code on real data,
+    `pd.testing.assert_frame_equal(check_exact=True)` incl. dtypes, index and
+    order, replay rows compared field by field with types. `decode_did_rows` on
+    30 chunks of `_capture-tuning-did-2026-08-07T005351` (300 000 rows, 17 763
+    decoded; plain, with `session`/`session_path`, nullable `session`, a
+    `kline` mix): all four identical. `_read_chunk` on 4 chunks of that session
+    (10 000 rows) and 2 of `_capture-tuning-2026-11-12T034249`, with and without
+    `skip_sources={"can"}`: all 12 identical. Timings, best of 3 (laptop):
+    `decode_did_rows` 0.86 s to 0.15 s (5.8x; 0.77 s to 0.18 s with session
+    columns); `_read_chunk` 0.47 s to 0.05 s per 10 000-row chunk (9x), 0.107 s
+    to 0.016 s with CAN skipped. `tests/test_hot_path_equivalence.py` keeps the
+    old loops as references and compares on synthetic frames (every branch;
+    asserts each distinct reading is decoded once).
+  - [x] A refusal of `.iterrows()` under `src/`: the existing
+    `per-row-dataframe-python` rule in `tests/test_source_rules.py` (the shared
+    mechanism; it also refuses `.apply(axis=1)`) had `replay.py` and `dids.py`
+    allowlisted, one hit each; both entries are removed, so the allowlist is
+    empty and any `iterrows` under `src/` fails. Its `bad`/`good` snippet test
+    and the scratch-tree test (`test_a_violation_in_a_scanned_file_is_reported`)
+    prove it can fail.
 
-- [ ] **R23.6 Per-frame object cost, taken together.** About 15 µs per
+- [x] **R23.6 Per-frame object cost, taken together.** About 15 µs per
   broadcast frame on the laptop: `frame_to_record` 9.8 µs (a `FrameArrival`
   dataclass, `datetime.fromtimestamp`, an `astimezone(UTC)` on a datetime that
   is already UTC, a frozen dataclass init, a metadata dict, an f-string
@@ -268,9 +287,29 @@ session-name parser.
   datetime back to a float, copies the payload, re-parses the hex id out of
   the channel name, takes `max()` of a 16-deque). No single hot spot, so it
   ranks below R23.1–R23.3.
-  - [ ] `slots=True` on `TelemetryRecord`; skip `astimezone` when the tzinfo
-    is already UTC; `keep_record` reads `metadata["can_id"]`; a running
-    maximum for the inter-arrival.
+  - [x] `slots=True` on `TelemetryRecord` (grep: no subclass, no `__dict__`/
+    `vars`, no `weakref`, no arbitrary attribute set; pickle and
+    `dataclasses.replace` tested); skip `astimezone` when `tzinfo is UTC`;
+    `keep_record` passes `metadata["can_id"]` to `keep` (`can_id=`) when it is
+    an `int` and parses the channel name otherwise (a hand-built record or a
+    stored row older than the key has none; `bool`/str values are refused);
+    a running maximum for the inter-arrival: `_RecentGaps`, a monotonic deque
+    that hands over when the maximum leaves the 16-window. Evidence
+    (2026-11-13): `tests/test_hot_path_equivalence.py` (34 tests) checks the
+    running maximum against `max(deque(maxlen=n))` for n in 1, 2, 3, 16 on 1 200
+    random, tied, ascending and descending sequences after every append, and
+    `keep_record` against a copy of the old rule on 4 x 6 000-frame streams with
+    and without `can_id`; breaking the expiry makes 14 of them fail. On a
+    94 696-frame real-session stream (12 chunks of
+    `_capture-tuning-did-2026-08-07T005351` plus error, remote, 11-bit and
+    29-bit diagnostic frames and clock steps) the `TelemetryRecord` fields
+    (timestamp, tzinfo, source, channel, value, unit, payload, metadata) and
+    the keep decision of every frame are identical at `HEAD` and now (kept
+    70 142, suppressed 24 554). Timings (laptop, gc off, best of 15, repeated
+    six times each because the machine is shared): `frame_to_record` 3.7-3.9 us
+    before, 3.3-4.4 us after, so unchanged within noise (the item's 9.8 us did
+    not reproduce; `TelemetryRecord.can` alone 2.89 to 2.36 us, `timeit`);
+    `keep_record` 1.5 us before (one 3.05 outlier), 1.3-1.4 us after.
 
 ## Duplication and structure
 

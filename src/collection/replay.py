@@ -114,31 +114,40 @@ def _present(value: Any) -> bool:
     """
     if value is None:
         return False
+    # The types a stored row is made of, answered without the pandas call.
+    if isinstance(value, (str, bool)):
+        return True
+    if isinstance(value, float):
+        return value == value
     return not (pd.api.types.is_scalar(value) and bool(pd.isna(value)))
 
 
-def _value(row: pd.Series) -> float | str | bool | None:
-    num = row.get("value_number")
+def _value_of(num: Any, text: Any, flag: Any) -> float | str | bool | None:
+    """The one value a stored row carries: its number, else its text, else its flag."""
     if _present(num):
-        return float(num)  # type: ignore[arg-type]
-    text = row.get("value_text")
+        return float(num)
     if _present(text):
         return str(text)
-    b = row.get("value_bool")
-    if _present(b):
-        return bool(b)
+    if _present(flag):
+        return bool(flag)
     return None
 
 
-def _payload(row: pd.Series) -> bytes | None:
-    p = row.get("payload")
+def _value(row: pd.Series) -> float | str | bool | None:
+    return _value_of(row.get("value_number"), row.get("value_text"), row.get("value_bool"))
+
+
+def _payload_of(p: Any) -> bytes | None:
     if isinstance(p, (bytes, bytearray)):
         return bytes(p)
     return None
 
 
-def _metadata(row: pd.Series) -> dict[str, MetadataValue]:
-    raw = row.get("metadata_json")
+def _payload(row: pd.Series) -> bytes | None:
+    return _payload_of(row.get("payload"))
+
+
+def _metadata_of(raw: Any) -> dict[str, MetadataValue]:
     if not isinstance(raw, str) or not raw:
         return {}
     try:
@@ -146,6 +155,10 @@ def _metadata(row: pd.Series) -> dict[str, MetadataValue]:
     except ValueError:
         return {}
     return dict(parsed) if isinstance(parsed, dict) else {}
+
+
+def _metadata(row: pd.Series) -> dict[str, MetadataValue]:
+    return _metadata_of(row.get("metadata_json"))
 
 
 def _original_acquired(metadata: Any) -> dict[str, MetadataValue]:
@@ -416,19 +429,34 @@ def _read_chunk(chunk: Path, skip_sources: frozenset[TelemetrySource]) -> tuple[
             return [], skipped
     df = df.sort_values("timestamp", kind="stable")
     ts = pd.to_datetime(df["timestamp"], utc=True)
+    # Column lists, not ``iterrows``: building a Series per row was most of this
+    # function's time (``src/decode/dbc.py`` records the same cost).
+    n = len(df)
+
+    def column(name: str) -> list[Any]:
+        return df[name].tolist() if name in df.columns else [None] * n
+
+    sources = df["source"].tolist()
+    channels = df["channel"].tolist()
+    numbers = column("value_number")
+    texts = column("value_text")
+    flags = column("value_bool")
+    units = column("unit")
+    payloads = column("payload")
+    metadata = column("metadata_json")
     rows: list[_Row] = []
-    for (_, row), t in zip(df.iterrows(), ts, strict=True):
-        unit = row.get("unit")
+    for i, t in enumerate(ts):
+        unit = units[i]
         rows.append(
             (
                 float(t.timestamp()),
                 {
-                    "source": str(row["source"]),
-                    "channel": str(row["channel"]),
-                    "value": _value(row),
+                    "source": str(sources[i]),
+                    "channel": str(channels[i]),
+                    "value": _value_of(numbers[i], texts[i], flags[i]),
                     "unit": "" if unit is None or pd.isna(unit) else str(unit),
-                    "payload": _payload(row),
-                    "metadata": _metadata(row),
+                    "payload": _payload_of(payloads[i]),
+                    "metadata": _metadata_of(metadata[i]),
                 },
             )
         )

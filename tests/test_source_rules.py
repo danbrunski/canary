@@ -341,28 +341,15 @@ RULES: tuple[Rule, ...] = (
         name="per-row-dataframe-python",
         why=(
             ".iterrows() and .apply(axis=1) run Python once per row: ~100x slower than the "
-            "vectorised form on a session frame (R26 found none on session frames; keep it "
-            "that way). Vectorise, or add the file here with the reason it is not a session frame"
+            "vectorised form on a session frame. Read the columns as lists (df[name].tolist()) "
+            "or use itertuples(); the last two loops, in collection/replay.py and "
+            "decode/dids.py, went in R23.5 (replay 9x, DID decode 5x faster) and this has "
+            "been found three times, so nothing under src/ is allowed one any more"
         ),
         roots=("src",),
         suffixes=(".py",),
         find=_slow_frame_rows,
-        allowed={
-            **_grant(
-                "replay re-emits a stored session one row at a time into the live pipeline; the"
-                " per-row step is the point, not a vectorisable transform",
-                {
-                    "src/collection/replay.py": 1,
-                },
-            ),
-            **_grant(
-                "decodes raw DID reading text row by row through decode_raw_did_reading (a "
-                "Python decoder per row); not on a session-sized hot path",
-                {
-                    "src/decode/dids.py": 1,
-                },
-            ),
-        },
+        allowed={},
         bad=(
             "for _, row in frame.iterrows():\n    pass\n"
             "frame.apply(f, axis=1)\nframe.apply(f, axis='columns')\n"

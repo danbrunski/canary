@@ -283,9 +283,14 @@ def channel_of(column: str) -> str:
     return channel if sep else column
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TelemetryRecord:
-    """One normalized telemetry sample from any collection source."""
+    """One normalized telemetry sample from any collection source.
+
+    ``slots=True``: a record is built per frame and per reading (tens of
+    thousands a second on a busy bus) and never takes another attribute, so
+    it carries no ``__dict__`` (R23.6).
+    """
 
     timestamp: datetime
     source: TelemetrySource
@@ -297,7 +302,10 @@ class TelemetryRecord:
 
     def __post_init__(self) -> None:
         ts = self.timestamp
-        if ts.tzinfo is None:
+        tzinfo = ts.tzinfo
+        if tzinfo is UTC:
+            return  # already normalised: nothing to set
+        if tzinfo is None:
             ts = ts.replace(tzinfo=UTC)
         else:
             ts = ts.astimezone(UTC)

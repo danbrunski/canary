@@ -107,6 +107,11 @@ def is_diagnostic_can_id(channel: str) -> bool:
     can_id = parse_can_channel(channel)
     if can_id is None:
         return False
+    return _is_diagnostic_id(can_id)
+
+
+def _is_diagnostic_id(can_id: int) -> bool:
+    """:func:`is_diagnostic_can_id` for an id already parsed."""
     return (
         can_id == 0x7DF
         or 0x7E0 <= can_id <= 0x7EF
@@ -227,7 +232,7 @@ class CanChangeFilter:
     #: (at most :data:`_RECENT_INTERARRIVALS`, each at most the timeout: a
     #: longer gap is a silence, not a period).
     _seen: dict[str, float] = field(init=False, default_factory=dict)
-    _recent: dict[str, deque[float]] = field(init=False, default_factory=dict)
+    _recent: dict[str, _RecentGaps] = field(init=False, default_factory=dict)
     kept: int = field(init=False, default=0)
     suppressed: int = field(init=False, default=0)
 
@@ -255,28 +260,35 @@ class CanChangeFilter:
         seconds: float,
         *,
         event: bool = False,
+        can_id: int | None = None,
     ) -> bool:
         """Whether a CAN frame of ``channel`` at ``seconds`` (epoch) is kept.
 
         ``event`` marks an error or remote frame, and a diagnostic id
         (:func:`is_diagnostic_can_id`) is one too: always kept, no state.
+        ``can_id`` is the frame's arbitration id when the caller already has it
+        as an integer, so the channel name is not parsed back into one; it must
+        be the id ``channel`` spells.
         """
-        if payload is None or event or is_diagnostic_can_id(channel):
+        if payload is None or event:
             # Nothing to compare, or not a value: keep it, leave the state alone.
             self.kept += 1
             return True
-        data = bytes(payload)
+        if _is_diagnostic_id(can_id) if can_id is not None else is_diagnostic_can_id(channel):
+            self.kept += 1
+            return True
+        data = payload if type(payload) is bytes else bytes(payload)
         previous = self._last.get(channel)
         seen = self._seen.get(channel)
         self._seen[channel] = seconds
         recent = self._recent.get(channel)
         if recent is None:
-            recent = self._recent[channel] = deque(maxlen=_RECENT_INTERARRIVALS)
+            recent = self._recent[channel] = _RecentGaps(_RECENT_INTERARRIVALS)
         if seen is not None and seen <= seconds and seconds - seen <= self.stale_timeout_seconds:
             recent.append(seconds - seen)
         # The next frame is expected within the id's longest recent gap: an
         # irregular id (a tester's requests) is judged by its slowest cadence.
-        interarrival = max(recent) if recent else 0.0
+        interarrival = recent.longest()
         age = seconds - previous[1] if previous is not None else 0.0
         if (
             previous is None
@@ -295,11 +307,18 @@ class CanChangeFilter:
         """:meth:`keep` for a telemetry record; non-CAN records are kept."""
         if record.source != CAN_SOURCE:
             return True
+        metadata = record.metadata
+        # ``can_id`` is on every frame the collectors build (``TelemetryRecord.can``)
+        # and on every stored row replayed from one. A record built by hand, or
+        # replayed from a session older than the key, has none, and the channel
+        # name is parsed instead; ``bool`` is excluded as it is an ``int``.
+        can_id = metadata.get("can_id")
         return self.keep(
             record.channel,
             record.payload,
             _epoch_seconds(record.timestamp),
-            event=record.metadata.get(CAN_FRAME_KIND_KEY) is not None,
+            event=metadata.get(CAN_FRAME_KIND_KEY) is not None,
+            can_id=can_id if type(can_id) is int else None,
         )
 
 
@@ -307,6 +326,38 @@ class CanChangeFilter:
 #: to span an irregular id's bursts; few enough that one dropout on a 100 Hz
 #: id is forgotten in a tenth of a second.
 _RECENT_INTERARRIVALS = 16
+
+
+class _RecentGaps:
+    """The newest ``size`` inter-arrivals of one id, and their maximum in O(1).
+
+    Equal to ``max(deque(maxlen=size))`` after every append: the window is a
+    monotonic deque of ``(sequence, gap)`` whose gaps fall from the front. A gap
+    is dropped from the back when a newer, at least as large gap arrives (it can
+    never be the maximum again), and the front is dropped when it is more than
+    ``size`` appends old, so the maximum leaving the window hands over to the
+    next largest gap still inside it.
+    """
+
+    __slots__ = ("_count", "_size", "_window")
+
+    def __init__(self, size: int) -> None:
+        self._size = size
+        self._count = 0
+        self._window: deque[tuple[int, float]] = deque()
+
+    def append(self, gap: float) -> None:
+        window = self._window
+        while window and window[-1][1] <= gap:
+            window.pop()
+        window.append((self._count, gap))
+        self._count += 1
+        if window[0][0] <= self._count - 1 - self._size:
+            window.popleft()
+
+    def longest(self) -> float:
+        """The largest gap in the window; ``0.0`` while it is empty."""
+        return self._window[0][1] if self._window else 0.0
 
 
 def _epoch_seconds(moment: datetime) -> float:

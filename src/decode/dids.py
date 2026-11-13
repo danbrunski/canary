@@ -1069,37 +1069,79 @@ def decode_did_rows(long_frame: pd.DataFrame, did_map: DidMap) -> pd.DataFrame:
     if not by_hex:
         return long_frame
 
-    has_session_path = "session_path" in long_frame.columns
-    records: list[dict[str, Any]] = []
-    for _, row in raw.iterrows():
-        hit = decode_raw_did_reading(
-            by_hex, str(row["channel"]), row.get("value_text"), source=str(row.get("source", ""))
+    # Column lists, not ``iterrows`` (a Series per row), and each distinct
+    # reading is decoded once: a polled DID repeats the same few payloads, so a
+    # session has far fewer distinct ``(source, channel, value_text)`` triples
+    # than raw rows. ``source`` is in the key because the decode refuses a
+    # foreign source; the frame is already stripped of those, so it never
+    # splits a group in practice.
+    n = len(raw)
+    timestamps = raw["timestamp"].tolist()
+    channels = raw["channel"].tolist()
+    texts = raw["value_text"].tolist() if "value_text" in raw.columns else [None] * n
+    sources = raw["source"].tolist() if "source" in raw.columns else [""] * n
+    sessions = raw["session"].tolist() if "session" in raw.columns else [None] * n
+    session_paths = raw["session_path"].tolist() if "session_path" in raw.columns else [None] * n
+    decoded_cache: dict[tuple[str, str, str], DecodedDid | None] = {}
+    columns: dict[str, list[Any]] = {
+        name: []
+        for name in (
+            "timestamp",
+            "channel",
+            "value_number",
+            "unit",
+            "session",
+            "session_path",
+            "source_channel",
         )
+    }
+    for i in range(n):
+        text = texts[i]
+        channel = str(channels[i])
+        source = str(sources[i])
+        if isinstance(text, str):
+            key = (source, channel, text)
+            if key in decoded_cache:
+                hit = decoded_cache[key]
+            else:
+                hit = decoded_cache[key] = decode_raw_did_reading(
+                    by_hex, channel, text, source=source
+                )
+        else:
+            # Not a hex string: ``decode_raw_did_reading`` returns None for it.
+            hit = None
         if hit is None:
             continue
         entry, numeric = hit.entry, hit.value
-        records.append(
-            {
-                "timestamp": row["timestamp"],
-                "source": DID_SOURCE,
-                "channel": entry.name,
-                "value_number": numeric,
-                "value_text": None,
-                "value_bool": None,
-                "unit": hit.unit,
-                "payload": None,
-                "metadata_json": None,
-                "session": row.get("session"),
-                "session_path": row.get("session_path") if has_session_path else None,
-                "source_channel": f"{DID_SOURCE}:{entry.name}",
-                "value": numeric,
-            }
-        )
+        columns["timestamp"].append(timestamps[i])
+        columns["channel"].append(entry.name)
+        columns["value_number"].append(numeric)
+        columns["unit"].append(hit.unit)
+        columns["session"].append(sessions[i])
+        columns["session_path"].append(session_paths[i])
+        columns["source_channel"].append(f"{DID_SOURCE}:{entry.name}")
 
-    if not records:
+    n_decoded = len(columns["timestamp"])
+    if not n_decoded:
         return long_frame
 
-    decoded = pd.DataFrame(records)
+    decoded = pd.DataFrame(
+        {
+            "timestamp": columns["timestamp"],
+            "source": DID_SOURCE,
+            "channel": columns["channel"],
+            "value_number": columns["value_number"],
+            "value_text": None,
+            "value_bool": None,
+            "unit": columns["unit"],
+            "payload": None,
+            "metadata_json": None,
+            "session": columns["session"],
+            "session_path": columns["session_path"],
+            "source_channel": columns["source_channel"],
+            "value": columns["value_number"],
+        }
+    )
     # Align columns with the input so concat doesn't introduce NaN-only extras.
     for col in long_frame.columns:
         if col not in decoded.columns:
