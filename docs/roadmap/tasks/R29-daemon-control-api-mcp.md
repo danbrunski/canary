@@ -1036,6 +1036,38 @@ it; go after that work lands.
   - `docs/mcp-server.md` has table cells several kilobytes long. Move the
     per-tool prose under headings so the table is a table.
 
+- [ ] **R29.17 The legacy `/control/tuning-mode` shim restores the wrong
+  profile.** Pre-existing. Found while moving it to
+  `src/control/tuning_mode.set_tuning_mode` in R29.7 (the move kept the
+  behavior).
+  - **Disarm.** `tuning_profile.set_active(False)` installs a synthesized
+    `default` (the 18 `DEFAULT_TUNING_CHANNELS`, no DIDs), not the catalog
+    `default` that `collectors.py` passes to `configure_default` and that
+    `ProfileCaptureController.stop` restores (`control/profile_capture.py`,
+    `profile_store.load().by_name("default")`). After a legacy disarm the
+    daemon therefore polls the shim's default until restart. On the truck,
+    unmeasured: how far the catalog `default` differs from the synthesized one.
+  - **Rollback.** `set_active` returns `is_active()`, which is `True` for
+    *any* non-default profile. Two failures follow:
+    - Arming over a running `/control/captures` capture replaces it with the
+      `fuel-map` shim profile, and storage does not move because
+      `previous == enabled`.
+    - When the writer fails, the rollback calls `set_active(previous)`
+      without the channel set or rate. A failed disarm therefore re-arms the
+      18-channel default set at no fixed rate, not the operator's set. A
+      failed arm during a real capture "restores" a synthesized `fuel-map`
+      profile.
+  - **Fix shape.**
+    - Snapshot `active_profile()` and the session dir before the change.
+    - Restore that exact profile on failure, and pass the catalog `default`
+      on disarm.
+    - `activate()` bumps the capture generation and restarts
+      `capture_lifetime`, so a faithful restore needs an `activate(...,
+      resume=True)` path, or a refusal to arm over a non-shim capture
+      (`409`, naming it) instead.
+  - Moot if the operator retires the route (R29.7's open question: only the
+    MCP tool `set_tuning_mode`, tests and docs use it; the dashboard does not).
+
 The path-keyed lock registry and locked JSONL append found here
 (`brain_jobs`, `evidence/ledger`, `vehicle_ledger`) are R24.9.
 
