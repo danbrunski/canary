@@ -164,6 +164,13 @@ def test_the_real_case_is_pending_because_the_plant_failed_its_bounds(
     pre = report["baseline_reproduction"]
     # Steady, transient and missing are reported apart, plus the latency bracket.
     assert pre["transient"]["n_samples"] > 0
+    # M01.19: a transient is compared under the one delay only at or above
+    # its stated rpm; the rest are counted, never scored.
+    transient = samples[(samples["state"] == "transient") & np.isfinite(samples["err_pct"])]
+    fast = transient["rpm"] >= delay.transient_min_rpm
+    assert pre["transient"]["min_rpm"] == delay.transient_min_rpm == 2500
+    assert pre["transient"]["n_samples"] == int(fast.sum())
+    assert pre["transient"]["below_min_rpm"] == int((~fast).sum())
     assert set(pre["missing"]) == {"missing_input", "not_co_observed"}
     assert set(pre["observation_latency_median_shift_pct"]) == {
         "lambda_observation_delay=lo",

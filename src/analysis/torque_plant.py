@@ -220,6 +220,10 @@ class TorquePlantProfile(_Strict):
     hardware_configuration: str = Field(min_length=1)
     structure: Structure
     registry: Registry
+    #: What the bracketed approximations leave out, with their size where it
+    #: is known (M01.19: the exhaust back-pressure bracket at full throttle).
+    #: Required, and carried on every :class:`TorqueResult`.
+    limitations: list[str] = Field(min_length=1)
 
     def unmeasured(self) -> tuple[str, ...]:
         return tuple(p.id for p in self.registry.parameters if p.status != "known")
@@ -470,6 +474,8 @@ class TorqueResult:
     brake_nm: FloatArray
     #: Per refusal reason, the samples it applies to (NaN in every array).
     refused: Mapping[str, NDArray[np.bool_]] = field(default_factory=dict)
+    #: The profile's stated limits (``TorquePlantProfile.limitations``).
+    limitations: tuple[str, ...] = ()
 
 
 def evaluate(
@@ -570,6 +576,7 @@ def evaluate(
         pumping_nm=pumping,
         brake_nm=brake,
         refused=refused,
+        limitations=tuple(profile.limitations),
     )
 
 

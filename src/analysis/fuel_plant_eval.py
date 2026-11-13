@@ -911,6 +911,7 @@ def evaluate(
         "sensitivity_median_shift_pct": sensitivity,
         "coverage": coverage,
         "unresolved_effects": sorted(set(unresolved)),
+        "limitations": list(profile.limitations),
         "sessions": sorted(sessions),
         "spent_records": [
             {

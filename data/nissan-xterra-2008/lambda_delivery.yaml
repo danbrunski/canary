@@ -252,6 +252,16 @@ eligibility:
           # tell from 0.10 s at alpha 0.05 (per_pair_bracket). Consumers
           # re-run at both ends and flag a result that changes (R05.16).
           bracket_s: [0.0, 0.5]
+          # M01.19: the lowest rpm a transient (tip-in, lift, a target still
+          # ramping) may be compared at under this one delay. The 161 reads
+          # that chose it sit at rpm p5 2,100 / p10 2,600 / median 3,275 and
+          # MAF p10 54 g/s (2026-11-13, nearest obd:RPM within 0.25 s on the
+          # five fitted_on drives). Exhaust transport lengthens as flow
+          # falls: about 0.12 s at full throttle, 0.16 s at cruise and
+          # 0.35-0.45 s at idle, so below the fitting range one 0.10 s delay
+          # pairs a tip-in's lambda with fuel set before the step. Steady
+          # windows (the dwell rule) do not depend on it.
+          transient_min_rpm: 2500
           fitted_on:
             - _capture-fuel-target-research-2026-09-20T222101
             - _capture-fuel-target-research-2026-09-20T224503

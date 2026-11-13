@@ -1151,7 +1151,7 @@ them; absolute and "corrected" figures do not.
     different constant, or does its setpoint sit at a neighboring knot?
     Related to M01.3(a): the divisor belongs to the ECM.
 
-- [ ] **M01.18 (Question) Does the Fuel Comp fit keep purge-active samples?**
+- [x] **M01.18 (Question) Does the Fuel Comp fit keep purge-active samples?**
   `fuel_comp_samples` reconstructs the purge term for the load byte
   (`purge_moves_cell`). No gate was found that removes or corrects
   purge-active samples in the trim-derived error; the fit internals were not
@@ -1159,10 +1159,49 @@ them; absolute and "corrected" figures do not.
   pulse 5–10 % while purging and any error in its estimate lands in STFT. If
   that estimate is off by a fifth, 1.5–3 % of trim in light-cruise cells is
   purge, and a fit would write it into a table that applies with purge off.
-  - [ ] Find out. If purge-active samples are kept, make purge state a stated
+  - [x] Find out. If purge-active samples are kept, make purge state a stated
     stratifier of the fit or gate them out.
+    *Done 2026-11-13: they were kept; now refused.* Read end to end:
+    `fuel_comp_samples` uses purge only to place the load byte
+    (`purge_area_lo/hi`, `purge_moves_cell` → `cell_ambiguous`), and
+    `fuel_comp_fit.prepare_fit_samples` had no purge test, so a sample with
+    purge paired and commanded on went straight into the fit. On the stored
+    corpus fit (`~/canary-data/analysis-scripts/2026-11-08-n02/fit-corpus`,
+    `samples-after`) 454 of the 564 usable samples (declared configuration,
+    10 of 13 drives) were purge-on, 95 purge-unknown, and only 8 closed-loop
+    plus 7 open-loop known purge-off. **Gated, not stratified:** while purging
+    the ECM's vapor estimate error lands in STFT, follows canister loading
+    (varies within and between drives, logged nowhere) and is scheduled by
+    load and rpm, so neither a per-cell nor a per-drive term separates it on
+    this corpus, and the table it would be written into also applies with
+    purge off. `fuel_comp_fit.purge_state` reads `off` only for a purge byte
+    paired within the separation whose flow area is 0 (byte 0 or 1); refusals
+    `purge_active` / `purge_unknown` (not paired, not captured, or a purge gain
+    of 0 that cannot show off) are tested **last**, so every other refusal
+    counts as before and the required factor is still formed; `purge_state` is
+    a prepared column; `FIT_VERSION` 1 → 2. The stratification survives as a
+    description: `purge_strata` (n, drives, median remainder and required vs
+    current, per route × purge state) in `fit.json` and `report.md`, never a
+    fit input. Tests (`tests/test_fuel_comp_fit.py`):
+    `test_only_samples_with_purge_flow_paired_and_zero_enter_the_fit`;
+    `test_purge_biases_a_fit_that_keeps_it_and_not_one_that_refuses_it` (six
+    drives, 75 % of samples purging with +3 % ± a ±1 % per-drive canister
+    term: kept, the six cells fit +1.49..+2.53 % high over seeds 3-5; gated,
+    −0.54..+0.40 %). **The stored fit, re-run** with the gate on the same
+    samples (`tools.fuel_comp_fit --samples …/samples-after/samples.parquet`):
+    usable 564 → 15 samples, 13 → 6 drives; cells proposed / insufficient /
+    not covered 10 / 50 / 196 → 0 / 26 / 230 (DID route included: 14 / 53 /
+    189 → 0 / 26 / 230). All ten previously proposed cells (rows 5-6, −4.3 to
+    +1.5 %, eight "resolved") rested on purging samples. Verdict unchanged,
+    "no improvement", now "(no cell passed the refusals in any fold)"; held-out
+    RMS current 2.848 → 4.035 %, global 2.555 → 2.713 % (different samples,
+    not comparable). Strata (closed loop, median remainder): purge on −0.65 %
+    (n 454, 10 drives), off −0.83 % (n 8, 5 drives), unknown −1.51 %
+    (n 105): the purge effect is not resolvable from 8 purge-off samples.
+    This matches the 2026-11-08 analysis' own request (§5): part-throttle
+    closed loop with purge commanded 0 on ≥ 2 drives before any proposal.
 
-- [ ] **M01.19 Documented approximations; state their limits where they are
+- [x] **M01.19 Documented approximations; state their limits where they are
   used.**
   - One λ transport delay, 0.10 s (`lambda_delivery.yaml`), fitted on
     enrichment. Physically the delay is about 0.12 s at full throttle, 0.16 s
@@ -1184,6 +1223,66 @@ them; absolute and "corrected" figures do not.
     of flow. Idle cells carry about ±1.5 % model uncertainty from this term.
   - `torque_plant`'s 0–15 kPa exhaust back-pressure bracket is probably low
     at full throttle (about 2 % of torque).
+
+  *Done 2026-11-13, each limit where it is used:*
+  - [x] λ delay: `RegimeDelay.transient_min_rpm` (`lambda_delivery.py`),
+    required on a frozen delay, refused on a `not_estimated` one;
+    `lambda_delivery.yaml` sets `transient_min_rpm: 2500` on the enrichment
+    RAM-target delay, from the rpm of the 161 reads that chose it (re-measured:
+    p5 2,100, p10 2,600, median 3,275; MAF p10 54 g/s). The one place that
+    compares transient windows under the single delay is
+    `plant_validation.replay_report`'s `transient` block (B06's delivery rows
+    are steady-target only; `fuel_comp_samples`' open loop uses the 0–0.5 s
+    bracket, which covers idle's 0.35–0.45 s): it now scores only transients
+    at or above the limit and reports `min_rpm` and `below_min_rpm`
+    (`B06Rules.transient_min_rpm`). On the committed 2026-09-23T142926 slice:
+    859 transients → 573 scored, 286 below (median error 4.06 → 4.35 %, |p90|
+    44.0 → 37.6 %; below the limit alone |p90| 53.5 %). Tests:
+    `test_a_frozen_delay_names_its_drives_and_sits_inside_its_bracket`
+    (missing limit refused; `load_b06` refuses `delay_not_frozen` without it), `test_the_real_case_is_pending_because_the_plant_failed_its_bounds`
+    (counts split at the limit).
+  - [x] Manifold τ: verified in `engine_dynamics.integrate` (2,500 rpm, 4.0 L,
+    VE 0.7, 3.954 L, rk4 at the contract's 1.28 ms and at 10 µs): τ 0.0694 s,
+    pressure 63 % at 0.04955 s = τ/γ exactly (adiabatic p obeys a first-order
+    law at γ/τ), air mass 63 % at 0.0694 s; isothermal pressure at τ. The
+    item's 0.0499 s reads 0.7 % late: normalizing by the end of a 6τ run
+    (0.25 % unsettled) moves the crossing. New
+    `ManifoldParameters.pressure_tau_s` and `volume_from_pressure_tau` (γ·τ_MAP
+    adiabatic, τ_MAP isothermal; the pair is the bracket); `manifold_plant.yaml`
+    `manifold_volume` basis and evidence rewritten to say so. Test:
+    `test_manifold_pressure_responds_at_tau_over_gamma_and_a_map_step_volume_uses_it`
+    (the τ formula read on the adiabatic step gives 4.0/1.4).
+  - [x] ZOH: `engine_dynamics.REPLAY_LIMITATIONS` on every `ManifoldReplay`
+    (`limitations`), `hold_gap_on_grid` gives the MAF read gap each solver step
+    is held across (`maf_hold_gap_s`), and `resolved_period_s` is now the longer
+    of one engine cycle (`cycle_period_s`) and that gap. The item's 27 ms is not
+    reproduced: at the working 4.0 L / VE 0.7, τ at 5,500 rpm is 31.5 ms and
+    the pressure constant τ/γ 22.5 ms (103 ms at 1,200 rpm); the text states
+    those. Tests: `test_the_held_boundary_states_the_read_gap_it_spans`,
+    `test_replay_refuses_outside_its_envelope_and_never_clips_above_ambient`
+    (0.25 s reads resolve 0.25 s, not the 60 ms cycle).
+  - [x] IAT / idle MAP: one sidecar, `data/nissan-xterra-2008/plant_limitations.yaml`,
+    keyed by `plant_version` (the plant files stay at HEAD bytes: fuel-mv-2's
+    sha256 189276b8… is pinned by the fuel-comp restore prediction of
+    record). `load_fuel_plant` attaches them as `FuelPlantProfile.limitations`
+    and refuses `limitations_undeclared` when the sidecar is absent or names
+    no entry for a version `plant_files` returns; a plant file that declares
+    `limitations` itself is refused. `fuel_plant_eval.evaluate` writes them
+    into its result (`limitations`). Each version's own idle MAP: fuel-mv-1/-2 17.5 kPa →
+    idle flow 1.3–2.2 % high against 28–35 kPa; fuel-mv-3 21.8 kPa (22.2 at
+    exhaust 1.1 × baro) → 0.7–1.6 % (rail 350 kPa, baro 81). IAT-as-charge:
+    a charge 20–40 K above IAT (not measured) is 7–13 % on MAP. The item's
+    "22–26 kPa" upper end was not reproduced. `manifold_pressure_speed_density`
+    docstring names it.
+    Tests: `test_every_plant_version_states_its_limits_and_a_missing_one_is_refused`,
+    `test_the_held_out_slice_is_scored_against_the_predeclared_bounds`.
+  - [x] Back pressure (in-file: nothing pins `torque_plant_tq0.yaml`'s
+    bytes): `TorquePlantProfile.limitations` (required) carried on
+    every `TorqueResult`; `torque_plant_tq0.yaml` states it: Vd/4π = 0.315 Nm
+    per kPa, a stock exhaust's 20–40 kPa at full flow (literature, not
+    measured) is 1.6–7.9 Nm beyond the 15 kPa top, 0.5–2.6 % of ~300 Nm at
+    80 kPa. Tests: `test_the_registry_follows_e07_3s_rules` (missing refused)
+    and `test_a_hand_computed_case_is_reproduced` (`r.limitations`).
 
 ## Part E — Vehicle facts in shared code
 

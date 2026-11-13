@@ -693,6 +693,12 @@ def test_a_frozen_delay_names_its_drives_and_sits_inside_its_bracket() -> None:
         LambdaDeliveryDeclaration.model_validate(
             _doc_with(path, {**delay, "status": "not_estimated", "fitted_on": []})
         )
+    # M01.19: one delay fitted on WOT pulls states the rpm below which a
+    # transient may not be compared under it.
+    assert delay["transient_min_rpm"] == 2500
+    without = {k: v for k, v in delay.items() if k != "transient_min_rpm"}
+    with pytest.raises(ValidationError, match="needs transient_min_rpm"):
+        LambdaDeliveryDeclaration.model_validate(_doc_with(path, without))
 
 
 def test_the_enrichment_delay_pairs_a_later_reading_and_closed_loop_does_not() -> None:

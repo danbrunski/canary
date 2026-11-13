@@ -157,6 +157,8 @@ def test_a_hand_computed_case_is_reproduced(world: Any) -> None:
     assert r.brake_nm[0] == pytest.approx(r.indicated_nm[0] - r.friction_nm[0] - r.pumping_nm[0])
     # A bracket case, never a prediction: it names what it rests on.
     assert r.kind == "bracket_case" and r.plant_sha256 == sha
+    # M01.19: the back-pressure bracket's limit rides on every result.
+    assert any("exhaust_back_pressure bracket" in t for t in r.limitations)
     assert set(r.unmeasured) == set(CASE)
     assert "spark_mbt_unmeasured" in r.effects and "pumping_from_unmeasured_map" in r.effects
     assert r.refused == {}
@@ -239,6 +241,10 @@ def test_the_registry_follows_e07_3s_rules() -> None:
         p for p in raw["registry"]["parameters"] if p["id"] != "cylinders"
     ]
     with pytest.raises(ValidationError, match="does not declare"):
+        TorquePlantProfile.model_validate(raw)
+    raw = _raw_plant()
+    del raw["limitations"]  # M01.19: the stated limits are required
+    with pytest.raises(ValidationError, match="limitations"):
         TorquePlantProfile.model_validate(raw)
     assert set(READS) == {p["id"] for p in _parsed_plant()["registry"]["parameters"]}
 

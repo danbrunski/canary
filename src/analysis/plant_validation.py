@@ -1121,7 +1121,13 @@ def replay_report(
 ) -> tuple[dict[str, Any], pd.DataFrame]:
     """Frozen-plant replay of recorded actuator commands: steady, transient and
     missing reads reported apart, and the lambda delay's bracket as a separate
-    observation-latency sensitivity. Returns the summary and the per-sample frame."""
+    observation-latency sensitivity. Returns the summary and the per-sample frame.
+
+    Transient reads are compared only at or above the delay's
+    ``transient_min_rpm`` (M01.19): the one frozen delay was fitted on
+    enrichment reads at rpm p10 2,600 / median 3,275, and below that exhaust transport is
+    longer (0.35-0.45 s at idle), so a low-rpm tip-in's lambda would pair with
+    fuel set before the step. Those reads are counted, never scored."""
     data = pd.concat([f for f in frames if len(f)], ignore_index=True) if frames else None
     if data is None or not len(data):
         return {"n_reads": 0, "verdict": "not_run", "reason": "no reads"}, pd.DataFrame()
@@ -1135,7 +1141,9 @@ def replay_report(
             lam / data.loc[finite, "lambda_obs"].to_numpy(dtype=float) - 1.0
         )
     steady = data[data["state"] == "eligible"]
-    transient = data[(data["state"] == "transient") & np.isfinite(data["err_pct"])]
+    transient_all = data[(data["state"] == "transient") & np.isfinite(data["err_pct"])]
+    fast = transient_all["rpm"].to_numpy(dtype=float) >= delay.transient_min_rpm
+    transient = transient_all[fast]
     steady_stats = _stats(
         steady["err_pct"].to_numpy(dtype=float), steady["region_id"].to_numpy(), profile
     )
@@ -1156,6 +1164,8 @@ def replay_report(
         "states": {k: int(v) for k, v in data["state"].value_counts().items()},
         "steady": steady_stats,
         "transient": {
+            "min_rpm": delay.transient_min_rpm,
+            "below_min_rpm": int((~fast).sum()),
             "n_samples": len(transient_err),
             "median_pct": float(np.median(transient_err)) if len(transient_err) else math.nan,
             "abs_p90_pct": (

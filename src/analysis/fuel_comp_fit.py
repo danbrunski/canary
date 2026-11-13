@@ -36,6 +36,25 @@ unvalidated DID route is a switch, not a refusal: off by default, and
 :func:`fit_both_ways` reports the cell outcome with and without it, flagging
 every cell those samples touch.
 
+**Purge is a refusal, tested last** (M01.18, :func:`purge_state`). Only a
+sample whose purge byte paired within the pairing separation and reads zero
+purge flow (``purge_area_hi == 0``: the byte is 0, valve off, or 1, duty 0)
+can enter the fit; ``purge_active`` and ``purge_unknown`` refuse the rest.
+While the canister purges, the ECM cuts the pulse by its own estimate of
+the vapor's fuel (0.90-0.95 of the chain on the 2026-10-26/27 drives) and
+any error in that estimate lands in STFT, so the trim-derived error of a
+purging sample is Fuel Comp's error plus the purge estimate's. That second
+term follows the canister's loading, which changes within a drive and
+between drives and is logged nowhere, and purge is scheduled by load and
+rpm, so it is not orthogonal to the cells: no per-cell or per-drive term
+separates it on the samples the corpus has. The table applies with purge
+off as well as on, so a fit on purging samples writes the purge error into
+every operating point of that cell. A purge read that did not pair is not
+known to be off (commands move by tens of percent between 15 s polls), so it
+refuses too. Every other refusal is tested first and the required factor is
+still formed, so :func:`purge_strata` can show what purge did to the
+samples it kept out.
+
 :func:`validate` fits on all drives but one (``fit.drive_unit``: sessions
 of one outing are one drive) and predicts the held-out drive's required
 factor, for every drive in turn, under four models on the same samples and
@@ -65,7 +84,9 @@ from src.decode.ecm_lookup import AxisHit, lookup_2d, search_axis
 from src.decode.fuel_comp_load import Interval, columns_read, reconstruct, spans_one_cell
 
 #: Bumped whenever a refusal, the required factor or a cell status changes.
-FIT_VERSION = 1
+#: 2: purge is a refusal (``purge_active``, ``purge_unknown``; M01.18) and
+#: ``purge_state`` is a prepared column.
+FIT_VERSION = 2
 
 CELLS = 256
 SIDE = 16
@@ -79,7 +100,12 @@ REFUSALS = (
     "cell_ambiguous",
     "target_cell_ambiguous",
     "required_factor_missing",
+    "purge_active",
+    "purge_unknown",
 )
+
+#: ``purge_state`` values (:func:`purge_state`).
+PURGE_STATES = ("off", "active", "unknown", "not_captured")
 
 #: Columns of :func:`prepare_fit_samples`' frame, in order.
 PREPARED_COLUMNS = (
@@ -114,6 +140,7 @@ PREPARED_COLUMNS = (
     "row_fraction",
     "col_index",
     "col_fraction",
+    "purge_state",
     "fit_refusal",
 )
 
@@ -166,6 +193,39 @@ def _culprits(row: Mapping[Any, Any]) -> str:
     return "+".join(names) if names else "inputs_jointly"
 
 
+def purge_state(record: Mapping[Any, Any], calibration: FuelCompCalibration) -> str:
+    """One of :data:`PURGE_STATES` for an N02.3 sample.
+
+    ``off`` only when the purge byte paired (``purge_basis == "paired"``) and
+    the purge flow area it gives on that revision is exactly 0 (byte 0, valve
+    off, or byte 1, duty 0). The area tells off from on only through a
+    nonzero ``purge_gain``: with a gain of 0 every byte reads area 0, so the
+    state is ``unknown``. ``not_captured``: the session logged no purge
+    source; ``unknown``: it did, but no read paired.
+    """
+    basis = record.get("purge_basis")
+    if basis == "not_captured":
+        return "not_captured"
+    if basis != "paired" or calibration.purge_gain <= 0:
+        return "unknown"
+    high = _int(record, "purge_area_hi")
+    if high is None:
+        return "unknown"
+    return "off" if high == 0 else "active"
+
+
+def _purge_refusal(state: str, calibration: FuelCompCalibration) -> str | None:
+    if state == "off":
+        return None
+    if state == "active":
+        return "purge_active: purge flow commanded on at the sample"
+    if state == "not_captured":
+        return "purge_unknown: purge never captured in the session"
+    if calibration.purge_gain <= 0:
+        return "purge_unknown: purge gain 0, the flow area cannot show purge off"
+    return "purge_unknown: no purge read paired within the separation"
+
+
 def prepare_fit_samples(
     samples: pd.DataFrame,
     calibrations: Mapping[str, FuelCompCalibration],
@@ -212,6 +272,7 @@ def prepare_fit_samples(
             out["fit_refusal"] = f"rom_image_unresolved: {record.get('revision')}"
             continue
         out["k_logged"] = calibration.k
+        out["purge_state"] = purge_state(record, calibration)
         values = {
             key: _int(record, key)
             for key in (
@@ -295,6 +356,9 @@ def prepare_fit_samples(
             out["fit_refusal"] = "required_factor_missing: no remainder"
             continue
         out["required_raw"] = applied * (1.0 + remainder / 100.0) * calibration.k / target.k
+        # Last, so every other refusal counts as before and the required
+        # factor of a purging sample is still formed (purge_strata).
+        out["fit_refusal"] = _purge_refusal(out["purge_state"], calibration)
     frame = pd.DataFrame(rows, columns=list(PREPARED_COLUMNS))
     refusal = frame["fit_refusal"].astype(object)
     frame["fit_refusal"] = refusal.where(refusal.notna(), None)
@@ -576,6 +640,42 @@ def refusal_counts(prepared: pd.DataFrame) -> dict[str, int]:
     """Prepared samples per refusal (``fit_refusal`` text), and ``usable``."""
     reasons = prepared["fit_refusal"].fillna("usable").astype(str)
     return {str(k): int(v) for k, v in reasons.value_counts().sort_index().items()}
+
+
+def purge_strata(prepared: pd.DataFrame) -> list[dict[str, Any]]:
+    """Per route and :data:`PURGE_STATES` value, the samples that pass every
+    refusal but purge's: count, drives, median droop remainder and median
+    required factor against the target's current lookup (both %). What the
+    purge refusal kept out, and how its error differs from purge off: a
+    description, never a fit input. A drive's median would be the fairer
+    unit; these pool samples, so read the drive count beside them."""
+    if prepared.empty:
+        return []
+    refusal = prepared["fit_refusal"]
+    kept = refusal.isna() | refusal.astype(str).str.startswith("purge_")
+    rows = prepared[kept]
+    out: list[dict[str, Any]] = []
+    for (route, state), group in rows.groupby(["route", "purge_state"], sort=True):
+        required = pd.to_numeric(group["required_raw"], errors="coerce")
+        current = pd.to_numeric(group["fc_now_firmware"], errors="coerce")
+        remainder = pd.to_numeric(group["remainder_pct"], errors="coerce")
+        out.append(
+            {
+                "route": str(route),
+                "purge_state": str(state),
+                "n": int(len(group)),
+                "drives": int(group["drive"].astype(str).nunique()),
+                "median_remainder_pct": (
+                    float(remainder.median()) if remainder.notna().any() else None
+                ),
+                "median_required_vs_current_pct": (
+                    float((100.0 * (required / current - 1.0)).median())
+                    if (required.notna() & current.notna()).any()
+                    else None
+                ),
+            }
+        )
+    return out
 
 
 def fit_table(
@@ -989,6 +1089,7 @@ __all__ = [
     "MODELS",
     "FIT_VERSION",
     "PREPARED_COLUMNS",
+    "PURGE_STATES",
     "REFUSALS",
     "VERDICT_IMPROVEMENT",
     "VERDICT_NONE",
@@ -1002,6 +1103,8 @@ __all__ = [
     "fit_both_ways",
     "fit_table",
     "prepare_fit_samples",
+    "purge_state",
+    "purge_strata",
     "refusal_counts",
     "validate",
 ]

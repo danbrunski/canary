@@ -246,3 +246,18 @@ registry:
         2026-10-08: no MAP sensor on the NA intake, ever; the boosted plant
         gets one with the supercharger). So pumping is a working assumption
         twice over and every result names pumping_from_unmeasured_map.
+
+# M01.19: what the bracketed approximations leave out, with their size, carried
+# on every TorqueResult (torque_plant.evaluate). Not a parameter: no bracket
+# changes here.
+limitations:
+  - >-
+    The exhaust_back_pressure bracket (0-15 kPa, one number at every flow) is
+    probably low at full throttle: back pressure rises with exhaust flow, and
+    a stock NA exhaust at full flow commonly runs 20-40 kPa above baro
+    (literature range, not measured on this truck). Each kPa is Vd / 4 pi =
+    0.315 Nm of pumping torque, so 5-25 kPa beyond the bracket's top is
+    1.6-7.9 Nm, about 0.5-2.6 % of a ~300 Nm full-throttle torque at 80 kPa
+    baro (381 Nm rated at sea level): full-throttle brake torque from this
+    plant reads high by up to about 2 % from this term. Part throttle (low
+    flow) sits inside the bracket.

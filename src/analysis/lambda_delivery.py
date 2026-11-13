@@ -322,16 +322,33 @@ class RegimeDelay(_Strict):
     bracket_s: tuple[float, float] | None = None
     fitted_on: list[str] = Field(default_factory=list)
     method: str | None = None
+    #: The lowest rpm at which a *transient* window (a tip-in, a lift, a
+    #: target still ramping) may be compared under this one delay (M01.19).
+    #: The delay is a single value fitted where the fitting reads sat; exhaust
+    #: transport lengthens as flow falls (about 0.12 s at full throttle,
+    #: 0.16 s at cruise, 0.35-0.45 s at idle), so below them it pairs a
+    #: transient's lambda with fuel set before the step. Steady windows do not
+    #: depend on it. Required when frozen; every transient comparison reads it
+    #: (:func:`src.analysis.plant_validation.replay_report`).
+    transient_min_rpm: float | None = Field(default=None, gt=0)
     note: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def _consistent(self) -> RegimeDelay:
         if self.status == "not_estimated":
-            if self.seconds is not None or self.fitted_on:
-                raise ValueError("a not_estimated delay carries no seconds and no fitted_on")
+            if self.seconds is not None or self.fitted_on or self.transient_min_rpm is not None:
+                raise ValueError(
+                    "a not_estimated delay carries no seconds, no fitted_on and no "
+                    "transient_min_rpm"
+                )
             return self
         if self.seconds is None or self.bracket_s is None or not self.fitted_on or not self.method:
             raise ValueError("a frozen delay needs seconds, bracket_s, fitted_on and method")
+        if self.transient_min_rpm is None:
+            raise ValueError(
+                "a frozen delay needs transient_min_rpm: one delay fitted on WOT pulls "
+                "does not hold for a low-rpm transient (M01.19)"
+            )
         lo, hi = self.bracket_s
         if not 0 <= lo <= self.seconds <= hi:
             raise ValueError(f"frozen delay {self.seconds} s lies outside its bracket {lo}..{hi} s")

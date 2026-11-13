@@ -192,8 +192,44 @@ class ManifoldParameters:
     effects: tuple[str, ...]
 
     def tau_s(self, rpm: ArrayLike) -> FloatArray:
-        """The filling time constant 120 V / (VE Vd rpm), s."""
+        """The mass-filling time constant 120 V / (VE Vd rpm), s: what the air
+        *mass* in the manifold responds at. Manifold *pressure* responds at
+        :meth:`pressure_tau_s`, which differs under the adiabatic law."""
         return 120.0 * self.volume_l / (self.volumetric_efficiency * self.displacement_l * _f(rpm))
+
+    def pressure_tau_s(self, rpm: ArrayLike) -> FloatArray:
+        """The time constant manifold pressure follows after an inflow step, s
+        (M01.19): ``tau / gamma`` under the adiabatic balance, ``tau`` under the
+        isothermal one. Adiabatic, ``p = (gamma - 1) E / V`` obeys
+        ``dp/dt = gamma R T_in mdot_in / V - gamma p / tau`` exactly, while the
+        mass moves at about ``tau``. :func:`integrate` at 2,500 rpm, 4.0 L, VE
+        0.7, 3.954 L: tau 0.0694 s, pressure 63 % at 0.0496 s (tau / 1.4), mass
+        63 % at 0.0694 s. A volume read from a MAP step goes through
+        :func:`volume_from_pressure_tau`, never through ``tau_s``'s formula."""
+        tau = self.tau_s(rpm)
+        return tau / self.gamma if self.energy_balance == "adiabatic" else tau
+
+
+def volume_from_pressure_tau(
+    pressure_tau_s: float,
+    rpm: float,
+    *,
+    volumetric_efficiency: float,
+    displacement_l: float,
+    gamma: float,
+    energy_balance: EnergyBalance,
+) -> float:
+    """Manifold volume, L, from the time constant of a measured MAP step
+    response: the inverse of :meth:`ManifoldParameters.pressure_tau_s`.
+
+    Reading the pressure time constant as the mass-filling ``tau`` gives a
+    volume ``gamma`` (1.4x) too small under the adiabatic law. Which balance
+    holds is not measured (``manifold_heat_transfer_unmodelled``), so a volume
+    from a MAP step is the pair of both forms, never one of them alone."""
+    if not (pressure_tau_s > 0 and rpm > 0 and volumetric_efficiency > 0 and displacement_l > 0):
+        raise ValueError("pressure_tau_s, rpm, VE and displacement must all be > 0")
+    gain = gamma if energy_balance == "adiabatic" else 1.0
+    return gain * pressure_tau_s * volumetric_efficiency * displacement_l * rpm / 120.0
 
 
 def _bracket(p: PlantParameter) -> tuple[float, float, float, str]:
@@ -572,9 +608,27 @@ def check_applicability(
 # -- plant replay -------------------------------------------------------------------
 
 
+#: What a replay's cylinder flow cannot show (M01.19), on every
+#: :class:`ManifoldReplay`.
+REPLAY_LIMITATIONS = (
+    "The MAF boundary is zero-order held between reads (hold_on_grid): at the "
+    "4-15 Hz MAF polls are made at, each read stands for 67-250 ms (a mean lag "
+    "of 33-125 ms), against a manifold pressure time constant (tau / gamma, "
+    "working 4.0 L and VE 0.7) of 23 ms at 5,500 rpm and 103 ms at 1,200 rpm. "
+    "Cylinder-flow transients shorter than the read gap are "
+    "the sampling, not the manifold: resolved_period_s is the longer of one "
+    "engine cycle and the MAF read gap held across.",
+)
+
+
 def hold_on_grid(times_s: ArrayLike, values: ArrayLike, grid_s: ArrayLike) -> FloatArray:
     """Zero-order hold: the last read at or before each grid time (NaN before
-    the first). A boundary is held between acquisitions, never interpolated."""
+    the first). A boundary is held between acquisitions, never interpolated.
+
+    The held value lags the quantity by up to one read gap (half on average):
+    at 4-15 Hz, 33-125 ms, longer than the manifold's own time constant at
+    high rpm. :func:`hold_gap_on_grid` gives the gap each grid time is held
+    across, so a result can state it (:data:`REPLAY_LIMITATIONS`)."""
     t, v, g = _f(times_s), _f(values), _f(grid_s)
     order = np.argsort(t, kind="stable")
     t, v = t[order], v[order]
@@ -582,6 +636,22 @@ def hold_on_grid(times_s: ArrayLike, values: ArrayLike, grid_s: ArrayLike) -> Fl
     out = np.full(len(g), np.nan)
     ok = i >= 0
     out[ok] = v[i[ok]]
+    return out
+
+
+def hold_gap_on_grid(times_s: ArrayLike, grid_s: ArrayLike) -> FloatArray:
+    """The read gap :func:`hold_on_grid` holds each grid time across, s: from
+    the read held to the next one (the last read: the gap before it). NaN
+    before the first read or with fewer than two reads."""
+    t, g = np.sort(_f(times_s), kind="stable"), _f(grid_s)
+    out = np.full(len(g), np.nan)
+    if len(t) < 2:
+        return out
+    gaps = np.diff(t)
+    gaps = np.r_[gaps, gaps[-1]]
+    i = np.searchsorted(t, g, side="right") - 1
+    ok = i >= 0
+    out[ok] = gaps[i[ok]]
     return out
 
 
@@ -602,12 +672,19 @@ class ManifoldReplay:
     refused: NDArray[np.bool_]
     above_ambient: NDArray[np.bool_]
     nonphysical: NDArray[np.bool_]
-    #: The shortest structure a result resolves at each step: one engine
-    #: cycle, 120 / rpm s (the contract's ``time_resolution``).
+    #: The shortest structure a result resolves at each step: the longer of
+    #: one engine cycle (``cycle_period_s``, the contract's
+    #: ``time_resolution``) and the MAF read gap the boundary is held across
+    #: (``maf_hold_gap_s``; M01.19, :data:`REPLAY_LIMITATIONS`).
     resolved_period_s: FloatArray
     consistency: Consistency
     step_s: float
     effects: tuple[str, ...]
+    #: One engine cycle, 120 / rpm s.
+    cycle_period_s: FloatArray = field(default_factory=lambda: np.empty(0))
+    #: The MAF read gap each step's held value spans (:func:`hold_gap_on_grid`).
+    maf_hold_gap_s: FloatArray = field(default_factory=lambda: np.empty(0))
+    limitations: tuple[str, ...] = REPLAY_LIMITATIONS
     prescribed: tuple[str, ...] = ("engine_speed", "mass_air_flow")
     labels: dict[str, str] = field(
         default_factory=lambda: {
@@ -686,6 +763,8 @@ def replay_manifold(
         above = ~nonphysical & (p > held["barometric_pressure"])
     refused = above | nonphysical
     nan = np.where(refused, np.nan, 1.0)
+    cycle = 120.0 / held["engine_speed"]
+    maf_gap = hold_gap_on_grid(times_s["mass_air_flow"], grid)
     return ManifoldReplay(
         t_s=grid,
         map_kpa=p * nan,
@@ -694,10 +773,12 @@ def replay_manifold(
         refused=refused,
         above_ambient=above,
         nonphysical=nonphysical,
-        resolved_period_s=120.0 / held["engine_speed"],
+        resolved_period_s=np.fmax(cycle, maf_gap),
         consistency=check,
         step_s=step_s,
         effects=params.effects,
+        cycle_period_s=cycle,
+        maf_hold_gap_s=maf_gap,
     )
 
 
@@ -1527,6 +1608,7 @@ def load_kit(profile_dir: Path) -> tuple[SimContract, ManifoldPlantProfile, Fuel
 
 __all__ = [
     "CLAIMS",
+    "REPLAY_LIMITATIONS",
     "CLAIM_QUANTITY",
     "MANIFOLD_FILE",
     "MANIFOLD_SUBSYSTEM",
@@ -1546,6 +1628,7 @@ __all__ = [
     "claim_chain",
     "claim_refusals",
     "convergence_study",
+    "hold_gap_on_grid",
     "hold_on_grid",
     "integrate",
     "consistency",
@@ -1562,4 +1645,5 @@ __all__ = [
     "steady_mass_g",
     "subsystem_inputs",
     "subsystem_standing",
+    "volume_from_pressure_tau",
 ]

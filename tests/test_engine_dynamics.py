@@ -32,6 +32,8 @@ from src.analysis.engine_dynamics import (
     consistency,
     contract_step_s,
     convergence_study,
+    hold_gap_on_grid,
+    hold_on_grid,
     integrate,
     load_kit,
     replay_manifold,
@@ -40,6 +42,7 @@ from src.analysis.engine_dynamics import (
     rollout_blockers,
     standings,
     subsystem_standing,
+    volume_from_pressure_tau,
 )
 from src.analysis.fuel_plant import (
     KELVIN,
@@ -196,6 +199,54 @@ def test_limiting_cases_no_inflow_empties_at_tau_and_isothermal_holds_temperatur
     assert np.all(trace.temp_k[:, 1] == pytest.approx(298.15))
     # An emptying adiabatic manifold expands and cools.
     assert trace.temp_k[-1, 0] < 298.15 - 10.0
+
+
+def test_manifold_pressure_responds_at_tau_over_gamma_and_a_map_step_volume_uses_it(
+    kit: Any,
+) -> None:
+    """M01.19: under the adiabatic law pressure is first order at tau / gamma
+    (exactly), the mass at about tau; isothermal, both at tau. A volume read
+    from a MAP step through tau's own formula comes out gamma too small."""
+    contract, manifold, fuel = kit
+    adia = resolve_manifold(manifold, fuel)
+    iso = resolve_manifold(manifold, fuel, energy_balance="isothermal")
+    assert (adia.volume_l, adia.volumetric_efficiency, adia.displacement_l) == (4.0, 0.7, 3.954)
+    rpm, h = 2500.0, 0.00128
+    tau = float(adia.tau_s(rpm))
+    assert tau == pytest.approx(0.0694, abs=5e-5)
+    assert float(adia.pressure_tau_s(rpm)) == pytest.approx(tau / 1.4)
+    assert float(iso.pressure_tau_s(rpm)) == pytest.approx(tau)
+    # 14 tau: the end is settled to 1e-6, so normalizing by it does not move
+    # the 63 % crossing (6 tau leaves 0.25 % and reads 0.4 % early).
+    n = int(14 * tau / h) + 2
+    flow = np.r_[2.0, np.full(n - 1, 6.0)]
+    trace = integrate(flow, rpm, 25.0, [adia, iso], step_s=h, method="rk4")
+    t = trace.t_s - h  # the step enters on the first update
+
+    def rise_63(x: np.ndarray) -> float:
+        f = (x - x[0]) / (x[-1] - x[0])
+        k = int(np.argmax(f >= 1 - np.exp(-1)))
+        return float(np.interp(1 - np.exp(-1), f[k - 1 : k + 1], t[k - 1 : k + 1]))
+
+    assert rise_63(trace.map_kpa[:, 0]) == pytest.approx(0.04955, abs=5e-5)
+    assert rise_63(trace.map_kpa[:, 0]) == pytest.approx(float(adia.pressure_tau_s(rpm)), rel=2e-3)
+    assert rise_63(trace.mass_g[:, 0]) == pytest.approx(tau, rel=0.01)
+    assert rise_63(trace.map_kpa[:, 1]) == pytest.approx(tau, rel=2e-3)
+    for column, params in enumerate((adia, iso)):
+        form = params.energy_balance
+        measured = rise_63(trace.map_kpa[:, column])
+        volume = volume_from_pressure_tau(
+            measured,
+            rpm,
+            volumetric_efficiency=params.volumetric_efficiency,
+            displacement_l=params.displacement_l,
+            gamma=params.gamma,
+            energy_balance=form,
+        )
+        assert volume == pytest.approx(4.0, rel=3e-3), form
+    # The mass-filling formula read on the adiabatic MAP step: 1.4x too small.
+    naive = rise_63(trace.map_kpa[:, 0]) * 0.7 * 3.954 * rpm / 120.0
+    assert 4.0 / naive == pytest.approx(1.4, rel=3e-3)
 
 
 def test_consistency_holds_a_correct_trace_and_fails_a_mutated_integrator(kit: Any) -> None:
@@ -365,7 +416,12 @@ def test_replay_refuses_outside_its_envelope_and_never_clips_above_ambient(kit: 
     assert not result.refused.any()
     assert result.prescribed == ("engine_speed", "mass_air_flow")
     assert "not a prediction of speed or acceleration" in result.labels["engine_speed"]
-    assert np.allclose(result.resolved_period_s, 120.0 / 2000.0)
+    # M01.19: MAF is held across 0.25 s reads, so the result resolves the
+    # read gap, not the 60 ms engine cycle, and says why.
+    assert np.allclose(result.cycle_period_s, 120.0 / 2000.0)
+    assert np.allclose(result.maf_hold_gap_s, 0.25)
+    assert np.allclose(result.resolved_period_s, 0.25)
+    assert "zero-order held" in result.limitations[0]
     assert result.consistency.equation_residual_rel[0] < 1e-12
     assert result.consistency.breathing_excess[0] <= 1.0
     assert result.step_s == contract_step_s(contract)
@@ -388,6 +444,19 @@ def test_replay_refuses_outside_its_envelope_and_never_clips_above_ambient(kit: 
         replay_manifold(
             contract, "supercharged", params, times_s=times, values=values, convergence=verified
         )
+
+
+def test_the_held_boundary_states_the_read_gap_it_spans() -> None:
+    """hold_on_grid's lag is one read gap at most; hold_gap_on_grid names it
+    per grid time (the last read: the gap before it; NaN before the first)."""
+    reads = np.array([0.0, 0.1, 0.35, 0.4])
+    grid = np.array([-0.05, 0.0, 0.05, 0.2, 0.39, 0.5])
+    held = hold_on_grid(reads, np.array([1.0, 2.0, 3.0, 4.0]), grid)
+    gaps = hold_gap_on_grid(reads, grid)
+    assert np.isnan(held[0]) and np.isnan(gaps[0])
+    assert held[1:].tolist() == [1.0, 1.0, 2.0, 3.0, 4.0]
+    assert gaps[1:] == pytest.approx([0.1, 0.1, 0.25, 0.05, 0.05])
+    assert np.isnan(hold_gap_on_grid([1.0], [1.0, 2.0])).all()
 
 
 def test_a_coarse_step_or_an_unverified_study_is_refused(kit: Any) -> None:

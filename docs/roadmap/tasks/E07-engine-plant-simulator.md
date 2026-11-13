@@ -980,7 +980,7 @@ supercharger is a hardware intervention with a new plant parameter set.
     a new plant. Invariant `manifold_at_or_below_ambient`: a sample above baro
     is NaN with `manifold_above_ambient`, never clipped. Time resolution: one
     engine cycle (τ is only ~1–4 cycles at every rpm), reported per step as
-    `resolved_period_s`. Test
+    `resolved_period_s`, the longer of that cycle and the MAF read gap (M01.19). Test
     `test_replay_refuses_outside_its_envelope_and_never_clips_above_ambient`.
   - **Validation: none possible from the corpus, and refused as such.**
     The catalogs have no MAP (PID 0x0B unsupported; the `bindings.yaml` "MAP"

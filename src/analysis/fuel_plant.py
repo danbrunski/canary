@@ -63,6 +63,10 @@ from src.refusal import ReasonedRefusal
 from src.yaml_load import load_yaml
 
 PLANT_FILE = "fuel_plant.yaml"
+#: Each fuel plant version's stated limits (M01.19), beside the frozen plant
+#: files rather than inside them: a plant file's bytes are pinned by the
+#: predictions made on it (``plant_file_sha256``), so it is never edited.
+LIMITATIONS_FILE = "plant_limitations.yaml"
 #: Specific gas constant of dry air, J/(kg K).
 R_AIR = 287.05
 #: 0 degC in K.
@@ -687,6 +691,22 @@ class FuelPlantProfile(_Strict):
     #: Held-out recordings already scored, and under which baseline. A spent
     #: recording is never held-out evidence for another baseline or plant.
     spent_held_out: list[SpentRecord] = Field(default_factory=list)
+    #: What this version's approximations leave out, with their size where it
+    #: is known (M01.19: IAT as charge temperature, idle MAP). Attached by
+    #: :func:`load_fuel_plant` from :data:`LIMITATIONS_FILE`, which must name
+    #: every declared version; a held-out evaluation
+    #: (``fuel_plant_eval.evaluate``) carries them. Never declared in the plant
+    #: file itself (refused): that file is frozen.
+    limitations: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _limitations_not_in_the_plant_file(self) -> FuelPlantProfile:
+        if self.limitations:
+            raise ValueError(
+                f"limitations belong in {LIMITATIONS_FILE}, keyed by plant_version: a "
+                "plant file is frozen, and its bytes are pinned by the predictions made on it"
+            )
+        return self
 
     @model_validator(mode="after")
     def _no_target_as_input(self) -> FuelPlantProfile:
@@ -829,6 +849,44 @@ def _parsed(text: bytes) -> Any:
     return load_yaml(text)
 
 
+class PlantLimitations(_Strict):
+    """:data:`LIMITATIONS_FILE`: per fuel plant version, its stated limits."""
+
+    schema_version: Literal[1]
+    fuel_plant: dict[str, list[str]]
+
+    @model_validator(mode="after")
+    def _stated(self) -> PlantLimitations:
+        empty = sorted(
+            version
+            for version, texts in self.fuel_plant.items()
+            if not any(text.strip() for text in texts)
+        )
+        if empty:
+            raise ValueError(f"fuel plant versions with no stated limitation: {empty}")
+        return self
+
+
+def plant_limitations(profile_dir: Path) -> dict[str, tuple[str, ...]]:
+    """Every declared fuel plant version's limits, from :data:`LIMITATIONS_FILE`.
+
+    ``limitations_undeclared`` when the file is absent or a version
+    :func:`plant_files` returns has no entry: a plant cannot be loaded
+    without its limits."""
+    path = profile_dir / LIMITATIONS_FILE
+    if not path.is_file():
+        raise FuelPlantRefusalError(
+            "limitations_undeclared", f"{profile_dir} has no {LIMITATIONS_FILE}"
+        )
+    declared = PlantLimitations.model_validate(_parsed(path.read_bytes())).fuel_plant
+    missing = sorted(set(plant_files(profile_dir)) - set(declared))
+    if missing:
+        raise FuelPlantRefusalError(
+            "limitations_undeclared", f"{LIMITATIONS_FILE} states nothing for {missing}"
+        )
+    return {version: tuple(texts) for version, texts in declared.items()}
+
+
 def plant_files(profile_dir: Path) -> dict[str, Path]:
     """Every fuel-plant declaration in the profile (``fuel_plant*.yaml``), by
     the ``plant_version`` it declares. Two files declaring one version are
@@ -869,7 +927,8 @@ def load_fuel_plant(
     if plant_version is not None and profile.plant_version != plant_version:
         raise FuelPlantRefusalError("plant_version_mismatch", f"{path.name} is not {plant_version}")
     refuse_spent_elsewhere(profile_dir, profile, profile.split.held_out)
-    return profile, hashlib.sha256(text).hexdigest()
+    limits = plant_limitations(profile_dir)[profile.plant_version]
+    return profile.model_copy(update={"limitations": limits}), hashlib.sha256(text).hexdigest()
 
 
 def refuse_spent_elsewhere(
@@ -944,6 +1003,9 @@ class B06Rules:
     seconds: float
     bracket: tuple[float, float]
     fitted_on: tuple[str, ...]
+    #: Transient reads below this rpm are not compared under the one delay
+    #: (``RegimeDelay.transient_min_rpm``, M01.19).
+    transient_min_rpm: float
     #: ``|phi - 1| <= closed_loop_band`` is closed loop.
     closed_loop_band: float
     holdoff_closed_loop_s: float
@@ -971,7 +1033,12 @@ def load_b06(profile_dir: Path, ref: DelayReference) -> B06Rules:
         raise FuelPlantRefusalError(
             "delay_not_declared", f"{ref.file} has no {ref.regime}/{ref.source} delay"
         ) from exc
-    if entry.status != "frozen" or entry.seconds is None or entry.bracket_s is None:
+    if (
+        entry.status != "frozen"
+        or entry.seconds is None
+        or entry.bracket_s is None
+        or entry.transient_min_rpm is None
+    ):
         raise FuelPlantRefusalError(
             "delay_not_frozen", f"{ref.file} {ref.regime}/{ref.source} is {entry.status!r}"
         )
@@ -980,6 +1047,7 @@ def load_b06(profile_dir: Path, ref: DelayReference) -> B06Rules:
         seconds=float(entry.seconds),
         bracket=(float(lo), float(hi)),
         fitted_on=tuple(entry.fitted_on),
+        transient_min_rpm=float(entry.transient_min_rpm),
         closed_loop_band=elig.closed_loop_band,
         holdoff_closed_loop_s=elig.regimes.closed_loop.post_fuel_cut_holdoff_s,
         holdoff_enrichment_s=elig.regimes.enrichment.post_fuel_cut_holdoff_s,
@@ -1038,6 +1106,9 @@ def manifold_pressure_speed_density(
 ) -> FloatArray:
     """MAP that would hold ``air_g`` per cylinder at ``volumetric_efficiency``, kPa.
 
+    The charge is taken at ``iat_c``: IAT stands in for charge temperature,
+    which runs warmer at low flow, so idle MAP is understated (M01.19; the
+    size is the profile's ``limitations``).
     Capped at baro: a naturally aspirated manifold cannot exceed ambient.
     fuel-mv-1's form (``speed_density_capped``), frozen; a revised plant uses
     :func:`manifold_pressure_ve_curve`, which refuses instead of capping.

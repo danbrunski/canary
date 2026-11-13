@@ -23,6 +23,7 @@ from pydantic import ValidationError
 
 from src.analysis.fuel_plant import (
     KELVIN,
+    LIMITATIONS_FILE,
     MAP_ABOVE_AMBIENT,
     MAP_OUTSIDE_VE_FIT,
     PLANT_FILE,
@@ -514,6 +515,11 @@ def test_the_held_out_slice_is_scored_against_the_predeclared_bounds(
     assert {"injector_latency_unmeasured", "manifold_pressure_unmeasured"} <= set(
         result["unresolved_effects"]
     )
+    # M01.19: the plant's stated limits ride on the evidence it mints.
+    assert result["limitations"] and result["limitations"][0].startswith(
+        "Charge temperature is IAT"
+    )
+    assert any("Idle MAP is understated" in t for t in result["limitations"])
     # Fuel error is the same information inverted, never a second test.
     assert result["fuel"]["median_pct"] == pytest.approx(
         100 * (1 / (1 + lam["median_pct"] / 100) - 1), abs=0.2
@@ -978,3 +984,36 @@ def test_one_plenum_feeds_both_banks_so_map_reads_the_total_air_at_any_split() -
             assert out.manifold_refusal is not None and out.manifold_refusal[0] == ""
             maps.append(float(out.map_kpa[0]))
         assert len(set(maps)) == 1, (version, maps)
+
+
+def test_every_plant_version_states_its_limits_and_a_missing_one_is_refused(
+    tmp_path: Path,
+) -> None:
+    """M01.19: IAT as charge temperature and the idle MAP it gives are stated
+    for every declared plant (``plant_limitations.yaml``), never only in a
+    roadmap doc, and never by editing a frozen plant file."""
+    files = plant_files(PROFILE)
+    assert set(files) >= {"fuel-mv-1", "fuel-mv-2", "fuel-mv-3"}
+    for version in files:
+        profile, _ = load_fuel_plant(PROFILE, version)
+        text = " ".join(profile.limitations)
+        assert "Charge temperature is IAT" in text, version
+        assert "Idle MAP is understated" in text, version
+    # A version with no entry, or no sidecar at all, refuses the load by name.
+    for name in [*(p.name for p in files.values()), LIMITATIONS_FILE]:
+        shutil.copy(PROFILE / name, tmp_path / name)
+    raw = load_yaml((tmp_path / LIMITATIONS_FILE).read_text())
+    del raw["fuel_plant"]["fuel-mv-2"]
+    (tmp_path / LIMITATIONS_FILE).write_text(yaml.safe_dump(raw))
+    with pytest.raises(FuelPlantRefusalError) as err:
+        load_fuel_plant(tmp_path, "fuel-mv-3")
+    assert err.value.reason == "limitations_undeclared" and "fuel-mv-2" in str(err.value)
+    (tmp_path / LIMITATIONS_FILE).unlink()
+    with pytest.raises(FuelPlantRefusalError) as err:
+        load_fuel_plant(tmp_path)
+    assert err.value.reason == "limitations_undeclared"
+    # The frozen plant file cannot carry them itself.
+    plant = load_yaml(files["fuel-mv-1"].read_text())
+    plant["limitations"] = ["stated in the frozen file"]
+    with pytest.raises(ValidationError, match="belong in plant_limitations.yaml"):
+        FuelPlantProfile.model_validate(plant)

@@ -39,6 +39,7 @@ from src.analysis.fuel_comp_fit import (
     design_vs_firmware,
     fit_both_ways,
     prepare_fit_samples,
+    purge_strata,
     validate,
 )
 from src.analysis.fuel_comp_inputs import FuelCompDeclaration
@@ -279,6 +280,7 @@ def build_result(
             if len(prepared)
             else {}
         ),
+        "purge_strata": purge_strata(prepared),
         "primary_configuration": primary_name,
         "fits": {name: fit.as_dict() for name, fit in fits.items()},
         "validation": {name: v.as_dict() for name, v in validations.items()},
@@ -486,6 +488,18 @@ def render_markdown(result: Mapping[str, Any]) -> str:
         )
     lines += ["", "Fit refusals among eligible samples:", ""]
     lines += [f"- {k}: {v}" for k, v in sorted(r["fit_refusals"].items(), key=lambda kv: -kv[1])]
+    lines += [
+        "",
+        "Purge (M01.18): only samples with purge flow paired and zero enter the fit. "
+        "Samples passing every other refusal, by purge state (descriptive):",
+        "",
+    ]
+    lines += [
+        f"- {s['route']} {s['purge_state']}: n {s['n']}, drives {s['drives']}, "
+        f"median remainder {_fmt(s['median_remainder_pct'])} %, "
+        f"median required vs current {_fmt(s['median_required_vs_current_pct'])} %"
+        for s in r.get("purge_strata", [])
+    ] or ["- none"]
     lines += ["", "## Known answers", ""]
     ka = r["load_byte_known_answer"]
     if ka:

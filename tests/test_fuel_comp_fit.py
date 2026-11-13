@@ -29,6 +29,7 @@ from src.analysis.fuel_comp_fit import (
     DIAGNOSTIC_UNIFORM,
     MODELS,
     PREPARED_COLUMNS,
+    REFUSALS,
     SIDE,
     VERDICT_IMPROVEMENT,
     VERDICT_NONE,
@@ -36,6 +37,7 @@ from src.analysis.fuel_comp_fit import (
     fit_both_ways,
     fit_table,
     prepare_fit_samples,
+    purge_strata,
     validate,
 )
 from src.analysis.fuel_comp_inputs import (
@@ -380,7 +382,7 @@ def _sample_frame(
         row: dict[str, Any] = {name: np.nan for name in COLUMNS}
         word = spec.get("word", 256)
         counts = Interval(*spec.get("counts", (300, 302)))
-        purge = Interval(0, 0)
+        purge = Interval(*spec.get("purge", (0, 0)))
         interval = load_interval(
             throttle_counts=counts,
             rpm_words=[word],
@@ -403,8 +405,9 @@ def _sample_frame(
             rpm_word_hi=word,
             throttle_counts_lo=counts.lo,
             throttle_counts_hi=counts.hi,
-            purge_area_lo=0,
-            purge_area_hi=0,
+            purge_basis=spec.get("purge_basis", "paired"),
+            purge_area_lo=purge.lo,
+            purge_area_hi=purge.hi,
             byte_lo=interval.byte.lo,
             byte_hi=interval.byte.hi,
             cell_ambiguous=spec.get("ambiguous", False),
@@ -466,6 +469,89 @@ def test_every_refused_sample_names_why(declaration: FuelCompDeclaration) -> Non
     assert reasons[2].startswith("rom_image_unresolved")
     assert reasons[3].startswith("required_factor_missing")
     assert reasons[4] is None
+
+
+# -- purge (M01.18) ------------------------------------------------------------------------
+
+
+def test_only_samples_with_purge_flow_paired_and_zero_enter_the_fit(
+    declaration: FuelCompDeclaration,
+) -> None:
+    """Purge byte 0 (off) and 1 (duty 0) both read flow area 0 and pass; a
+    paired nonzero area, an unpaired read and an uncaptured purge refuse by
+    name, after every other refusal, with the required factor still formed."""
+    logged = _logged()
+    gain = logged.purge_gain
+    assert gain > 0
+    frame = _sample_frame(
+        declaration,
+        logged,
+        [
+            {},
+            {"purge": (40, 40)},
+            {"purge_basis": "unknown", "purge": (0, (255 * gain) >> 7)},
+            {"purge_basis": "not_captured", "purge": (0, (255 * gain) >> 7)},
+            {"purge": (40, 40), "droop": "none"},
+            {"purge": (0, (255 * gain) >> 7)},  # byte 255: on, area ambiguous from 0
+        ],
+    )
+    prepared = prepare_fit_samples(frame, {"logged": logged}, _target(), declaration)
+    assert list(prepared["purge_state"]) == ["off", "active", "unknown", "not_captured"] + [
+        "active",
+        "active",
+    ]
+    reasons = list(prepared["fit_refusal"])
+    assert reasons[0] is None
+    assert reasons[1] == "purge_active: purge flow commanded on at the sample"
+    assert reasons[2] == "purge_unknown: no purge read paired within the separation"
+    assert reasons[3] == "purge_unknown: purge never captured in the session"
+    assert reasons[4].startswith("droop_none")  # purge is tested last
+    assert reasons[5].startswith("purge_active")
+    assert {r.split(":")[0] for r in reasons if r} <= set(REFUSALS)
+    assert prepared["required_raw"].iloc[:4].notna().all()
+    # A zero gain makes every byte read area 0: off cannot be shown.
+    blind = dataclasses.replace(logged, purge_gain=0)
+    prepared = prepare_fit_samples(frame.iloc[:1], {"logged": blind}, _target(), declaration)
+    assert prepared["purge_state"].iloc[0] == "unknown"
+    assert prepared["fit_refusal"].iloc[0].startswith("purge_unknown: purge gain 0")
+
+
+def _purge_rows(seed: int = 3) -> tuple[list[dict[str, Any]], np.ndarray, np.ndarray]:
+    """``_pattern_rows`` with purge: three quarters of each drive's samples
+    purge, and while they do the ECM's vapor estimate is off so trim (and the
+    required factor) reads +3 % plus a per-drive canister term of +-1 %."""
+    rows, current, true = _pattern_rows(seed, drives=6, per_drive=120)
+    rng = np.random.default_rng(seed)
+    canister = {f"drive-{d}": float(rng.uniform(-1.0, 1.0)) for d in range(6)}
+    for row in rows:
+        if rng.uniform() < 0.75:
+            row["purge_state"] = "active"
+            row["required_raw"] *= 1.0 + (3.0 + canister[row["session"]]) / 100.0
+            row["fit_refusal"] = "purge_active: purge flow commanded on at the sample"
+        else:
+            row["purge_state"] = "off"
+    return rows, current, true
+
+
+def test_purge_biases_a_fit_that_keeps_it_and_not_one_that_refuses_it(rules: FitRules) -> None:
+    rows, current, true = _purge_rows()
+    gated = fit_table(_prepared(rows), _target(current), rules, include_unvalidated=False)
+    kept_rows = [{**row, "fit_refusal": None} for row in rows]
+    kept = fit_table(_prepared(kept_rows), _target(current), rules, include_unvalidated=False)
+    block = [r * SIDE + c for r in (5, 6, 7) for c in (7, 8)]
+    for k in block:
+        assert gated.cells[k].status == "proposed", (k, gated.cells[k].refusals)
+        # A quarter of the samples (70-160 per cell): within the noise of
+        # the truth (measured -0.54..+0.40 % over seeds 3-5).
+        assert abs(100.0 * (gated.cells[k].fitted_raw / true[k] - 1.0)) < 0.75, k
+        # Keeping purging samples writes most of the purge error into a table
+        # that also applies with purge off (measured +1.49..+2.53 %).
+        bias = 100.0 * (kept.cells[k].fitted_raw / true[k] - 1.0)
+        assert 1.2 < bias < 3.2, (k, bias)
+    assert gated.refusal_counts["purge_active: purge flow commanded on at the sample"] > 0
+    strata = {s["purge_state"]: s for s in purge_strata(_prepared(rows))}
+    assert set(strata) == {"active", "off"}
+    assert strata["active"]["drives"] == strata["off"]["drives"] == 6
 
 
 # -- the knock-on -------------------------------------------------------------------------

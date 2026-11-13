@@ -43,11 +43,23 @@ parameters:
         Plenum (collector) plus runners plus the duct between the MAF and the
         throttle, lumped. Not measured: about one displacement (3.954 L) is a
         common NA sizing, and the bracket spans half to twice that. It sets
-        only the filling time constant tau = 120 V / (VE Vd rpm), never a
-        steady value.
+        only the time constants, never a steady value: the mass-filling
+        tau = 120 V / (VE Vd rpm), and the pressure response, which under
+        the adiabatic balance declared above is tau / gamma, not tau
+        (ManifoldParameters.pressure_tau_s; M01.19).
     evidence: >-
       No CAD volume or fill measurement on file. Identifiable from a logged MAP
-      step response (tau) together with MAF and rpm; not from MAF alone.
+      step response together with MAF and rpm; not from MAF alone. A MAP step
+      measures the pressure time constant, which is tau / gamma under the
+      adiabatic law (p = (gamma - 1) E / V obeys a first-order equation at
+      exactly that rate) and tau under the isothermal one. engine_dynamics.
+      integrate at 2,500 rpm, 4.0 L, VE 0.7, 3.954 L: tau 0.0694 s, pressure
+      63 % at 0.0496 s, air mass 63 % at 0.0694 s. So V = gamma x tau_MAP x
+      VE Vd rpm / 120 (adiabatic) or tau_MAP x VE Vd rpm / 120 (isothermal),
+      through engine_dynamics.volume_from_pressure_tau; read with the
+      mass-filling formula alone, the adiabatic step gives a volume 1.4x too
+      small. Which balance holds is not measured, so a MAP-step volume is the
+      pair, a bracket of gamma.
   - id: heat_capacity_ratio
     units: ratio
     status: known

@@ -1,0 +1,48 @@
+# M01.19 -- what each fuel plant version's approximations leave out, with their
+# size where it is known. Keyed by plant_version; every version a fuel_plant*.yaml
+# declares must have an entry (src.analysis.fuel_plant.plant_limitations refuses
+# a load otherwise), and load_fuel_plant attaches them to the profile, so a
+# held-out evaluation carries them (fuel_plant_eval.evaluate "limitations").
+#
+# Kept here, not in the plant files: those are frozen, and a prediction of record
+# pins their bytes (sim design plant_file_sha256), so a stated limit added later
+# goes beside them. Not parameters: no bracket or baseline changes here.
+schema_version: 1
+fuel_plant:
+  fuel-mv-1:
+    - >-
+      Charge temperature is IAT. Speed density states MAP from the paired air
+      charge at the intake-air temperature, and the charge is warmer than IAT
+      at low flow (port and manifold heat pickup, not measured): a charge
+      20-40 K above IAT would put the true MAP 7-13 % above the stated one.
+    - >-
+      Idle MAP is understated. At warm idle (charge fraction p50 0.151, 762 rpm,
+      baro 81 kPa) VE 0.7 states 17.5 kPa where a warm NA idle sits at about
+      28-35 kPa. Injector dP = rail + baro - MAP is then overstated, so modeled
+      flow at idle is 1.3-2.2 % high (rail 350 kPa); idle cells carry that much
+      model error from this term alone.
+  fuel-mv-2:
+    - >-
+      Charge temperature is IAT. Speed density states MAP from the paired air
+      charge at the intake-air temperature, and the charge is warmer than IAT
+      at low flow (port and manifold heat pickup, not measured): a charge
+      20-40 K above IAT would put the true MAP 7-13 % above the stated one.
+    - >-
+      Idle MAP is understated. Part-load VE equals the full-breathing VE, so
+      warm idle (charge fraction p50 0.151, 762 rpm, baro 81 kPa) reads 17.5 kPa
+      where a warm NA idle sits at about 28-35 kPa. Injector dP = rail + baro -
+      MAP is then overstated, so modeled flow at idle is 1.3-2.2 % high (rail
+      350 kPa); idle cells carry that much model error from this term alone.
+  fuel-mv-3:
+    - >-
+      Charge temperature is IAT. Speed density states MAP from the paired air
+      charge at the intake-air temperature, and the charge is warmer than IAT
+      at low flow (port and manifold heat pickup, not measured): a charge
+      20-40 K above IAT would put the true MAP 7-13 % above the stated one.
+    - >-
+      Idle MAP is understated. The residual-gas factor moves warm idle (charge
+      fraction p50 0.151, 762 rpm, baro 81 kPa) to 21.8 kPa (22.2 at exhaust
+      1.1 x baro) where a warm NA idle sits at about 28-35 kPa. Injector dP =
+      rail + baro - MAP is then overstated, so modeled flow at idle is
+      0.7-1.6 % high (rail 350 kPa): idle cells carry about +-1.5 % model
+      uncertainty from this term.
