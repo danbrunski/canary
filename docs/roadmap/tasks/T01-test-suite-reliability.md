@@ -1020,3 +1020,16 @@ measurement in hand.
   so the gate's clean worktree now runs it too. `tests/fixtures/deployed_manifests/`
   holds only the 2026-09-24 LSTM manifest, so it could not serve.
   `pytest tests/test_sequence_feature_set.py -m ""`: 7 passed.
+
+- [ ] **T01.35 `tests/test_canary_desk.py::test_the_launcher_serves_the_dashboard_and_leaves_the_checkout_alone`
+  fails whenever another session edits the tree during the run (2026-11-12).**
+  It diffs `git status --porcelain --ignored -uall` over the whole checkout
+  (`CHECKOUT_PATHS`, excluding docs and the dashboard) before and after the
+  launcher runs, so any concurrent edit reads as the launcher writing into the
+  checkout. In a 17-minute `pytest -m slow` it failed on
+  `?? src/features/bus_freshness.py`, `?? src/features/trip_integrals.py` (an
+  R27.6 implementer) and ` M .claude/skills/vehicle-nissan-xterra-2008/SKILL.md`
+  (another session); alone it passed in 11 s. Not a launcher regression.
+  Fix: run the launcher against a pinned copy of the checkout
+  (`tests/pinned_checkout_harness.py`, as the T01 item that introduced it did),
+  so the before/after listing covers a tree nothing else edits.
