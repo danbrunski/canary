@@ -50,7 +50,8 @@ DEPENDS_ON: dict[str, frozenset[str]] = {
     "dyno_altitude_noise": frozenset({"dyno_contract"}),
     "dyno_squat": frozenset({"dyno_contract", "dyno_motion", "dyno_altitude_noise"}),
     "dyno_driveline": frozenset({"dyno_contract"}),
-    "dyno_inertia": frozenset({"dyno_contract", "dyno_motion", "dyno_driveline"}),
+    # The road-load record, so the fit can move its C into the pulls' air (M01.8).
+    "dyno_inertia": frozenset({"dyno_contract", "dyno_motion", "dyno_driveline", "dyno_road_load"}),
     "dyno_road_load": frozenset({"dyno_contract", "dyno_motion", "dyno_driveline"}),
     "dyno_comparison": frozenset({"dyno_contract"}),
     "dyno_power": frozenset(

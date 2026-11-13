@@ -1807,7 +1807,20 @@
      "mean_alpha_difference": 32.55824928336939,
      "imu_pitch_offset_deg": 0.29901481292154986,
      "imu_reference_id": null,
-     "squat_corrected": true
+     "squat_corrected": true,
+     "road_load_air": {
+      "__dataclass__": "AirScaledRoadLoad",
+      "a_n": 180.0,
+      "b_n_per_mps": 5.0,
+      "c_n_per_mps2": 0.55,
+      "c_fit_n_per_mps2": 0.55,
+      "density_ratio": 1.0,
+      "fit_baro_kpa": 80.0,
+      "fit_ambient_temp_c": 18.0,
+      "run_baro_kpa": 80.0,
+      "run_ambient_temp_c": 18.0,
+      "temperature_source": "ambient_temp_c (the road load's own record and the run's conditions); not intake_temp_c, which reads engine-bay air at low flow on this truck"
+     }
     }
    ],
    [
@@ -1927,7 +1940,20 @@
      "mean_alpha_difference": 32.55824928336939,
      "imu_pitch_offset_deg": 0.29901481292154986,
      "imu_reference_id": null,
-     "squat_corrected": false
+     "squat_corrected": false,
+     "road_load_air": {
+      "__dataclass__": "AirScaledRoadLoad",
+      "a_n": 180.0,
+      "b_n_per_mps": 5.0,
+      "c_n_per_mps2": 0.55,
+      "c_fit_n_per_mps2": 0.55,
+      "density_ratio": 1.0,
+      "fit_baro_kpa": 80.0,
+      "fit_ambient_temp_c": 18.0,
+      "run_baro_kpa": 80.0,
+      "run_ambient_temp_c": 18.0,
+      "temperature_source": "ambient_temp_c (the road load's own record and the run's conditions); not intake_temp_c, which reads engine-bay air at low flow on this truck"
+     }
     }
    ],
    [
@@ -11360,7 +11386,7 @@
     "wheel_shape_factor": 0.7,
     "driveline_output_kg_m2": 1.0,
     "engine_side_kg_m2": 0.25,
-    "evidence": "ESTIMATES, 2026-09-26, none measured. Wheel side: four road wheels at the profile's measured 40.3 kg per wheel and tire (wheel_tire_assembly_kg) and the 2.559 m rolling circumference (r = 0.407 m; 2.609 m until 2026-10-03, H07.11), with a shape factor of 0.7 of m*r^2 (an LT tire's mass sits near the rim; a solid disc is 0.5, a thin ring 1.0) -- about 19.4 kg m^2. driveline_output_kg_m2 (propshaft, differentials, axle shafts, hubs and rotors, referred to the wheels) is an order-of-magnitude figure, not a part weight. engine_side_kg_m2 (crank, flywheel, clutch, gearbox input) is the PHYSICAL crank-side inertia, a typical 4 L V6 manual figure within a plausible 0.15-0.35 kg m^2. It sits upstream of the driveline losses, so the wheels see eta times it, with eta = 1 - drivetrain_loss_fraction from profiles.yaml (0.85). The one convention is dyno.INERTIA_CONVENTION. H07.6's two-gear pulls measure eta*I_e and replace the estimate (measured_engine). In 3rd (overall 7.11) the estimates add ~119 kg (wheel side) + ~65 kg (0.85 x 0.25 kg m^2 through the ratio) to a ~2,311 kg test mass. A 40 % error in the engine-side estimate therefore moves 3rd-gear wheel force during a pull by ~1.0 %.",
+    "evidence": "ESTIMATES, 2026-09-26, none measured. Wheel side: four road wheels at the profile's measured 40.3 kg per wheel and tire (wheel_tire_assembly_kg) and the 2.559 m rolling circumference (r = 0.4073 m; 2.609 m until 2026-10-03, H07.11), with a shape factor of 0.7 of m*r^2 (an LT tire's mass sits near the rim; a solid disc is 0.5, a thin ring 1.0). At r = 0.4073 m that is 4 x 0.7 x 40.3 x r^2 = 18.72 kg m^2 for the wheels, 19.72 kg m^2 with driveline_output_kg_m2, which is 118.9 kg of equivalent mass (J/r^2; Driveline.wheel_side_kg_m2 computes exactly this). The earlier \"about 19.4 kg m^2\" was the four wheels alone at the old 2.609 m radius (19.46); beside \"~119 kg\" at r = 0.4073 it would read as 117.0 kg, and 119 kg as 19.74 kg m^2 (M01.12). The wheels' equivalent mass, 4 x 0.7 x 40.3 = 112.8 kg, does not depend on the radius. OPEN QUESTION (M01.12): 0.7 looks high for this wheel and tire. A per-part estimate gives about 0.57 (4 x 0.13 x 40.3 = 21 kg less equivalent mass, 0.84 % of the ~2,495 kg 3rd-gear m_eff). Kept at 0.7 because it is an estimate either way; H07.6 is meant to replace it with a measurement, and the value is not changed until then. driveline_output_kg_m2 (propshaft, differentials, axle shafts, hubs and rotors, referred to the wheels) is an order-of-magnitude figure, not a part weight. engine_side_kg_m2 (crank, flywheel, clutch, gearbox input) is the PHYSICAL crank-side inertia, a typical 4 L V6 manual figure within a plausible 0.15-0.35 kg m^2. It sits upstream of the driveline losses, so the wheels see eta times it, with eta = 1 - drivetrain_loss_fraction from profiles.yaml (0.85). The one convention is dyno.INERTIA_CONVENTION. H07.6's two-gear pulls measure eta*I_e and replace the estimate (measured_engine). In 3rd (overall 7.11) the estimates add ~119 kg (wheel side) + ~65 kg (0.85 x 0.25 kg m^2 through the ratio) to a ~2,311 kg test mass. A 40 % error in the engine-side estimate therefore moves 3rd-gear wheel force during a pull by ~1.0 %. The test mass is less certain than either inertia (M01.12). It is mass_kg (an itemised estimate, curb = full fuel) plus usual_payload_kg (127 kg, stated by the operator and never weighed). Fuel enters the force 1:1 through m*f: a full tank (21.1 US gal, about 80 L at ~0.745 kg/L, so ~60 kg, a published capacity, not measured here) is 2.6 % of the 2,311 kg test mass. A run on a near-empty tank against the full-fuel curb figure overstates wheel force by up to that much. State the fuel level, and weigh the truck (H07.10).",
     "measured_engine": null
    },
    "squat": null,

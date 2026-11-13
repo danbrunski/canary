@@ -25,6 +25,7 @@ from pydantic import ValidationError
 from src.analysis.dyno import (
     DYNO_FILENAME,
     AltitudeNoise,
+    DirectionFit,
     Driveline,
     DynoCurve,
     DynoNoiseFloor,
@@ -38,6 +39,7 @@ from src.analysis.dyno import (
     Leg,
     MotionSamples,
     PitchOffset,
+    RoadLoadCoefficients,
     RoadLoadConditions,
     RoadLoadFit,
     RunComparison,
@@ -273,8 +275,13 @@ def _pull(
     rpm_end: float = 5500.0,
     hz: float = 100.0,
     eta_at_crank: float = ETA,
+    c_n_per_mps2: float = TRUE_C,
 ) -> GearPull:
-    """A WOT pull in one gear from a known torque curve, road load and inertia."""
+    """A WOT pull in one gear from a known torque curve, road load and inertia.
+
+    ``c_n_per_mps2`` is the aero term in the pull's own air (``TRUE_C`` is
+    the coast-downs' air, :data:`ROAD_LOAD_FIT_BARO_KPA`).
+    """
     ratio = driveline.overall_ratio(gear)
     r = driveline.tire_radius_m
     # The crank inertia is upstream of the lossy gearbox: the wheel sees
@@ -295,7 +302,7 @@ def _pull(
         if rpm > rpm_end:
             break
         drive = _engine_torque(rpm) * eta_at_crank * ratio / r
-        load = TRUE_A + TRUE_B * v + TRUE_C * v**2
+        load = TRUE_A + TRUE_B * v + c_n_per_mps2 * v**2
         accel = (drive - load - MASS * G * math.sin(theta)) / m_eff
         rows.append((t, v, accel, rpm))
         assert t < 60.0, f"gear {gear} never reaches {rpm_end} rpm: pick a reachable band"
@@ -343,8 +350,27 @@ def _squat_record() -> SquatCoefficient:
     )
 
 
-def _true_road_load() -> RoadLoadFit:
-    return RoadLoadFit(
+#: The air the synthetic road load (``TRUE_C``) was coasted in.
+ROAD_LOAD_FIT_BARO_KPA = 80.0
+ROAD_LOAD_FIT_AMBIENT_C = 18.0
+
+
+def _true_road_load() -> RoadLoadCoefficients:
+    """The exact synthetic road load, recorded at :data:`ROAD_LOAD_FIT_BARO_KPA`."""
+    direction = DirectionFit(
+        a_n=TRUE_A,
+        b_n_per_mps=TRUE_B,
+        c_n_per_mps2=TRUE_C,
+        a_se_n=0.0,
+        b_se_n_per_mps=0.0,
+        c_se_n_per_mps2=0.0,
+        residual_sd_n=0.0,
+        n_samples=1000,
+        speed_min_mps=4.0,
+        speed_max_mps=32.0,
+        static_pitch_deg=TRUE_MOUNT_OFFSET_DEG,
+    )
+    fit = RoadLoadFit(
         a_n=TRUE_A,
         b_n_per_mps=TRUE_B,
         c_n_per_mps2=TRUE_C,
@@ -352,13 +378,25 @@ def _true_road_load() -> RoadLoadFit:
         b_se_n_per_mps=0.0,
         c_se_n_per_mps2=0.0,
         directions="pair",
-        per_direction={},
+        per_direction={"northbound": direction, "southbound": direction},
         residual_sd_n=0.0,
         test_mass_kg=MASS,
         neutral_effective_mass_kg=MASS,
         inertia="estimated",
         squat_corrected=True,
         imu_pitch_offset_deg=TRUE_MOUNT_OFFSET_DEG,
+    )
+    return fit.to_record(
+        RoadLoadConditions(
+            road="synthetic flat",
+            date=dt.date(2026, 9, 26),
+            sessions=["synthetic"],
+            payload_kg=127.0,
+            tire_pressure_front_kpa=240.0,
+            tire_pressure_rear_kpa=240.0,
+            ambient_temp_c=ROAD_LOAD_FIT_AMBIENT_C,
+            baro_kpa=ROAD_LOAD_FIT_BARO_KPA,
+        )
     )
 
 
@@ -1238,6 +1276,9 @@ def _inertia_kwargs(driveline: Driveline) -> dict[str, Any]:
         "driveline": driveline,
         "test_mass_kg": MASS,
         "road_load": _true_road_load(),
+        # The pulls run in the coast-downs' air unless a test says otherwise.
+        "baro_kpa": ROAD_LOAD_FIT_BARO_KPA,
+        "ambient_temp_c": ROAD_LOAD_FIT_AMBIENT_C,
         "squat": _squat_record(),
     }
 
@@ -1252,6 +1293,58 @@ def test_two_gear_fit_is_exact_without_noise(driveline: Driveline) -> None:
 class _Silent:
     def normal(self, loc: float, scale: float, size: int) -> np.ndarray:
         return np.zeros(size)
+
+
+@pytest.mark.parametrize("seed", [None, 21])
+def test_inertia_fit_moves_the_road_load_into_the_pulls_air_m01_8(
+    driveline: Driveline, seed: int | None
+) -> None:
+    # Known answer (M01.8): the road load was coasted at 80 kPa (C = TRUE_C);
+    # the pulls run at 70 kPa, same ambient, so their true aero term is
+    # TRUE_C * 70/80. Moved into the pulls' air, the fit recovers 0.18 kg m^2.
+    ratio = 70.0 / ROAD_LOAD_FIT_BARO_KPA
+    rng: Any = _Silent() if seed is None else np.random.default_rng(seed)
+    per_gear = 1 if seed is None else 3
+    pulls = [
+        _pull(rng, driveline, gear, c_n_per_mps2=TRUE_C * ratio)
+        for gear in (2, 3)
+        for _ in range(per_gear)
+    ]
+    kwargs = {**_inertia_kwargs(driveline), "pitch_offset": _stated_offset()}
+    fit = fit_engine_inertia(pulls, **{**kwargs, "baro_kpa": 70.0})
+    assert isinstance(fit, EngineInertiaFit), fit
+    assert fit.engine_kg_m2 == pytest.approx(
+        TRUE_ENGINE_INERTIA, rel=0.005 if seed is None else 0.03
+    )
+    assert fit.road_load_air.density_ratio == pytest.approx(ratio, rel=1e-12)
+    assert fit.road_load_air.run_baro_kpa == 70.0
+    assert fit.road_load_air.fit_baro_kpa == ROAD_LOAD_FIT_BARO_KPA
+    assert fit.road_load_air.c_n_per_mps2 == pytest.approx(TRUE_C * ratio, rel=1e-12)
+    # The pre-M01.8 behaviour, the record applied in its own air: the excess
+    # drag does not cancel between the gears (at one rpm 3rd is faster than
+    # 2nd), and the crank inertia reads +33 % (measured +33.1 % silent, +33.9 %
+    # seed 21; the verifier's own harness gave +38 %).
+    unscaled = fit_engine_inertia(pulls, **kwargs)
+    assert isinstance(unscaled, EngineInertiaFit), unscaled
+    assert unscaled.road_load_air.density_ratio == 1.0
+    assert unscaled.engine_kg_m2 / TRUE_ENGINE_INERTIA - 1.0 == pytest.approx(0.33, abs=0.02)
+
+
+def test_inertia_fit_refuses_a_road_load_without_its_air(driveline: Driveline) -> None:
+    pulls = [_pull(_Silent(), driveline, 2), _pull(_Silent(), driveline, 3)]  # type: ignore[arg-type]
+    kwargs = {**_inertia_kwargs(driveline), "pitch_offset": _stated_offset()}
+    record = kwargs["road_load"]
+    # An unrecorded fit says nothing about the air its C was fitted in.
+    unrecorded = RoadLoadFit(
+        **{name: getattr(record, name) for name in RoadLoadFit.__dataclass_fields__}
+    )
+    refusal = _refused(
+        fit_engine_inertia(pulls, **{**kwargs, "road_load": unrecorded}), "inputs_missing"
+    )
+    assert "M01.8" in refusal.reason and "baro_kpa" in refusal.reason
+    # A barometer in another unit (hPa) is refused, not scaled by 10x.
+    refusal = _refused(fit_engine_inertia(pulls, **{**kwargs, "baro_kpa": 800.0}), "invalid_input")
+    assert "hPa" in refusal.reason
 
 
 def test_inertia_convention_is_upstream_of_driveline_losses(driveline: Driveline) -> None:

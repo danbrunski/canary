@@ -5,9 +5,11 @@ between two gears at the same engine speed, against the difference in the
 engine's angular acceleration. The stored record and the driveline it feeds
 are in :mod:`src.analysis.dyno_driveline`.
 
-Depends on the contract, motion and driveline modules; it takes the road load
-and squat as protocols, so it does not depend on the road-load or squat fits.
-Moved verbatim out of ``dyno.py`` (R16).
+Depends on the contract, motion, driveline and road-load modules. The road load
+is a stored record (:class:`RoadLoadCoefficients`), never a bare force
+protocol, because only a record says which air its ``C`` was fitted in and the
+fit moves it into the pulls' air (M01.8). Squat is still taken as a protocol.
+Moved out of ``dyno.py`` (R16).
 """
 
 from __future__ import annotations
@@ -22,12 +24,17 @@ from src.analysis.dyno_contract import (
     DynoRefusal,
     FloatArray,
     MotionSamples,
-    RoadLoadLike,
     SquatLike,
     lstsq,
 )
 from src.analysis.dyno_driveline import Driveline, EngineInertiaRecord, InertiaConditions
 from src.analysis.dyno_motion import PitchOffset, frame_mismatch, remove_sensor_tilt
+from src.analysis.dyno_road_load import (
+    ROAD_LOAD_BARO_MAX_KPA,
+    ROAD_LOAD_BARO_MIN_KPA,
+    AirScaledRoadLoad,
+    RoadLoadCoefficients,
+)
 
 #: Two-gear inertia: the pulls must share this much rpm.
 INERTIA_MIN_RPM_OVERLAP = 1000.0
@@ -67,6 +74,9 @@ class EngineInertiaFit:
     imu_pitch_offset_deg: float
     imu_reference_id: str | None
     squat_corrected: bool
+    #: The road load as applied: the record's ``C`` moved into the pulls' air
+    #: (M01.8), with the density ratio and both barometers.
+    road_load_air: AirScaledRoadLoad
 
     def to_record(self, conditions: InertiaConditions) -> EngineInertiaRecord:
         return EngineInertiaRecord(
@@ -105,7 +115,9 @@ def fit_engine_inertia(
     *,
     driveline: Driveline,
     test_mass_kg: float,
-    road_load: RoadLoadLike,
+    road_load: RoadLoadCoefficients,
+    baro_kpa: float,
+    ambient_temp_c: float,
     squat: SquatLike | None,
     pitch_offset: PitchOffset,
     rpm_bin: float = INERTIA_RPM_BIN,
@@ -140,11 +152,43 @@ def fit_engine_inertia(
     moves the result by ~44 %. Take it from :func:`estimate_pitch_offset` on a
     direction pair in the same IMU frame (the road-load pair records one);
     pulls from another frame are refused (``frame_mismatch``).
+
+    ``road_load`` must be a *record*, and ``baro_kpa`` / ``ambient_temp_c``
+    (the pulls' measured barometer and ambient temperature) are required: the
+    record's ``C`` (``½·ρ·Cd·A``) is moved into the pulls' air by
+    ``ρ_run / ρ_fit`` (:meth:`RoadLoadCoefficients.in_air`, ambient on both
+    sides, as :func:`compute_power` does; M01.8). Unscaled, it does not cancel
+    between the gears: at one engine speed the higher gear is faster, so it
+    carries more of the excess drag. A fit at 80 kPa applied to pulls at
+    70 kPa read the crank inertia 33 % high in the synthetic two-gear harness
+    (``test_inertia_fit_moves_the_road_load_into_the_pulls_air_m01_8``). An
+    unrecorded :class:`RoadLoadFit` is refused ``inputs_missing``; a
+    barometer outside the record range, ``invalid_input``. The applied road
+    load is carried as ``road_load_air``.
     """
     name = "engine_inertia"
     gears = sorted({pull.gear for pull in pulls})
     if not pulls:
         return DynoRefusal(name, "inputs_missing", "no pulls were given")
+    # Typed out, and refused at run time for an untyped caller handing over a
+    # RoadLoadFit: a fit carries no conditions, so no air to scale from.
+    if not isinstance(road_load, RoadLoadCoefficients):
+        return DynoRefusal(
+            name,
+            "inputs_missing",
+            "the road load is an unrecorded fit, so nothing says which air its C "
+            "(1/2*rho*Cd*A) was fitted in; record it with RoadLoadFit.to_record and the "
+            "coast-downs' measured baro_kpa before using it at another barometer (M01.8)",
+        )
+    if not ROAD_LOAD_BARO_MIN_KPA <= baro_kpa <= ROAD_LOAD_BARO_MAX_KPA:
+        return DynoRefusal(
+            name,
+            "invalid_input",
+            f"the pulls' baro_kpa {baro_kpa:g} is outside {ROAD_LOAD_BARO_MIN_KPA:g}-"
+            f"{ROAD_LOAD_BARO_MAX_KPA:g} kPa (sea level to the highest roads): a value in "
+            "hPa, mbar, psi or inHg? Give kPa",
+        )
+    air = road_load.in_air(baro_kpa, ambient_temp_c)
     mismatch = frame_mismatch(name, pitch_offset, [pull.samples for pull in pulls])
     if mismatch is not None:
         return mismatch
@@ -176,7 +220,7 @@ def fit_engine_inertia(
         force = (
             test_mass_kg * sf
             + driveline.wheel_side_kg_m2 / r**2 * s.accel_mps2
-            + road_load.force(s.speed_mps)
+            + air.force(s.speed_mps)
         )
         per_gear[pull.gear].append((r / ratio * force, ratio * s.accel_mps2 / r, s.rpm))
     torques = [np.concatenate([t for t, _, _ in per_gear[g]]) for g in gears]
@@ -237,4 +281,5 @@ def fit_engine_inertia(
         imu_pitch_offset_deg=pitch_offset.deg,
         imu_reference_id=pitch_offset.reference_id,
         squat_corrected=squat is not None,
+        road_load_air=air,
     )

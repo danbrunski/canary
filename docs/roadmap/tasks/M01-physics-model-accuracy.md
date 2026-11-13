@@ -674,7 +674,7 @@ them; absolute and "corrected" figures do not.
     fields, so every workbench run reports both pressures `unstated`. Add
     `tire_pressure_front_kpa` / `tire_pressure_rear_kpa` to the request,
     route, MCP tool and form, and pass them into `RunConditions`.
-  - [ ] **The inertia fit applies the road load unscaled too.**
+  - [x] **The inertia fit applies the road load unscaled too.**
     `dyno_inertia.fit_engine_inertia` calls `road_load.force(v)`, which is
     the record in the air it was fitted in, and takes no run conditions. In
     the verifier's synthetic two-gear harness, a fit at 80 kPa used at
@@ -682,6 +682,50 @@ them; absolute and "corrected" figures do not.
     verifier's measurement; I did not re-run it. No production caller exists
     yet. Fix it before any H07.12 inertia fit: give it the run's conditions
     and `RoadLoadCoefficients.in_air`, as `compute_power` does.
+    - *2026-11-13.* `fit_engine_inertia` now takes `road_load:
+      RoadLoadCoefficients` (a record, no longer the `RoadLoadLike` force
+      protocol) and two required keyword arguments, `baro_kpa` and
+      `ambient_temp_c` (the pulls' air), so the unscaled call cannot be
+      written. It applies `road_load.in_air(baro_kpa, ambient_temp_c)`
+      (ambient on both sides, `ROAD_LOAD_TEMPERATURE_SOURCE`) and carries it
+      as `EngineInertiaFit.road_load_air`. At run time an unrecorded
+      `RoadLoadFit` is refused `inputs_missing` (naming `baro_kpa` and M01.8),
+      the same way `compute_power` refuses it, and a barometer outside
+      `ROAD_LOAD_BARO_MIN_KPA`–`MAX` (45–110) is refused `invalid_input` as
+      probably another unit. `dyno_inertia` may now import `dyno_road_load`
+      (`DEPENDS_ON` in `tests/test_dyno_boundaries.py`; no cycle, because
+      road load does not import inertia). Callers swept with
+      `grep -rn fit_engine_inertia`: no production caller, only the facade
+      re-export plus `tests/test_dyno.py` and `tests/test_dyno_golden.py`,
+      both through `_inertia_kwargs`. That helper now passes a
+      `RoadLoadCoefficients` recorded at 80 kPa / 18 °C, in the same air.
+    - Known answer,
+      `test_inertia_fit_moves_the_road_load_into_the_pulls_air_m01_8[None|21]`:
+      road load recorded at 80 kPa (C = 0.55), pulls in 2nd and 3rd generated
+      at 70 kPa (true C = 0.55 × 70/80), same ambient. Scaled, the fit
+      recovers 0.18 kg·m² (silent: +0.07 %, asserted rel 0.005; seed 21,
+      three pulls per gear: +0.03 %, asserted rel 0.03), with
+      `road_load_air.density_ratio` = 0.875. Unscaled (the record in its
+      own air, the old behavior), it reads **+33.1 %** silent and +33.9 % on
+      seed 21 (asserted 0.33 ± 0.02). The excess drag does not cancel
+      between gears, because at one rpm 3rd is faster than 2nd. Other
+      measured cases (scratch, same harness): pulls at 63 kPa read +56 %
+      unscaled; at 70 kPa / 30 °C (density ratio 0.840), +42 %; at 82 kPa
+      (denser than the fit), −6.6 %. Scaled, all of them come back within
+      0.3 % silent and within 0.9 % with seed-21 noise. The earlier figures
+      (+38 %, and +45 % "at 82 kPa") are the same effect with C = 0.55
+      pinned to the pulls' air rather than the record's: the error is linear
+      in the excess drag ΔC, and 0.55·(80/70 − 1) is 8/7 of 0.55·(1 − 70/80).
+      The second verifier reproduced +37.6 % that way, and a fit at 82 kPa
+      used at 70 gives ΔC = 0.094, about +45 %.
+      `test_inertia_fit_refuses_a_road_load_without_its_air` covers the two
+      refusals.
+    - Golden (`tests/fixtures/dyno_golden.json`): no value moved. The test
+      road load is applied in its own air, so the density ratio is exactly 1.
+      Added: `road_load_air` on `inertia_fit` and `inertia_no_squat`. The
+      stored Xterra `dyno.yaml` inertia `evidence` string changed (M01.12).
+      25 squat and road-load floats that changed only by noise on
+      regeneration (relative ≤ 1e-9) were restored to the pinned values.
 
 - [~] **M01.9 (Out of range) SAE J1349 is applied at 63–82 kPa.**
   `dyno_power._j1349_factor` implements the right formula
@@ -793,13 +837,31 @@ them; absolute and "corrected" figures do not.
     with grade and headwind, the same size as the 0.15–0.43 % drive-to-drive
     scatter in the tread-depth estimate. Gate on grade and tractive effort.
 
-- [ ] **M01.12 Data notes in `data/nissan-xterra-2008/dyno.yaml`.**
+- [x] **M01.12 Data notes in `data/nissan-xterra-2008/dyno.yaml`.**
   Wheel-side inertia is given as "about 19.4 kg m²" beside "~119 kg"; at
   r = 0.4073 m those are 117 kg and 19.7 kg m² (a 1.5 % mismatch in a stated
   estimate). `wheel_shape_factor: 0.7` looks high for this wheel and tire
   (about 0.57 by estimate, worth 0.9 % of effective mass); H07.6 is meant to
   replace it with a measurement. A tank of fuel is 2.6 % of test mass and
   enters force 1:1; payload is operator-stated only.
+  - *2026-11-13, notes only; no value changed.* The `inertia.evidence` in
+    `dyno.yaml` is corrected. With 4 × 0.7 × 40.3 kg × r² at r = 2.559/2π =
+    0.4073 m, the wheels are 18.72 kg·m², and with `driveline_output_kg_m2`
+    19.72 kg·m² = 118.9 kg equivalent mass. That is what
+    `Driveline.wheel_side_kg_m2` computes. The old "19.4" was the four wheels
+    alone at the pre-2026-10-03 2.609 m radius (19.46). Taken at r = 0.4073,
+    19.4 kg·m² is 117.0 kg and 119 kg is 19.74 kg·m², which reproduces the
+    item's figures. The wheels' equivalent mass (112.8 kg) does not depend on
+    the radius. **`wheel_shape_factor` stays 0.7.** It is recorded as an open
+    question: about 0.57 by estimate is 21 kg less equivalent mass, 0.84 % of
+    the ~2,495 kg 3rd-gear m_eff (0.91 % of the 2,311 kg test mass). H07.6
+    replaces it with a measurement. Also noted: the test mass is `mass_kg`
+    (curb = full fuel, itemised estimate) + `usual_payload_kg` 127 kg
+    (operator-stated, never weighed). Fuel enters force 1:1 through m·f, and a
+    full tank is ~60 kg, 2.6 % of test mass. The tank figure uses the
+    published 21.1 US gal (~80 L) at ~0.745 kg/L, from outside the repo; no
+    profile states a tank capacity. Golden: the evidence string in the
+    stored-profile case changed, nothing else.
 
 ## Part C — IMU
 
