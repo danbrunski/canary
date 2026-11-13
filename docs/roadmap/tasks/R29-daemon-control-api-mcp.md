@@ -872,7 +872,7 @@ it; go after that work lands.
   - [ ] `validation/harness._start_pipeline` is a second composition root;
     give both one `start_pipeline(components, …)`.
 
-- [~] **R29.13 `RomBackupJob` is a 920-line class.** Lifecycle (~150 lines),
+- [x] **R29.13 `RomBackupJob` is a 920-line class.** Lifecycle (~150 lines),
   preconditions (90), the wire protocol (~275: `_listen`, `_send`,
   `_session_step`, `_read_block`, `_reread`, …) and post-processing that needs
   no bus (~150: `_store`, `_integrity`, `_size_caveat`). A
@@ -905,9 +905,43 @@ it; go after that work lands.
     The only services requested are 0x10 and 0x23. A grep of the moved code
     for 0x2E/0x31/0x34/0x36/0x3B/0x3E/0x27 finds only an NRC `"0x31"` in a
     comment.
-  - [ ] `brain_jobs.py` (1,155 lines) splits the same way: store and index, kind
-    runners and `precheck`, scheduler. Not attempted (out of the R29.13
-    dispatch's scope, 2026-11-12).
+  - [x] `brain_jobs.py` (1,168 lines) splits the same way: store and index, kind
+    runners and `precheck`, scheduler.
+    `brain_jobs_store.py` (295 lines) holds `BrainJob`, `BrainJobStore`,
+    `BrainJobRefusedError`, `job_id_for`, the kind and state vocabularies, and
+    the only `_LOCKS` / `_INDEXES` / `_JobIndex`. `brain_jobs_runners.py` (468)
+    holds `canonical_params`, the candidate helpers, `enqueue_after_digest`,
+    the `_run_*` kind runners, `run_brain_job` and `precheck`.
+    `brain_jobs_scheduler.py` (410) holds `collection_activity`,
+    `MIN_TICK_SECONDS` and `BrainScheduler`. `brain_jobs.py` is a 94-line
+    facade re-exporting every name an importer in `src/`, `scripts/`, `tools/`
+    or `tests/` uses (found by an AST scan of imports and attribute reads),
+    plus the daemon's `importlib` use of `BrainScheduler` and
+    `collection_activity`. Behavior identical: `ast.dump` of all 40 moved
+    top-level definitions (5 scheduler, 19 store, 16 runners) equals
+    `git show HEAD:src/control/brain_jobs.py`, 40 of 40, none defined twice,
+    none new. Persisted state is dicts only (`jobs.jsonl` lines, result
+    files), so old files load unchanged; `run_brain_job` pickles by its new
+    module name and `test_the_real_spawn_child_runs_a_job` runs it in a real
+    `spawn` child.
+    Patches that would silently stop applying were repointed, not delegated,
+    because the scheduler reads `any_digest_in_flight`,
+    `any_workbench_job_in_flight` and `precheck` from its own module:
+    `tests/test_brain_jobs.py` (three `monkeypatch.setattr` targets, and the
+    `_INDEXES` read, now `brain_jobs_scheduler` / `brain_jobs_store`);
+    `tests/test_child_pool.py` `_MAY_SPAWN` names
+    `src/control/brain_jobs_scheduler.py` (where `spawn_pool(` now is);
+    `tests/test_exceptions_pickle.py` keys `BrainJobRefusedError` by its new
+    `__module__`. One behavior change: the scheduler's two
+    `log.exception` records now come from logger
+    `src.control.brain_jobs_scheduler` (was `src.control.brain_jobs`); nothing
+    filters on the old name. Verified independently (40/40 AST, 491 passed).
+    Gate: ruff and mypy clean on the new files (the whole-repo
+    `ruff format --check` and `mypy` were red only on another session's files),
+    491 passed over every test file mentioning `brain_jobs` plus
+    `test_layering`, `test_source_rules`, `test_exceptions_pickle`,
+    `test_process_state_reset`, `test_route_table_snapshot` and
+    `test_mcp_tool_snapshot` (`-m "" -n 4`).
 
 - [x] **R29.14 "Engine running" is defined three ways, and the non-volatile
   write guard uses the weakest.** `classify_vehicle_state` uses the OBD rpm

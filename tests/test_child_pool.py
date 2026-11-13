@@ -263,7 +263,7 @@ def test_the_failure_types_survive_a_pickle_round_trip() -> None:
 
 #: Modules that may build a pool themselves. The brain keeps its own lifecycle
 #: (it polls its child so it can yield); the list may only shrink.
-_MAY_SPAWN = {"src/control/child_pool.py", "src/control/brain_jobs.py"}
+_MAY_SPAWN = {"src/control/child_pool.py", "src/control/brain_jobs_scheduler.py"}
 
 
 def test_no_fifth_copy_of_the_bounded_child_runner() -> None:

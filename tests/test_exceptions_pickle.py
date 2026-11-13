@@ -83,7 +83,7 @@ def _construct_typed() -> dict[str, Any]:
             (0x22, 0x31, b"\x7f\x22\x31"),
             {},
         ),
-        "src.control.brain_jobs.BrainJobRefusedError": ((409, {"message": "busy"}), {}),
+        "src.control.brain_jobs_store.BrainJobRefusedError": ((409, {"message": "busy"}), {}),
         "src.control.brain_reads.BrainReadError": ((503, {"message": "down"}), {}),
         "src.control.profile_capture.ProfileCaptureError": ((409, {"message": "busy"}), {}),
         "src.control.tuning_mode.TuningStorageSwitchError": ((500, "storage did not switch"), {}),

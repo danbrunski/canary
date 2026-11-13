@@ -24,7 +24,7 @@ from typing import Any
 import pytest
 
 from src.config import CanaryConfig
-from src.control import brain_jobs
+from src.control import brain_jobs, brain_jobs_scheduler, brain_jobs_store
 from src.control.brain_jobs import (
     BrainJobRefusedError,
     BrainJobStore,
@@ -234,11 +234,11 @@ def test_digest_and_workbench_children_are_shared_not_doubled(
 ) -> None:
     write_session(config)
     job_id = submit_twin(config)
-    monkeypatch.setattr(brain_jobs, "any_digest_in_flight", lambda: True)
+    monkeypatch.setattr(brain_jobs_scheduler, "any_digest_in_flight", lambda: True)
     assert asyncio.run(scheduler(config).step()) is None
     assert BrainJobStore.for_config(config).get(job_id).reason == "digest_running"  # type: ignore[union-attr]
-    monkeypatch.setattr(brain_jobs, "any_digest_in_flight", lambda: False)
-    monkeypatch.setattr(brain_jobs, "any_workbench_job_in_flight", lambda: True)
+    monkeypatch.setattr(brain_jobs_scheduler, "any_digest_in_flight", lambda: False)
+    monkeypatch.setattr(brain_jobs_scheduler, "any_workbench_job_in_flight", lambda: True)
     assert asyncio.run(scheduler(config).step()) is None
     assert BrainJobStore.for_config(config).get(job_id).reason == "workbench_running"  # type: ignore[union-attr]
 
@@ -372,7 +372,7 @@ def test_step_keeps_the_loop_responsive_under_a_slow_precheck(
         time.sleep(0.6)
         return "pending", "session_open", "slow"
 
-    monkeypatch.setattr(brain_jobs, "precheck", slow_precheck)
+    monkeypatch.setattr(brain_jobs_scheduler, "precheck", slow_precheck)
     sched = scheduler(config)
 
     async def scenario() -> float:
@@ -405,7 +405,7 @@ def test_the_job_log_is_read_incrementally(config: CanaryConfig) -> None:
     first, _ = store.submit("memory_consolidation", {})
     other = BrainJobStore.for_config(config)  # another instance, same file
     assert other.get(first.job_id) is not None
-    index = brain_jobs._INDEXES[store.path.resolve()]
+    index = brain_jobs_store._INDEXES[store.path.resolve()]
     offset = index.offset
     other.transition(first, "deferred", reason="collecting:engine_off")
     job = store.get(first.job_id)
