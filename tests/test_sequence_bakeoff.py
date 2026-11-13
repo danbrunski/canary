@@ -18,7 +18,7 @@ from scripts.sequence_bakeoff import (
     main,
     run_bakeoff,
 )
-from src.models import evaluation as model_evaluation
+from src.models import evaluation_corpus as model_evaluation
 from src.yaml_load import load_yaml
 from tests.builders import write_obd_session
 from tests.configs import example_config

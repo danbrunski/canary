@@ -343,7 +343,7 @@ not measured.
     test_decoded_mode_signals.py` calls it; also the method `apply_built_tick`
     uses). The eight trip fields had no outside reader and are gone.
 
-- [ ] **R27.7 `models/evaluation.py` (1,589 lines) is four unrelated
+- [x] **R27.7 `models/evaluation.py` (1,589 lines) is four unrelated
   clusters.** R15 created twelve `evaluation_*.py` modules and left this file
   alone. By content: corpus structure (`Era`, `Drive`, `HoldoutSplit`,
   `holdout_by_drive`, `pick_calibration_holdouts`); alert persistence
@@ -353,10 +353,31 @@ not measured.
   `_shift_verdict`); plus the unrelated
   `refuse_non_default_profile_sessions`, which `training_entry` imports from
   here.
-  - [ ] `evaluation_corpus.py`, `evaluation_alerts.py`,
+  - [x] `evaluation_corpus.py`, `evaluation_alerts.py`,
     `evaluation_metrics.py`, `evaluation_shift.py`; `evaluation.py`
     re-exports, with an `is`-identity test like
     `test_loader_names_are_the_owners_objects`. No body edits.
+    Done: `evaluation.py` 1,589 -> 275 lines (docstring, facade imports,
+    reporting strata, `DriveDetectorResult`); corpus 685, alerts 133, metrics
+    405, shift 266. `refuse_non_default_profile_sessions` and its error sit in
+    `evaluation_corpus.py`: it is the corpus-eligibility rule applied at the
+    trainer, the other half of "which sessions may a detector see".
+    `MAX_ENGINE_STEP_SECONDS` lives in `evaluation_alerts.py` (the lowest
+    module, so `evaluation_metrics.py` can import it without a cycle). Proof:
+    all 70 module-level defs/classes/constants of HEAD's `evaluation.py` have an
+    identical `ast.dump` and source segment in their new owner, and no new
+    names were defined; `tests/test_evaluation_reexports.py` (57 tests)
+    pins every re-export as the owner's object and each moved class's
+    `__module__`. Pickles: score-cache entries are keyed by `code_version`
+    (hash of every `src/**/*.py`), so old entries are never read; a pickle
+    naming `src.models.evaluation.Drive` still loads through the facade.
+    `tests/test_retrain_script.py` and `tests/test_sequence_bakeoff.py`
+    monkeypatched `session_parquet_bytes` and friends on the facade, which
+    would no longer reach `pick_calibration_holdouts`; they now import
+    `evaluation_corpus as model_evaluation`. Ran with `-m ""`: every test
+    importing `src.models.evaluation*`, the golden, `evaluate_detectors` script
+    and layering tests, 665 passed; `-m ml_training` on the evaluation files,
+    31 passed. The pick log line now logs under `src.models.evaluation_corpus`.
   - Note in the close-out: the score cache's `code_version` hashes every
     `src/**/*.py`, so the next evaluation misses its cache once.
 

@@ -15,7 +15,7 @@ from scripts import _cli, retrain
 from src.config import CanaryConfig
 from src.decode.dids import load_repo_did_map
 from src.features.feature_pipeline import load_resampled_session
-from src.models import evaluation as model_evaluation
+from src.models import evaluation_corpus as model_evaluation
 from src.models import training_entry
 from src.models.evaluation import MIN_CALIBRATION_HOLDOUT_SESSIONS
 from src.models.feedback import FeedbackStore
