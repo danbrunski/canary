@@ -44,10 +44,7 @@ appends are serialized per file; across processes they are not.
 
 from __future__ import annotations
 
-import fcntl
 import json
-import os
-import threading
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -71,7 +68,13 @@ from src.evidence.records import (
     record_to_dict,
     recurrence_key,
 )
-from src.jsonl_store import JsonlStore
+from src.jsonl_store import (
+    JsonlStore,
+    TailIndex,
+    append_jsonl_line_repairing,
+    file_lock,
+    path_lock,
+)
 from src.session import SessionKind, is_synthetic_session, session_kind
 
 if TYPE_CHECKING:
@@ -280,15 +283,11 @@ class OutcomeAssessment:
 class _Index:
     """Everything parsed from one ledger file, maintained incrementally."""
 
-    inode: int | None = None
-    offset: int = 0
-    #: Trailing bytes with no newline yet (a torn or in-progress write).
-    partial: bool = False
-    #: The file's first bytes and the bytes just before ``offset``, as last
-    #: read. A file rewritten in place (same inode, any length) or deleted and
+    #: Where in the file this has read to. It also compares the file's first
+    #: bytes and the bytes just before the read offset with what it last read:
+    #: a file rewritten in place (same inode, any length) or deleted and
     #: recreated on a reused inode no longer matches, and is re-read whole.
-    head: bytes = b""
-    tail: bytes = b""
+    tail: TailIndex = field(default_factory=lambda: TailIndex(verify_bytes=True))
     records: dict[str, AnyRecord] = field(default_factory=dict)
     corrupt: dict[str, str] = field(default_factory=dict)
     #: old id -> [(recorded_at, by id, "supersede" | "retract")]
@@ -356,20 +355,10 @@ class _Index:
         return found
 
 
-_HEAD_BYTES = 4096
-_TAIL_BYTES = 512
-
-#: One lock and one parsed index per ledger file, shared by every
-#: :class:`MemoryLedger` on it in this process (route handlers build their own).
-_LOCKS: dict[Path, threading.RLock] = {}
+#: One parsed index per ledger file (and, from :func:`~src.jsonl_store.path_lock`,
+#: one lock), shared by every :class:`MemoryLedger` on it in this process
+#: (route handlers build their own).
 _INDEXES: dict[Path, _Index] = {}
-_LOCKS_GUARD = threading.Lock()
-
-
-def _lock_for(path: Path) -> threading.RLock:
-    key = path.resolve()
-    with _LOCKS_GUARD:
-        return _LOCKS.setdefault(key, threading.RLock())
 
 
 def _now() -> datetime:
@@ -453,12 +442,10 @@ class MemoryLedger(JsonlStore[AnyRecord]):
                 )
         if isinstance(record, Prediction) and record.noise_floor is not None:
             verify_floor(record.noise_floor)  # FloorVerificationError: relabelled/invented
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         # In-process lock for threads, then an exclusive flock on the ledger
         # file itself for other processes: refresh, decide and write are one
         # step, so two writers cannot both supersede the same record.
-        with _lock_for(self.path), self.path.open("ab") as lock_handle:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        with file_lock(self.path):
             return self._append_locked(record, now)
 
     def _append_locked(self, record: AnyRecord, now: datetime | None) -> AnyRecord:
@@ -533,7 +520,7 @@ class MemoryLedger(JsonlStore[AnyRecord]):
     def entry(self, record_id: str, *, as_of: datetime | None = None) -> LedgerEntry:
         """The record with its derived state (as of a record time, if given),
         or a refusal naming which kind of bad id it is."""
-        with _lock_for(self.path):
+        with path_lock(self.path):
             index = self._refresh()
             self._check_reference(index, record_id, None)
             record = index.records[record_id]
@@ -546,20 +533,20 @@ class MemoryLedger(JsonlStore[AnyRecord]):
 
     def resolve_evidence(self, evidence_id: str) -> LedgerEntry:
         """An evidence id a card or record cites, resolved — or refused."""
-        with _lock_for(self.path):
+        with path_lock(self.path):
             index = self._refresh()
             self._check_reference(index, evidence_id, "evidence")
             return self._entry(index, evidence_id, None)
 
     def entries(self) -> list[LedgerEntry]:
         """Every record in write order, with its supersession state."""
-        with _lock_for(self.path):
+        with path_lock(self.path):
             index = self._refresh()
             return [self._entry(index, rid, None) for rid in index.records]
 
     def history(self, record_id: str) -> list[LedgerEntry]:
         """``record_id`` and every record it superseded, oldest first."""
-        with _lock_for(self.path):
+        with path_lock(self.path):
             index = self._refresh()
             self._check_reference(index, record_id, None)
             chain: list[LedgerEntry] = []
@@ -587,7 +574,7 @@ class MemoryLedger(JsonlStore[AnyRecord]):
             raise TypeError("pass a MemoryQuery or keyword filters, not both")
         terms = query.text.lower().split() if query.text else []
         found: list[LedgerEntry] = []
-        with _lock_for(self.path):
+        with path_lock(self.path):
             index = self._refresh()
             if query.recurrence is not None:
                 candidates: Iterable[str] = index.by_recurrence.get(query.recurrence, ())
@@ -748,7 +735,7 @@ class MemoryLedger(JsonlStore[AnyRecord]):
 
     def reload(self) -> None:
         """Forget this process's parsed index of the file (as a restart would)."""
-        with _lock_for(self.path):
+        with path_lock(self.path):
             _INDEXES.pop(self._key, None)
 
     # -- internals --------------------------------------------------------
@@ -762,75 +749,22 @@ class MemoryLedger(JsonlStore[AnyRecord]):
         a delete and recreate that reused the inode).
         """
         index = _INDEXES.get(self._key)
-        try:
-            handle = self.path.open("rb")
-        except FileNotFoundError:
+        if index is None:
             index = _INDEXES[self._key] = _Index()
-            return index
-        with handle:
-            stat = os.fstat(handle.fileno())
-            if (
-                index is None
-                or index.inode != stat.st_ino
-                or stat.st_size < index.offset
-                or not self._same_bytes(handle, index)
-            ):
-                index = _INDEXES[self._key] = _Index(inode=stat.st_ino)
-            if stat.st_size == index.offset:
-                return index
-            handle.seek(index.offset)
-            data = handle.read(stat.st_size - index.offset)
-            end = data.rfind(b"\n")
-            index.partial = end + 1 < len(data)
-            if end < 0:
-                return index
-            for line in data[: end + 1].split(b"\n"):
-                index.ingest_line(line)
-            index.offset += end + 1
-            self._fingerprint(handle, index)
+        read = index.tail.read_new(self.path)
+        if read.reset:
+            # Not the file this was built from (or none): start over.
+            index = _INDEXES[self._key] = _Index(tail=index.tail)
+        for line in read.lines:
+            index.ingest_line(line)
         return index
-
-    @staticmethod
-    def _fingerprint(handle: Any, index: _Index) -> None:
-        handle.seek(0)
-        index.head = handle.read(min(index.offset, _HEAD_BYTES))
-        start = max(0, index.offset - _TAIL_BYTES)
-        handle.seek(start)
-        index.tail = handle.read(index.offset - start)
-
-    @staticmethod
-    def _same_bytes(handle: Any, index: _Index) -> bool:
-        if index.offset == 0:
-            return True
-        handle.seek(0)
-        if handle.read(len(index.head)) != index.head:
-            return False
-        handle.seek(index.offset - len(index.tail))
-        return bool(handle.read(len(index.tail)) == index.tail)
 
     def _write(self, index: _Index, stored: AnyRecord) -> None:
         """Append one line (after terminating a torn tail) and index it."""
-        line = json.dumps(record_to_dict(stored), sort_keys=True, default=str) + "\n"
-        payload = ("\n" if index.partial else "") + line
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("ab") as handle:
-            handle.write(payload.encode())
-            handle.flush()
-            size = handle.tell()
-        stat = os.stat(self.path)
-        if index.inode is None and index.offset == 0 and not index.partial:
-            index.inode = stat.st_ino  # this append created the file
-        if (
-            stat.st_ino == index.inode
-            and size == stat.st_size
-            and size - len(line.encode()) - index.offset == (1 if index.partial else 0)
-        ):
+        appended = append_jsonl_line_repairing(self.path, record_to_dict(stored))
+        if index.tail.accept_own_append(self.path, appended):
             # Nobody else wrote in between: index the record we hold.
             index.add(stored)
-            index.offset = size
-            index.partial = False
-            with self.path.open("rb") as reread:
-                self._fingerprint(reread, index)
         else:
             self._refresh()
 

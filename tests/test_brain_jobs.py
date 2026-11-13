@@ -406,11 +406,11 @@ def test_the_job_log_is_read_incrementally(config: CanaryConfig) -> None:
     other = BrainJobStore.for_config(config)  # another instance, same file
     assert other.get(first.job_id) is not None
     index = brain_jobs_store._INDEXES[store.path.resolve()]
-    offset = index.offset
+    offset = index.tail.offset
     other.transition(first, "deferred", reason="collecting:engine_off")
     job = store.get(first.job_id)
     assert job is not None and job.state == "deferred"
-    assert index.offset > offset  # only the appended bytes were parsed
+    assert index.tail.offset > offset  # only the appended bytes were parsed
     # A torn tail (power cut mid-line) is neither parsed nor swallows the next line.
     with store.path.open("ab") as handle:
         handle.write(b'{"job_id": "torn')

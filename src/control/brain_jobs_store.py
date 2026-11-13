@@ -10,10 +10,8 @@ shares one of each.
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
-import threading
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,6 +20,7 @@ from typing import Any, Literal, cast
 from src.config import CanaryConfig
 from src.control.brain_state import brain_dir
 from src.control.status_error import StatusError
+from src.jsonl_store import TailIndex, append_jsonl_line_locked, path_lock
 
 JobKind = Literal[
     "twin_session_evaluation",
@@ -104,25 +103,10 @@ class BrainJob:
         )
 
 
-_LOCKS: dict[Path, threading.RLock] = {}
-_LOCKS_GUARD = threading.Lock()
-
-
-def _lock_for(path: Path) -> threading.RLock:
-    with _LOCKS_GUARD:
-        return _LOCKS.setdefault(path.resolve(), threading.RLock())
-
-
 @dataclass
 class _JobIndex:
-    identity: tuple[int, int] | None = None
-    offset: int = 0
+    tail: TailIndex = field(default_factory=TailIndex)
     jobs: dict[str, BrainJob] = field(default_factory=dict)
-
-    def reset(self) -> None:
-        self.identity = None
-        self.offset = 0
-        self.jobs = {}
 
 
 _INDEXES: dict[Path, _JobIndex] = {}
@@ -157,33 +141,22 @@ class BrainJobStore:
         """Latest state per job. Incremental: each call stats the file and
         parses only the bytes appended since the last read (by any instance in
         this process); a file that shrank or was replaced is re-read whole."""
-        with _lock_for(self.path):
+        with path_lock(self.path):
             index = _INDEXES.setdefault(self.path.resolve(), _JobIndex())
-            try:
-                stat = self.path.stat()
-            except FileNotFoundError:
-                index.reset()
-                return {}
-            if (stat.st_ino, stat.st_dev) != index.identity or stat.st_size < index.offset:
-                index.reset()
-                index.identity = (stat.st_ino, stat.st_dev)
-            if stat.st_size > index.offset:
-                with self.path.open("rb") as handle:
-                    handle.seek(index.offset)
-                    chunk = handle.read(stat.st_size - index.offset)
-                # Only whole lines; a torn tail is re-read once completed.
-                end = chunk.rfind(b"\n") + 1
-                for line in chunk[:end].splitlines():
-                    if not line.strip():
-                        continue
-                    try:
-                        job = BrainJob.from_dict(json.loads(line))
-                    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-                        # A corrupt line from a power cut: the transition before
-                        # it stands, and the job reruns from there.
-                        continue
-                    index.jobs[job.job_id] = job
-                index.offset += end
+            # Only whole lines; a torn tail is re-read once completed.
+            read = index.tail.read_new(self.path)
+            if read.reset:
+                index.jobs = {}
+            for line in read.lines:
+                if not line.strip():
+                    continue
+                try:
+                    job = BrainJob.from_dict(json.loads(line))
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    # A corrupt line from a power cut: the transition before
+                    # it stands, and the job reruns from there.
+                    continue
+                index.jobs[job.job_id] = job
             return dict(index.jobs)
 
     def ordered(self) -> list[BrainJob]:
@@ -205,18 +178,7 @@ class BrainJobStore:
     # -- writes -----------------------------------------------------------
 
     def _append(self, job: BrainJob) -> BrainJob:
-        self.root.mkdir(parents=True, exist_ok=True)
-        line = (json.dumps(job.to_dict(), sort_keys=True, default=str) + "\n").encode()
-        with _lock_for(self.path), self.path.open("a+b") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            handle.seek(0, 2)
-            if handle.tell():
-                handle.seek(-1, 2)
-                if handle.read(1) != b"\n":
-                    # A torn tail (power cut mid-line) must not swallow this line.
-                    line = b"\n" + line
-            handle.write(line)
-            handle.flush()
+        append_jsonl_line_locked(self.path, job.to_dict())
         return job
 
     def submit(
@@ -233,7 +195,7 @@ class BrainJobStore:
             )
         job_id = job_id_for(kind, params)
         stamp = (now or _now()).isoformat()
-        with _lock_for(self.path):
+        with path_lock(self.path):
             existing = self.get(job_id)
             if existing is not None:
                 finished = existing.state in ("completed", "failed")

@@ -240,16 +240,45 @@ a fixture per caller proves it.
     handling and tests) stays its own file: moving it would not be a pure
     move.
 
-- [ ] **R24.9 Locked JSONL append.** `_lock_for(path)` with a module-level
+- [x] **R24.9 Locked JSONL append.** `_lock_for(path)` with a module-level
   registry is defined three times (`control/brain_jobs.py`,
   `evidence/ledger.py`, `vehicle/vehicle_ledger.py`, one with a non-reentrant
   lock). `brain_jobs` and `evidence/ledger` each also carry an `fcntl.flock`
   append with torn-tail repair and an incremental tail index;
   `models/candidate_store` has a fourth `flock`. `jsonl_store.append_jsonl_line`
   says "callers that need locking take it themselves".
-  - [ ] `path_lock(path)`, `append_jsonl_line_locked(path, payload)` and a
+  - [x] `path_lock(path)`, `append_jsonl_line_locked(path, payload)` and a
     small `TailIndex` in `src/jsonl_store.py`; move `BrainJobStore` and the
     evidence ledger onto them.
+    Done: also `file_lock` (path lock + flock, for the evidence ledger, which
+    holds the flock across refresh, decide and write) and
+    `append_jsonl_line_repairing` (the same append with no locking, for use
+    inside `file_lock`: a second `flock` on another handle in one process
+    blocks forever). The three `_lock_for` registries are gone
+    (`test_no_module_keeps_its_own_lock_registry`). `path_lock` is an `RLock`:
+    brain_jobs and the ledger nest (`submit` -> `get`/`transition`; the ledger's
+    reads inside `append`), and the vehicle ledger's plain `Lock` was never
+    nested (`append`, `replace`, `remove` and their helpers take it once; `get`
+    and `_iter_raw` take none), so the swap loses nothing. `TailIndex` is the
+    job log's position (inode+dev, shrink) and, with `verify_bytes`, the
+    ledger's head/tail byte check; `accept_own_append` replaces the ledger's
+    "index the record I just wrote" shortcut. No fsync added or removed (still
+    flush only). Bytes unchanged: the same job-log and ledger scenario (5
+    appends, a torn tail, a supersession; brain submit/transition across a
+    torn tail) run at HEAD and now gives identical SHA-256 for `jobs.jsonl` and
+    `memory.jsonl`. `tests/test_jsonl_store.py` (new, 26 tests): one lock per
+    resolved path (symlink, `..`), reentrant, exclusion; 8 threads x 60 20 kB
+    lines and 3 processes x 25 interleave nothing; torn-tail repair, exact
+    bytes; `TailIndex` incremental, torn tail held, truncate, replace, delete,
+    same-length rewrite (only `verify_bytes` sees it), `accept_own_append`.
+    The 48 test files naming these modules + layering: 1015 passed (199 of
+    them the brain/ledger/candidate set, 199 before and after); `-m slow` on
+    those files 8 passed. `tests/test_brain_jobs.py` reads `index.tail.offset`
+    now (was `index.offset`).
+  - Decision: `models/candidate_store`'s `.lock` flock (a fourth) is left alone:
+    it is a sentinel file in a directory of JSON documents, no JSONL and no
+    in-process lock, so `jsonl_store` is not its home, and routing it through
+    `file_lock` would only add an RLock it has no use for.
   - Durable (fsync) atomic writes are R23.13; this is the append half.
     Pinned by `tests/test_jsonl_store.py`, `test_brain_jobs.py` and the
     ledger tests.

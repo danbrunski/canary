@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -39,7 +38,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.atomic_write import atomic_write_text
-from src.jsonl_store import JsonlStore, latest_by_key
+from src.jsonl_store import JsonlStore, latest_by_key, path_lock
 from src.paths import CONTROL_DIR
 
 log = logging.getLogger(__name__)
@@ -151,18 +150,6 @@ class VehicleEvent(BaseModel):
         return cls.model_validate(data)
 
 
-#: One lock per ledger file, shared by every store instance on it: the route
-#: handlers, the DTC auto-append and the tire trend each build their own store.
-_LOCKS: dict[Path, threading.Lock] = {}
-_LOCKS_GUARD = threading.Lock()
-
-
-def _lock_for(path: Path) -> threading.Lock:
-    key = path.resolve()
-    with _LOCKS_GUARD:
-        return _LOCKS.setdefault(key, threading.Lock())
-
-
 class VehicleLedgerStore(JsonlStore[VehicleEvent]):
     """JSONL store of vehicle events: append, replace and remove.
 
@@ -176,7 +163,7 @@ class VehicleLedgerStore(JsonlStore[VehicleEvent]):
 
     def append(self, event: VehicleEvent) -> VehicleEvent:
         """Append one event (flushed; crash loses at most the last line)."""
-        with _lock_for(self.path):
+        with path_lock(self.path):
             return self._append_record(event, to_dict=VehicleEvent.to_dict)
 
     def replace(self, event: VehicleEvent) -> VehicleEvent:
@@ -185,13 +172,13 @@ class VehicleLedgerStore(JsonlStore[VehicleEvent]):
         The earlier version is gone from disk, not superseded. An ``id`` not
         on the ledger is simply added.
         """
-        with _lock_for(self.path):
+        with path_lock(self.path):
             self._rewrite_without(event.id, then=event)
         return event
 
     def remove(self, event_id: str) -> VehicleEvent | None:
         """Delete every line for ``event_id``; the removed event, or ``None``."""
-        with _lock_for(self.path):
+        with path_lock(self.path):
             removed = self.get(event_id)
             if removed is not None:
                 self._rewrite_without(event_id, then=None)
