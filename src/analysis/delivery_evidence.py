@@ -54,6 +54,7 @@ import src.analysis.channels_plan as channels_plan_module
 import src.analysis.fault_model as fault_model_module
 import src.analysis.lambda_delivery as lambda_delivery_module
 import src.analysis.tuning as tuning_module
+import src.signals.bins as bins_module
 from src.analysis.channels import read_channels
 from src.analysis.compare_evidence import comparison_identity
 from src.analysis.fault_model import FaultModel, observed_sign
@@ -387,6 +388,7 @@ def mint_delivery_error(
                 channels_module,
                 channels_plan_module,
                 channels_align_module,
+                bins_module,
             ),
         ),
         conditions=Conditions(
@@ -683,6 +685,7 @@ def mint_fuel_pressure_droop(
                 channels_align_module,
                 fault_model_module,
                 tuning_module,
+                bins_module,
             ),
         ),
         conditions=Conditions(regime=regime, vehicle_state="engine_running", operating_mode=region),

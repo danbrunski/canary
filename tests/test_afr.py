@@ -194,6 +194,38 @@ def test_afr_error_surface_excludes_censored_samples(monkeypatch: pytest.MonkeyP
         )
 
 
+def test_afr_error_surface_bins_every_breakpoint_by_the_one_rule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R24.6: a sample on a breakpoint starts its cell; the last closes the last.
+
+    This used ``pd.cut(include_lowest=True)``: 1000 and 2000 rpm fell in the
+    cell below them, and the first cell read ``rpm_low`` 999.999, not 1000.
+    """
+    _declare_axis(monkeypatch)
+    base = _calibration().target_map("r1")
+    assert base is not None
+    target = base.model_copy(
+        update={
+            "rpm_breakpoints": [1000, 2000, 3000],
+            "load_breakpoints": [20, 60, 100],
+            "afr": [[14.7] * 3] * 3,
+        }
+    )
+    rpm = [1000.0, 2000.0, 3000.0, 3000.001, 999.0]
+    frame = pd.DataFrame(
+        {
+            "obd:RPM": rpm + [1500.0, 1500.0, 1500.0],
+            AXIS: [40.0] * len(rpm) + [20.0, 60.0, 100.0],
+            "derived:AFR_ERROR_B1": [0.1, 0.2, 0.3, 9.0, 9.0, 0.4, 0.5, 0.6],
+        }
+    )
+    rows = afr_error_surface(frame, target, bank=1, min_samples=1, channel_units=UNITS)
+    cells = {(r["rpm_low"], r["load_low"]): r["count"] for r in rows}
+    assert cells == {(1000.0, 20.0): 2, (2000.0, 20.0): 2, (1000.0, 60.0): 2}
+    assert {r["rpm_high"] for r in rows if r["rpm_low"] == 2000.0} == {3000.0}
+
+
 def test_decel_fuel_cut_is_censored_like_the_rich_floor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

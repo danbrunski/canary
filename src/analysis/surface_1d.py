@@ -39,7 +39,8 @@ from src.behavior.behavior_models import (
     PolynomialFit,
     RobustBaselineFit,
 )
-from src.behavior.surface_eval import bin_indices, evaluate_1d
+from src.behavior.surface_eval import evaluate_1d
+from src.signals.bins import bin_indices
 
 log = logging.getLogger(__name__)
 

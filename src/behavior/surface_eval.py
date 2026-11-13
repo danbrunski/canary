@@ -7,14 +7,11 @@ analysis *fitting* modules (``surface_1d`` / ``surface_2d``), which made
 ``decode.behavior_decoder`` import ``analysis``; they belong beside the model
 schema they read. The fitters stay in analysis and re-export these names.
 
-:func:`bin_indices` is the one bin rule. Bin ``i`` covers
-``[edges[i], edges[i+1])`` and the last bin is closed, so the maximum lands
-in the last bin rather than overflowing; values below the first edge clip
-into bin 0 and values above the last into the last bin — callers that must
-not bin out-of-range values check the extent first, as
-:func:`containing_cell_indices` does. Four copies of this rule (the 2D fitter,
-the binned analysis route, the session-deviation cells and the 1D fitter)
-and two ``pd.cut`` variants had grown apart.
+The one bin rule, :func:`~src.signals.bins.bin_indices`, lives in
+:mod:`src.signals.bins` (layer 0, R24.6) so the signal and analysis layers
+group samples with the same cells the surfaces serve. Bin ``i`` covers
+``[edges[i], edges[i+1])`` and the last bin is closed; values outside the
+edges clip, so :func:`containing_cell_indices` checks the extent first.
 """
 
 from __future__ import annotations
@@ -28,18 +25,7 @@ from src.behavior.behavior_models import (
     PolynomialFit,
     RobustBaselineFit,
 )
-
-
-def bin_indices(values: np.ndarray, edges: np.ndarray) -> np.ndarray:
-    """Place each value into ``[0, len(edges) - 2]`` — closed on the right end."""
-    bins = np.digitize(np.asarray(values, dtype=float), np.asarray(edges, dtype=float)) - 1
-    clipped: np.ndarray = np.clip(bins, 0, len(edges) - 2)
-    return clipped
-
-
-def bin_index(value: float, edges: np.ndarray) -> int:
-    """Scalar :func:`bin_indices`."""
-    return int(bin_indices(np.asarray([value], dtype=float), edges)[0])
+from src.signals.bins import bin_index, bin_indices
 
 
 def evaluate_1d(model: BehaviorModel1D, x: float) -> float | None:
@@ -200,8 +186,6 @@ def containing_cell_indices(model: BehaviorModel2D, x: np.ndarray, y: np.ndarray
 
 
 __all__ = [
-    "bin_index",
-    "bin_indices",
     "cell_eligible",
     "containing_cell_indices",
     "evaluate_1d",

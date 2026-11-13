@@ -28,10 +28,11 @@ from src.behavior.behavior_models import (
     FoldMetrics,
     RobustBaselineFit,
 )
-from src.behavior.surface_eval import bin_indices, containing_cell_indices, trusted_cell_mask
+from src.behavior.surface_eval import containing_cell_indices, trusted_cell_mask
 from src.columns import SESSION_COLUMN, gap_column
 from src.dataframe_utils import numeric_values
 from src.preprocessing.features import compute_rate_of_change
+from src.signals.bins import bin_indices
 
 #: Drives needed before a drive-resampled bootstrap interval is reported.
 MIN_BOOTSTRAP_DRIVES = 3

@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from src.columns import SESSION_COLUMN, arrived_column
 from src.config import VehicleParameters
 from src.refusal import ReasonedRefusal
+from src.signals.bins import cell_codes
 from src.signals.derived import _append_dependency_gap, _selected_input, fuel_properties
 from src.signals.fuel_cut import COMMANDED_EQUIV_RATIO_COLUMN, fuel_cut_rows
 from src.signals.pairing import to_seconds
@@ -1433,26 +1434,27 @@ def afr_error_surface(
     if censored_column in clean:
         clean = clean.loc[~clean[censored_column].fillna(False).astype(bool)]
     clean = clean.dropna(subset=required)
-    clean["rpm_bin"] = pd.cut(
-        clean["obd:RPM"], target.rpm_breakpoints, include_lowest=True, right=True
-    )
-    clean["load_bin"] = pd.cut(
-        clean[load_column], target.load_breakpoints, include_lowest=True, right=True
-    )
+    # The one bin rule (R24.6): ``[lo, hi)`` cells, the last closed. This used
+    # ``pd.cut(include_lowest=True)``, under which a sample on an interior
+    # breakpoint fell in the cell below it, unlike every other surface.
+    rpm_edges = [float(v) for v in target.rpm_breakpoints]
+    load_edges = [float(v) for v in target.load_breakpoints]
+    clean["rpm_bin"] = cell_codes(clean["obd:RPM"], rpm_edges, out_of_range="drop")
+    clean["load_bin"] = cell_codes(clean[load_column], load_edges, out_of_range="drop")
+    clean = clean.loc[(clean["rpm_bin"] >= 0) & (clean["load_bin"] >= 0)]
     rows: list[dict[str, Any]] = []
-    grouped = clean.groupby(["rpm_bin", "load_bin"], observed=True)[error_column]
+    grouped = clean.groupby(["rpm_bin", "load_bin"], sort=True)[error_column]
     for (rpm_bin, load_bin), values in grouped:
-        rpm_interval = cast(pd.Interval, rpm_bin)
-        load_interval = cast(pd.Interval, load_bin)
+        r, c = int(cast(int, rpm_bin)), int(cast(int, load_bin))
         numeric = pd.to_numeric(values, errors="coerce").dropna()
         count = int(len(numeric))
         rows.append(
             {
                 "bank": bank,
-                "rpm_low": float(rpm_interval.left),
-                "rpm_high": float(rpm_interval.right),
-                "load_low": float(load_interval.left),
-                "load_high": float(load_interval.right),
+                "rpm_low": rpm_edges[r],
+                "rpm_high": rpm_edges[r + 1],
+                "load_low": load_edges[c],
+                "load_high": load_edges[c + 1],
                 "median_error_afr": float(numeric.median()),
                 "iqr_error_afr": float(numeric.quantile(0.75) - numeric.quantile(0.25)),
                 "count": count,

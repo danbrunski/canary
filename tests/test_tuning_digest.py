@@ -74,8 +74,8 @@ def test_capture_reports_wot_inventory_and_the_pair_count(
     assert digest.wot.seconds == 10
     assert digest.wot.with_afr_pair == 10
     assert {row["rpm_band"] for row in digest.wot.by_band} == {
-        "(2500.0, 3000.0]",
-        "(3500.0, 4000.0]",
+        "[2500.0, 3000.0)",
+        "[3500.0, 4000.0)",
     }
     # R05.16: the delivery section is the acquisition-paired engine, and the
     # section says so, so a stored 1 s last-cell digest is distinguishable.
@@ -353,9 +353,9 @@ def test_untagged_all_did_capture_infers_wot_from_the_throttle_stop(
     assert digest.wot.criterion is not None
     assert digest.wot.criterion["provider"] == "did:ECM_THROTTLE_POS_SENSOR_1"
     assert {row["rpm_band"] for row in digest.wot.by_band} == {
-        "(3000.0, 3500.0]",
-        "(3500.0, 4000.0]",
-        "(4500.0, 5000.0]",
+        "[3000.0, 3500.0)",
+        "[3500.0, 4000.0)",
+        "[4500.0, 5000.0)",
     }
     assert any("INFERRED" in note for note in digest.notes)
 

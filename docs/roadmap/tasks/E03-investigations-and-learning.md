@@ -20,7 +20,7 @@ computed on the Pi and render without a language model.
   explicit outcomes; neither becomes a zero error or a resolved diagnosis.
   *Laptop loop done 2026-10-04 (revised after verification); the Pi run
   remains (E04).* **Real answer today: the WOT lean does not reproduce out
-  of sample.** `_capture-tuning-2026-09-23T164007` (+3.30 %, 44 rows) is in
+  of sample.** `_capture-tuning-2026-09-23T164007` (+3.24 %, 44 rows) is in
   B06's enrichment `informed_by`, so it is in-sample: the mint writes no
   sign (`sign_refused`, flag `informed_constants`) and `detect_discrepancy`
   returns `unqualified`/`in_sample` — qualified needs an explicit
@@ -28,9 +28,12 @@ computed on the Pi and render without a language model.
   represented. The five held-out drives are minted in the case, all within
   the 2.50 % detectable (sign `0`, `within_floor`, nothing opened):
   `_capture-tuning-2026-09-23T142926` −1.14 % (24 rows),
-  `…09-22T170459` +0.17 % (22), `…09-22T235224` +0.74 % (21),
-  `_capture-tuning-hybrid-research-2026-09-17T191712` −0.46 % (67) and
-  `…T201000` −0.66 % (46) — the last two on calibration ZS44A-k106. Each
+  `…09-22T170459` +0.17 % (22), `…09-22T235224` +0.71 % (22),
+  `_capture-tuning-hybrid-research-2026-09-17T191712` −0.44 % (67) and
+  `…T201000` −0.61 % (46) — the last two on calibration ZS44A-k106.
+  (Figures as of 2026-11-13: R24.6's one bin rule puts a sample on an rpm
+  band edge in the band that starts there, which moved these from +3.30,
+  +0.74 (21 rows), −0.46 and −0.66 %.) Each
   committed slice (`tests/fixtures/delivery_investigation/`, 8 slices,
   ~1.8 MiB, cut with `tools/make_ground_truth_fixture.py`, which gained
   `--keep-sensor`/`--sensor-stride`) reproduces its full session's n and

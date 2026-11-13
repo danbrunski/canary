@@ -45,7 +45,7 @@ def test_the_floors_and_bands_come_from_the_profile(tmp_path: Path) -> None:
     lower = LoadWotCriterion(load_floor_pct=75.0, rpm_floor=2000.0, rpm_bands=(2000.0, 8000.0))
     other = _wot_inventory(session, rpm_spec=None, did_continuous=False, load_wot=lower)
     assert other.seconds == 7
-    assert other.by_band == [{"rpm_band": "(2000.0, 8000.0]", "seconds": 7}]
+    assert other.by_band == [{"rpm_band": "[2000.0, 8000.0]", "seconds": 7}]
     assert other.criterion is not None and other.criterion["threshold_value"] == 75.0
 
 

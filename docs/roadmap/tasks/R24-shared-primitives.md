@@ -171,7 +171,7 @@ a fixture per caller proves it.
   - Must not change: any stored hash. `test_feature_pipeline_golden` (cache
     key) and the behavior-fingerprint tests are the pins.
 
-- [ ] **R24.6 One bin rule.** `behavior/surface_eval.bin_indices` is the
+- [~] **R24.6 One bin rule.** `behavior/surface_eval.bin_indices` is the
   rule (R05.10 fixed a right-closed `pd.cut` that dropped left-edge values).
   It is bypassed by: `tuning.py`'s per-band grouping with `pd.cut` and
   default right-closed edges, the R05.10 shape again;
@@ -179,9 +179,73 @@ a fixture per caller proves it.
   `signals/afr.afr_error_surface`; `np.digitize` in `dyno_inertia` and
   `dyno_power`; `fuel_comp_fit._maf_bins`. A value exactly on an edge can land
   in different cells depending on which page drew it.
-  - [ ] `cell_codes(values, edges, *, out_of_range="drop" | "clip")` beside
+  - [x] `cell_codes(values, edges, *, out_of_range="drop" | "clip")` beside
     `bin_indices`, and an edge-value test (values equal to every edge) run
     against each caller before and after.
+    Evidence: the rule moved to `src/signals/bins.py` (new, layer 0:
+    `signals/afr` is layer 0 and could not import `behavior`, layer 4):
+    `bin_indices` / `bin_index` byte-for-byte, plus `cell_codes` (`-1` = no
+    cell; `out_of_range` has no default; NaN/inf get no cell in either mode)
+    and `cell_names` (`[lo, hi)`, last `[lo, hi]`). `surface_eval` imports it;
+    its five importers point at `signals.bins`. All seven copies migrated with
+    `out_of_range="drop"`, and the `outside_rpm_bands` delivery gate now is
+    `cell_codes(...) >= 0` so it keeps exactly what the bands bin.
+    Before → after at edges (500, 1000, 2000, 4000), probed at HEAD and in the
+    tree: delivery bands and `tuning_digest._bands` (right-closed `pd.cut`)
+    500 no band → first, 1000/2000 band below → band starting there;
+    `afr_error_surface` (`include_lowest`) 1000/2000 cell below → cell starting
+    there, first cell's `rpm_low`/`load_low` 499.999 → 500 exactly;
+    `workbench._cells` (`right=False`), `dyno_inertia._binned`,
+    `dyno_power` (`np.digitize`) and `fuel_comp_fit._maf_bins`
+    (`searchsorted`) 4000 no cell → last cell. Labels change from
+    `(lo, hi]` to `[lo, hi)` / last `[lo, hi]` (`delivery_evidence._band_key`
+    strips either bracket, so evidence keys are unchanged).
+    Real data, raw `obd:RPM`/`obd:MAF` samples whose cell moves (drives
+    2026-10-10T153117, 2026-10-27T173734; captures
+    `_capture-tuning-2026-11-11T174602`, `-11-12T034249`): delivery/WOT bands
+    23 / 20 / 33 / 20 (of 2444 / 1529 / 3193 / 2544; 2500 rpm entering the
+    first band is most); AFR surface rpm axis 31 / 20 / 26 / 31; workbench,
+    fuel-comp MAF 0 (no sample on 7000 rpm or 250 g/s). `compute_tuning_digest`
+    on both captures, HEAD vs tree: WOT seconds per band, delivery `n`, gates,
+    per-band `error_pct`, `band_averaged_pct` and `pooled_pct` identical, only
+    the labels changed (no gated sample sits on an edge). The committed
+    delivery slices (`tests/fixtures/delivery_investigation`) do move:
+    band-averaged error, HEAD → tree, `…09-23T164007` +3.304 → +3.239 %
+    (two 4500 rpm samples and one 5000 rpm sample move up a band),
+    `…09-22T235224` +0.736 → +0.714 % (n 21 → 22: its 2500 rpm sample is no
+    longer gated out), `…hybrid-research-09-17T191712` −0.462 → −0.443 %,
+    `…T201000` −0.657 → −0.607 %; `…09-23T142926` and `…09-22T170459`
+    unchanged. 9 of 223 gated samples sat on an edge. All stay inside the
+    2.50 % floor, every `sign` is still `0`; `test_delivery_investigation.py`
+    pins updated to those values.
+    Deployed behavior models unchanged: all 12 surfaces of
+    `data/nissan-xterra-2008/behavior_models.yaml` evaluated on 2026-10-10T153117
+    (1851 rows) and 2026-10-27T173734 (1242 rows) at HEAD and in the tree,
+    max |Δ expected| = max |Δ deviation| = 0, refusal reasons and 2D cell
+    assignment (`containing_cell_indices`) identical on every row
+    (`cat_warmup` spoke on neither drive).
+    Tests: `tests/test_bin_rule.py` (new: the rule at every edge, out of
+    range, NaN/inf, agreement with `bin_indices`, `cell_names`; every caller
+    at every edge; an AST guard refusing `pd.cut` / `pd.qcut` /
+    `np.digitize`, under any module alias or a `from` import, in `src/`
+    outside `signals/bins.py`, allowlisting `fuel_plant_eval.py`'s two
+    `right=False` MAF-band cuts, the open sub-item below), and
+    `test_afr.py::test_afr_error_surface_bins_every_breakpoint_by_the_one_rule`.
+    `delivery_evidence`'s delivery-error and droop mints hash
+    `src/signals/bins.py` in their `code_version` (both gate on the rpm
+    bands); `compare_evidence` does not bin. E03's quoted delivery figures
+    updated with a dated note;
+    label expectations updated in `test_tuning_digest.py` (2) and
+    `test_wot_profile_facts.py` (1).
+  - [ ] `src/analysis/fuel_plant_eval.py`'s two MAF-band
+    `pd.cut(..., right=False)` calls (the `maf_band` labels over `MAF_BANDS`),
+    found after the list above was written: a sample exactly on the top MAF
+    edge falls in no band. Move them to `cell_codes(..., out_of_range="drop")`
+    with `cell_names` labels, so the top edge joins the last band (and the
+    last label reads `[lo, hi]`), then delete the file from `UNMIGRATED` in
+    `tests/test_bin_rule.py`. An output change like the rest of R24.6: count
+    the samples that move on real drives. Coordinate with R24.7, which
+    reshapes this module.
   - **This one changes outputs** wherever a copy disagrees with the rule. Its
     own commit, with the cells that move listed in the message.
 

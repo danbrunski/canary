@@ -28,9 +28,9 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
-from src.behavior.surface_eval import bin_indices
 from src.preprocessing.loader import to_wide
 from src.preprocessing.resampler import ResampleConfig, resample_wide
+from src.signals.bins import bin_indices
 
 Aggregation = Literal["mean", "median", "p95", "count"]
 
@@ -233,12 +233,9 @@ def compute_binned_analysis(
     }
 
 
-#: ``bin_indices`` is the one bin rule (:mod:`src.behavior.surface_eval`, R05.10),
-#: re-exported for analysis callers.
 __all__ = [
     "DEFAULT_BIN_COUNT",
     "Aggregation",
-    "bin_indices",
     "compute_binned_analysis",
     "rows_to_resampled_frame",
 ]

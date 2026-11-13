@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 
 from src.analysis.channels import (
@@ -60,6 +61,7 @@ from src.signals.afr import (
     voltage_route_refusal,
     voltage_to_afr,
 )
+from src.signals.bins import cell_codes, cell_names
 from src.signals.pairing import (
     ComparisonRefusedError,
     InputNotCapturedError,
@@ -619,9 +621,19 @@ def _target_map_summary(
 
 
 def _bands(per_second: pd.Series, rpm_bands: Sequence[float]) -> list[dict[str, Any]]:
-    """Seconds per rpm band, in the vehicle's band edges."""
-    counts = per_second.groupby(pd.cut(per_second, list(rpm_bands)), observed=True).size()
-    return [{"rpm_band": str(band), "seconds": int(seconds)} for band, seconds in counts.items()]
+    """Seconds per rpm band, in the vehicle's band edges, under the one bin rule.
+
+    R24.6: ``pd.cut``'s right-closed default put a second exactly on an
+    interior edge in the band below; :func:`cell_codes` puts it in the band
+    that starts there, as every surface does.
+    """
+    codes = cell_codes(per_second, rpm_bands, out_of_range="drop")
+    names = cell_names(rpm_bands)
+    cells, seconds = np.unique(codes[codes >= 0], return_counts=True)
+    return [
+        {"rpm_band": names[int(cell)], "seconds": int(n)}
+        for cell, n in zip(cells, seconds, strict=True)
+    ]
 
 
 def _infer_wot(

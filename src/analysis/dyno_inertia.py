@@ -35,6 +35,7 @@ from src.analysis.dyno_road_load import (
     AirScaledRoadLoad,
     RoadLoadCoefficients,
 )
+from src.signals.bins import cell_codes
 
 #: Two-gear inertia: the pulls must share this much rpm.
 INERTIA_MIN_RPM_OVERLAP = 1000.0
@@ -99,7 +100,9 @@ class EngineInertiaFit:
 def _binned(
     values: FloatArray, rpm: FloatArray, edges: FloatArray
 ) -> tuple[FloatArray, FloatArray]:
-    index = np.digitize(rpm, edges) - 1
+    # The one bin rule (R24.6): ``np.digitize`` alone dropped a sample on the
+    # top edge, which is the overlap's own end whenever it spans whole bins.
+    index = cell_codes(rpm, edges, out_of_range="drop")
     means = np.full(len(edges) - 1, np.nan)
     counts = np.zeros(len(edges) - 1)
     for i in range(len(edges) - 1):

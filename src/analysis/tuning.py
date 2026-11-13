@@ -56,9 +56,9 @@ from src.analysis.lambda_delivery import (
 )
 from src.analysis.noise_floor import FloorRefusal, NoiseFloor
 from src.analysis.tuning_frame import ProviderRegistry
-from src.behavior.surface_eval import bin_indices
 from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.signals.afr import AfrCalibration
+from src.signals.bins import cell_codes, cell_names
 from src.signals.pairing import (
     PairingPolicy,
     check_clock_support,
@@ -655,8 +655,9 @@ def gate_delivery_samples(
        of that context channel within the same separation;
     3. ``closed_loop``: the Mode 01 route only — ``FUEL_STATUS`` not open
        loop, where PID 0x44 is not the final target;
-    4. ``below_min_load``, then ``outside_rpm_bands`` (bands are
-       ``(lo, hi]``, so the gate keeps exactly what the bands bin).
+    4. ``below_min_load``, then ``outside_rpm_bands`` (the one bin rule,
+       :func:`~src.signals.bins.cell_codes`: bands are ``[lo, hi)``
+       and the last ``[lo, hi]``; the gate keeps exactly what the bands bin).
 
     Gated per session on its own clock, so several sessions can be pooled
     and band-averaged once (:func:`delivery_error_from_gated`).
@@ -717,7 +718,9 @@ def gate_delivery_samples(
     if min_load is not None:
         masks["load_missing"] = lambda v: v["load"].notna()
         masks["below_min_load"] = lambda v: v["load"] > min_load
-    masks["outside_rpm_bands"] = lambda v: (v["rpm"] > rpm_bands[0]) & (v["rpm"] <= rpm_bands[-1])
+    masks["outside_rpm_bands"] = lambda v: pd.Series(
+        cell_codes(v["rpm"], rpm_bands, out_of_range="drop") >= 0, index=v.index
+    )
     for gate in _CONTEXT_GATES:
         keep = masks.get(gate)
         if keep is None:
@@ -774,7 +777,11 @@ def delivery_error_from_gated(
             tune_revision_source=tune_revision_source,
             pairing=dict(pairing or {}),
         )
-    binned = values.groupby(pd.cut(values["rpm"], list(rpm_bands)), observed=True)
+    # The one bin rule (R24.6): ``pd.cut``'s right-closed default put an rpm
+    # exactly on an interior edge in the band below, unlike every surface.
+    codes = cell_codes(values["rpm"], rpm_bands, out_of_range="drop")
+    in_band = codes >= 0
+    binned = values.loc[in_band].groupby(codes[in_band], sort=True)
     bands = binned.agg(
         n=("error_pct", "size"),
         commanded=("commanded_afr", "mean"),
@@ -782,8 +789,10 @@ def delivery_error_from_gated(
         error_pct=("error_pct", "mean"),
         p05_pct=("error_pct", lambda v: float(np.quantile(v, 0.05))),
         p95_pct=("error_pct", lambda v: float(np.quantile(v, 0.95))),
-    ).reset_index(names="rpm_band")
-    bands["rpm_band"] = bands["rpm_band"].astype(str)
+    )
+    names = cell_names(rpm_bands)
+    bands.index = pd.Index([names[int(code)] for code in bands.index], dtype=object)
+    bands = bands.reset_index(names="rpm_band")
     return DeliveryError(
         bands=bands.loc[:, columns],
         band_averaged_pct=float(bands["error_pct"].mean()),
@@ -937,23 +946,17 @@ class SessionComparison:
 
 
 def _cell_labels(values: pd.Series, edges: Sequence[float]) -> pd.Series:
-    """Each value's cell under the one bin rule (:func:`src.behavior.surface_eval.bin_indices`).
+    """Each value's cell under the one bin rule (:func:`src.signals.bins.cell_codes`).
 
     Labels read ``[lo, hi)`` (the last cell ``[lo, hi]``). Values outside the
     edges get no cell. R05.10: this used right-closed ``pd.cut``, under which
     the minimum of auto-computed ``linspace`` edges fell in no cell and every
     sample at the lowest operating point was silently dropped.
     """
-    edge_array = np.asarray(edges, dtype=float)
     numeric = pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
-    inside = np.isfinite(numeric) & (numeric >= edge_array[0]) & (numeric <= edge_array[-1])
-    index = bin_indices(np.where(inside, numeric, edge_array[0]), edge_array)
-    last = len(edge_array) - 2
-    names = [
-        str(pd.Interval(edge_array[i], edge_array[i + 1], closed="both" if i == last else "left"))
-        for i in range(last + 1)
-    ]
-    labels = [names[i] if ok else None for i, ok in zip(index, inside, strict=True)]
+    codes = cell_codes(numeric, edges, out_of_range="drop")
+    names = cell_names(edges)
+    labels = [names[code] if code >= 0 else None for code in codes]
     return pd.Series(labels, index=values.index, dtype=object)
 
 

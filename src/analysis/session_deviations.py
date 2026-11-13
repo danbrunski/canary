@@ -36,7 +36,6 @@ from src.behavior.behavior_models import (
     serving_status,
     unknown_operating_modes,
 )
-from src.behavior.surface_eval import bin_index
 from src.columns import MODE_COLUMN
 from src.config import CanaryConfig
 from src.decode.bindings import load_bindings
@@ -48,6 +47,7 @@ from src.features.session_resampling import (
     decode_session_to_resampled as _decode_session_to_resampled,
 )
 from src.preprocessing.resampler import resample_config_for
+from src.signals.bins import bin_index
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP, channel_key
 
 

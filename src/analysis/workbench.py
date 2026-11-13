@@ -58,6 +58,7 @@ from src.analysis.tuning_frame import ProviderRegistry
 from src.jsonable import jsonable
 from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.session import TAGS_FILENAME, load_tags
+from src.signals.bins import cell_codes
 from src.storage.capture_manifest import read_capture_manifest
 from src.storage.session_files import session_footer_span
 from src.vehicle.tune_revisions import (
@@ -867,12 +868,18 @@ def _cells(
     airflow_edges: tuple[float, ...],
     min_n: int,
 ) -> list[dict[str, Any]]:
-    """Mean of each value column per rpm x airflow cell, with n and sparsity."""
+    """Mean of each value column per rpm x airflow cell, with n and sparsity.
+
+    Cells follow the one bin rule (R24.6, :func:`cell_codes`): ``[lo, hi)``
+    with the last cell closed, so a sample on the top edge is kept rather
+    than dropped as ``pd.cut(right=False)`` did.
+    """
     if frame.empty:
         return []
-    rpm_bin = pd.cut(frame[rpm], list(rpm_edges), right=False)
-    air_bin = pd.cut(frame[airflow], list(airflow_edges), right=False)
-    grouped = frame.assign(_r=rpm_bin.cat.codes, _a=air_bin.cat.codes)
+    grouped = frame.assign(
+        _r=cell_codes(frame[rpm], rpm_edges, out_of_range="drop"),
+        _a=cell_codes(frame[airflow], airflow_edges, out_of_range="drop"),
+    )
     grouped = grouped[(grouped["_r"] >= 0) & (grouped["_a"] >= 0)]
     out: list[dict[str, Any]] = []
     for key, cell in grouped.groupby(["_r", "_a"], sort=True):

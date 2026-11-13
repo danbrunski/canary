@@ -47,6 +47,7 @@ from src.analysis.dyno_road_load import (
     AirScaledRoadLoad,
     RoadLoadCoefficients,
 )
+from src.signals.bins import cell_codes
 from src.signals.committees import STANDARD_GRAVITY
 
 #: A pull's engine speed must stay within this fraction of what the stated
@@ -586,7 +587,9 @@ def _pull_points(
     force = test_mass_kg * f + (m_eff - test_mass_kg) * a + road_load.force(v)
     power = force * v
     edges = np.arange(math.floor(rpm.min() / rpm_bin) * rpm_bin, rpm.max() + rpm_bin, rpm_bin)
-    index_of = np.digitize(rpm, edges) - 1
+    # The one bin rule (R24.6): ``np.digitize`` alone dropped the pull's top
+    # sample whenever ``rpm.max()`` sat exactly on a bin edge.
+    index_of = cell_codes(rpm, edges, out_of_range="drop")
     spanned = len(edges) - 1
     per_bin = len(rpm) * rpm_bin / max(span, rpm_bin)
     ask = int(min(POWER_MIN_PER_BIN, max(1, math.floor(per_bin))))

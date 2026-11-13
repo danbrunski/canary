@@ -34,12 +34,12 @@ from src.behavior.behavior_models import (
     GridCell,
 )
 from src.behavior.surface_eval import (
-    bin_indices,
     containing_cell_indices,
     evaluate_2d,
     trusted_cell_mask,
 )
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
+from src.signals.bins import bin_indices
 
 log = logging.getLogger(__name__)
 

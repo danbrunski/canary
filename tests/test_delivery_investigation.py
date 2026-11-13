@@ -5,13 +5,15 @@ cut with ``tools/make_ground_truth_fixture.py``; each directory is named as
 its source session so calibration and B06's ``informed_by`` resolve as on the
 truck; each slice reproduces its full session's delivery error exactly):
 
-* ``_capture-tuning-2026-09-23T164007`` — the WOT-lean drive (+3.30 %, 44
+* ``_capture-tuning-2026-09-23T164007`` — the WOT-lean drive (+3.24 %, 44
   rows). It is in B06's enrichment ``informed_by``: in-sample, so it opens
   nothing.
 * the five held-out enrichment drives of ``lambda_delivery.yaml``
   (``_capture-tuning-2026-09-23T142926`` −1.14 %, ``…09-22T170459`` +0.17 %,
-  ``…09-22T235224`` +0.74 %, ``…hybrid-research-2026-09-17T191712`` −0.46 %,
-  ``…T201000`` −0.66 %): every one within the 2.50 % floor. Out of sample
+  ``…09-22T235224`` +0.71 %, ``…hybrid-research-2026-09-17T191712`` −0.44 %,
+  ``…T201000`` −0.61 %): every one within the 2.50 % floor. R24.6 (one bin
+  rule: a sample on a band edge is in the band that starts there) moved these
+  from +0.74 / −0.46 / −0.66 % and the WOT-lean drive from +3.30 %. Out of sample
   there is no qualified discrepancy today.
 * ``2026-10-04T194342`` — first drive with fuel pressure: no full-throttle
   pull (enrichment uncovered), closed-loop droop at high airflow.
@@ -84,9 +86,9 @@ NO_COMMAND = FIXTURES / "_capture-rom-trace-2026-09-21T195647"
 HELD_OUT = {
     "_capture-tuning-2026-09-23T142926": (-1.14, 24),
     "_capture-tuning-2026-09-22T170459": (0.17, 22),
-    "_capture-tuning-2026-09-22T235224": (0.74, 21),
-    "_capture-tuning-hybrid-research-2026-09-17T191712": (-0.46, 67),
-    "_capture-tuning-hybrid-research-2026-09-17T201000": (-0.66, 46),
+    "_capture-tuning-2026-09-22T235224": (0.71, 22),
+    "_capture-tuning-hybrid-research-2026-09-17T191712": (-0.44, 67),
+    "_capture-tuning-hybrid-research-2026-09-17T201000": (-0.61, 46),
 }
 FUEL_PRESSURE_MEASUREMENT = "Log fuel pressure through a full-throttle pull"
 PROFILE = "nissan-xterra-2008"
@@ -213,14 +215,14 @@ def test_delivery_error_mints_evidence_from_b06_without_rebuilding_it(
     assert record.result.residual is not None
     assert record.result.residual.value == pytest.approx(direct.band_averaged_pct)
     assert record.values["eligible_rows"].value == direct.n == 44
-    assert record.result.residual.value == pytest.approx(3.30, abs=0.01)
+    assert record.result.residual.value == pytest.approx(3.24, abs=0.01)
     assert record.labels["evidence_class"] == "engine_response"
     assert record.vehicle.calibration == "ZS44A-20260920"
     assert "sensor:FUEL_PRESSURE" not in record.labels["fault_model_channels"]
 
 
 def test_the_in_sample_wot_lean_drive_opens_nothing(real: Real) -> None:
-    """164007 chose B06's enrichment constants: its +3.30 % is in-sample."""
+    """164007 chose B06's enrichment constants: its +3.24 % is in-sample."""
     record = _evidence(real.ledger, real.wot_lean)
     assert record.labels["session_informed_constants"] == "true"
     assert "sign" not in record.labels

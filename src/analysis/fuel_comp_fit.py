@@ -82,6 +82,7 @@ from src.analysis.fuel_comp_inputs import FitRules, FuelCompDeclaration, load_in
 from src.analysis.fuel_comp_rom import FuelCompCalibration
 from src.decode.ecm_lookup import AxisHit, lookup_2d, search_axis
 from src.decode.fuel_comp_load import Interval, columns_read, reconstruct, spans_one_cell
+from src.signals.bins import cell_codes
 
 #: Bumped whenever a refusal, the required factor or a cell status changes.
 #: 2: purge is a refusal (``purge_active``, ``purge_unknown``; M01.18) and
@@ -798,13 +799,12 @@ def fit_both_ways(
 
 
 def _maf_bins(maf: np.ndarray, edges: Sequence[float]) -> np.ndarray:
-    """Bin index per sample (``-1`` outside the edges or unpaired)."""
-    out = np.full(len(maf), -1, dtype=int)
-    ok = np.isfinite(maf)
-    index = np.searchsorted(np.asarray(edges, dtype=float), maf[ok], side="right") - 1
-    inside = (index >= 0) & (index < len(edges) - 1)
-    out[np.flatnonzero(ok)[inside]] = index[inside]
-    return out
+    """Bin index per sample (``-1`` outside the edges or unpaired).
+
+    The one bin rule (R24.6): a sample on the top edge is in the last bin; the
+    ``searchsorted`` this replaced dropped it.
+    """
+    return cell_codes(maf, edges, out_of_range="drop")
 
 
 def _maf_factors(
