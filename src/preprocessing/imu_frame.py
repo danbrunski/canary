@@ -68,6 +68,7 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -141,11 +142,152 @@ def input_max_age_seconds(
     return max(base_seconds, validate_broadcast_stale_timeout(change_only_timeout_seconds))
 
 
-#: The gravity low-pass's smoothing factor per quiescent sample
-#: (:func:`estimate_gravity`, ``adjust=False``: ``g ← α·a + (1 − α)·g``). Its
-#: whole state is the last estimate, which is what lets the offline stream
-#: (``imu_stream``) carry it across parts bit for bit.
-GRAVITY_LOW_PASS_ALPHA = 0.02
+#: The gravity low-pass's time constant, seconds of *quiescent* samples
+#: (M01.13). Each quiescent sample moves the estimate by
+#: ``α = 1 − exp(−Δt/τ)`` of the way to it (:func:`gravity_low_pass_alpha`),
+#: ``Δt`` the interval the sample covers, so the filter means the same thing at
+#: every IMU rate. It was a per-sample ``α = 0.02`` until 2026-11-13: τ 3.96 s
+#: at 12.5 Hz, 0.48 s at 104 Hz, 0.24 s at 208 Hz.
+#:
+#: The quiescence gate (speed std ≤ 1.5 km/h over the 2 s window plus the
+#: 1.5 s look-ahead) passes a steady ramp up to ~0.042 g, so a gentle sustained
+#: acceleration *is* fed to this filter, and only τ decides how much of it the
+#: estimate swallows: ``1 − exp(−T/τ)`` after ``T`` seconds. The same τ sets
+#: how fast a new road grade leaves ``ACCEL_LON`` (the linear family takes
+#: grade out by design; ``SF_*`` keep it). The two cannot be told apart by an
+#: accelerometer, so τ is a trade between them. Over two real drives' speed,
+#: course and GPS-altitude grade with a synthesised IMU (M01.13, no stored
+#: drive has IMU rows yet), the per-sample error against d(road speed)/dt is
+#: flat from 5 to 15 s and 10 s is the longest τ within 5 % of the minimum on
+#: both: it keeps 61 % of a 5 s gate-passing ramp (5 s: 37 %) and leaves about
+#: 24-39 % of a grade's term in ``ACCEL_LON`` (5 s: 14-28 %). Numbers in
+#: ``docs/roadmap/tasks/M01-physics-model-accuracy.md`` (M01.13).
+GRAVITY_TIME_CONSTANT_SECONDS = 10.0
+
+#: The longest interval one IMU sample stands for in the low-pass, seconds.
+#: A sample after a gap (FIFO overrun, an IMU dropout) observed only its own
+#: sample period, not the gap: without this it would take ``α → 1`` and
+#: replace the estimate with one vibrating sample. The slowest LSM6DSOX rate
+#: in use is 12.5 Hz (0.08 s), so every regular interval is below it.
+GRAVITY_MAX_SAMPLE_SECONDS = 0.1
+
+
+def gravity_low_pass_alpha(
+    sample_seconds: float,
+    *,
+    time_constant_seconds: float = GRAVITY_TIME_CONSTANT_SECONDS,
+    max_sample_seconds: float = GRAVITY_MAX_SAMPLE_SECONDS,
+) -> float:
+    """``α = 1 − exp(−Δt/τ)`` for a quiescent sample covering ``sample_seconds``.
+
+    ``Δt`` is clamped to ``[0, max_sample_seconds]`` (see
+    :data:`GRAVITY_MAX_SAMPLE_SECONDS`); a missing one (the session's first
+    IMU sample has no interval) counts as ``max_sample_seconds``. Pure Python
+    floats, so the offline loop (:func:`low_pass_gravity`) and the live frame
+    (``imu_live``) compute the same bits from the same interval.
+    """
+    dt = (
+        min(max(sample_seconds, 0.0), max_sample_seconds)
+        if math.isfinite(sample_seconds)
+        else max_sample_seconds
+    )
+    return -math.expm1(-dt / time_constant_seconds)
+
+
+class GravityState(NamedTuple):
+    """The gravity low-pass's whole state: the estimate (body frame, g) and
+    the weight its samples carry, ``1 − exp(−T/τ)`` after ``T`` quiescent
+    seconds (``0`` before any). Carried across parts by ``imu_stream``."""
+
+    x: float
+    y: float
+    z: float
+    weight: float
+
+    @property
+    def estimate(self) -> tuple[float, float, float]:
+        return (self.x, self.y, self.z)
+
+
+#: Before the first quiescent sample: no estimate, no weight.
+GRAVITY_START = GravityState(0.0, 0.0, 0.0, 0.0)
+
+
+def gravity_step(
+    state: GravityState, sample: tuple[float, float, float], alpha: float
+) -> GravityState:
+    """One low-pass update, the one expression every path evaluates (offline
+    :func:`low_pass_gravity`, live ``imu_live``).
+
+    A bias-corrected exponential mean: ``w ← (1 − α)·w + α`` and
+    ``g ← g + (α / w)·(a − g)``, which is ``Σ αₖ·∏(1 − α)·aₖ / w`` over the
+    samples so far. Once ``w`` nears 1 (a few τ of quiescent samples) it is
+    the plain ``g ← α·a + (1 − α)·g``; before that it is the time-weighted mean
+    of the samples seen, not one seed sample held for τ. The first sample is
+    the estimate exactly (``α / α = 1``). A zero-length sample with no weight
+    yet stands in until a weighted one arrives.
+
+    A sample with a non-finite axis is skipped: ``state`` itself is returned
+    (callers test ``is``), so one NaN cannot poison an axis for the rest of
+    the session (the ``ewm`` this replaced skipped NaNs too).
+    """
+    if not (math.isfinite(sample[0]) and math.isfinite(sample[1]) and math.isfinite(sample[2])):
+        return state
+    weight = (1.0 - alpha) * state.weight + alpha
+    if weight == 0.0:
+        return GravityState(sample[0], sample[1], sample[2], 0.0)
+    gain = alpha / weight
+    return GravityState(
+        state.x + gain * (sample[0] - state.x),
+        state.y + gain * (sample[1] - state.y),
+        state.z + gain * (sample[2] - state.z),
+        weight,
+    )
+
+
+def sample_intervals_seconds(timestamps: pd.Series | pd.DatetimeIndex) -> np.ndarray:
+    """Seconds from each IMU sample to the one before it (``nan`` for the
+    first): the ``Δt`` each sample covers in the gravity low-pass.
+
+    Integer nanoseconds divided once, so it equals the live frame's
+    ``timedelta.total_seconds()`` of the same two instants bit for bit.
+    """
+    index = pd.DatetimeIndex(pd.to_datetime(timestamps, utc=True)).as_unit("ns")
+    ns = index.tz_localize(None).to_numpy().view(np.int64)
+    out = np.full(len(ns), np.nan)
+    if len(ns) > 1:
+        out[1:] = np.diff(ns) / 1e9
+    return out
+
+
+def low_pass_gravity(
+    samples: np.ndarray,
+    sample_seconds: np.ndarray,
+    state: GravityState = GRAVITY_START,
+) -> tuple[np.ndarray, GravityState]:
+    """The low-pass over quiescent ``samples`` (n × 3, g), in time order.
+
+    ``sample_seconds`` is each sample's interval (:func:`sample_intervals_seconds`
+    over *every* IMU sample, quiescent or not, then the quiescent rows taken).
+    ``state`` is the filter before the first sample (:data:`GRAVITY_START` for
+    a session's first). Returns the estimate after each sample and the state
+    after the last. A scalar loop on purpose: a caller that carries the state
+    (``imu_stream``) reproduces the whole-session result bit for bit however
+    the rows are cut.
+    """
+    values = np.asarray(samples, dtype=np.float64).tolist()
+    intervals = np.asarray(sample_seconds, dtype=np.float64).tolist()
+    out = np.empty((len(values), 3), dtype=np.float64)
+    # Rows before the first usable sample have no estimate (NaN, which
+    # ``estimate_gravity`` back-fills), never GRAVITY_START's zeros.
+    started = state is not GRAVITY_START
+    for i, (x, y, z) in enumerate(values):
+        stepped = gravity_step(state, (x, y, z), gravity_low_pass_alpha(intervals[i]))
+        started = started or stepped is not state
+        state = stepped
+        out[i] = state.estimate if started else (math.nan, math.nan, math.nan)
+    return out, state
+
 
 #: Body-frame accel axis used as the initial horizontal reference when
 #: building the plane perpendicular to gravity (see ``_project_horizontal``).
@@ -285,25 +427,39 @@ def straight_mask(
     return _looking_ahead(_circular_steady(heading_deg, span, heading_std_max_deg), lookahead)
 
 
-def estimate_gravity(accel: pd.DataFrame, mask: pd.Series) -> pd.DataFrame:
+def estimate_gravity(
+    accel: pd.DataFrame, mask: pd.Series, timestamps: pd.Series | pd.DatetimeIndex
+) -> pd.DataFrame:
     """Running low-pass of the 3-axis accel vector, held during non-quiescent rows.
 
-    ``accel`` has columns ``x``/``y``/``z`` (g units, body frame). The
-    estimate only advances on quiescent rows — computed here as an EWM over
-    the quiescent subsequence in time order, then reindexed back and
+    ``accel`` has columns ``x``/``y``/``z`` (g units, body frame), one row per
+    IMU sample at ``timestamps`` (positionally). The estimate only advances on
+    quiescent rows, each by :func:`gravity_low_pass_alpha` of its own sample
+    interval (:data:`GRAVITY_TIME_CONSTANT_SECONDS`), then is reindexed back and
     forward/backward-filled so every row (quiescent or not) has a current
     gravity estimate to subtract. Rows before the first quiescent sample
     fall back to the nearest (first) available estimate (``bfill``) rather
     than an assumed-level mount, so a session that starts mid-maneuver still
     gets a real estimate as soon as one exists.
+
+    ``timestamps`` is required: the filter's time constant is in seconds, so
+    a row count alone cannot say how far a sample moves it (M01.13).
     """
-    quiescent_accel = accel.loc[mask.reindex(accel.index, fill_value=False)]
-    if quiescent_accel.empty:
+    if len(timestamps) != len(accel):
+        raise ValueError(f"{len(timestamps)} timestamps for {len(accel)} IMU rows")
+    quiescent = mask.reindex(accel.index, fill_value=False).to_numpy(dtype=bool)
+    if not quiescent.any():
         # No quiescent window at all (e.g. a session shorter than one
         # rolling-std window) — assume a level mount so callers still get a
         # (uncorrected) linear-accel estimate instead of raising.
         return pd.DataFrame({"x": 0.0, "y": 0.0, "z": 1.0}, index=accel.index)
-    smoothed = quiescent_accel.ewm(alpha=GRAVITY_LOW_PASS_ALPHA, adjust=False).mean()
+    intervals = sample_intervals_seconds(timestamps)
+    values = accel[["x", "y", "z"]].to_numpy(dtype=np.float64)
+    smoothed = pd.DataFrame(
+        low_pass_gravity(values[quiescent], intervals[quiescent])[0],
+        index=accel.index[quiescent],
+        columns=["x", "y", "z"],
+    )
     return smoothed.reindex(accel.index).ffill().bfill()
 
 
@@ -594,7 +750,7 @@ def resolve_frame(
         quiescent = quiescent_mask(
             speed, heading, window=quiescent_window, lookahead=quiescent_lookahead
         )
-        gravity = estimate_gravity(accel, quiescent)
+        gravity = estimate_gravity(accel, quiescent, timestamps)
         linear_accel = accel.to_numpy() - gravity.to_numpy()
         h1_arr, h2_arr = _project_horizontal(linear_accel, gravity.to_numpy())
         h1 = pd.Series(h1_arr, index=frame.index)

@@ -15,7 +15,10 @@ The same three steps as :func:`~src.preprocessing.imu_frame.resolve_frame`,
 incrementally:
 
 1. **Gravity**: an exponential low-pass of the accel vector (the offline
-   ``alpha``, per sample), advanced only by quiescent samples — steady speed
+   ``imu_frame.gravity_step``, each sample moving it by
+   ``1 − exp(−Δt/τ)`` for its interval ``Δt`` to the IMU sample before it,
+   τ = ``imu_frame.GRAVITY_TIME_CONSTANT_SECONDS``: the same bits offline
+   computes from the same instants), advanced only by quiescent samples — steady speed
    over :attr:`LiveImuFrame.quiescent_seconds` and, when GPS course is fresh,
    a steady course. Speed is the best fresh source
    (``imu_frame.SPEED_SOURCES``: ``0x2D1`` broadcast, Mode 01, GPS), each
@@ -112,11 +115,14 @@ from src.preprocessing.imu_decimation import (
     JERK_MAX_COLUMN,
 )
 from src.preprocessing.imu_frame import (
-    GRAVITY_LOW_PASS_ALPHA,
+    GRAVITY_START,
     HEADING_COLUMN,
     INPUT_MAX_AGE_SECONDS,
     QUIESCENT_LOOKAHEAD_SECONDS,
     SPEED_SOURCES,
+    GravityState,
+    gravity_low_pass_alpha,
+    gravity_step,
     input_max_age_seconds,
 )
 from src.signals.committees import STANDARD_GRAVITY
@@ -128,8 +134,6 @@ _AXES = {"ACCEL_X": 0, "ACCEL_Y": 1, "ACCEL_Z": 2}
 #: each accepted value of these.
 IMU_FRAME_INPUTS: frozenset[str] = frozenset({*SPEED_SOURCES, HEADING_COLUMN})
 
-#: Offline ``estimate_gravity``'s smoothing factor, per sample.
-GRAVITY_ALPHA = GRAVITY_LOW_PASS_ALPHA
 #: Resolution of each non-``decoded:`` speed source, km/h. ``obd:SPEED`` is
 #: J1979 PID 0x0D, one byte of whole km/h. GPS speed over ground is not
 #: quantised (its jitter is what ``min_vote_accel_g`` screens). A
@@ -315,11 +319,15 @@ class LiveImuFrame:
     _heading: _Steadiness = field(init=False)
     _pending_t: float | None = field(init=False, default=None)
     _pending: list[float | None] = field(init=False, default_factory=lambda: [None] * 3)
-    #: Samples awaiting their quiescent / straight decision.
-    _undecided: deque[tuple[float, tuple[float, float, float]]] = field(
+    #: Samples awaiting their quiescent / straight decision: instant, axes,
+    #: and the seconds since the IMU sample before it (``nan`` for the first),
+    #: which is how far a quiescent one moves the gravity low-pass.
+    _undecided: deque[tuple[float, tuple[float, float, float], float]] = field(
         init=False, default_factory=deque
     )
-    _gravity: list[float] | None = field(init=False, default=None)
+    #: The gravity low-pass (``imu_frame.GravityState``); ``None`` before
+    #: the first quiescent sample.
+    _gravity_state: GravityState | None = field(init=False, default=None)
     _s_xy: float = field(init=False, default=0.0)
     _s_xx_yy: float = field(init=False, default=0.0)
     #: Sign evidence, ``Σ sign(Δv)·h`` in the horizontal basis (module doc).
@@ -354,6 +362,12 @@ class LiveImuFrame:
     def __post_init__(self) -> None:
         self.reset()
 
+    @property
+    def _gravity(self) -> tuple[float, float, float] | None:
+        """The current gravity estimate (body frame, g), or ``None``."""
+        state = self._gravity_state
+        return None if state is None else state.estimate
+
     def reset(self) -> None:
         """Forget everything: gravity, yaw, inputs, the open tick."""
         span = self.quiescent_seconds + self.lookahead_s + _DECISION_SLACK_S
@@ -362,7 +376,7 @@ class LiveImuFrame:
         self._pending_t = None
         self._pending = [None, None, None]
         self._undecided = deque()
-        self._gravity = None
+        self._gravity_state = None
         self._s_xy = 0.0
         self._s_xx_yy = 0.0
         self._forward = [0.0, 0.0]
@@ -428,7 +442,7 @@ class LiveImuFrame:
         past it, oldest first. A sample whose inputs went silent is decided
         (as neither) once ``input_max_age_s`` past its look-ahead."""
         while self._undecided:
-            t, a = self._undecided[0]
+            t, a, interval = self._undecided[0]
             timed_out = now >= t + self.lookahead_s + self.input_max_age_s
             speed = next((s for s in self._speeds.values() if self._fresh(s, t)), None)
             heading_fresh = self._fresh(self._heading, t)
@@ -445,12 +459,10 @@ class LiveImuFrame:
                 and (heading_steady or not heading_fresh)
             )
             if quiescent:
-                if self._gravity is None:
-                    self._gravity = list(a)
-                else:
-                    g = self._gravity
-                    for i in range(3):
-                        g[i] = GRAVITY_ALPHA * a[i] + (1.0 - GRAVITY_ALPHA) * g[i]
+                state = GRAVITY_START if self._gravity_state is None else self._gravity_state
+                stepped = gravity_step(state, a, gravity_low_pass_alpha(interval))
+                if stepped is not state:  # a non-finite sample is skipped
+                    self._gravity_state = stepped
             if heading_steady and self._gravity is not None:
                 h1, h2 = _horizontal(a, self._gravity)
                 if h1 * h1 + h2 * h2 >= self.min_yaw_magnitude_g**2:
@@ -478,8 +490,11 @@ class LiveImuFrame:
 
     def _sample(self, t: float, a: tuple[float, float, float], observed_at: datetime) -> None:
         self._samples += 1
+        previous = self._last_sample_at
+        # timedelta seconds: the offline interval (integer ns / 1e9) bit for bit.
+        interval = math.nan if previous is None else (observed_at - previous).total_seconds()
         self._last_sample_at = observed_at
-        self._undecided.append((t, a))
+        self._undecided.append((t, a, interval))
         for speed in self._speeds.values():
             speed.hold_through(t, _DECISION_SLACK_S)
         self._decide(t)
@@ -660,7 +675,9 @@ class LiveImuFrame:
         return f"live IMU frame resolving; newest IMU sample {silent:.1f} s before this tick"
 
 
-def _horizontal(a: tuple[float, float, float], g: list[float]) -> tuple[float, float]:
+def _horizontal(
+    a: tuple[float, float, float], g: tuple[float, float, float]
+) -> tuple[float, float]:
     """``a − g`` projected onto the plane ⊥ ``g``, in the basis
     ``imu_frame._project_horizontal`` uses (body X projected; body Y when X is
     nearly vertical; ``e2 = ĝ × e1``)."""
@@ -683,7 +700,6 @@ def _horizontal(a: tuple[float, float, float], g: list[float]) -> tuple[float, f
 
 
 __all__ = [
-    "GRAVITY_ALPHA",
     "IMU_FRAME_INPUTS",
     "SIGN_ALPHA",
     "SIGN_RHO_G2",

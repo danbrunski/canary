@@ -409,7 +409,6 @@ them; absolute and "corrected" figures do not.
     regression test (a known-answer case, per `AGENTS.md`). Correct the
     docstring. Re-run the stored offset and road-load fits and record how far
     they move.
-
     *Done 2026-11-13:* `dyno_motion.distance_weights` gives each sample
     `v·dt`, `dt` half the interval to each neighbour (the trapezoid rule for
     `∫v dt`, so the weights sum to `distance_m(...)[-1]`), and
@@ -480,6 +479,7 @@ them; absolute and "corrected" figures do not.
       plus the new `heading_distance_m` field, the reworded
       `too_few_samples` reason and `no_distance` in the stored refusal
       kinds.
+
 - [ ] **M01.8 (Missing condition) Road load stores no air density.**
   `RoadLoadConditions` holds road, date, sessions, payload, tire pressures and
   ambient temperature; its docstring names "air". `C` in `A + B·v + C·v²` is
@@ -555,8 +555,9 @@ them; absolute and "corrected" figures do not.
 
 ## Part C — IMU
 
-- [ ] **M01.13 (Error) The gravity low-pass constant is per sample, so its
-  time constant follows the IMU rate.**
+- [~] **M01.13 (Error) The gravity low-pass constant is per sample, so its
+  time constant follows the IMU rate.** *Fixed 2026-11-13 (τ = 10 s); the
+  measurement on a drive recorded with the IMU is still owed (box 1).*
   `imu_frame.GRAVITY_LOW_PASS_ALPHA = 0.02`, applied as
   `ewm(alpha=…, adjust=False)` over quiescent samples in `estimate_gravity`,
   `imu_stream` and `imu_live`. The neighboring quiescence window was
@@ -572,13 +573,126 @@ them; absolute and "corrected" figures do not.
     wrong sign. Changing the ODR setting changes what the channel means.
   - Not affected: the dyno's `SF_*` channels, which use one constant rotation
     from the mean of the quiescent rows.
-  - [ ] Measure first on a stored drive: `imu:ACCEL_LON` against d(speed)/dt
+  - [~] Measure first on a stored drive: `imu:ACCEL_LON` against d(speed)/dt
     through a long gentle acceleration, per sample.
-  - [ ] Fix the time constant, `α = 1 − exp(−Δt/τ)`, with τ a named constant
+    *2026-11-13, simulated over real drives; the truck measurement remains.*
+    **No stored drive has IMU rows**: every `telemetry-*.parquet` under
+    `~/canary-data/sessions*` holds 0 `imu:ACCEL_X` rows, and the 2026-10-27
+    status snapshot reads `imu: null` (the HAT IMU is off until H02.3 picks
+    its rate). So the IMU was synthesised from two real drives' motion and
+    run through the production resolver (`imu_session.resolve_imu_frame`,
+    with the session's own 0x2D1 speed, held change-only, and GPS course):
+    truth `a_lon` = d/dt of road speed = decoded 0x2D1 ÷ 0.9203 (`dyno.yaml`
+    `ratio_to_gps`, 1 s centred smoothing); lateral = v·d(GPS course)/dt;
+    grade = d(GPS altitude)/d(distance) over 20 s; mount 6° pitch, −3° roll,
+    25° yaw; 0.02 g white vibration per axis. `ACCEL_LON` was paired with the
+    truth at each IMU instant; "swallowed" is the per-sample
+    `(a − ACCEL_LON)/a`, and the medians below are over those paired values,
+    never over window means. Drives: 2026-10-04T194342 (32 min; 141 s of
+    gentle 0.03–0.08 g, 11 pulls of ≥ 4 s; 82 s of level cruise on
+    |grade| > 3 %) and 2026-10-10T153117 (31 min; 116 s gentle, 2 pulls).
+    2026-10-27T171651 was dropped: its GPS speed covers only the last 9 min.
+    2026-10-04T194342:
+
+    | Rate | Filter | τ | Swallowed (median, gentle samples) | At the end of each pull (median) | Grade term left in `ACCEL_LON` | RMS residual, moving, 2 s |
+    |---|---|---|---|---|---|---|
+    | 12.5 Hz | α = 0.02 | 3.96 s | 26 % | 54 % | 23 % | 0.0222 g |
+    | 104 Hz | α = 0.02 | 0.48 s | 67 % | 105 % | 5.5 % | 0.0258 g |
+    | 208 Hz | α = 0.02 | 0.24 s | 71 % | 107 % | 4.4 % | 0.0278 g |
+    | 12.5 Hz | τ = 10 s | 10 s | 14 % | 39 % | 39 % | 0.0233 g |
+    | 104 Hz | τ = 10 s | 10 s | 15.5 % | 41.5 % | 39 % | 0.0230 g |
+    | 208 Hz | τ = 10 s | 10 s | 14.5 % | 37 % | 40 % | 0.0230 g |
+
+    2026-10-10T153117 at 104 Hz: α = 0.02 swallows 30 % (98 % at pull end),
+    τ = 10 s −15 % (its gentle samples sit on grades, so it reads high) and
+    48 %; RMS 0.0310 → 0.0253 g; at 208 Hz α = 0.02 swallows 37 % (102 %).
+    Controlled case (`test_a_sustained_gentle_pull_reads_the_same_at_every_imu_rate`,
+    a noise-free 10 s 0.035 g pull, which the gate passes the whole way):
+    the pull's last second kept 9 / 0 / 0 % at 12.5 / 104 / 208 Hz before,
+    38.4 / 38.6 / 38.6 % after. Half of a gate-passing ramp was gone
+    τ·ln 2 = 2.7 / 0.33 / 0.17 s after the gate opened; now 6.9 s at every
+    rate. **Remaining:** the same per-sample comparison on a drive recorded
+    with the HAT IMU (`hardware.imu` on at H02.3's rate), with H02.6.
+  - [x] Fix the time constant, `α = 1 − exp(−Δt/τ)`, with τ a named constant
     in seconds. Offline and live are pinned bit for bit
     (`test_imu_stream`, `test_live_and_offline_agree_except_where_live_cannot_see_accel`);
     keep that. This changes `imu:` channels the segmenter, tags and the
     lon-accel committee read: treat it as a spec change.
+    *Done 2026-11-13.* `imu_frame.GRAVITY_TIME_CONSTANT_SECONDS = 10.0`;
+    `gravity_low_pass_alpha(Δt) = −expm1(−Δt/τ)`, Δt clamped to
+    `[0, GRAVITY_MAX_SAMPLE_SECONDS = 0.1]`. Δt is per sample, the interval
+    to the previous IMU sample (quiescent or not) from the timestamps:
+    integer ns / 1e9 offline (`sample_intervals_seconds`),
+    `timedelta.total_seconds()` live, the same double. The cap keeps a
+    sample after a dropout or FIFO overrun from taking α → 1 and replacing
+    the estimate with one vibrating sample. The slowest LSM6DSOX rate in use
+    is 12.5 Hz (0.08 s). One scalar step (`gravity_step`) serves the offline
+    loop (`low_pass_gravity`: `estimate_gravity`, `imu_stream`) and
+    `LiveImuFrame`. `estimate_gravity` now requires the timestamps. The
+    constant was used nowhere else (`grep GRAVITY_LOW_PASS_ALPHA`).
+    - **Bias-corrected.** The filter carries its weight
+      `w = 1 − exp(−T/τ)` (`GravityState`) and steps `g ← g + (α/w)(a − g)`,
+      so until a few τ of quiescent samples it is their time-weighted mean,
+      not the first sample held for τ. This was needed: with a plain EWM at
+      τ = 10 s the single seed sample still carries 37 % of the estimate 10 s
+      later. Live and offline seed at different first-quiescent instants, and
+      `test_live_and_offline_agree_except_where_live_cannot_see_accel` failed
+      at 2.68 mg against its 2 mg bound. With the correction the largest
+      live/offline `ACCEL_LON_MAX` difference on that drive is 0.21 mg (56
+      ticks). Cost: early on, a contaminating sample weighs more. Three
+      synthetic `resolve_frame` tests in `test_imu_frame.py` called it with a
+      trailing mask (no look-ahead), which marks the first second of each
+      pull quiescent; their 0.30 g pull read 0.249 g. They now pass
+      `quiescent_lookahead` = 1.5 s, as every production caller does, and
+      recover 0.300 / −0.350 / 0.250 g exactly (assertions unchanged). The
+      drive simulation above is unchanged to four decimals.
+    - τ: the gate (speed std ≤ 1.5 km/h over 2 s + 1.5 s look-ahead) passes
+      a ramp up to ~0.042 g, so a gentle pull is swallowed at
+      `1 − exp(−T/τ)` whatever τ is. The same τ sets how fast a new grade
+      leaves `ACCEL_LON`, and the accelerometer cannot tell the two apart.
+      The RMS residual is flat from 5 to 15 s (10-04: 0.0221 / 0.0224 /
+      0.0230 / 0.0245 g at 5 / 7.5 / 10 / 15 s; 10-10: 0.0257 / 0.0255 /
+      0.0253 / 0.0253 g). 10 s is the longest τ within 5 % of the minimum on
+      both drives. It keeps 61 % of a 5 s gate-passing ramp (37 % at 5 s)
+      and leaves 24–39 % of a grade's term (14–28 % at 5 s), which settles
+      within ~30 s of a new grade. Mount and load changes are slower still.
+    - Sidecar: `ImuFrameInputs.gravity_time_constant_seconds` /
+      `gravity_max_sample_seconds` record the low-pass the linear yaw and
+      sign were fitted through, and `IMU_FRAME_CODE_VERSION` is 3. The
+      stream names a sidecar `stale` when either differs from the code's,
+      including every sidecar written before this. Re-running
+      `scripts/resolve_imu_frame.py` fixes it without `--replace`, since the
+      `SF_*` reference does not depend on the low-pass. No stored session
+      has a sidecar today.
+    - Tests: `tests/test_imu_frame.py`
+      `test_the_gravity_time_constant_is_the_same_at_every_imu_rate` (12.5 /
+      104 / 208 Hz), `test_a_sample_after_a_gap_moves_the_estimate_by_one_sample_at_most`,
+      `test_offline_and_live_low_pass_steps_are_bit_identical` (irregular µs
+      stamps and a 2.5 s gap) and
+      `test_a_sustained_gentle_pull_reads_the_same_at_every_imu_rate` (fails
+      at HEAD's α: 9 / 0 / 0 % kept), and
+      `test_the_low_pass_is_a_mean_until_its_weight_fills`, and
+      `test_a_non_finite_sample_is_skipped_not_carried`: `gravity_step` skips a
+      sample with a non-finite axis, as the `ewm` it replaced did, so one NaN
+      no longer freezes that axis for the session (the verifier's repro:
+      final x 0.1 before the skip, 0.19996 with it). `tests/test_imu_stream.py`
+      `test_a_sidecar_from_another_gravity_low_pass_is_stale` (3 cases).
+      Parity is unchanged and unweakened:
+      `test_stream_equals_the_whole_session_frame` (3 cuts) and
+      `test_an_imu_dropout_holds_only_the_look_ahead` hold bit for bit, and
+      `test_live_and_offline_agree_except_where_live_cannot_see_accel` keeps
+      < 2 mg (now 0.21 mg) and 54 / 73 / 19.
+    - Spec change, consumers: the segmenter's accel-gated modes (`launch`,
+      `hard_brake`, `cornering` where configured, via
+      `imu:ACCEL_LON_MAX` / `ACCEL_LAT_MAX`), the auto-tagger (offline
+      `scripts/autotag.py`, live `LiveAutoTagHook`) and
+      `LON_ACCEL_SOURCE_DIVERGENCE` (`imu:ACCEL_LON_MEAN`, which has no
+      relation in the Xterra's `committees.yaml` yet). **No learned model
+      reads them**: `imu:*` is `source_not_trainable` (H01.1), behavior
+      models refuse `imu:` inputs, and `bindings.yaml` and the IF features
+      carry none. No deployed model's inputs change and no retrain is owed.
+      `src/preprocessing/` is in `scripts/ml_paths.txt`, so the
+      `ml_training` tier was run.
 
 ## Part D — Fuel plant, pressure and λ
 

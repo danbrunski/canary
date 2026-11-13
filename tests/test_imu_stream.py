@@ -23,6 +23,7 @@ from src.config import CanaryConfig
 from src.features.live import LiveFeatureSource
 from src.preprocessing.derived import grid_interval_ns, reduce_numeric_session
 from src.preprocessing.derived_store import DerivedStore, use_store
+from src.preprocessing.imu_frame import GRAVITY_MAX_SAMPLE_SECONDS, GRAVITY_TIME_CONSTANT_SECONDS
 from src.preprocessing.imu_session import (
     IMU_FRAME_FILENAME,
     ImuSessionFrame,
@@ -493,6 +494,45 @@ def test_a_stale_sidecar_backfills_with_the_same_reference(tmp_path: Path) -> No
     first = resolve_session_imu_frame(fresh, write=False, now=NOW)
     assert isinstance(first, ImuSessionFrame) and first.sidecar.inputs is not None
     assert first.sidecar.inputs.speed_source == "decoded:VEHICLE_SPEED_2D1"
+
+
+@pytest.mark.parametrize(
+    "low_pass",
+    [(None, None), (5.0, GRAVITY_MAX_SAMPLE_SECONDS), (GRAVITY_TIME_CONSTANT_SECONDS, 0.5)],
+)
+def test_a_sidecar_from_another_gravity_low_pass_is_stale(
+    tmp_path: Path, low_pass: tuple[float | None, float | None]
+) -> None:
+    """M01.13: the linear yaw and sign are fitted through the gravity low-pass,
+    so a sidecar resolved under another one (every sidecar before 2026-11-13
+    used the per-sample alpha 0.02, whose time constant followed the IMU rate)
+    is not applied. Re-resolving it keeps the specific-force reference, which
+    does not depend on the low-pass, so no ``replace`` is needed."""
+    session = write_session(tmp_path)
+    current = read_imu_frame_sidecar(session)
+    assert current is not None and current.inputs is not None
+    assert current.specific_force is not None
+    assert current.inputs.gravity_time_constant_seconds == GRAVITY_TIME_CONSTANT_SECONDS
+    assert current.inputs.gravity_max_sample_seconds == GRAVITY_MAX_SAMPLE_SECONDS
+    raw = current.model_dump(mode="json")
+    tau, max_sample = low_pass
+    if tau is None:
+        del raw["inputs"]["gravity_time_constant_seconds"]
+        del raw["inputs"]["gravity_max_sample_seconds"]
+    else:
+        raw["inputs"]["gravity_time_constant_seconds"] = tau
+        raw["inputs"]["gravity_max_sample_seconds"] = max_sample
+    (session / IMU_FRAME_FILENAME).write_text(json.dumps(raw))
+
+    plan = plan_imu_frame(session)
+    assert plan.status == "stale"
+    assert "M01.13" in plan.reason and "no --replace needed" in plan.reason
+    assert plan.key() == "none"
+
+    again = resolve_session_imu_frame(session, now=NOW)  # no replace
+    assert isinstance(again, ImuSessionFrame) and again.sidecar.specific_force is not None
+    assert again.sidecar.specific_force.reference_id == current.specific_force.reference_id
+    assert plan_imu_frame(session).status == "applied"
 
 
 def test_a_sidecar_from_other_rows_is_refused(tmp_path: Path, config: CanaryConfig) -> None:

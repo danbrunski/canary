@@ -74,6 +74,8 @@ from src.preprocessing.decode import decode_on_read, on_read_can_ids
 from src.preprocessing.imu_decimation import ACCEL_LAT_COLUMN, ACCEL_LON_COLUMN
 from src.preprocessing.imu_frame import (
     GRAVITY_MAGNITUDE_RANGE_G,
+    GRAVITY_MAX_SAMPLE_SECONDS,
+    GRAVITY_TIME_CONSTANT_SECONDS,
     HEADING_COLUMN,
     INPUT_MAX_AGE_SECONDS,
     QUIESCENT_LOOKAHEAD_SECONDS,
@@ -97,7 +99,9 @@ IMU_FRAME_SCHEMA_VERSION = 1
 #: Bump when the resolution changes for unchanged inputs.
 #: 2 -- P02.10: a broadcast speed stored change-only is held for the session's
 #: stale timeout (``ImuFrameInputs.speed_max_age_seconds``).
-IMU_FRAME_CODE_VERSION = 2
+#: 3 -- M01.13: the gravity low-pass has a time constant in seconds
+#: (``ImuFrameInputs.gravity_time_constant_seconds``), not a per-sample α.
+IMU_FRAME_CODE_VERSION = 3
 
 ACCEL_X_COLUMN = channel_key(IMU_SOURCE, "ACCEL_X")
 ACCEL_Y_COLUMN = channel_key(IMU_SOURCE, "ACCEL_Y")
@@ -253,6 +257,16 @@ class ImuFrameInputs(_Strict):
     #: did. ``None``: :data:`INPUT_MAX_AGE_SECONDS`, the age every sidecar
     #: before this field used and every session storing every frame uses.
     speed_max_age_seconds: float | None = None
+    #: The linear family's gravity low-pass (M01.13): its time constant and
+    #: the longest interval one sample stands for
+    #: (``imu_frame.GRAVITY_TIME_CONSTANT_SECONDS`` /
+    #: ``GRAVITY_MAX_SAMPLE_SECONDS``). The linear yaw and sign were fitted
+    #: through it, so the stream (``imu_stream``) applies a sidecar only when
+    #: both equal the running code's. ``None``: written before 2026-11-13,
+    #: under the per-sample ``α = 0.02`` whose time constant followed the IMU
+    #: rate; the stream names it ``stale``.
+    gravity_time_constant_seconds: float | None = None
+    gravity_max_sample_seconds: float | None = None
 
     @property
     def speed_max_age(self) -> float:
@@ -639,6 +653,8 @@ def resolve_imu_frame(
             speed_max_age_seconds=(
                 None if speed_max_age == INPUT_MAX_AGE_SECONDS else speed_max_age
             ),
+            gravity_time_constant_seconds=GRAVITY_TIME_CONSTANT_SECONDS,
+            gravity_max_sample_seconds=GRAVITY_MAX_SAMPLE_SECONDS,
         ),
         specific_force=SpecificForceFrame(
             reference_id=reference_id(rotation),

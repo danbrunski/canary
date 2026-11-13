@@ -30,9 +30,12 @@ repeats each one on the rows it has, carrying state between parts:
    started. The mask is a threshold on that std, so it can differ only where
    a window's std sits within that of 1.5 km/h (or 3 deg). Every value below
    is then bit-identical.
-3. **The gravity low-pass.** An EWM with ``adjust=False``
-   (``imu_frame.GRAVITY_LOW_PASS_ALPHA``), whose whole state is the last
-   estimate, carried across parts bit for bit. The samples before the first
+3. **The gravity low-pass.** ``imu_frame.low_pass_gravity``, a
+   bias-corrected first-order filter with a time constant in seconds
+   (``imu_frame.GRAVITY_TIME_CONSTANT_SECONDS``; each sample's ``Δt`` is its
+   interval to the IMU sample before it, which the kept history supplies at a
+   part edge). Its whole state (``imu_frame.GravityState``: the estimate and
+   its weight) is carried across parts bit for bit. The samples before the first
    quiescent instant subtract that instant's raw sample (the whole-session
    back-fill). The sidecar records it (``linear_accel.initial_gravity_body_g``),
    so no part waits for a later one.
@@ -73,7 +76,10 @@ channels):
   it: a re-resolve keeps the recorded speed source
   (``imu_session.resolve_session_imu_frame``), so the reference is unchanged
   and no ``--replace`` is needed, even on a session whose ``0x2D1`` frames the
-  old resolver could not decode.
+  old resolver could not decode. Also stale: a sidecar whose gravity low-pass
+  (``inputs.gravity_time_constant_seconds`` / ``gravity_max_sample_seconds``)
+  is not this code's, including every one written before M01.13 (2026-11-13,
+  the per-sample α); the same re-run fixes it.
 
 ``session_pipeline.resample_and_segment`` puts each session's :class:`ImuFrameUse` on its
 result (``attrs[IMU_FRAME_ATTR]``), so an absent ``imu:ACCEL_LON_MAX`` says
@@ -110,9 +116,14 @@ from src.decode.on_read import on_read_catalog
 from src.decode.slices import sentinel_channel
 from src.preprocessing.imu_decimation import ACCEL_LAT_COLUMN, ACCEL_LON_COLUMN
 from src.preprocessing.imu_frame import (
-    GRAVITY_LOW_PASS_ALPHA,
+    GRAVITY_MAX_SAMPLE_SECONDS,
+    GRAVITY_START,
+    GRAVITY_TIME_CONSTANT_SECONDS,
+    GravityState,
     _project_horizontal,
     _rotate,
+    low_pass_gravity,
+    sample_intervals_seconds,
     steady_speed_mask,
     straight_mask,
 )
@@ -272,6 +283,27 @@ def plan_imu_frame(session_dir: Path) -> ImuFramePlan:
             f"{session} (it keeps the recorded speed source {speed_source}, so the "
             "reference is unchanged: no --replace needed)",
         )
+    inputs = sidecar.inputs
+    low_pass = (
+        (inputs.gravity_time_constant_seconds, inputs.gravity_max_sample_seconds)
+        if inputs is not None
+        else (None, None)
+    )
+    if low_pass != (GRAVITY_TIME_CONSTANT_SECONDS, GRAVITY_MAX_SAMPLE_SECONDS):
+        recorded = (
+            "the per-sample alpha 0.02 its time constant followed the IMU rate with"
+            if low_pass == (None, None)
+            else f"tau {low_pass[0]} s, max sample {low_pass[1]} s"
+        )
+        return ImuFramePlan(
+            session,
+            "stale",
+            f"imu_frame.json's linear yaw and sign were fitted through a gravity low-pass of "
+            f"{recorded}; this code's is tau {GRAVITY_TIME_CONSTANT_SECONDS} s, max sample "
+            f"{GRAVITY_MAX_SAMPLE_SECONDS} s (M01.13). Re-run scripts/resolve_imu_frame.py "
+            f"{session} (the specific-force reference does not depend on it: no --replace "
+            "needed)",
+        )
     speed_catalog = None
     if speed_source is not None and is_decoded_column(speed_source):
         name = speed_source.split(SOURCE_SEP, 1)[1]
@@ -393,7 +425,7 @@ class LinearAccelStream:
         self._heading = np.empty(0, dtype=np.float64)
         self._history = 0
         self._last_input: dict[str, pd.DataFrame] = {}
-        self._state: np.ndarray | None = None
+        self._state: GravityState | None = None
         # Rows of ticks still holding unresolved IMU rows, and resolved
         # ACCEL_LON/LAT rows not yet emitted.
         self._held: pd.DataFrame | None = None
@@ -503,7 +535,8 @@ class LinearAccelStream:
         straight = straight_mask(heading, window=self._window, lookahead=self._lookahead)
         quiescent = (steady & straight).to_numpy(dtype=bool)[start:stop]
         accel = self._acc[start:stop]
-        gravity = self._gravity(accel, quiescent, self._ts[start:stop])
+        intervals = sample_intervals_seconds(self._ts)[start:stop]
+        gravity = self._gravity(accel, quiescent, self._ts[start:stop], intervals)
         linear = accel - gravity
         h1, h2 = _project_horizontal(linear, gravity)
         lon, lat = _rotate(pd.Series(h1), pd.Series(h2), self._yaw)
@@ -529,21 +562,25 @@ class LinearAccelStream:
         self._history = stop - keep_from
 
     def _gravity(
-        self, accel: np.ndarray, quiescent: np.ndarray, stamps: pd.DatetimeIndex
+        self,
+        accel: np.ndarray,
+        quiescent: np.ndarray,
+        stamps: pd.DatetimeIndex,
+        intervals: np.ndarray,
     ) -> np.ndarray:
-        """``imu_frame.estimate_gravity`` for these rows, from the carried state."""
-        seed = self._state if self._state is not None else self._initial
+        """``imu_frame.estimate_gravity`` for these rows, from the carried state.
+        ``intervals`` is each row's ``Δt`` to the IMU sample before it, taken
+        over the kept history so the first row of a part has its own."""
+        seed = self._initial if self._state is None else np.asarray(self._state.estimate)
         if not quiescent.any():
             return np.tile(seed, (len(accel), 1))
-        rows = pd.DataFrame(accel[quiescent], columns=_XYZ)
         if self._state is None:
             first = int(np.flatnonzero(quiescent)[0])
             self._check_first_quiescent(pd.Timestamp(stamps[first]), accel[first])
-            smoothed = rows.ewm(alpha=GRAVITY_LOW_PASS_ALPHA, adjust=False).mean().to_numpy()
-        else:
-            seeded = pd.concat([pd.DataFrame([self._state], columns=_XYZ), rows], ignore_index=True)
-            smoothed = seeded.ewm(alpha=GRAVITY_LOW_PASS_ALPHA, adjust=False).mean().to_numpy()[1:]
-        self._state = smoothed[-1].copy()
+        state = GRAVITY_START if self._state is None else self._state
+        smoothed, after_rows = low_pass_gravity(accel[quiescent], intervals[quiescent], state)
+        if after_rows is not GRAVITY_START:  # every row skipped (non-finite): no estimate yet
+            self._state = after_rows
         seen = np.cumsum(quiescent)
         out = np.tile(seed, (len(accel), 1))
         after = seen > 0
