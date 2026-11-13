@@ -898,8 +898,11 @@ class LiveFeatureSource:
         self._replay_shift_s = None
         self.latest_operating_point = None
         self.last_segmenter_fallback = False
-        # Replay entry/exit is a session boundary: no start evidence carries.
+        # Replay entry/exit is a session boundary: no start evidence carries,
+        # nor the recording it was gathered in — the next recording seen is
+        # the first, as on a fresh source (R27.6).
         self._start_trackers = {}
+        self._start_context_recording = None
         # Nor does a gravity/yaw estimate (H02.4).
         self.imu_frame.reset()
         # Trip integrals are session-scoped (Task 1.3) — zero them on the

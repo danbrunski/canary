@@ -570,6 +570,50 @@ def test_start_context_live_matches_batch_across_a_writer_rotation(config: Canar
     assert unwired[-1][observed_col] == 1.0
 
 
+def test_start_context_after_reset_matches_a_fresh_source(config: CanaryConfig) -> None:
+    """R27.6: ``reset()`` leaves a source the same as a freshly built one, the
+    writer's recording included. It used to keep the pre-reset recording, so a
+    start watched after the reset while the writer had no recording yet was
+    then dropped when a recording other than the pre-reset one appeared; a
+    fresh source keeps it (the first recording it sees ends nothing)."""
+    models = BehaviorModels(schema_version=CURRENT_SCHEMA_VERSION, models=[_cold_model()])
+    observed_col, coolant_col = start_context_columns(_COLD)
+    before = _drive("R1", initial_coolant=20.0, run_seconds=10)
+    # After the reset: a cold start watched with no recording, then the same
+    # run continues once recording R2 exists, past the 60 s start window so
+    # the run-time clock cannot place the start again.
+    unrecorded = _drive("none", initial_coolant=20.0, run_seconds=70)
+    unrecorded["timestamp"] = unrecorded["timestamp"] + timedelta(seconds=100)
+    recorded = _drive("R2", initial_coolant=27.0, koeo_seconds=0, run_seconds=10, first_runtime=70)
+    recorded["timestamp"] = recorded["timestamp"] + timedelta(seconds=175)
+
+    def after_reset(source: LiveFeatureSource, writing: dict[str, str | None]) -> list[Any]:
+        writing["dir"] = None
+        points = _feed_live(source, unrecorded)
+        writing["dir"] = "R2"
+        points += _feed_live(source, recorded)
+        return [
+            (point[observed_col], None if np.isnan(point[coolant_col]) else point[coolant_col])
+            for point in points
+        ]
+
+    fresh_writing: dict[str, str | None] = {"dir": None}
+    fresh = LiveFeatureSource(
+        config=config, behavior_models=models, session_identity=lambda: fresh_writing["dir"]
+    )
+    expected = after_reset(fresh, fresh_writing)
+    # The fresh source watched the start and keeps it into R2.
+    assert expected[-1] == (1.0, 20.0)
+
+    writing: dict[str, str | None] = {"dir": "R1"}
+    source = LiveFeatureSource(
+        config=config, behavior_models=models, session_identity=lambda: writing["dir"]
+    )
+    _feed_live(source, before)
+    source.reset()
+    assert after_reset(source, writing) == expected
+
+
 # ---------------------------------------------------------------------------
 # B01.4 — fitting uses the same contract it persists
 # ---------------------------------------------------------------------------

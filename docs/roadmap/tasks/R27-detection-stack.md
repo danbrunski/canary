@@ -193,10 +193,41 @@ not measured.
     824 passed; 48,000 randomized ticks through HEAD's and the new accumulator
     side by side were identical by `float.hex`, and its own replay of the same
     window (HEAD import confirmed) gave 0 diffs.
-    Open, its own commit: `reset()` does not clear `_start_context_recording`
-    (found by the new test, excluded there with the reason). Clearing it makes
-    a reset source match a fresh one, which keeps start evidence gathered with
-    no recording that today is dropped; a deliberate behavior change.
+    *Closed 2026-11-12, its own change:* `reset()` now clears
+    `_start_context_recording`, and `NOT_RESET` no longer excludes it, so the
+    reset test covers it (dropping the new line fails it: `reset() left these
+    fields as driven, not fresh: ['_start_context_recording']`). Reproducer
+    `tests/test_behavior_serving_contracts.py::
+    test_start_context_after_reset_matches_a_fresh_source` (recording R1,
+    reset, a cold start watched with no recording, then R2) failed before the
+    fix at the first R2 tick: reset source `(0.0, None)`, fresh source
+    `(1.0, 20.0)`; it passes after. What it feeds: only the `context:*`
+    start-evidence columns, read by behavior eligibility rule 4
+    (`cold_start_no_start_evidence`) of a model with a `cold_start` contract.
+    They are never a model feature (`candidate_feature_columns` and the rolling
+    builder skip `context:*`). Three shared recipes do set a cold-start
+    contract (`coolant_warmup`, `cold_start_idle_rpm_vs_coolant`, `cat_warmup`,
+    via `recipe_builders.WARMUP_1D_FIELDS` `max_initial_coolant_c: 40.0`), so
+    the next refit ships them; no model file loaded today has one (repo, desk
+    and the `pi-20261112` backup all give `start_context_specs == []`). What
+    bounds the impact is the wiring, not the models: in the daemon
+    `session_identity()` is `None` only before the storage writer exists,
+    before any replay can reset the source, and `reset()` already empties
+    `_start_trackers`, so the old "new recording, clear trackers" on the first
+    tick after a reset cleared trackers that were already empty. The fix
+    changes output only when a `None` recording follows a reset (tests and
+    tools, not the daemon), whatever models are loaded. Replay, HEAD (912c3238)
+    against the fix: the first 900 s of `2026-10-26T003705` (engine start at
+    3.8 s, stop at 522.5 s, restart at 643.3 s), the shipped models with a
+    cold-start contract added to the first, recording R1, `reset()` at 300 s,
+    no recording until 700 s, then R2: 901 ticks, 764 feature rows, 523,226
+    cells. Every non-`context:*` cell, `latest_derived_channels` and
+    non-context operating-point value is identical (`check_exact`); the two
+    `context:*` columns differ on the 65 rows from 700 s (HEAD `(0.0, NaN)`,
+    fixed `(1.0, 73.0)`, the restart watched at 643 s). The contract model's
+    eligibility verdict changed on 0 ticks (it refuses earlier, on operating
+    mode). Tests: the 35 files importing `features.live`/`LiveFeatureSource`
+    plus `test_feature_pipeline_boundaries`, `pytest -n 4`: 963 passed.
     `pytest -m ml_training tests/test_lstm_inference.py`: 20 passed;
     `tests/test_train_lstm.py tests/test_tcn_training.py`: 26 passed.
   - Must not change: the public surface (35 test files import the class).

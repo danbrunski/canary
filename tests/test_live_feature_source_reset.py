@@ -68,12 +68,6 @@ NOT_RESET: dict[str, str] = {
     "_slow_max_gap_seconds": "built from config",
     "_resample_config": "built from config",
     "_max_gap_by_channel": "memo of the pure _resample_config.max_gap_seconds_for",
-    # Found by this test (R27.6) and left as it was: the item is behavior-
-    # unchanged. Resetting it to None is not output-identical — after a reset,
-    # ticks with no recording (``session_identity()`` is None) followed by a
-    # recording other than the pre-reset one would keep, not drop, the start
-    # evidence gathered in between. Whether it should is an open decision.
-    "_start_context_recording": "kept across reset today (see the R27.6 note)",
     # The one field reset must *move*: it tags in-flight worker results so a
     # result built before the reset cannot be applied after it.
     "_generation": "advanced by reset (asserted below)",
