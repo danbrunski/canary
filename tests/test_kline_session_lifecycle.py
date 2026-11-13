@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
-from pathlib import Path
 
 import pytest
 
@@ -23,9 +22,9 @@ from src.collection.kline.sessions import MODULE_SESSIONS
 from src.collection.kline.transport import KlineTimeoutError, WakePulse
 from src.collection.kline_collector import KlineCollector
 from src.config import KlineConfig
+from src.paths import REPO_ROOT
 from src.telemetry import TelemetryRecord
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 DIDS = REPO_ROOT / "data/dids.yaml"
 PROFILE = REPO_ROOT / "data/nissan-xterra-2008/kline.yaml"
 ENTRIES = ("0x1201", "ECM_TARGET_EQUIV_RATIO")
