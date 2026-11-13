@@ -1441,7 +1441,7 @@ _PLUMBING = {
     # _LEARNED_FIELDS: the contract's boundary quantity -> the LearnedState field
     # (key and value), the only way these names reach a scenario's boundaries.
     ("src/analysis/paired_scenarios.py", "string"): 2,
-    # SimRequest -> LearnedState(<name>=request.<name>) in rom_editor._template.
+    # SimRequest -> LearnedState(<name>=request.<name>) in rom_editor._learned.
     ("src/analysis/rom_editor.py", "attribute"): 1,
     ("src/analysis/rom_editor.py", "keyword"): 1,
     # rom_editor.TYPICAL_FIELDS: the fields the typical-values button may fill.

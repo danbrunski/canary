@@ -15,6 +15,9 @@ code:
   the order of ``GET .../tables``, plus the simulator kit's load.
 * :func:`simulate_edits` -- a stated rpm x load grid (E08.2), paired Monte
   Carlo draws (E08.3) and per-cell aggregation (E08.4), base vs candidate.
+* :func:`simulate_cells` and :func:`scenario_template` -- that pipeline on a
+  built design, the one copy this module and ``tools/rom_sim.py run`` both
+  drive (R25.3); each assembles its own result document.
 * :func:`run_job` -- the workbench child's entry point.
 
 What it makes impossible rather than documented:
@@ -121,6 +124,7 @@ from src.analysis.rom_image import (
 from src.analysis.rom_levers import classify_edit
 from src.analysis.rom_map import ROM_MAP_FILE, RomMap, load_rom_map, rom_map_sha256
 from src.analysis.sim_cells import (
+    CellTable,
     Grid,
     aggregate_cells,
     fuel_comp_axes,
@@ -141,6 +145,7 @@ from src.analysis.sim_montecarlo import (
     MODE,
     LoadedUncertainty,
     MonteCarloDesign,
+    MonteCarloResult,
     load_sim_kit,
     run_monte_carlo,
 )
@@ -391,7 +396,9 @@ def _preview_kit(profile_dir: Path, kit: SimKit | None) -> tuple[SimKit | None, 
         return None, SIM_KIT_UNDECLARED
 
 
-def _effects(base_image: bytes, candidate_image: bytes, kit: SimKit) -> EffectReport:
+def _effects(
+    base_image: bytes, candidate_image: bytes, kit: SimKit, *, slot: int = SIM_SLOT
+) -> EffectReport:
     """``compare_roms`` on the two images under the run's contract mode, as the
     simulator's ``rom_report`` has it. Where a quantity the mode holds fixed
     makes an output ``unevaluable``, this is the report that says so."""
@@ -401,8 +408,8 @@ def _effects(base_image: bytes, candidate_image: bytes, kit: SimKit) -> EffectRe
         kit.rom_map,
         kit.model,
         kit.model_sha256,
-        base_slot=SIM_SLOT,
-        candidate_slot=SIM_SLOT,
+        base_slot=slot,
+        candidate_slot=slot,
         slot_source=SLOT_SOURCE,
         contract=kit.contract,
         mode=MODE,
@@ -680,36 +687,127 @@ def _uncertainty(profile_dir: Path, kit: SimKit) -> LoadedUncertainty:
     return load_sim_kit(profile_dir, kit.plant.plant_version).uncertainty
 
 
-def _template(
-    kit: SimKit, base_sha: str, candidate_sha: str, request: SimRequest
+def _learned(request: SimRequest) -> LearnedState:
+    return LearnedState(
+        stft_pct=request.stft_pct,
+        ltft_pct=request.ltft_pct,
+        throttle_closed_learned=request.throttle_closed_learned,
+        idle_air_learned=request.idle_air_learned,
+        evap_purge_area=request.evap_purge_area,
+        source=LEARNED_SOURCE,
+    )
+
+
+# -- the simulate pipeline (R25.3) ----------------------------------------------------------
+#
+# Two drivers run it: this module's simulate (the dashboard's ROM Editor) and
+# ``tools/rom_sim.py run`` (the CLI). Each used to carry its own copy, with its
+# own paired-scenario template, so a pipeline change had to be made twice and
+# the two could disagree without anything noticing. Each caller still builds
+# its own design, learned state and result document.
+
+
+def scenario_template(
+    kit: SimKit,
+    base_sha256: str,
+    candidate_sha256: str,
+    *,
+    slot: int,
+    learned: LearnedState,
+    candidate_events: tuple[str, ...],
 ) -> PairedScenario:
+    """The paired scenario minus its points (the design gives them): both ROM
+    identities on ``slot``, named :data:`SLOT_SOURCE`, the kit's plant, the
+    caller's learned state and candidate events."""
+
     def identity(sha: str) -> EcuIdentity:
         return EcuIdentity(
             program_id=kit.model.program.id,
             image_sha256=sha,
-            slot=SIM_SLOT,
+            slot=slot,
             slot_source=SLOT_SOURCE,
         )
 
     return PairedScenario(
         mode=MODE,
-        base=identity(base_sha),
-        candidate=identity(candidate_sha),
+        base=identity(base_sha256),
+        candidate=identity(candidate_sha256),
         plant=PlantIdentity(
             version=kit.plant.plant_version,
             hardware_configuration=kit.plant.hardware_configuration,
         ),
         points=(),
-        learned=LearnedState(
-            stft_pct=request.stft_pct,
-            ltft_pct=request.ltft_pct,
-            throttle_closed_learned=request.throttle_closed_learned,
-            idle_air_learned=request.idle_air_learned,
-            evap_purge_area=request.evap_purge_area,
-            source=LEARNED_SOURCE,
-        ),
-        candidate_events=request.events,
+        learned=learned,
+        candidate_events=candidate_events,
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class SimulatedCells:
+    """What :func:`simulate_cells` computes; the caller assembles its document."""
+
+    result: MonteCarloResult
+    cells: CellTable
+    #: :func:`~src.analysis.sim_cells.ignition_timing_block` with its
+    #: ``points`` (:func:`~src.analysis.sim_cells.ignition_timing_points`).
+    timing: dict[str, Any]
+
+
+def simulate_cells(
+    kit: SimKit,
+    template: PairedScenario,
+    design: SimDesign,
+    base_image: bytes,
+    candidate_image: bytes,
+    uncertainty: LoadedUncertainty,
+    *,
+    grid: Grid,
+    slot: int,
+    timing_state: TimingState | None,
+    timing_coolant_c: float,
+    all_timing_cells: bool,
+    draws: int,
+    seed: int,
+) -> SimulatedCells:
+    """Base vs candidate over ``design``: the paired Monte Carlo, aggregated
+    into ``grid``'s cells, and the ignition timing block.
+
+    Refuses a design built on another base (``require_base``) first, then
+    the timing block's refusals (a trim edit with no stated timing state),
+    both before the draws run. ``timing_coolant_c`` is the coolant the trim
+    cells are read at and ``all_timing_cells`` whether every trim cell is
+    listed or only the changed ones: each caller states its own."""
+    require_base(design, template.base.image_sha256)
+    timing = ignition_timing_block(
+        kit,
+        base_image,
+        candidate_image,
+        timing_state,
+        slot=slot,
+        coolant_c=timing_coolant_c,
+        all_cells=all_timing_cells,
+    )
+    result = run_monte_carlo(
+        kit,
+        template,
+        MonteCarloDesign.from_sim_design(design),
+        base_image,
+        candidate_image,
+        uncertainty,
+        draws=draws,
+        seed=seed,
+    )
+    effects = _effects(base_image, candidate_image, kit, slot=slot)
+    axes = (
+        fuel_comp_axes(kit, base_image, slot=slot)
+        if grid == "fuel_comp"
+        else target_afr_axes(kit, base_image, slot=slot)
+    )
+    cells = aggregate_cells(result, design, axes, effects=effects)
+    timing["points"] = ignition_timing_points(
+        kit, result, design, base_image, candidate_image, timing_state, slot=slot
+    )
+    return SimulatedCells(result=result, cells=cells, timing=timing)
 
 
 def _grid_design(
@@ -755,40 +853,33 @@ def _simulate(
     _bounded(request)
     design = _grid_design(request, revision, profile_dir, registry, kit.plant.plant_version)
     require_base(design, base.image_sha256)
+    template = scenario_template(
+        kit,
+        base.image_sha256,
+        sha256_hex(candidate_image),
+        slot=SIM_SLOT,
+        learned=_learned(request),
+        candidate_events=request.events,
+    )
     # The request states the HI DET latch and knock control (module docstring),
     # so a trim edit simulates; the cells are read at the request's coolant, the
     # one every design point carries.
-    state = request.timing_state
-    timing = ignition_timing_block(
+    simulated = simulate_cells(
         kit,
-        base.image,
-        candidate_image,
-        state,
-        slot=SIM_SLOT,
-        coolant_c=request.coolant_c,
-        all_cells=False,
-    )
-    candidate_sha = sha256_hex(candidate_image)
-    result = run_monte_carlo(
-        kit,
-        _template(kit, base.image_sha256, candidate_sha, request),
-        MonteCarloDesign.from_sim_design(design),
+        template,
+        design,
         base.image,
         candidate_image,
         _uncertainty(profile_dir, kit),
+        grid=request.grid,
+        slot=SIM_SLOT,
+        timing_state=request.timing_state,
+        timing_coolant_c=request.coolant_c,
+        all_timing_cells=False,
         draws=request.draws,
         seed=request.seed,
     )
-    effects = _effects(base.image, candidate_image, kit)
-    axes = (
-        fuel_comp_axes(kit, base.image, slot=SIM_SLOT)
-        if request.grid == "fuel_comp"
-        else target_afr_axes(kit, base.image, slot=SIM_SLOT)
-    )
-    cells = aggregate_cells(result, design, axes, effects=effects)
-    timing["points"] = ignition_timing_points(
-        kit, result, design, base.image, candidate_image, state, slot=SIM_SLOT
-    )
+    result, cells, timing = simulated.result, simulated.cells, simulated.timing
     assert design.grid is not None
     return {
         "tool": TOOL,
@@ -1174,6 +1265,7 @@ __all__ = [
     "TYPICAL_VALUES_FILE",
     "ExportedImage",
     "SimRequest",
+    "SimulatedCells",
     "editor_spec",
     "export_edits",
     "export_refusal",
@@ -1181,7 +1273,9 @@ __all__ = [
     "preview_edits",
     "refusal_kind",
     "run_job",
+    "scenario_template",
     "sim_base",
+    "simulate_cells",
     "simulate_edits",
     "spec_export",
     "spec_yaml",

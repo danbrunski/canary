@@ -33,14 +33,17 @@ import pandas as pd
 import pytest
 import yaml
 
+from src.analysis import rom_editor
 from src.analysis.ecu_application import program_sha256
 from src.analysis.fuel_plant import plant_qualification
 from src.analysis.rom_effects import CellEdit, RomEffectRefusalError, compare_roms, make_candidate
+from src.analysis.rom_image import revision_match
 from src.analysis.rom_levers import classify_edit
 from src.analysis.sim_cells import CellTable
 from src.analysis.sim_montecarlo import load_sim_kit
 from src.analysis.sim_report import render_report
 from src.session import is_synthetic_session
+from src.vehicle.tune_revisions import load_tune_revisions
 from src.yaml_load import load_yaml
 from tests.rom_fixtures import PROFILE, encrypted_backup_lookalike
 from tests.test_sim_montecarlo import build_kit_and_image
@@ -332,6 +335,69 @@ def test_the_same_seed_writes_byte_identical_results_and_another_seed_does_not(
     args[args.index("--seed") + 1] = "8"
     assert _cli(capsys, *args)[0] == 0
     assert (other / "result.json").read_bytes() != (spec_run["out"] / "result.json").read_bytes()
+
+
+def _editor_request(**over: Any) -> rom_editor.SimRequest:
+    """The CLI run's edit, grid, environment, learned state and draws, as the
+    ROM Editor's request (GRID_ARGS, LEARNED, ``world["spec"]``, _run_args)."""
+    body: dict[str, Any] = dict(
+        label="cli test spec.yaml",
+        edits=[{"table": "fuel_compensation", "slot": 1, "cells": [[4, 4]], "set_raw": 148}],
+        grid="fuel_comp",
+        rpm_edges=[1900.0, 2100.0, 2900.0, 3100.0],
+        load_edges=[25.0, 32.0, 60.0, 70.0],
+        load_basis="fill_fraction_as_manifold_ratio",
+        baro_kpa=80.0,
+        iat_c=25.0,
+        coolant_c=88.0,
+        battery_v=14.0,
+        rail_kpa="working_assumption",
+        throttle_pct=20.0,
+        pedal_flag=0,
+        stft_pct=0.0,
+        ltft_pct=2.34,
+        throttle_closed_learned=0.0,
+        idle_air_learned=0.0,
+        evap_purge_area=0.0,
+        high_det="clear",
+        knock_control="active",
+        candidate_events="none",
+        draws=6,
+        seed=7,
+    )
+    body.update(over)
+    return rom_editor.SimRequest.model_validate(body)
+
+
+def test_one_edit_through_the_rom_editor_and_the_cli_gives_the_same_cells(
+    world: dict[str, Any], spec_run: dict[str, Any]
+) -> None:
+    """R25.3: the dashboard's simulate and ``rom_sim run`` drive one pipeline
+    (``rom_editor.simulate_cells``). The same edit, grid, learned state, draws
+    and seed give the same cell table and the same Monte Carlo provenance,
+    whatever document each caller wraps them in (``cells`` vs ``cell_table``)."""
+    registry = load_tune_revisions(world["profile"] / "tune_revisions.yaml")
+    match = revision_match(world["sha"], registry)
+    assert match["status"] == "matched" and match["revision"] == BASE
+    editor = rom_editor.simulate_edits(world["image"], match, _editor_request(), world["profile"])
+    cli = spec_run["result"]
+    # The CLI's design came from ``design grid`` with GRID_ARGS, the editor's
+    # from its request: one design, one candidate.
+    assert editor["design"]["sha256"] == cli["inputs"]["design_sha256"]
+    assert editor["candidate"]["candidate_sha256"] == world["candidate_sha"]
+    assert editor["cells"] == cli["cell_table"]
+    assert editor["provenance"] == cli["monte_carlo"]
+    # Not vacuous: the edited cell moves, and another seed moves the quantiles.
+    bfs = {
+        (c["row"], c["col"]): c["outputs"]["base_fuel_schedule"]["status"]
+        for c in editor["cells"]["cells"]
+        if c["n_points"]
+    }
+    assert bfs[(4, 4)] == "changed"
+    reseeded = rom_editor.simulate_edits(
+        world["image"], match, _editor_request(seed=8), world["profile"]
+    )
+    assert reseeded["cells"] != cli["cell_table"]
 
 
 def test_a_spec_that_names_its_own_base_needs_no_base_flags(

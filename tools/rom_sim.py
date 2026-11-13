@@ -78,7 +78,6 @@ from src.analysis.fuel_comp_rom import (
 from src.analysis.fuel_plant import FuelPlantRefusalError, plant_qualification
 from src.analysis.paired_scenarios import (
     LearnedState,
-    PairedScenario,
     SimKit,
     TimingState,
 )
@@ -92,6 +91,8 @@ from src.analysis.rom_edit_spec import (
     load_edit_spec,
     resolve_base,
 )
+from src.analysis.rom_editor import SLOT_SOURCE as EDITOR_SLOT_SOURCE
+from src.analysis.rom_editor import scenario_template, simulate_cells
 from src.analysis.rom_effects import (
     Candidate,
     EffectReport,
@@ -103,15 +104,9 @@ from src.analysis.sim_cells import (
     TOOL_VERSION as CELLS_TOOL_VERSION,
 )
 from src.analysis.sim_cells import (
-    aggregate_cells,
-    fuel_comp_axes,
     ignition_timing_block,
-    ignition_timing_points,
-    target_afr_axes,
 )
 from src.analysis.sim_contract import (
-    EcuIdentity,
-    PlantIdentity,
     SimulationRefusalError,
 )
 from src.analysis.sim_design import (
@@ -127,9 +122,7 @@ from src.analysis.sim_design import (
 from src.analysis.sim_montecarlo import (
     MODE,
     LoadedUncertainty,
-    MonteCarloDesign,
     load_sim_kit,
-    run_monte_carlo,
 )
 from src.analysis.sim_montecarlo import TOOL_VERSION as MONTECARLO_TOOL_VERSION
 from src.analysis.sim_report import TOOL_VERSION as REPORT_TOOL_VERSION
@@ -162,8 +155,9 @@ REPORT_HTML = "report.html"
 LEARNED_HELD = {"throttle_closed_learned": 0.0, "idle_air_learned": 0.0, "evap_purge_area": 0.0}
 #: The source string of the learned state; it names no recording.
 LEARNED_SOURCE = "cli: trims stated by --stft-pct and --ltft-pct"
-#: The slot the profile declares as the one the ECM runs (fuel_comp_fit.yaml).
-SLOT_SOURCE = "default_slot"
+#: The slot the profile declares as the one the ECM runs (fuel_comp_fit.yaml),
+#: named as the library names it: the run's template takes it from there too.
+SLOT_SOURCE = EDITOR_SLOT_SOURCE
 
 GRIDS = ("fuel_comp", "target_afr")
 #: The source a command-line timing state carries.
@@ -679,35 +673,15 @@ def _candidate_events(args: argparse.Namespace) -> tuple[str, ...]:
     return tuple(events)
 
 
-def _template(
-    world: _World, args: argparse.Namespace, events: tuple[str, ...], candidate_sha: str
-) -> PairedScenario:
-    kit = world.kit
-    program = kit.model.program.id
-
-    def identity(sha: str) -> EcuIdentity:
-        return EcuIdentity(
-            program_id=program, image_sha256=sha, slot=world.slot, slot_source="default_slot"
-        )
-
-    return PairedScenario(
-        mode=MODE,
-        base=identity(world.base.image_sha256),
-        candidate=identity(candidate_sha),
-        plant=PlantIdentity(
-            version=kit.plant.plant_version,
-            hardware_configuration=kit.plant.hardware_configuration,
-        ),
-        points=(),
-        learned=LearnedState(
-            stft_pct=float(args.stft_pct),
-            ltft_pct=float(args.ltft_pct),
-            throttle_closed_learned=LEARNED_HELD["throttle_closed_learned"],
-            idle_air_learned=LEARNED_HELD["idle_air_learned"],
-            evap_purge_area=LEARNED_HELD["evap_purge_area"],
-            source=LEARNED_SOURCE,
-        ),
-        candidate_events=events,
+def _learned(args: argparse.Namespace) -> LearnedState:
+    """The trims the caller states; the rest held (:data:`LEARNED_HELD`)."""
+    return LearnedState(
+        stft_pct=float(args.stft_pct),
+        ltft_pct=float(args.ltft_pct),
+        throttle_closed_learned=LEARNED_HELD["throttle_closed_learned"],
+        idle_air_learned=LEARNED_HELD["idle_air_learned"],
+        evap_purge_area=LEARNED_HELD["evap_purge_area"],
+        source=LEARNED_SOURCE,
     )
 
 
@@ -745,52 +719,33 @@ def cmd_run(args: argparse.Namespace) -> dict[str, Any]:
     kit, base = world.kit, world.base
     design = load_design(args.design)
     require_base(design, base.image_sha256)
-    uncertainty = world.uncertainty
-    template = _template(world, args, events, candidate.image_sha256)
-    result = run_monte_carlo(
+    template = scenario_template(
+        kit,
+        base.image_sha256,
+        candidate.image_sha256,
+        slot=world.slot,
+        learned=_learned(args),
+        candidate_events=events,
+    )
+    # The pipeline the ROM Editor runs too (R25.3). The trim cells are read at
+    # the design's coldest point: every point the plant accepts is warm, and a
+    # design with a point in the trims' blend band shows it per cell.
+    simulated = simulate_cells(
         kit,
         template,
-        MonteCarloDesign.from_sim_design(design),
+        design,
         base.image,
         candidate.image,
-        uncertainty,
+        world.uncertainty,
+        grid=args.grid,
+        slot=world.slot,
+        timing_state=_timing_state(args),
+        timing_coolant_c=min(p.coolant_c for p in design.points),
+        all_timing_cells=True,
         draws=args.draws,
         seed=args.seed,
     )
-    effects = compare_roms(
-        base.image,
-        candidate.image,
-        kit.rom_map,
-        kit.model,
-        kit.model_sha256,
-        base_slot=world.slot,
-        candidate_slot=world.slot,
-        slot_source=SLOT_SOURCE,
-        contract=kit.contract,
-        mode=MODE,
-    )
-    axes = (
-        fuel_comp_axes(kit, base.image, slot=world.slot)
-        if args.grid == "fuel_comp"
-        else target_afr_axes(kit, base.image, slot=world.slot)
-    )
-    table = aggregate_cells(result, design, axes, effects=effects)
-    state = _timing_state(args)
-    # The cells are read at the design's coldest point: every point the
-    # plant accepts is warm, and a design with a point in the trims' blend
-    # band shows it per cell.
-    timing = ignition_timing_block(
-        kit,
-        base.image,
-        candidate.image,
-        state,
-        slot=world.slot,
-        coolant_c=min(p.coolant_c for p in design.points),
-        all_cells=True,
-    )
-    timing["points"] = ignition_timing_points(
-        kit, result, design, base.image, candidate.image, state, slot=world.slot
-    )
+    result, table, timing = simulated.result, simulated.cells, simulated.timing
     prov = candidate.provenance
     run_facts: dict[str, Any] = {
         "label": prov["label"],

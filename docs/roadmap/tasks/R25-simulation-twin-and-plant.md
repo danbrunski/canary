@@ -105,7 +105,7 @@ did not change.
     a new 68-point grid, the 917-point drive design, seeds 2/7/13 and nonzero
     trims. `run_paired` was 5.4–6.9x faster, and Monte Carlo was no slower.
 
-- [ ] **R25.3 Two drivers of the simulate pipeline.** `rom_editor._simulate`
+- [x] **R25.3 Two drivers of the simulate pipeline.** `rom_editor._simulate`
   and `tools/rom_sim.py` `cmd_run` (153 lines) both run design →
   `require_base` → `run_monte_carlo` → `compare_roms` → axes → `aggregate_cells`
   → `ignition_timing_block` → `ignition_timing_points`, and each has its own
@@ -114,9 +114,62 @@ did not change.
   two result documents already differ (`cells` against `cell_table`). A
   pipeline change has to be made twice, and the dashboard and the CLI can
   disagree without anything noticing.
-  - [ ] `rom_editor.simulate_cells(…)` and one `scenario_template(…)`; each
+  - [x] `rom_editor.simulate_cells(…)` and one `scenario_template(…)`; each
     caller keeps its own document assembly.
-  - [ ] A test that runs one edit through both and compares the cell results.
+    `simulate_cells(kit, template, design, base, candidate, uncertainty, *,
+    grid, slot, timing_state, timing_coolant_c, all_timing_cells, draws,
+    seed)` runs `require_base` → `ignition_timing_block` → `run_monte_carlo`
+    → `compare_roms` (`_effects`, now slot-parameterised) → axes →
+    `aggregate_cells` → `ignition_timing_points` and returns
+    `SimulatedCells(result, cells, timing)`. `scenario_template(kit, base_sha,
+    candidate_sha, *, slot, learned, candidate_events)` replaces both
+    `_template`s; each caller builds its own `LearnedState` (`rom_editor._learned`
+    from the request, `rom_sim._learned` from the flags plus `LEARNED_HELD`) and
+    its own document (`cells` vs `cell_table`, unchanged). The slot sources were
+    the same value: the tool's literal and its `SLOT_SOURCE` were both
+    `"default_slot"`, equal to `rom_editor.SLOT_SOURCE`; the tool now takes the
+    library's constant (`rom_sim.SLOT_SOURCE = rom_editor.SLOT_SOURCE`).
+    `cmd_run` loses 19 lines. Behaviour change, refusal order only: the CLI
+    now runs the timing block before the draws (the editor's order), so with
+    two faults at once `timing_state_incomplete`/`timing_state_unstated` now
+    come before a Monte Carlo refusal, and a trim edit with no timing state is
+    refused without first spending the draws. Single-fault inputs give the
+    same reason. Verified 2026-11-13 against a HEAD (519e9423) worktree, with
+    only this diff applied to a second worktree: byte-identical
+    `rom_sim run` result.json, traces.parquet and report.html for the stored
+    917-point drive design f4332b8d… (seed 1, 200 draws, ecu_reflash,
+    ZS44A-20260920 → ZS44A-Tuned-20261004; result_digest 8ddbd8da… both
+    sides), the same candidate on the target_afr grid with HI DET set /
+    fallback (seed 3, ltft 2.5) and a Fuel Comp edit spec (seed 5, trims
+    1.5/−2, HI DET clear / active); byte-identical ROM Editor responses for
+    `simulate_edits` (Fuel Comp add_raw; K ×1.05 with ecu_reflash) and
+    `_simulate` with the 20261004 image on the target_afr grid. Design hash,
+    `TOOL_VERSION`s (rom_sim 4, rom_editor 1) and slot_source unchanged.
+  - [x] A test that runs one edit through both and compares the cell results.
+    `tests/test_rom_sim_cli.py::test_one_edit_through_the_rom_editor_and_the_cli_gives_the_same_cells`:
+    the CLI's spec run and `rom_editor.simulate_edits` with the same edit, grid,
+    learned state, draws and seed give the same design sha, the same
+    `cells` == `cell_table`, and the same Monte Carlo provenance; the edited
+    cell is `changed`, and seed 8 gives a different table (not vacuous).
+    Independently verified 2026-11-13 at e4154e05:
+    - Byte-identical on 4 more CLI runs and 3 more editor calls (20261111-2
+      and 20261110 candidates, K and timing-trim specs, events `none`, seeds
+      2/5/11/31/42/77).
+    - Single-fault refusals are unchanged.
+    - Mutating either side's seed or trim fails the new test.
+  - [ ] Follow-up (pre-existing, found verifying R25.3): the slot can split.
+    The editor simulates the constant `SIM_SLOT = 1`, and its `_editable`
+    refusal hard-codes it too. The CLI uses the profile's
+    `fuel_comp_fit.yaml` `map_slot`. Today the only declaration is the
+    2008's `map_slot: 1`, so they agree. A profile declaring another slot
+    would make the two drivers simulate different slots. Make that
+    impossible: the editor reads the declared slot, or `simulate_cells`
+    refuses (`slot_not_simulated`) when its `slot` differs from the
+    declaration.
+  - [ ] Follow-up (pre-existing): bad CLI arguments are accepted or crash
+    instead of being refused. `rom_sim run --seed -1` crashes with numpy's
+    `ValueError` (exit 1) instead of refusing, and `--ltft 400` is accepted.
+    Validate both at the argument boundary.
 
 - [ ] **R25.4 Three kit types, three `load_kit`s, and the same YAML parsed
   several times per request.** `paired_scenarios.SimKit` and
