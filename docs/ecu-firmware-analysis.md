@@ -1861,6 +1861,142 @@ in notes but still decode unsigned and wrap at 150 N·m. Decoding them as
 torque needs a `signed` flag on `Signal`, plus the column decoder and the
 DBC emit, which is shared-code work.
 
+### Misfire monitor (F01.15, 2026-11-12)
+
+Verified from code unless marked inferred. The answer to F01.15 is yes: a
+per-cylinder crank roughness value is in RAM. It is held as a six-deep
+history of combustion events rather than one fixed word per cylinder.
+
+**Where it runs.** The crank ISR sets the cylinder index `4602` from the
+segment phase `11FC` through the table at ROM `0x0226E8`: phases 1–6 give
+cylinders 4, 5, 6, 1, 2, 3. That is the cylinder whose power stroke the
+segment times just measured. It then flags a new combustion. The two-tick
+task `0x07CEC8` runs `0x087A0C` once for each flagged combustion. The
+per-revolution task `0x07CF80` (in the every-third-segment table `0x0219C4`)
+runs `0x089304`, and the main cycle runs the evaluator `0x08498E`. Segments
+are 120°, so every third segment is one revolution. That part is inferred
+from the six phases.
+
+**Roughness** (`0x087A0C`, computed once at least 13 events have passed
+since sync, `3F5C` > 12):
+
+| RAM | What it holds |
+|---|---|
+| `3F40` | The newest event's roughness (cylinder `4602`). It is a crank-speed change, `6·T₁ − 5·T₂ − T₃` from the segment-time words around `0xFFFF2084`. It is divided by the segment period cubed (`0x089002`, floating mantissa and exponent) and by the base fuel schedule `103A` (`0x088FA8`). That makes it an angular deceleration per unit load (inferred physical reading). It is stored as a byte with 0x80 = zero, clamped to 0x00–0xFF, and the sign is in `481A` bit 6. |
+| `3F41`–`3F45` | The five events before it, in firing order. One read of `3F40`–`3F45` together with `4602` gives all six cylinders: `3F4k` belongs to cylinder ((`4602` − 1 − k) mod 6) + 1 (inferred from the phase table, with firing order 1-2-3-4-5-6). |
+| `3F46`–`3F49`, `3F4C`–`3F4F` | Two more four-deep histories from other segment-time combinations: `6·T(2084) − 3·T(2090) − 3·T(2078)` and `6·T(2084) − 3·T(209C) − 3·T(206C)`. |
+| `3F4A` | `3F47` − `3F48`, offset 0x80. |
+| `3F50` | `3F4D` − `3F4E`, offset 0x80. |
+| `3F4B` | (3·(`3F47` − `3F48`) + `3F49` − `3F46`) / 2, offset 0x80. |
+| `3F88` | The signed mean of `3F40`–`3F45`, divided by 6 (`0x087D9A`), offset 0x80. |
+
+`0x0848C4` resets every history byte to 0x80 at init.
+
+**Detection.** Three one-bit-per-event shift registers mark suspect events
+against thresholds that `0x08498E` takes from rpm × load maps (`FUN_00022584`
+and `FUN_00026B54` over `11CA` = rpm/50 and `1038`; maps `0xA959`, `0xA759`
+and `0xA859` among them):
+
+- A, `3E64`: `3828` ≤ `3F4A` < `3829` and `3F4B` ≥ `3EF4`. In the high-load
+  zone (`47C4` bit 7) it also needs `3F40` ≥ `3EF3`.
+- B, `3E60`: `382B` ≤ `3F4A` < `382C`. It counts only when more than three
+  of the last twelve events were marked.
+- C, `3E62`: `3797` ≤ `3F40` < `3798`, plus a `3F4A` condition.
+
+An event is counted when its bit reaches position 12 (0x1000), two engine
+cycles later. Twelve events is a whole number of cycles, so `4602` at that
+moment names the same cylinder. Counter arrays hold seven words each:
+index 0 is the total and 1–6 are cylinders 1–6.
+
+| Counter | Fed by | Window, reset |
+|---|---|---|
+| `3F22`–`3F2E` | A | 200 revolutions (`4662` ≥ 200 sets `4847` bit 5; reset via `47ED` bit 5) |
+| `3F30`–`3F3C` | A | 1,000 revolutions (`4664`, `4847` bit 7; `47ED` bit 4) |
+| `3EF8`–`3F04`, total `3EF6` | B | 200 revolutions (`4666`, `4847` bit 6; `47ED` bit 6) |
+| `3F06`–`3F12` | C | 200 revolutions, same as B |
+| `3F14`–`3F20` | A, B or C, at most once per event | The drive cycle; saturates at 0xFFFF |
+| `3838`–`3844` | `3F14` at drive-cycle end (`0x07D062`) | Ten-cycle EWMA (below) |
+
+The revolution counters run only while the monitor is enabled and stop
+during a hold-off.
+
+**Enable** (`4857` bit 4, set in `0x08498E`):
+
+- the misfire item cal flag `47C9` bit 7;
+- no MAF, throttle or other inhibiting item failing (items 0x114, 0x115, 0,
+  0x11C, 0x12 and the "any" check);
+- `1115` > 0x88 (the battery-voltage byte, as in the knock enable);
+- `465A` non-zero;
+- 300–6,250 rpm (`11CA` 6–125).
+
+It also needs `47D5` bits 7 and 6, which come from two temperature curves:
+`0xCDBB` over `1078` with `282A` bit 5, and `0xD9C7` over `1078` against
+`1079`.
+
+**Hold-offs.** For 100 events, `4B25`/`4B26` = 100. A hold-off starts on:
+
+- fuel cut (`26B8`);
+- a change in `282A` bit 2;
+- load below the curve `0xD8C3` while `282A` bit 5 is set;
+- `1038` high byte > 0xD1;
+- an rpm drop of more than 20 counts (250 rpm) between main cycles (`47D5`
+  bit 5).
+
+`0x086F8A` adds `4B27` hold-offs for a large `2B85`, a mismatch between
+`2833` and `2835` bits, `4782` bit 3 or `2859` bit 1 (inferred to be
+rough-road and drivetrain-disturbance checks). Separately, if more than two
+of the last twelve events show `3F4A` ≥ `382A` (`3E5E`), `4819` bit 6
+suppresses detector A as a noise pattern.
+
+**Judgement.**
+
+- *Catalyst damage, every 200 revolutions.* Detector A's total `3F22` is
+  compared with `3E54` >> 8. `3E54` adds a per-event allowance of 13, 13, 13,
+  43 or 86 by the speed and load zone `2F93` (maps `0xD2EF`–`0xD31F`), which
+  allows 5.1 %, 16.8 % or 33.6 % of events. Past that, each cylinder with
+  ≥ 6 counts sets its flag (`0x086A2C`). The flags are `4802` bits 1/0 for
+  cylinders 1/2 and `4803` bits 7/6/5/4 for cylinders 3–6. Two or more
+  flagged cylinders set `4803` bit 3. `0x086C4E` then reports one item: the
+  single flagged cylinder (items 0x0D…0x08 = P0301…P0306), or P0300
+  (item 0x0E) when several cylinders are flagged or P0300 is already
+  reportable. The MIL blink path is `0x07B9B0` (`4760`).
+- *Emissions, every 1,000 revolutions.* `3F30` ≥ `2FE4`, a curve of `1077`
+  that is 33 or 60 counts (about 1.1–2 % of 3,000 events). Detectors B and C
+  use `2FE6` = 60. They add pattern tests: `0x086B16` passes when every
+  cylinder holds either ≥ 25 % or < 5 % of the misfires (concentrated). On
+  the C counts, `0x086B86` passes when a companion pair 360° apart (1 & 4,
+  2 & 5, 3 & 6) holds ≥ 90 % while the other four hold < 10 % (inferred:
+  a crank-wheel or companion-cylinder signature).
+
+**Mode 06 already reads the counters.** The CAN Mode 06 handler `0x0D6024`
+advertises MIDs A0–A7 (bitmap at ROM `0x0C9D8`), and its record table
+starts near ROM `0x025344`. The records point at RAM: MIDs A2–A7, TID 0x0C
+at `63C4`–`63CE` (current cycle), TID 0x0B at `63D2`–`63DC` (ten-cycle
+average), unit 0x24 (counts). MID A1 TIDs 0x80–0x93 point at `6386`–`63A2`.
+The writer of `63C4`–`63DC` was not found (indexed stores). The EWMA itself
+is in `0x07D062`: new = (9 × old + this cycle) / 10. When that would leave
+it unchanged and this cycle's count is higher, it adds 1. The CANary
+`MONITOR_RESULTS` channel already stores these records, and the 2026-11-11
+sweeps confirm the round-up:
+
+- at 11:09, TID 0x0B was 0 on cylinders 3–6 and TID 0x0C was 1, 1, 3, 1;
+- at 18:00, after a cycle ended, TID 0x0B was 1 on those four cylinders;
+- (9 × 0 + 1) / 10 = 0, then +1, gives 1, and so does a count of 3.
+
+**What this gives CANary.** The counters are reachable today over Mode 06
+(`obd:MISFIRE_COUNT_CYLn` is TID 0x0C). The roughness history is not
+reachable by any PID, DID or MID. It needs a service `0x23` read of
+`0xFFFF3F40` (6 bytes) with `0xFFFF4602`; `3F88` is 0x48 bytes further.
+One engine cycle is 185 ms at 650 rpm, so a read every 100–200 ms samples
+each cylinder about once per cycle. Two cautions apply:
+
+- the read can straddle a shift and pair a byte with the wrong cylinder;
+- the routine does not run until 13 events after sync.
+
+The live idle read is owed (F01 "Not disassembly"). It has no known-answer
+relation to a DID, so it would go into the `memory:` catalog only after the
+idle read has shown the cylinder phase is stable.
+
 ### Throttle area units: not settleable at the desk (F01.9, 2026-11-12)
 
 **Why the desk can't settle them.**

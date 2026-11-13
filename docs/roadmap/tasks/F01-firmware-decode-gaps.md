@@ -453,13 +453,24 @@ Same conventions as the other task files: task-level truth is the checkboxes,
     - The signed decode is owed as shared-code work; see "Not disassembly"
       below.
 
-- [ ] **F01.15 Misfire monitor.** Only its DTC items and MIL blink routine
+- [~] **F01.15 Misfire monitor.** Only its DTC items and MIL blink routine
   are noted.
   - *Answers:* whether a per-cylinder crank-speed roughness word exists in
     RAM. It would be a new channel for the anomaly detectors and a
     per-cylinder check that fuel trims cannot give.
   - **Accept:** the roughness and counter words are located and read live at
     idle, or the item is closed with why they are not reachable.
+  - *Done 2026-11-12:* located (firmware doc, "Misfire monitor (F01.15)").
+    - Roughness is a six-event history `0xFFFF3F40`–`3F45`, cylinder of the
+      newest in `4602`, with the six-event mean in `3F88` (`0x087A0C`).
+    - Three detectors feed per-cylinder counters (`3F22`, `3F30`, `3EF8`,
+      `3F06`, `3F14`) over 200- and 1,000-revolution windows. The ten-cycle
+      EWMA is `3838`.
+    - The counters are already read live: Mode 06 MIDs A2–A7. The
+      2026-11-11 `MONITOR_RESULTS` sweeps match the firmware's EWMA
+      round-up rule.
+  - *Open (truck):* the live idle read of the roughness bytes. Pi unplugged;
+    listed under "Not disassembly".
 
 - [ ] **F01.16 Outputs: fans, A/C cut, alternator, VIAS.** Nothing recorded.
   The FSM gives the VIAS valve as closed from 2,200 to 3,300 rpm.
@@ -490,6 +501,11 @@ tracked where it is named; listed here so they are not mistaken for F01 items.
   (`uncovered: airflow_pipeline`).
 - Air-charge branch state at key-on and crank (`air_charge_branch_state`).
 - `mem:ECM_ACTIVE_MAP` stepping when the map switch is used.
+- Misfire roughness at warm idle (F01.15): read `0xFFFF3F40` (6 bytes) and
+  `0xFFFF4602` together at 5–10 Hz for a minute. Check two things: that the
+  bytes sit near 0x80, and that the cylinder phase rule in the firmware doc
+  holds (each cylinder's value stays steady when its slot is re-labelled).
+  Only then add a `memory:` channel.
 - Signed bindings (from F01.14), which is code work, not a truck read. The
   bindings `Signal` schema has no `signed` flag, so the signed torque bytes
   (`0x231` b0/b3/b4/b5, `0x23D` b5–6, `0x29E` b0) still decode unsigned and
