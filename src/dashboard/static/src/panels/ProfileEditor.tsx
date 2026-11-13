@@ -13,7 +13,7 @@ import { buttonClass, cn, inputClass, placeholderClass } from "../styles";
 import { COMMON_TIRE_SIZES, parseTireSize } from "../util/tireSize";
 import { checkVin } from "../util/vin";
 
-/** The examples the daemon's evidence refusal quotes (src/vehicle/profiles.py). */
+/** The examples the daemon's evidence refusal quotes (src/vehicle/profiles/). */
 const EVIDENCE_EXAMPLES: Record<string, string> = {
   mass_evidence: "scale ticket 2026-10-10, CAT scale, full fuel, no occupants",
   driveline_evidence: "final drive from the axle tag; ratios from the gearbox manual",

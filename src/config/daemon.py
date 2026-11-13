@@ -59,7 +59,7 @@ class DaemonConfig(_Strict):
     trend_alert_state: Path = CONTROL_DIR / "trend_alert_state.json"
     #: Behavior-model surfaces (hand-edited / refit-written). A config field
     #: rather than a hardcoded path so it can be scoped per vehicle profile
-    #: (see ``src/vehicle/profiles.py``). Rooted at the checkout like the sibling
+    #: (see ``src/vehicle/profiles/``). Rooted at the checkout like the sibling
     #: paths (R01.2), so a tool started from another directory reads the same
     #: file the daemon does.
     behavior_models: Path = DATA_DIR / "behavior_models.yaml"

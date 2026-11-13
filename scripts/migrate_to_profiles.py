@@ -3,7 +3,7 @@
 
 CANary used to keep one vehicle's data in a flat tree. With multiple vehicle
 profiles, every vehicle-specific path moves under ``<base>/<slug>/`` (see
-``src/vehicle/profiles.py``). This script moves the *existing* data into that layout
+``src/vehicle/profiles/``). This script moves the *existing* data into that layout
 for one profile (the ``vehicle:`` block's default, or ``--slug``) and registers
 it in ``profiles.yaml`` so the daemon's VIN-resolution finds it.
 

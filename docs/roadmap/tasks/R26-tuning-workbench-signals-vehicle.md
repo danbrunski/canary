@@ -173,7 +173,7 @@ The cross-cutting copies found here (`_aware`, `_iso`,
     frame work, not the catalogs.
     The first call after a file change still pays the parse and validation.
 
-- [ ] **R26.4 `vehicle/profiles.py` (1,724 lines) is six modules.** By line
+- [x] **R26.4 `vehicle/profiles.py` (1,724 lines) is six modules.** By line
   range: schema and naming; registry file I/O and overlay merge;
   edit / delete / restore with their evidence rules; active-profile resolution
   from the VIN probe; path scoping (`scope_config`, `profile_data_paths`,
@@ -184,13 +184,102 @@ The cross-cutting copies found here (`_aware`, `_iso`,
   function-level imports hide no cycle. `active_flash_history` is on the
   per-tick feature path (`features/live.py`) and re-reads and hashes both
   registry files each tick.
-  - [ ] A `src/vehicle/profiles/` package (`model`, `edit`, `resolve`,
+  - [x] A `src/vehicle/profiles/` package (`model`, `edit`, `resolve`,
     `scope`, `legacy`) whose `__init__` re-exports every name now imported
     (107 import sites). Flash history moves to `tune_revisions.py` or
     `flash_history.py`.
-  - Must not change: `scope_config`'s output, the registry file format, the
+    `src/vehicle/profiles.py` is gone; `profiles/model.py` (338 lines: schema,
+    naming, registry I/O and overlay merge), `edit.py` (586: edit, revert,
+    delete, restore, the evidence rules, and `ProfileResolution` with its
+    process record, which the rules read and `resolve` writes), `scope.py`
+    (201: `scope_config`, `profile_data_paths`, the profile data locations),
+    `legacy.py` (216: adoption and migration of the pre-R05.15 directory),
+    `resolve.py` (363: the VIN-probe resolution), and `__init__.py` (227:
+    re-exports of every public name the module had, 64 names). Imports run one
+    way: `model` < `scope`, `edit` < `legacy` < `resolve`
+    (`test_a_profiles_module_imports_only_below_itself`). One placement differs
+    from the item's list: `operational_file` is in `legacy`, not `scope`. It falls
+    back to `legacy_operational_dir`, and `legacy` needs `scope`'s `operational_dir`
+    and `source_registry_path`, so the other way round is a cycle. The flash history is the new `src/vehicle/flash_history.py`
+    (`active_registry`, `active_flash_history`, `_flash_history_cache`, and with
+    them `active_registry_path` and `active_registry_sources`, which only name the
+    files it reads); its three function-level imports are module-level there.
+    `tune_revisions.py` itself is untouched: putting the accessors in it would
+    make it import `profiles`, which imports it.
+    **Moved code is body-identical.** `<scratchpad>/r264/ast_proof.py` compares
+    `ast.dump` of every top-level definition in `git show HEAD:src/vehicle/profiles.py`
+    against the new modules: 97 names, 97 present once, 95 identical, and the 2
+    others (`active_registry`, `active_flash_history`) identical once their three
+    hoisted function-level imports are removed. Nothing missing, nothing extra.
+    **Re-exports.** `src.vehicle.profiles` re-exports all 64 public names (the 51
+    any file imports, plus the rest of the old surface); the four flash-history
+    names (`active_registry`, `active_registry_path`, `active_registry_sources`,
+    `active_flash_history`) are served by a module `__getattr__` (PEP 562, with
+    `TYPE_CHECKING` imports so mypy sees the real types): `flash_history` imports
+    `profiles.legacy` and `profiles.scope`, which run the package `__init__`
+    first, so an eager import there fails whichever of the two is imported first.
+    `test_each_module_imports_first_in_a_fresh_interpreter` imports each of the
+    seven modules first in a clean interpreter; `import src.vehicle.profiles`
+    still loads no pandas. Private names are not re-exported: the one caller that
+    used one (`tests/test_profiles.py`, `_scope_file`) imports it from
+    `src.vehicle.profiles.scope`.
+    **Monkeypatch traps: none to repoint.** No test or script patched an attribute
+    of `src.vehicle.profiles` (`monkeypatch.setattr(<profiles alias>, ...)`,
+    `"src.vehicle.profiles.X"` strings, `patch.object`, direct assignment): the one
+    module alias, `profiles_mod` in `tests/test_profiles.py`, was used only to read
+    `_scope_file`. `test_nothing_patches_a_name_the_package_only_re_exports` (an
+    `ast` walk of `src`, `scripts`, `tools`, `tests`, with
+    `test_the_tripwire_for_a_patch_through_the_package_can_fail`) keeps it so.
+    **Pickles and caches.** Nothing persists `src.vehicle.profiles.<Class>` names:
+    the IF artifact payload holds sklearn models and dicts, and the score cache
+    (`src/models/evaluation_cache.py`) is keyed by a hash of every `src/**/*.py`
+    path and byte, so any move already invalidates it. The two things pickled
+    across a process boundary, `CanaryConfig._scope_source` (a `VehicleProfile`, to
+    the scoring child) and the `ProfileEditError` family, now pickle by reference to
+    `src.vehicle.profiles.model` / `.edit`
+    (`test_the_classes_that_cross_a_process_boundary_pickle_from_their_new_modules`;
+    `tests/test_exceptions_pickle.py` still holds every class to it). Logger names
+    are now `src.vehicle.profiles.resolve` and `.legacy` (children of the old name,
+    so `caplog.at_level(logger="src.vehicle.profiles")` still reaches them).
+  - [x] `active_flash_history` per tick: R29.9's memo already did the work that
+    mattered, so no second memo was added. `load_tune_revisions` now caches the
+    parse by file identity (`load_yaml_model`, with its racy-window rule), so
+    what each call still does is `active_registry_sources` (two `exists`) and one
+    `read_bytes` + sha256 per file to build the bytes key. Measured at HEAD, median
+    of 300 calls on the laptop, Xterra scoped config: 0.034 ms with the 10 kB
+    tracked registry alone, 0.036 ms with an operational copy beside it (parse
+    memo alone, 0.038 ms); the same after the move (0.034 and 0.035 ms,
+    `<scratchpad>/r264/bench_flash.py`). A stat-keyed memo in front of that would reintroduce
+    the coarse-mtime stale read the bytes key exists for
+    (`test_an_edited_flash_history_is_reread`), to save ~30 microseconds per tick.
+  - [x] Must not change: `scope_config`'s output, the registry file format, the
     bytes-keyed flash-history cache
     (`test_an_edited_flash_history_is_reread`).
+    `tests/fixtures/scope_config_golden.json` was generated by
+    `tests/test_profiles_split.py::scope_snapshot` run against the unsplit
+    module (HEAD `2f83f934`): for each of the four tracked example configs and
+    each of the two profiles in the tracked `profiles.yaml` (2008 and 2013
+    Xterra) plus a synthetic profile with no year or VIN, every dotted field of
+    the whole config that scoping changes (25 paths, nothing removed), the
+    `_scope_source` identity, idempotence, the re-scope refusal text, and
+    `rescope_like`. `test_scope_config_returns_what_it_returned_before_the_split`
+    compares the split module field by field (12 entries, passed);
+    `test_the_vehicle_block_is_the_profiles_own` holds the `vehicle:` block, which
+    follows `profiles.yaml` edits, to the property instead. The registry format
+    is untouched (`REGISTRY_SCHEMA_VERSION`, `save_registry`, `load_registry` are
+    in the AST proof; `tests/test_profiles.py`, `test_profile_edit.py`,
+    `test_profile_delete.py`, `test_operational_calibration_scope.py` pass).
+    `test_an_edited_flash_history_is_reread` passes on the moved cache.
+    Gate: `ruff check .`, `ruff format --check .`, bare `mypy` clean; `pytest -m ""
+    -n 4` over the 96 test files that import `src.vehicle.profiles` or mention
+    `tune_revisions`, `flash_history` or `active_registry`, plus
+    `test_layering.py`, `test_state_dir.py`, `test_config_golden.py`: 2485
+    passed, 1 xfailed, 1 failed
+    (`tests/test_exceptions_pickle.py::test_the_bases_reach_the_classes_that_were_hand_written`,
+    which names the R29.7 agent's untracked `TuningStorageSwitchError` in
+    `src/control/tuning_mode.py`, not a profiles class).
+    `src/vehicle/` is in `scripts/ml_paths.txt`: the push gate adds the
+    `ml_training` tier for this change.
 
 - [ ] **R26.5 `signals/afr.py` (1,513 lines) is five modules, and its error
   surface is used only by its own tests.** Calibration schema; baro samples;

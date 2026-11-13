@@ -82,7 +82,7 @@ def _write_session(slug_dir: Path, session_id: str, *, timing_advance: float) ->
 @pytest.fixture
 def env(tmp_path: Path) -> dict[str, Any]:
     # The default profile for this vehicle block slugs to nissan-xterra-2008
-    # (see src/vehicle/profiles.py:_default_profile) — the session must live there.
+    # (see src/vehicle/profiles/model.py:_default_profile) — the session must live there.
     storage = tmp_path / "data"
     slug_dir = storage / "nissan-xterra-2008"
     session_id = "2026-07-19T000000"

@@ -34,7 +34,7 @@ for (2026-07-31):
 ## Guiding constraints
 
 - **Naming**: call these **capture profiles**. "Profile" alone already
-  means per-VIN vehicle profiles (`src/vehicle/profiles.py`) — do not overload.
+  means per-VIN vehicle profiles (`src/vehicle/profiles/`) — do not overload.
 - **Corpus isolation**: non-default captures default to a
   `_capture-<profile>-<ts>/` session directory (leading `_` excludes it
   from training discovery, live listing, retention — existing

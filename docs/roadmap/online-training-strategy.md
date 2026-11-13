@@ -45,7 +45,7 @@ and is out of scope until the guards below exist.
 | Reactive operator verdicts feeding retrain | `src/models/feedback.py` | Done — `true_positive/false_positive/ignored/needs_review`, `data/control/anomaly_feedback.jsonl` |
 | Observed-vs-FSM-spec range scoring | `src/signals/fsm.py`, `src/analysis/range_match.py` | Done — built for DID binding; **reusable as the validation screen** |
 | Held-out threshold calibration in retrain | `scripts/retrain.py` (`--calibration-sessions`, automatic holdout via `src.models.evaluation.pick_calibration_holdouts`) | Done — and ml-hardening Phase 3 makes in-sample calibration a loud refusal at the library layer |
-| Per-vehicle data partitioning | `src/vehicle/profiles.py` (`scope_config`) | Done — everything this doc adds is per-vehicle state and must live under the profile scope |
+| Per-vehicle data partitioning | `src/vehicle/profiles/scope.py` (`scope_config`) | Done — everything this doc adds is per-vehicle state and must live under the profile scope |
 | Scheduled trigger + training-data validation | — | **Missing. This doc.** |
 
 The delta to "online" is small in mechanism (a scheduler + a rolling
@@ -388,7 +388,7 @@ and the checklist below encodes them:
    vs golden on the injected-fault suite** plus held-out FP/hr within
    budget, not just score agreement.
 4. **Everything here is profile-scoped.** `scope_config`
-   (`src/vehicle/profiles.py`) partitions all vehicle-specific state by VIN.
+   (`src/vehicle/profiles/scope.py`) partitions all vehicle-specific state by VIN.
    `accepted_baselines.yaml`, dispositions, and the golden-baseline
    declaration are *this-vehicle* facts by definition (a second vehicle
    must not inherit the Xterra's weak-injector override) — the override

@@ -92,7 +92,7 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
 | Flash image layout, map slots, candidate tables | `rom_map.yaml` (W08), `docs/uprev-rom-table-verification.md` |
 | What the ECM's code computes (disassembly findings) | `docs/ecu-firmware-analysis.md` |
 | Factory service manual (engine control = EC) | `xterra_fsm/ec.pdf` |
-| Per-vehicle partitioning of all learned state | `src/vehicle/profiles.py`, keyed by VIN |
+| Per-vehicle partitioning of all learned state | `src/vehicle/profiles/`, keyed by VIN |
 
 ## The traps that have cost the most on this truck
 

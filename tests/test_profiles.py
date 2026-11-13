@@ -8,7 +8,6 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-import src.vehicle.profiles as profiles_mod
 from src.collection.vehicle_probe import probe_vehicle_info
 from src.config import CanaryConfig, DaemonConfig, ProfilesConfig, VehicleParameters
 from src.dashboard.api import create_app
@@ -24,6 +23,7 @@ from src.vehicle.profiles import (
     slugify,
     update_profile_name,
 )
+from src.vehicle.profiles.scope import _scope_file
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
 from src.yaml_load import load_yaml
 
@@ -417,10 +417,7 @@ def test_resolve_persists_calibration_id_and_cvn_on_first_probe(tmp_path: Path) 
     assert reloaded["work-truck"].calibration_id == "CAL0001"
     # First-ever read: a baseline, not a reflash — no ledger entry.
     assert (
-        VehicleLedgerStore(
-            profiles_mod._scope_file(config.daemon.vehicle_ledger, "work-truck")
-        ).records()
-        == []
+        VehicleLedgerStore(_scope_file(config.daemon.vehicle_ledger, "work-truck")).records() == []
     )
 
 
@@ -444,9 +441,7 @@ def test_resolve_flags_a_changed_calibration_id_as_a_corpus_boundary(tmp_path: P
     profile = resolve_active_profile(config, probe=lambda _config: probe)
     assert profile.calibration_id == "CAL0002"
 
-    ledger = VehicleLedgerStore(
-        profiles_mod._scope_file(config.daemon.vehicle_ledger, "work-truck")
-    )
+    ledger = VehicleLedgerStore(_scope_file(config.daemon.vehicle_ledger, "work-truck"))
     records = ledger.records()
     assert len(records) == 1
     assert records[0].corpus_boundary is True
@@ -467,9 +462,7 @@ def test_resolve_unchanged_calibration_id_does_not_flag_a_boundary(tmp_path: Pat
     )
     probe = VehicleInfoProbe(vin="VINWORK", calibration_id="CAL0001", cvn=None)
     resolve_active_profile(config, probe=lambda _config: probe)
-    ledger = VehicleLedgerStore(
-        profiles_mod._scope_file(config.daemon.vehicle_ledger, "work-truck")
-    )
+    ledger = VehicleLedgerStore(_scope_file(config.daemon.vehicle_ledger, "work-truck"))
     assert ledger.records() == []
 
 
