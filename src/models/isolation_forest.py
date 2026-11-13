@@ -659,7 +659,9 @@ class TrainedIsolationForest:
         # symmetric with the LSTM "wait for a clean window" contract.
         fallback_key = self._fallback_key
 
-        scaled = self.scaler.transform(frame)
+        # Only the fitted columns are scaled (R27.4): ``out`` is the one copy
+        # of ``frame``, where a full ``transform`` copied it a second time.
+        scaled = self.scaler.transform_fitted(frame)
         out = frame.copy()
         out[SCORE_COLUMN] = np.nan
         out[LABEL_COLUMN] = pd.Series(pd.NA, index=out.index, dtype="Int64")
@@ -667,7 +669,7 @@ class TrainedIsolationForest:
         out[MISSING_FEATURES_COLUMN] = False
         out[MISSING_FEATURE_FRACTION_COLUMN] = np.nan
 
-        for mode, group in scaled.groupby(self.mode_column, sort=True, dropna=False):
+        for mode, group in scaled.groupby(frame[self.mode_column], sort=True, dropna=False):
             mode_key = str(mode)
             indexes = group.index
             model_key = mode_key if mode_key in self.models else fallback_key
@@ -1841,8 +1843,9 @@ def _scaled_array(
     values = frame.loc[:, list(columns)].to_numpy(dtype=np.float32, copy=True)
     means, denoms = scaler.vectors(columns)
     # float32 arithmetic, as the forests were always fit: the fit matrix is the
-    # dominant training allocation. Serve scales in float64 (``transform``);
-    # both use the scaler's one denominator rule (R04.15).
+    # dominant training allocation. Serve (``transform`` / ``transform_fitted``)
+    # scales float32 features in float32 too, per dtype block (R27.4); both
+    # use the scaler's one denominator rule (R04.15).
     values -= means.astype(np.float32)
     values /= denoms.astype(np.float32)
     return values

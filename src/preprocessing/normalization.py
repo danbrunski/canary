@@ -20,9 +20,10 @@ Design notes:
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -107,16 +108,129 @@ class ZScoreScaler:
 
         Raises `SchemaMismatchError` when any fitted column is absent from
         `df`. Extra columns in `df` are preserved — useful for keeping
-        session/timestamp/mode alongside the scaled features.
+        session/timestamp/mode alongside the scaled features. Columns keep
+        their order, the index is ``df``'s, and each column's values and dtype
+        are bit-identical to ``(df[col] - mean) / denom`` (R27.4: computed in
+        dtype blocks, see :meth:`_scaled_pieces`).
         """
+        self._require_fitted_columns(df)
+        fitted = set(self.columns)
+        labels = df.columns.tolist()  # iterating a str Index directly costs ~0.4 µs a label
+        scaled_at = [pos for pos, label in enumerate(labels) if label in fitted]
+        if not scaled_at:
+            return df.copy()
+        kept_at = [pos for pos, label in enumerate(labels) if label not in fitted]
+        pieces = self._scaled_pieces(df, scaled_at)
+        if kept_at:
+            pieces.append(df.iloc[:, kept_at].set_axis(kept_at, axis=1))
+        combined = _in_position_order(pieces, list(range(len(df.columns))))
+        out = combined.set_axis(df.columns, axis=1)
+        # What ``df.copy()`` carried besides the data.
+        if df.attrs:
+            out.attrs = copy.deepcopy(df.attrs)
+        if not df.flags.allows_duplicate_labels:
+            out = out.set_flags(allows_duplicate_labels=False)
+        return out
+
+    def transform_fitted(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Only the fitted columns of ``df``, z-scored, in :attr:`columns` order.
+
+        The same values as ``transform(df)[list(self.columns)]`` without
+        copying the columns ``transform`` passes through -- for a scorer that
+        reads the scaled features and keeps the unscaled frame itself
+        (``TrainedIsolationForest.score``). Refuses a frame with duplicate
+        column labels, where "the fitted column" names more than one.
+        """
+        self._require_fitted_columns(df)
+        if not df.columns.is_unique:
+            duplicated = sorted({str(label) for label in df.columns[df.columns.duplicated()]})
+            raise SchemaMismatchError(f"input DataFrame has duplicate column labels: {duplicated}")
+        if not self.columns:
+            return pd.DataFrame(index=df.index)
+        positions = [int(pos) for pos in df.columns.get_indexer(pd.Index(self.columns))]
+        combined = _in_position_order(self._scaled_pieces(df, positions), positions)
+        return combined.set_axis(list(self.columns), axis=1)
+
+    def _require_fitted_columns(self, df: pd.DataFrame) -> None:
         missing = [col for col in self.columns if col not in df.columns]
         if missing:
             raise SchemaMismatchError(f"input DataFrame missing fitted columns: {missing}")
 
-        out = df.copy()
-        for col in self.columns:
-            out[col] = (df[col] - self.means[col]) / self.denominator(col)
-        return out
+    def _scaled_pieces(self, df: pd.DataFrame, positions: list[int]) -> list[pd.DataFrame]:
+        """z-score the columns of ``df`` at ``positions``, one block per dtype (R27.4).
+
+        Each returned frame is labelled by the *positions* it holds, on
+        ``df``'s index. Every element is computed as ``(x - mean) / denom`` --
+        the per-column pandas expression this replaced, in the same dtypes, so
+        the result is bit-identical to it (``tests/test_zscore_block.py``):
+
+        * a numpy numeric column is computed in the dtypes numpy's own
+          promotion picks for ``column - mean`` and then ``/ denom`` -- float32
+          stays float32 against a Python-float mean, ints and bools become
+          float64. Columns sharing those dtypes share one 2-D block, which is
+          what replaces ~230 µs of pandas overhead per column;
+        * an object column (the daemon's one-row ``to_frame().T`` frame) is
+          one object block, so each element keeps Python's own arithmetic for
+          its type (an ``np.float32`` stays float32);
+        * anything else (pandas extension dtypes, an object column holding
+          ``None``) takes the per-column Series expression itself.
+
+        The reciprocal is never multiplied in its place: ``x * (1 / d)`` is
+        not ``x / d`` to the last bit.
+        """
+        dtypes = df.dtypes.tolist()
+        labels = df.columns.tolist()
+        blocks: dict[_BlockKey, list[int]] = {}
+        by_column: list[int] = []
+        for pos in positions:
+            key = self._block_key(labels[pos], dtypes[pos])
+            if key is None:
+                by_column.append(pos)
+            else:
+                blocks.setdefault(key, []).append(pos)
+
+        pieces: list[pd.DataFrame] = []
+        for key, group in blocks.items():
+            names = [labels[pos] for pos in group]
+            means = [_operand(self.means[name]) for name in names]
+            denoms = [_operand(self.denominator(name)) for name in names]
+            if isinstance(key, str):
+                piece = _object_piece(df, group, means, denoms)
+                if piece is None:
+                    by_column.extend(group)
+                    continue
+            else:
+                first, second = key
+                values = df.iloc[:, group].to_numpy(dtype=first)
+                with np.errstate(all="ignore"):
+                    diff = values - np.array(means, dtype=first)
+                    if second != first:
+                        diff = diff.astype(second)
+                    result = diff / np.array(denoms, dtype=second)
+                piece = pd.DataFrame(result, index=df.index, columns=group, copy=False)
+            pieces.append(piece)
+        if by_column:
+            series = [
+                (df.iloc[:, pos] - self.means[labels[pos]]) / self.denominator(labels[pos])
+                for pos in by_column
+            ]
+            pieces.append(pd.concat(series, axis=1).set_axis(by_column, axis=1))
+        return pieces
+
+    def _block_key(self, label: Any, dtype: Any) -> _BlockKey | None:
+        """Which block column ``label`` of ``dtype`` joins, or ``None`` for the
+        per-column path. A numeric block is keyed by the two result dtypes
+        numpy promotes ``column - mean`` and ``... / denom`` to, for the
+        operands pandas actually hands numpy (:func:`_operand`)."""
+        if not isinstance(dtype, np.dtype):
+            return None
+        if dtype.kind == "O":
+            return _OBJECT_BLOCK
+        if dtype.kind not in "biuf":
+            return None
+        first = np.result_type(dtype, _operand(self.means[label]))
+        second = np.result_type(first, _operand(self.denominator(label)))
+        return (first, second)
 
     def denominator(self, column: str) -> float:
         """The divisor for ``column``: its std, or 1.0 when the std is below
@@ -178,6 +292,53 @@ class ZScoreScaler:
             columns=tuple(data["columns"]),
             std_floor=float(data.get("std_floor", _DEFAULT_STD_FLOOR)),
         )
+
+
+_OBJECT_BLOCK = "object"
+# A numeric block's (``x - mean`` dtype, ``/ denom`` dtype), or _OBJECT_BLOCK.
+_BlockKey = tuple[np.dtype[Any], np.dtype[Any]] | str
+
+
+def _operand(value: Any) -> Any:
+    """A stored mean/denominator as pandas passes it to numpy: a numpy
+    integer or floating scalar becomes the Python scalar, so it promotes
+    weakly (pandas ``maybe_prepare_scalar_for_op``; float32 minus an
+    ``np.float64`` mean stays float32 in a Series)."""
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    return value
+
+
+def _object_piece(
+    df: pd.DataFrame, positions: list[int], means: list[Any], denoms: list[Any]
+) -> pd.DataFrame | None:
+    """One object block: numpy applies ``(x - mean) / denom`` element by
+    element with the same operands, exactly as pandas does for an object
+    Series. ``None`` when an element refuses the arithmetic (``None``
+    itself): pandas then masks the nulls, so the caller takes that path."""
+    values = df.iloc[:, positions].to_numpy(dtype=object)
+    mean_row = np.empty(len(means), dtype=object)
+    mean_row[:] = means
+    denom_row = np.empty(len(denoms), dtype=object)
+    denom_row[:] = denoms
+    try:
+        with np.errstate(all="ignore"):
+            result = (values - mean_row) / denom_row
+    except TypeError:
+        return None
+    return pd.DataFrame(result, index=df.index, columns=positions, dtype=object, copy=False)
+
+
+def _in_position_order(pieces: list[pd.DataFrame], order: list[int]) -> pd.DataFrame:
+    """Concatenate position-labelled ``pieces`` and arrange them in ``order``."""
+    combined = pieces[0] if len(pieces) == 1 else pd.concat(pieces, axis=1)
+    current = cast(list[int], combined.columns.tolist())
+    if current != order:
+        where = {pos: index for index, pos in enumerate(current)}
+        combined = combined.iloc[:, [where[pos] for pos in order]]
+    return combined
 
 
 def _resolve_columns(
