@@ -13,6 +13,7 @@ request the gates refuse outright.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any, Literal
 
@@ -37,6 +38,7 @@ from src.control.workbench_jobs import (
     Selection,
     capture_deferral,
     dyno_preflight,
+    prepare_single_session_job,
     run_off_loop,
     select_sessions,
 )
@@ -44,7 +46,6 @@ from src.dashboard.security import (
     control_auth_dependency,
 )
 from src.dashboard.status_errors import register_status_error_handler
-from src.storage.sessions import resolve_session
 
 DEFAULT_MEASURED = "obd:O2_WR_LAMBDA_S1"
 
@@ -76,9 +77,13 @@ def register_workbench_routes(
 
     async def run(kind: str, params: dict[str, Any], names: list[str]) -> dict[str, Any]:
         try:
-            capture_deferral(config, names)
             return await run_off_loop(
-                kind, params, config, bindings_path=bindings_path, dids_path=dids_path
+                kind,
+                params,
+                config,
+                bindings_path=bindings_path,
+                dids_path=dids_path,
+                sessions=names,
             )
         except (GateError, ChannelSpecError) as exc:
             raise HTTPException(400, {"error": "analysis_refused", "message": str(exc)}) from exc
@@ -118,20 +123,9 @@ def register_workbench_routes(
         if not names:
             raise HTTPException(400, "name at least one channel spec")
         try:
-            session = resolve_session(config.collection.storage_path, session_id)
+            session = (await prepare_single_session_job(config, session_id)).session
         except FileNotFoundError as exc:
             raise HTTPException(404, str(exc)) from exc
-        capture_deferral(config, [session_id])
-        selection = select_sessions(config, sessions=[session_id])
-        if selection.over_budget:
-            raise HTTPException(
-                409,
-                {
-                    "error": "analysis_refused",
-                    "reason": "over_budget",
-                    "message": selection.over_budget[0].reason,
-                },
-            )
         params = {
             "session": str(session),
             "specs": names,
@@ -152,36 +146,29 @@ def register_workbench_routes(
         cannot answer returns ``available: false`` with a named ``reason``,
         never an empty grid."""
         try:
-            definition = load_viewer_definition(profile_dir(config))
+            definition = await asyncio.to_thread(load_viewer_definition, profile_dir(config))
         except FileNotFoundError as exc:
             raise HTTPException(409, "ROM map definitions unavailable for this vehicle") from exc
         info = definition.table(table)
         if info is None:
             raise HTTPException(404, f"no ROM table {table!r} for this vehicle")
+
+        # A profile fact, not a data fact: refuse before spawning a child.
+        def profile_refusal(session: Path) -> dict[str, Any] | None:
+            refusal = mapping_refusal(info.trace)
+            if refusal is None:
+                return None
+            return {"session_id": session.name, "table": table, "available": False, **refusal}
+
         try:
-            session = resolve_session(config.collection.storage_path, session_id)
+            prepared = await prepare_single_session_job(
+                config, session_id, profile_refusal=profile_refusal
+            )
         except FileNotFoundError as exc:
             raise HTTPException(404, str(exc)) from exc
-        capture_deferral(config, [session_id])
-        # A profile fact, not a data fact: refuse before spawning a child.
-        refusal = mapping_refusal(info.trace)
-        if refusal is not None:
-            return {
-                "session_id": session.name,
-                "table": table,
-                "available": False,
-                **refusal,
-            }
-        selection = select_sessions(config, sessions=[session_id])
-        if selection.over_budget:
-            raise HTTPException(
-                409,
-                {
-                    "error": "analysis_refused",
-                    "reason": "over_budget",
-                    "message": selection.over_budget[0].reason,
-                },
-            )
+        if prepared.answer is not None:
+            return prepared.answer
+        session = prepared.session
         return await run("cell_residency", {"session": str(session), "table": table}, [session_id])
 
     @app.get("/analysis/delivery-error", dependencies=[Depends(authorize)])

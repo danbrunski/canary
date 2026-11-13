@@ -6,6 +6,7 @@ Part of ``/control/*``; every route here requires the control token
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -47,7 +48,9 @@ def build_router(ctx: ControlContext) -> APIRouter:
         # sessions are `_`-prefixed and invisible to that search, so during a
         # capture this guard would read a stale session, see `no_data`, and
         # let a replay start on a running engine.
-        vehicle_state = derive_vehicle_state_from_storage(
+        # It reads the newest session's parquet, so it runs off the event loop.
+        vehicle_state = await asyncio.to_thread(
+            derive_vehicle_state_from_storage,
             config.collection.storage_path,
             replay_controller=controller,
             session_dir=active_session_dir(storage_writer),

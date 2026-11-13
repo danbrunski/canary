@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+from collections.abc import Callable
 from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -243,6 +244,63 @@ def select_sessions(
         else:
             usable.append(session)
     return Selection(usable=usable, over_budget=over, omitted=omitted)
+
+
+@dataclass(frozen=True)
+class PreparedSession:
+    """What :func:`prepare_single_session_job` hands back: the resolved session,
+    or ``answer`` when the route's own refusal fired first (the route returns it)."""
+
+    session: Path
+    answer: dict[str, Any] | None = None
+
+
+def _prepare_single_session(
+    config: CanaryConfig,
+    session_id: str,
+    reads: Literal["raw", "value_number"],
+    profile_refusal: Callable[[Path], dict[str, Any] | None] | None,
+) -> PreparedSession:
+    session = resolve_session(config.collection.storage_path, session_id)
+    capture_deferral(config, [session_id])
+    if profile_refusal is not None:
+        answer = profile_refusal(session)
+        if answer is not None:
+            return PreparedSession(session, answer)
+    selection = select_sessions(config, sessions=[session_id], reads=reads)
+    if selection.over_budget:
+        raise WorkbenchRefusedError(
+            409,
+            {
+                "error": "analysis_refused",
+                "reason": "over_budget",
+                "message": selection.over_budget[0].reason,
+            },
+        )
+    return PreparedSession(session)
+
+
+async def prepare_single_session_job(
+    config: CanaryConfig,
+    session_id: str,
+    *,
+    reads: Literal["raw", "value_number"] = "raw",
+    profile_refusal: Callable[[Path], dict[str, Any] | None] | None = None,
+) -> PreparedSession:
+    """Resolve one session, defer while a capture records, and refuse it over
+    budget, all off the event loop (``select_sessions`` opens every parquet
+    footer of the session). The one preamble of a route that runs a job on a
+    single named session.
+
+    Raises ``FileNotFoundError`` for an unknown id (each route words its own
+    404) and :class:`WorkbenchRefusedError` for a deferral or an over-budget
+    session. ``profile_refusal`` is a fact of the vehicle's profile rather than
+    of the data: asked after the deferral and before the budget, a non-``None``
+    answer comes back in :attr:`PreparedSession.answer` with no child to spawn.
+    """
+    return await asyncio.to_thread(
+        _prepare_single_session, config, session_id, reads, profile_refusal
+    )
 
 
 def dyno_preflight(
@@ -467,8 +525,12 @@ async def run_off_loop(
     dids_path: Path | None = None,
     executor: Executor | None = None,
     timeout: float = DIGEST_TIMEOUT_SECONDS,
+    sessions: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run one job in the bounded child; the only way a route may compute one.
+
+    Defers first (:func:`capture_deferral`, naming ``sessions`` in the refusal's
+    laptop path), so no caller has to remember to.
 
     ``bindings_path`` and ``dids_path`` are required by every kind except
     those in ``_CONFIG_ONLY_KINDS``; the child refuses without them.
@@ -481,6 +543,7 @@ async def run_off_loop(
         raise ValueError(f"unknown workbench job {kind!r}")
     if kind not in _CONFIG_ONLY_KINDS and (bindings_path is None or dids_path is None):
         raise ValueError(f"workbench job {kind!r} needs bindings_path and dids_path")
+    capture_deferral(config, sessions)
     key = _job_key(kind, params)
     existing = _IN_FLIGHT.get(key)
     if existing is not None:
@@ -593,12 +656,14 @@ async def _compute(
 __all__ = [
     "JOB_KINDS",
     "MAX_POOLED_SESSIONS",
+    "PreparedSession",
     "Selection",
     "WorkbenchRefusedError",
     "any_workbench_job_in_flight",
     "capture_deferral",
     "dyno_preflight",
     "laptop_path",
+    "prepare_single_session_job",
     "run_off_loop",
     "run_workbench_job",
     "select_sessions",

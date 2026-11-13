@@ -479,7 +479,7 @@ it; go after that work lands.
     boolean tuning-mode endpoint"); `/control/capture` is the lifecycle with
     session isolation (`enter_capture_mode`).
 
-- [ ] **R29.8 Four `async def` handlers do file work on the event loop, and
+- [~] **R29.8 Four `async def` handlers do file work on the event loop, and
   the deferral preamble is copied.** `routes/workbench.py`
   `get_session_frame` and `get_cell_residency`,
   `routes/control/classification.py` `post_session_classification` and
@@ -490,9 +490,42 @@ it; go after that work lands.
   is written three times with an identical dict. `run_off_loop` is documented
   as "the only way a route may compute one" and does not defer by itself, so
   each route has to remember.
-  - [ ] `prepare_single_session_job(config, session_id, …)` in
+  - [x] `prepare_single_session_job(config, session_id, …)` in
     `workbench_jobs`, doing resolve, defer and budget off the loop.
-  - [ ] `run_off_loop` calls `capture_deferral` itself.
+    `await prepare_single_session_job(config, id, reads=…, profile_refusal=…)`
+    runs resolve → `capture_deferral` → (the route's profile fact) →
+    `select_sessions` → `409 analysis_refused over_budget` in one
+    `asyncio.to_thread`; `get_session_frame`, `get_cell_residency` and
+    `post_session_classification` call it instead of their three copies of the
+    preamble (same bodies and statuses; `test_status_error_http.py` pins them,
+    its patch points moved to `workbench_jobs`). Rule: plain file work in an
+    `async def` goes through `asyncio.to_thread`; a whole-session read goes to
+    the bounded child. `get_cell_residency` loads `load_viewer_definition` in
+    `asyncio.to_thread` too. `post_replay_start` runs
+    `derive_vehicle_state_from_storage` in `asyncio.to_thread`, and
+    `ReplayController._start_locked`'s source reads (`is_dir`,
+    `refuse_unfaithful_replay`, `read_capture_manifest`) moved into
+    `_read_source`, one `to_thread` call keeping the order (not found, then
+    unfaithful 422). Proof `tests/test_workbench_off_loop.py` (8): each of the
+    four routes against a 0.4 s blocking read (the viewer-definition load, the
+    budget read, the vehicle-state read and the replay source read) with a
+    10 ms ticker on the same loop, stall < 0.2 s. With the `to_thread` removed
+    the prepare tests (3) and the worker-thread test fail, and putting back the
+    direct `load_viewer_definition` call and the direct `_read_source` call
+    each fails its test (2 failures). Also the worker-thread-ident test, the
+    profile-refusal ordering and the deferral.
+  - [x] `run_off_loop` calls `capture_deferral` itself. It takes
+    `sessions=` for the refusal's laptop path; the explicit calls in
+    `workbench.run`, `post_session_classification` and `trip_summary_off_loop`
+    are gone (`rom_editor` keeps its own first, for its own `laptop_path`).
+    `test_run_off_loop_defers_while_a_capture_records_without_the_route_asking`.
+  - [ ] `pooled()` in `routes/workbench.py` still calls `select_sessions`
+    (opens every parquet footer of each session) and, in `get_dyno`,
+    `dyno_preflight` (`count_session_rows`) on the event loop, inside the async
+    handlers `get_delivery_error`, `get_trim_surface`, `get_timing`,
+    `get_dyno` and `get_pull_comparison` (twice, once per revision). Move them
+    into `asyncio.to_thread` (or a `prepare_pooled_job` beside
+    `prepare_single_session_job`) with the same off-loop proof.
 
 - [~] **R29.9 The dashboard polls the full `/status` every 5 s.**
   `hooks/useStatus.ts` calls `getStatus`, which requests `/status` with no

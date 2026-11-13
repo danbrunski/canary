@@ -26,7 +26,7 @@ from src.analysis.trip_summary_sidecar import (
     read_trip_summary,
 )
 from src.config import CanaryConfig
-from src.control.workbench_jobs import capture_deferral, run_off_loop
+from src.control.workbench_jobs import run_off_loop
 from src.storage.sessions import resolve_session
 
 
@@ -59,7 +59,7 @@ async def trip_summary_off_loop(config: CanaryConfig, session_id: str) -> dict[s
 
     A current sidecar is read and served (a small file, even during a capture).
     A missing or stale one is computed in the workbench's bounded child, after
-    ``capture_deferral``. Returns ``None`` for an id that is not a session or a
+    ``run_off_loop``'s own deferral. Returns ``None`` for an id that is not a session or a
     session with no telemetry; raises
     :class:`~src.control.workbench_jobs.WorkbenchRefusedError` for a deferral,
     a busy child or a child that failed (the route's 409 / 503).
@@ -71,8 +71,9 @@ async def trip_summary_off_loop(config: CanaryConfig, session_id: str) -> dict[s
     stored = await asyncio.to_thread(_stored_trip_summary, session_dir)
     if stored is not None:
         return stored
-    capture_deferral(config, [session_id])
-    result = await run_off_loop("trip_summary", {"session_id": session_id}, config)
+    result = await run_off_loop(
+        "trip_summary", {"session_id": session_id}, config, sessions=[session_id]
+    )
     payload: dict[str, Any] | None = result["trip_summary"]
     return payload
 

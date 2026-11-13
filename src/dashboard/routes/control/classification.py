@@ -18,11 +18,7 @@ from src.control.classification import (
     list_events_by_kind,
 )
 from src.control.trends import corpus_trend_summary
-from src.control.workbench_jobs import (
-    capture_deferral,
-    run_off_loop,
-    select_sessions,
-)
+from src.control.workbench_jobs import prepare_single_session_job, run_off_loop
 from src.dashboard.routes.control.context import ControlContext
 from src.session import SessionKind, session_kind
 from src.storage.sessions import resolve_session
@@ -61,25 +57,17 @@ def build_router(ctx: ControlContext) -> APIRouter:
                 status_code=400,
                 detail=f"refusing to classify non-live-session id {session_id!r}",
             )
-        session_root = config.collection.storage_path
-        if not (session_root / session_id).is_dir():
+        try:
+            await prepare_single_session_job(config, session_id, reads="value_number")
+        except FileNotFoundError as exc:
             raise HTTPException(
                 status_code=404,
-                detail=f"session {session_id!r} not found under {session_root}",
-            )
-        capture_deferral(config, [session_id])
-        selection = select_sessions(config, sessions=[session_id], reads="value_number")
-        if selection.over_budget:
-            raise HTTPException(
-                409,
-                {
-                    "error": "analysis_refused",
-                    "reason": "over_budget",
-                    "message": selection.over_budget[0].reason,
-                },
-            )
+                detail=(f"session {session_id!r} not found under {config.collection.storage_path}"),
+            ) from exc
         try:
-            written = await run_off_loop("classify", {"session_id": session_id}, config)
+            written = await run_off_loop(
+                "classify", {"session_id": session_id}, config, sessions=[session_id]
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except FileNotFoundError as exc:

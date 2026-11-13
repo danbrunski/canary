@@ -57,7 +57,7 @@ from src.models.fusion import PersistenceGate
 from src.session import SessionKind, issue_isolated_id, session_kind
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.broadcast_storage import UnfaithfulReplayError, refuse_unfaithful_replay
-from src.storage.capture_manifest import read_capture_manifest
+from src.storage.capture_manifest import CaptureManifest, read_capture_manifest
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
 
@@ -366,6 +366,23 @@ class ReplayController:
         async with self._lifecycle_lock:
             return await self._start_locked(source_session_id, speed=speed, loop=loop)
 
+    def _read_source(
+        self, source_session_id: str, speed: float
+    ) -> tuple[Path, float, CaptureManifest | None]:
+        """The file reads of a start, refusing in order: not found, then unfaithful."""
+        source_dir = self._storage_root / source_session_id
+        if not source_dir.is_dir():
+            raise ReplayNotFoundError(f"session {source_session_id!r} not found")
+
+        speed = speed if speed > 0 else 1.0
+        try:
+            refuse_unfaithful_replay(
+                source_dir, speed, stale_timeout_seconds=self._broadcast_stale_timeout_seconds
+            )
+        except UnfaithfulReplayError as exc:
+            raise ReplayRefusedError(str(exc)) from exc
+        return source_dir, speed, read_capture_manifest(source_dir)
+
     async def _start_locked(
         self,
         source_session_id: str,
@@ -384,18 +401,11 @@ class ReplayController:
             raise ReplayNotFoundError(
                 f"refusing to replay non-live-session name {source_session_id!r}"
             )
-        source_dir = self._storage_root / source_session_id
-        if not source_dir.is_dir():
-            raise ReplayNotFoundError(f"session {source_session_id!r} not found")
-
-        speed = speed if speed > 0 else 1.0
-        try:
-            refuse_unfaithful_replay(
-                source_dir, speed, stale_timeout_seconds=self._broadcast_stale_timeout_seconds
-            )
-        except UnfaithfulReplayError as exc:
-            raise ReplayRefusedError(str(exc)) from exc
-        manifest = read_capture_manifest(source_dir)
+        # The source's directory, storage metadata and capture manifest are file
+        # reads: off the loop, in the order the refusals have always come.
+        source_dir, speed, manifest = await asyncio.to_thread(
+            self._read_source, source_session_id, speed
+        )
         replay_id = issue_isolated_id(_utc_now())
         # D02.9: stop live input first, then let what is already queued land
         # in the live session, and only then redirect the writer.
