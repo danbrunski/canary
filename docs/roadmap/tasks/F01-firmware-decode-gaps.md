@@ -383,7 +383,7 @@ Same conventions as the other task files: task-level truth is the checkboxes,
       sign to a lag.
     - **Answer:** baro tracks the climb. It is not a stale value.
 
-- [ ] **F01.13 Torque limits and who asks for them.** The arbitration is
+- [x] **F01.13 Torque limits and who asks for them.** The arbitration is
   traced. Open: the torque-down request `0xFFFF3C36` (`0x07A00C`) and what
   sends it on a truck with no TCM, the baro × rpm and intake-temperature
   limit `0xFFFF37A2` (table `0xB374`, all 1.0 today), the all-gear limp cap's
@@ -453,14 +453,15 @@ Same conventions as the other task files: task-level truth is the checkboxes,
     - The signed decode is owed as shared-code work; see "Not disassembly"
       below.
 
-- [~] **F01.15 Misfire monitor.** Only its DTC items and MIL blink routine
+- [ ] **F01.15 Misfire monitor.** Only its DTC items and MIL blink routine
   are noted.
   - *Answers:* whether a per-cylinder crank-speed roughness word exists in
     RAM. It would be a new channel for the anomaly detectors and a
     per-cylinder check that fuel trims cannot give.
   - **Accept:** the roughness and counter words are located and read live at
     idle, or the item is closed with why they are not reachable.
-  - *Done 2026-11-12:* located (firmware doc, "Misfire monitor (F01.15)").
+  - [~] 2026-11-12, located; the truck read is owed. Firmware doc: "Misfire
+    monitor (F01.15)".
     - Roughness is a six-event history `0xFFFF3F40`–`3F45`, cylinder of the
       newest in `4602`, with the six-event mean in `3F88` (`0x087A0C`).
     - Three detectors feed per-cylinder counters (`3F22`, `3F30`, `3EF8`,
@@ -469,8 +470,8 @@ Same conventions as the other task files: task-level truth is the checkboxes,
     - The counters are already read live: Mode 06 MIDs A2–A7. The
       2026-11-11 `MONITOR_RESULTS` sweeps match the firmware's EWMA
       round-up rule.
-  - *Open (truck):* the live idle read of the roughness bytes. Pi unplugged;
-    listed under "Not disassembly".
+    - Open (truck): the live idle read of the roughness bytes. The Pi is
+      unplugged; listed under "Not disassembly".
 
 - [x] **F01.16 Outputs: fans, A/C cut, alternator, VIAS.** Nothing recorded.
   The FSM gives the VIAS valve as closed from 2,200 to 3,300 rpm.
@@ -478,8 +479,8 @@ Same conventions as the other task files: task-level truth is the checkboxes,
     A/C cut at full throttle), and the real VIAS switch points, which put
     steps in VE and torque.
   - **Accept:** each output's condition and thresholds listed from the image.
-  - *Done 2026-11-12:* all four are in the firmware doc, "Outputs: fans, A/C,
-    alternator, VIAS (F01.16)".
+  - [x] 2026-11-12. Firmware doc: "Outputs: fans, A/C, alternator, VIAS
+    (F01.16)".
     - **Fan.** Sent as a stage in `0x1F9`. Low at 98 °C (A/C off, under
       40 km/h), else 105 °C. High at 105 °C, on high refrigerant pressure,
       or with a P0500 fault. Stage 2 is unreachable.
@@ -491,12 +492,23 @@ Same conventions as the other task files: task-level truth is the checkboxes,
       up and 3,350 to 2,000 rpm coming down. Gated by electronic-throttle
       status, not by coolant or load.
 
-- [ ] **F01.17 The unidentified curves and maps.** 35 curves with no input,
+- [x] **F01.17 The unidentified curves and maps.** 35 curves with no input,
   118 inferred, and the flash-resident two-dimensional maps.
   - *Answers:* nothing by itself. It is the sweep that finds what the items
     above missed.
   - **Accept:** `~/ecu-re/out/tables_1d.yaml` has no `unknown` input, and
     each curve is assigned to a function in this file or marked unused.
+  - [x] 2026-11-12. Firmware doc: "The 1-D curve sweep (F01.17)". All 153
+    entries carry an `input` from their call site.
+    - Confidence: 121 verified, 30 inferred (one step from a RAM read),
+      0 unknown.
+    - Two entries are not curves (`0x8681`, `0xDAB3`), and `0xCA52` is
+      always read at input 0.
+    - Each keeps its consuming function in `callers`.
+    - Coolant indexes 57 curves and rpm 22. The variables nobody has named
+      yet are listed in the doc.
+    - The two-dimensional maps were not swept. They need their own pass
+      and are not part of this accept.
 
 ## Not disassembly: decoded, waiting on a truck read
 

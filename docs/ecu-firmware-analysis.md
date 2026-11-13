@@ -2105,6 +2105,42 @@ valve closes at 2,200 rpm and opens near 3,550 rpm going up, and closes near
 3,350 rpm and opens at 2,000 rpm coming down. Expect the VE and torque steps
 at those four speeds, not at 2,200 and 3,300 both ways.
 
+### The 1-D curve sweep (F01.17, 2026-11-12)
+
+`~/ecu-re/out/tables_1d.yaml` lists the 153 byte curves read through
+`FUN_00026BA4`, `FUN_00026BBC` and `FUN_00026BD4`. Each now has an `input`
+taken from its call site (`scripts/resolve_tables_1d.py`, local):
+
+| Result | Count |
+|---|---|
+| Argument is a RAM read in the decompiled call (verified) | 104 |
+| Resolved by hand from the listing, where the decompiler hid the call | 17 |
+| An expression one step from a RAM read, named in the file (inferred) | 30 |
+| Not a curve | 2 |
+
+The two that are not curves: `0x8681` is a scalar threshold (0x0B against
+`1238`), and `0xDAB3` is a word constant written to `13E6` at init. A third
+entry, `0xCA52` (in `0x07A718`), is always looked up at input 0, so only its
+first byte matters. The emitter's "35 with no input" were these cases plus
+call sites the bulk decompile had dropped.
+
+What the inputs say:
+
+- Coolant indexes 57 of the curves: 48 on the rescaled byte `1077`, 6 on
+  the live `1081`, and 3 on `1078`. They are the warm-up and
+  temperature-compensation family.
+- Two more take the alternate coolant byte `1076`.
+- rpm (`11CF`, `11CE`) indexes 22 and road speed (`111C`) 2. A handful use
+  load (`103E`, `1038`, `118A`).
+- The variables a curve reads that no F01 item has named are `26BD` (the
+  DID `0x110D` variable), `108B`, `1194` (filtered A/D word `2002` / 4),
+  `2B36`, `2BE4`, `13AC`, `2ED4`, `10FC`, `22BC`, `10DA` and `116E`. They
+  are recorded in the file, not interpreted here.
+
+The flash-resident two-dimensional maps were not swept. `FUN_00022584`
+lookups appear throughout (the misfire thresholds in F01.15 among them);
+they need their own pass with the 2-D axis decoder.
+
 ### Throttle area units: not settleable at the desk (F01.9, 2026-11-12)
 
 **Why the desk can't settle them.**
