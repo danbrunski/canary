@@ -223,6 +223,10 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
+#: Top-level packages whose loggers belong to this repo (see the fixture below).
+_REPO_LOGGER_ROOTS = frozenset({"src", "scripts", "tools", "tests", "__main__"})
+
+
 @pytest.fixture(autouse=True)
 def _restore_root_logger_state() -> Iterator[None]:
     """Snapshot and restore the root logger after every test.
@@ -238,15 +242,44 @@ def _restore_root_logger_state() -> Iterator[None]:
 
     Restoring here at the source keeps that class of pollution from ever
     crossing a test boundary, rather than papering over one victim.
+
+    Named loggers too (T01): ``scripts/evaluate_plausibility.py`` and
+    ``evaluate_committee_coverage.py`` set ``src.plausibility.evaluator`` to
+    ERROR in ``main()``, so after ``tests/test_plausibility.py`` ran in a
+    worker, the slow ``test_detector_evaluation_golden[full]`` saw 1 of its 74
+    pinned log lines (2026-11-13). Every logger's level, ``propagate`` and
+    ``disabled`` go back to what they were; one of this repo's loggers first
+    created during the test goes back to the defaults. A third-party logger
+    first created during the test is left as its library configured it on
+    import.
     """
     root = logging.getLogger()
     level = root.level
     handlers = list(root.handlers)
+    manager = logging.Logger.manager
+    named = {
+        name: (logger.level, logger.propagate, logger.disabled)
+        for name, logger in manager.loggerDict.items()
+        if isinstance(logger, logging.Logger)
+    }
     try:
         yield
     finally:
         root.setLevel(level)
         root.handlers[:] = handlers
+        for name, logger in list(manager.loggerDict.items()):
+            if not isinstance(logger, logging.Logger):
+                continue
+            if name in named:
+                was_level, was_propagate, was_disabled = named[name]
+            elif name.split(".", 1)[0] in _REPO_LOGGER_ROOTS:
+                was_level, was_propagate, was_disabled = logging.NOTSET, True, False
+            else:
+                continue
+            if logger.level != was_level:
+                logger.setLevel(was_level)
+            logger.propagate = was_propagate
+            logger.disabled = was_disabled
 
 
 @pytest.fixture(autouse=True)

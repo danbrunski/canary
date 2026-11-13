@@ -1058,3 +1058,24 @@ measurement in hand.
     extend `pytest_xdist_auto_num_workers` to `slow` selections, with a cap
     the measurement justifies. A worker count from `MemAvailable` ÷ measured
     peak would also cover a second session's gate, which a fixed cap does not.
+- [x] **T01.37 `tests/test_detector_evaluation_golden.py::test_the_run_matches_the_pinned_one[full]`
+  lost 73 of its 74 pinned log lines in a worker that had run
+  `tests/test_plausibility.py` first (2026-11-13).** Order-dependent, not a
+  regression. The test passed alone.
+  - **Seen** in a by-hand `pytest -m slow -n 4` on `ee89225f`:
+    `full/stdout[3]: '[74 log line(s), …]' != '[1 log line(s), …]'`.
+  - **Cause:** `scripts/evaluate_plausibility.py` and
+    `scripts/evaluate_committee_coverage.py` call
+    `logging.getLogger("src.plausibility.evaluator").setLevel(logging.ERROR)`
+    in `main()`, and the tests run those mains in-process. The 73 missing
+    lines are that logger's `plausibility: …` warnings. `conftest`'s autouse
+    fixture restored only the root logger.
+  - **Fix:** `_restore_root_logger_state` (`tests/conftest.py`) now also
+    restores every named logger's level, `propagate` and `disabled`. A repo
+    logger (`src`, `scripts`, `tools`, `tests`) first created during the test
+    goes back to the defaults; a third-party one keeps what its library set
+    on import.
+  - **Evidence:** `pytest -n0 tests/test_plausibility.py
+    "…golden.py::test_the_run_matches_the_pinned_one[full]"` failed before
+    the fix (1 failed, 48 passed) and passes after (49 passed). The
+    non-slow tier passes with it: 12,196 passed, `-n 6`.
