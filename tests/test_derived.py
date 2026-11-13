@@ -160,6 +160,142 @@ def test_estimated_power_from_torque_pids() -> None:
     assert out["derived:ESTIMATED_TORQUE_NM"].iloc[0] > 0
 
 
+E10 = VehicleParameters(fuel_type="e10")
+
+
+def _wideband(maf: list[float], lam: list[float]) -> pd.DataFrame:
+    return _frame(
+        len(maf), **{"obd:MAF": maf, "obd:O2_WR_LAMBDA_S1": lam, "obd:RPM": [4000.0] * len(maf)}
+    )
+
+
+def test_fuel_energy_power_burns_only_the_stoichiometric_fuel_for_the_air() -> None:
+    """M01.6 known answer: rich of stoich the extra fuel makes no power.
+
+    100 g/s of air on E10 is 100 / 14.08 = 7.102 g/s of fuel at stoich, 41.3
+    MJ/kg, 30 % brake efficiency, 15 % driveline loss: 74.80 kW = 100.31 hp.
+    At lambda 0.85 the same air carries 1/0.85 the fuel, and the uncapped
+    estimate read 1/0.85 = 1.176 of that (118.01 hp) though the engine made the
+    same power. The fuel rate still reports every gram injected.
+    """
+    out = compute_instantaneous_channels(
+        _wideband([100.0, 100.0, 100.0], [1.0, 0.85, 1.2]), E10, speed_correction=UNCORRECTED
+    )
+    stoich_hp = 100.0 / 14.08 / 1000.0 * 41.3e3 * 0.30 * 0.85 * 1.34102209
+    assert stoich_hp == pytest.approx(100.31, abs=0.01)
+    power = out["derived:ESTIMATED_POWER_HP"]
+    fuel = out["derived:FUEL_RATE_LPH"]
+    assert power.iloc[0] == pytest.approx(stoich_hp, rel=1e-9)
+    # The old reading scaled with the fuel; the fuel did go up by 1/0.85.
+    assert fuel.iloc[1] / fuel.iloc[0] == pytest.approx(1 / 0.85, rel=1e-9)
+    assert stoich_hp / 0.85 == pytest.approx(118.01, abs=0.01)
+    assert power.iloc[1] == pytest.approx(stoich_hp, rel=1e-9)
+    # Lean of stoich every gram burns, so the fuel flow stands: 1/1.2 of stoich.
+    assert power.iloc[2] == pytest.approx(stoich_hp / 1.2, rel=1e-9)
+
+
+def test_the_air_cap_uses_speed_density_air_without_maf() -> None:
+    """A fuel-rate PID with only MAP-style air is capped by the speed-density air
+    (the same air the fuel route falls back to), so the cap never needs MAF."""
+    df = _frame(
+        2,
+        **{
+            "obd:ENGINE_FUEL_RATE": [30.0, 1.0],
+            "obd:RPM": [2000.0, 2000.0],
+            "obd:INTAKE_PRESSURE": [100.0, 100.0],
+            "obd:INTAKE_TEMP": [25.0, 25.0],
+        },
+    )
+    with_air = compute_instantaneous_channels(df, GASOLINE, speed_correction=UNCORRECTED)
+    density_only = compute_instantaneous_channels(
+        df.drop(columns=["obd:ENGINE_FUEL_RATE"]), GASOLINE, speed_correction=UNCORRECTED
+    )
+    power = with_air["derived:ESTIMATED_POWER_HP"]
+    # 30 L/h is far richer than the air allows: capped at the stoich fuel.
+    assert power.iloc[0] == pytest.approx(density_only["derived:ESTIMATED_POWER_HP"].iloc[0])
+    # 1 L/h is lean of it: the fuel flow stands.
+    assert power.iloc[1] < density_only["derived:ESTIMATED_POWER_HP"].iloc[1]
+
+
+def test_fuel_energy_power_refuses_without_air() -> None:
+    """The decision (M01.6): no air, no bounded burn, no power — never the
+    uncapped fuel figure. No air source at all: the channel is absent; a row
+    whose air is missing: NaN on that row."""
+    fuel_only = _frame(2, **{"obd:ENGINE_FUEL_RATE": [6.0, 6.0]})
+    out = compute_instantaneous_channels(fuel_only, GASOLINE, speed_correction=UNCORRECTED)
+    assert "derived:FUEL_RATE_LPH" in out.columns
+    assert "derived:ESTIMATED_POWER_HP" not in out.columns
+    assert "derived:ESTIMATED_TORQUE_NM" not in out.columns
+
+    gap = _frame(2, **{"obd:ENGINE_FUEL_RATE": [6.0, 6.0], "obd:MAF": [50.0, np.nan]})
+    power = compute_instantaneous_channels(gap, GASOLINE, speed_correction=UNCORRECTED)[
+        "derived:ESTIMATED_POWER_HP"
+    ]
+    assert power.iloc[0] > 0
+    assert np.isnan(power.iloc[1])
+
+
+def test_fuel_cut_rows_make_no_power() -> None:
+    """A fuel-cut row is 0 g/s of fuel (M01.4), so the cap keeps it 0 power,
+    with or without a MAF sample on the row: no fuel burns nothing whatever the
+    air (the third row; NaN there on 2 rows of 2026-09-20T152758 before the fix)."""
+    df = _frame(
+        3,
+        **{
+            "obd:MAF": [7.35, 7.35, np.nan],
+            "obd:COMMANDED_EQUIV_RATIO": [1.0, 0.0, 0.0],
+            "obd:RPM": [2000.0] * 3,
+        },
+    )
+    out = compute_instantaneous_channels(df, GASOLINE, speed_correction=UNCORRECTED)
+    assert out["derived:ESTIMATED_POWER_HP"].iloc[0] > 0
+    assert out["derived:ESTIMATED_POWER_HP"].iloc[1] == 0.0
+    assert out["derived:ESTIMATED_POWER_HP"].iloc[2] == 0.0
+
+
+def test_idle_fraction_divides_by_engine_running_time() -> None:
+    """M01.6 known answer: key-on engine-off time is not in the denominator.
+
+    10 s KOEO (rpm 0), 10 s idling, 10 s driving, 1 Hz. Running time is the
+    trapezoid of the running indicator over 29 s: 0.5 s for the start edge,
+    then 19 s, = 19.5 s. Idle is 0.5 + 9 + 0.5 = 10 s. The fraction is 10 /
+    19.5 = 0.513; over the 29 s duration it read 0.345.
+    """
+    df = _frame(
+        30,
+        **{"obd:RPM": [0.0] * 10 + [800.0] * 20, "obd:SPEED": [0.0] * 20 + [36.0] * 10},
+    )
+    trip = summarize_trip(df, GASOLINE, speed_correction=UNCORRECTED)
+    assert trip.duration_s == pytest.approx(29.0)
+    assert trip.idle_time_s == pytest.approx(10.0)
+    assert trip.engine_running_s == pytest.approx(19.5)
+    assert trip.idle_fraction == pytest.approx(10.0 / 19.5)
+    assert 10.0 / trip.duration_s == pytest.approx(0.345, abs=1e-3)
+
+
+def test_idle_uses_the_shared_engine_running_definition() -> None:
+    """Idle and running both use ``ENGINE_RUNNING_MIN_RPM`` (rpm >= 400, the
+    ``vehicle_state`` threshold): 300 rpm cranking is neither, so it used to
+    count as idle (floor 200) without counting as running. 400 exactly is both."""
+    df = _frame(3, **{"obd:RPM": [300.0, 300.0, 300.0], "obd:SPEED": [0.0, 0.0, 0.0]})
+    cranking = summarize_trip(df, GASOLINE, speed_correction=UNCORRECTED)
+    assert cranking.idle_time_s == 0.0
+    assert cranking.engine_running_s == 0.0
+    assert cranking.idle_fraction is None, "the engine never ran: no fraction, not 0"
+    df["obd:RPM"] = 400.0
+    at_floor = summarize_trip(df, GASOLINE, speed_correction=UNCORRECTED)
+    assert at_floor.idle_time_s == pytest.approx(2.0)
+    assert at_floor.idle_fraction == pytest.approx(1.0)
+
+
+def test_idle_fraction_is_none_without_rpm_or_speed() -> None:
+    trip = summarize_trip(
+        _frame(3, **{"obd:SPEED": [0.0, 0.0, 0.0]}), GASOLINE, speed_correction=UNCORRECTED
+    )
+    assert trip.engine_running_s is None
+    assert trip.idle_fraction is None
+
+
 def test_cumulative_distance_fuel_idle() -> None:
     # 10 s at 36 kph = 0.01 km/s; first row dt=0 ⇒ 9 increments ⇒ 0.09 km.
     df = _frame(

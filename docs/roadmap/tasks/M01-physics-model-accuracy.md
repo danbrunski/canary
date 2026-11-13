@@ -366,15 +366,134 @@ does, the fix is a spec change and a retrain is owed (the 2026-09 IF incident).
     arithmetic for the supercharger rests on this scale (the implied
     full-throttle pulse is 11.2 ms at 5,500 rpm, 51 % duty).
 
-- [ ] **M01.6 Small items in `derived.py`.**
+- [~] **M01.6 Small items in `derived.py`.** Two of three bullets done
+  2026-11-13; the collector's snap-to-zero is measured and left for an
+  operator decision (below).
   - `_estimated_power_kw`'s fuel-energy route scales with fuel flow. Rich of
     stoich the extra fuel does not burn, so at λ 0.85 it reads about 18 %
     high. Cap the energy at the stoichiometric fuel for the air, or do not
     use it to compare pulls at different commanded AFR.
+    - [x] *Done 2026-11-13:* the burn is `min(fuel, air / AFR_stoich)`, with
+      the profile's fuel (`fuel_properties`, E10 = 14.08 on the Xterra) and
+      `_air_g_s`, the air the fuel route already uses (MAF, else
+      speed-density from MAP/rpm/IAT; the speed-density block moved into
+      `_speed_density_air_g_s`, bit-identical). Lean of stoich the fuel flow
+      stands; a fuel-cut row stays 0, with or without air on the row (no
+      fuel burns nothing; found by the verifier: 2 of 8,570 rows of
+      2026-09-20T152758, 17:47:24Z and 17:48:08Z, are fuel cut with no MAF
+      sample and read NaN until `burned_g_s.mask(fuel_g_s == 0, 0.0)`).
+      **Decision: without air the route refuses** (channel absent with no air
+      source; NaN on a fuelled row whose air is missing), never the uncapped
+      figure. Torque-PID route unchanged.
+      Declaration (B08.1): `ESTIMATED_POWER_HP` now needs torque PIDs or air
+      (MAF, or MAP and rpm); the fuel-rate PID, λ, PID 0x44 and IAT are its
+      optional inputs (any air also yields a fuel flow, so the fuel-rate PID
+      is not required); `test_derived_inputs_declared` 53 passed.
+      - Known answer `tests/test_derived.py::test_fuel_energy_power_burns_only_the_stoichiometric_fuel_for_the_air`:
+        100 g/s of air on E10 at λ 1.0 is 100.31 hp; at λ 0.85 the fuel rate
+        is ×1/0.85 (the old reading, 118.01 hp) and the power equals the
+        stoich case to 1e-9; at λ 1.2 it is 1/1.2 of it. Also
+        `test_the_air_cap_uses_speed_density_air_without_maf`,
+        `test_fuel_energy_power_refuses_without_air`,
+        `test_fuel_cut_rows_make_no_power` (includes a fuel-cut row with
+        `obd:MAF` NaN, asserted 0.0; fails without the mask).
+      - Per sample on stored drives (new ÷ old power, same rows): the ratio
+        is exactly λ on every capped row (max error 7e-16) and exactly 1 on
+        the other rows where both are defined. That run predates the
+        fuel-cut fix; the two 2026-09-20T152758 rows above were NaN under the
+        cap and are 0 again, as at HEAD. 2026-10-10T153117: 817 of 1,611 rows capped (closed-loop
+        dither: median λ 0.980, min 0.772), peak 133.0 → 116.9 hp, mean
+        19.90 → 19.57 hp. 2026-10-27T173734: 547 of 973, peak 119.9 → 107.0
+        hp. 2026-09-20T152758: 4,315 of 6,608, peak 82.1 → 73.1 hp.
+      - **Spec change; retrain owed for exactness, not urgent.** The
+        deployed IF and LSTM manifests
+        (laptop copies `models/nissan-xterra-2008/*/model.manifest.json`,
+        2026-09-20, and `tests/fixtures/deployed_manifests`) consume
+        `derived:ESTIMATED_POWER_HP` and `derived:ESTIMATED_TORQUE_NM`; rich
+        rows now read λ× what they trained on. Nothing refuses at serve time;
+        the next retrain takes it up. New sequence trainings already drop
+        both (`DERIVED_DROPPED`). Feature-frame cache 11 → 12; the
+        feature-pipeline golden moves only in `dependencies` and
+        `cache_version`.
+      - Model impact, measured by the verifier (deployed IF, sequence and
+        fused stack scored with the capped power vs HEAD's uncapped power
+        monkeypatched in, same frames; review scratchpad `verify-m016/score.py`):
+        **0 verdict flips** for IF, sequence or fused on the 3 drives with
+        capped rows. 2026-10-10T153117 (1,850 rows, 817 capped; IF 41 flags
+        both ways, sequence 291): max |Δscore| IF 0.0023, sequence 0.0048.
+        2026-10-27T173734 (1,241 rows, 547 capped; sequence 155 flags):
+        sequence 0.0065. 2026-09-20T152758 (8,570 rows, 4,315 capped; IF 25,
+        sequence 5,815 flags): IF 0.0050, sequence 0.0045. Max IF move 0.005
+        against IF thresholds of about 0.105. 2026-11-11T173212 and
+        T183314 had no capped rows (Δ 0); 2026-11-12T011119 has no power
+        column.
   - Idle fraction divides idle time by session duration, which includes
     key-on engine-off time.
+    - [x] *Done 2026-11-13:* `TripSummary.idle_fraction` is idle time over the
+      new `engine_running_s`: the trapezoid of `rpm >= ENGINE_RUNNING_MIN_RPM`
+      (`src.operating`, 400, the `vehicle_state` threshold) on the idle
+      integral's own rows (rpm and speed both sampled), so it is ≤ 1 by
+      construction. Idle itself now uses the same definition (`rpm >= 400`,
+      was `> 200`, which counted cranking as idle), in the batch integral and
+      the live `trip_integrals` accumulator alike
+      (`tests/test_preprocessing_live.py::test_live_trip_integrals_match_batch_compute_derived_channels`
+      now starts with 300 and 400 rpm rows at 0 km/h and pins idle to 4.0 s
+      as well as live = batch; reverting the live `>=`, the batch `>=`, or
+      the floor to 200 each fails it). `idle_fraction` is `None`
+      when the engine never ran (`engine_running_s` 0.0) or rpm/speed is
+      absent (`engine_running_s` `None`).
+      - Known answer `test_idle_fraction_divides_by_engine_running_time`:
+        10 s KOEO, 10 s idle, 10 s driving at 1 Hz → idle 10 s, running
+        19.5 s, fraction 0.513 (over duration it read 0.345). Also
+        `test_idle_uses_the_shared_engine_running_definition` (300 rpm is
+        neither, 400 is both) and `test_idle_fraction_is_none_without_rpm_or_speed`.
+      - Stored drives, old → new fraction: 2026-10-10T153117 0.159 → 0.193
+        (running 1,516.5 of 1,850 s; idle 294.0 → 293.0 s);
+        2026-10-27T173734 0.148 → 0.171; 2026-09-20T152758 0.531 → 0.867
+        (running 5,251.5 of 8,570 s).
+      - Basis step: trip-summary sidecar schema 4 → 5 (old sidecars
+        recompute), recorded in `trip_summary_sidecar.SCHEMA_VERSION`,
+        `docs/headless-api.md` and `docs/mcp-server.md`: idle-fraction trends
+        do not carry across 2026-11-13. Distance, fuel and economy are
+        unchanged, so no new `speed_basis`/`fuel_basis` value; the denominator
+        is stated in the new `engine_running_s` field instead. No model
+        consumes idle time or fraction.
   - `gps_tracker`'s odometer uses a rectangle rule, and the collector's
     5 km/h snap-to-zero drops crawl distance.
+    - [x] *Trapezoid, done 2026-11-13:* `GpsTracker._accumulate` integrates
+      the segment's mean speed; a segment counts when either end is at the
+      3 km/h moving threshold. Known answer
+      `tests/test_gps_tracker.py::test_odometer_integrates_a_constant_acceleration_exactly`
+      (0 → 36 km/h over 4 s is 20 m; the rectangle read 25 m) and
+      `test_odometer_counts_the_segment_leaving_a_stop_and_entering_one`.
+      `moving_time_s` changes with it: it now also counts the segment
+      entering a stop (moving end → 0), which the rectangle rule's closing
+      speed of 0 left out (2 s of moving time in that test, was 1 s).
+      On 2026-10-27T173734 (GPS speed at 10 Hz, 1,029 s): rectangle
+      12,058.2 m, trapezoid 12,111.2 m, road-speed integral (`obd:SPEED` ÷
+      0.9203, trapezoid, same window) 12,113.2 m.
+    - [~] *Snap-to-zero measured, not changed.* It lives in
+      `gps_collector.reading_to_records` (`_STATIONARY_SPEED_KMH` = 5), at
+      storage time, so the stored `gps:speed` is snapped; it exists for the
+      segmenter's stopped modes (`speed_max: 0`), not for the odometer, which
+      has its own 3 km/h gate. Pairing each GPS sample with the `obd:SPEED`
+      at or before it (≤ 2 s): on 2026-10-27T173734 GPS read 0 while road
+      speed was > 0 for 15.9 s, 12.2 m of road-speed distance (0.10 % of the
+      drive; road speed there median 2.2, max 6.5 km/h); on
+      2026-10-27T171651 5.9 s, 4.1 m. Parked side: the raw sub-5 km/h
+      speed-over-ground is not stored, so what the snap suppresses can only
+      be bounded by position: on parked 2026-10-27T161320 (191 s, OBD 0) the
+      10 Hz fixes wander 27.7 m (position-derived speed p95 1.28, p99 1.98
+      km/h); in 173734's stops 55.0 m over 133 s (p95 4.6 km/h). The snap
+      leaked 3 stored nonzero samples (≤ 6.0 km/h) in 1,276 stopped rows,
+      0.6 m to the odometer. **Remainder: an operator decision.** Gating the
+      snap on a second source needs something the collector does not have:
+      (a) leave it, 0.10 % of distance (recommended); (b) the collector also
+      stores the unsnapped speed-over-ground as a new channel and the
+      odometer accrues it while vehicle speed reads > 0 (a new stored
+      channel; parked drift above stays out because OBD reads 0); (c) store
+      `gps:speed` unsnapped and move the snap into the segmenter, which sees
+      `obd:SPEED` (changes stored data and the mode labels it feeds).
 
 ## Part B — Driving dyno
 

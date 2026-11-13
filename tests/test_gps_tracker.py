@@ -26,6 +26,31 @@ def test_distance_and_drive_time_accumulate() -> None:
     assert trip["distance_miles"] == pytest.approx(round(0.03 / 1.609344, 3))
 
 
+def test_odometer_integrates_a_constant_acceleration_exactly() -> None:
+    """M01.6: the trapezoid rule is exact for a linear speed trace.
+
+    0 -> 36 km/h in 1 s steps of 9 km/h over 4 s is 20 m (mean 18 km/h). The
+    rectangle rule took each segment's closing speed and read 25 m, 25 % high.
+    """
+    tracker = GpsTracker()
+    for i, kmh in enumerate((0.0, 9.0, 18.0, 27.0, 36.0)):
+        tracker.observe(_speed(100.0 + i, kmh))
+    trip = tracker.trip_status()
+    assert trip["distance_km"] == pytest.approx(0.020, abs=1e-9)
+    assert trip["moving_time_seconds"] == pytest.approx(4.0)
+
+
+def test_odometer_counts_the_segment_leaving_a_stop_and_entering_one() -> None:
+    """A segment with one end at the snapped 0 and the other moving is half its
+    moving end's speed, both ways: 0 -> 18 -> 0 km/h over 2 s is 5 m."""
+    tracker = GpsTracker()
+    for i, kmh in enumerate((0.0, 18.0, 0.0, 0.0)):
+        tracker.observe(_speed(100.0 + i, kmh))
+    trip = tracker.trip_status()
+    assert trip["distance_km"] == pytest.approx(0.005, abs=1e-9)
+    assert trip["moving_time_seconds"] == pytest.approx(2.0)
+
+
 def test_parked_jitter_below_threshold_does_not_accrue() -> None:
     tracker = GpsTracker()
     for epoch in (100.0, 101.0, 102.0):

@@ -34,6 +34,7 @@ import pandas as pd
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, arrived_column, gap_column
 from src.config import VehicleParameters
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
+from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.signals import vehicle_signals
 from src.signals.committees import COMMITTEES, MEMBER_TRANSFORMS, committee_channel_reason
 from src.signals.fuel_cut import COMMANDED_EQUIV_RATIO_COLUMN, fuel_cut_rows
@@ -76,8 +77,13 @@ _SIXTY_MPH_KPH = 60.0 * _KPH_PER_MPH
 _QUARTER_MILE_M = 402.336
 _GAL_PER_L = 0.26417205
 _MI_PER_KM = 0.62137119
-#: Idle = engine turning but vehicle essentially stopped.
-_IDLE_RPM_FLOOR = 200.0
+#: Idle = engine running but vehicle essentially stopped. "Running" is the
+#: shared definition (``src.operating.ENGINE_RUNNING_MIN_RPM``, rpm >= 400, the
+#: same one ``vehicle_state`` classifies ``engine_running`` by), so idle time is
+#: a subset of engine-running time and :attr:`TripSummary.idle_fraction` can
+#: divide one by the other (M01.6). This floor was 200 rpm before 2026-11-13,
+#: which counted cranking as idle.
+_IDLE_RPM_FLOOR = ENGINE_RUNNING_MIN_RPM
 _IDLE_SPEED_CEIL_KPH = 3.0
 #: A launch starts at ≤ ~2 mph; a clean accel run never drops back to that.
 _LAUNCH_SPEED_KPH = 2.0 * _KPH_PER_MPH
@@ -210,6 +216,18 @@ _require_literal(
 #: ``tests/test_derived_inputs_declared.py`` proves each one is read.
 DERIVED_CHANNEL_OPTIONAL_INPUTS: dict[str, tuple[str, ...]] = {
     "derived:FUEL_RATE_LPH": (
+        "obd:O2_WR_LAMBDA_S1",
+        "obd:O2_WR_LAMBDA_S2",
+        "obd:COMMANDED_EQUIV_RATIO",
+        "obd:INTAKE_TEMP",
+        "decoded:IAT",
+    ),
+    # M01.6: the fuel-energy route reads the fuel flow's own inputs when present
+    # (the fuel-rate PID and FUEL_RATE_LPH's refinements), and the air cap is
+    # speed-density, with IAT, without MAF.
+    "derived:ESTIMATED_POWER_HP": (
+        "obd:ENGINE_FUEL_RATE",
+        "decoded:ENGINE_FUEL_RATE",
         "obd:O2_WR_LAMBDA_S1",
         "obd:O2_WR_LAMBDA_S2",
         "obd:COMMANDED_EQUIV_RATIO",
@@ -552,17 +570,30 @@ def _fuel_g_s_by_method(
         # stoich-shaped guess is a fabricated measurement.
         return maf / (fuel.afr_stoich * lam.where(lam > 0))
 
+    air_g_s = _speed_density_air_g_s(wide, vehicle)
+    return None if air_g_s is None else air_g_s / fuel.afr_stoich
+
+
+def _speed_density_air_g_s(wide: pd.DataFrame, vehicle: VehicleParameters) -> pd.Series | None:
+    """Ideal-gas air mass flow (g/s) from MAP/IAT/RPM/displacement/VE, or ``None``
+    without rpm and MAP. IAT defaults to 25 degC when absent."""
     rpm = _series(wide, "obd:RPM", "decoded:ECM_RPM")
     mapp = _series(wide, "obd:INTAKE_PRESSURE", "decoded:MAP")
+    if rpm is None or mapp is None:
+        return None
     iat = _series(wide, "obd:INTAKE_TEMP", "decoded:IAT")
-    if rpm is not None and mapp is not None:
-        iat_k = (iat if iat is not None else pd.Series(25.0, index=wide.index)) + 273.15
-        air_density = (mapp * 1000.0) / (287.05 * iat_k)  # kg/m^3
-        disp_m3 = vehicle.displacement_l / 1000.0
-        flow_m3_s = vehicle.volumetric_efficiency * disp_m3 * (rpm / 2.0 / 60.0)
-        air_g_s = flow_m3_s * air_density * 1000.0
-        return air_g_s / fuel.afr_stoich
-    return None
+    iat_k = (iat if iat is not None else pd.Series(25.0, index=wide.index)) + 273.15
+    air_density = (mapp * 1000.0) / (287.05 * iat_k)  # kg/m^3
+    disp_m3 = vehicle.displacement_l / 1000.0
+    flow_m3_s = vehicle.volumetric_efficiency * disp_m3 * (rpm / 2.0 / 60.0)
+    return flow_m3_s * air_density * 1000.0
+
+
+def _air_g_s(wide: pd.DataFrame, vehicle: VehicleParameters) -> pd.Series | None:
+    """Air mass flow (g/s): MAF when the frame carries it, else speed-density —
+    the same air, in the same order, that :func:`_instant_fuel_g_s` uses."""
+    maf = _series(wide, "obd:MAF", "decoded:MAF")
+    return maf if maf is not None else _speed_density_air_g_s(wide, vehicle)
 
 
 def _estimated_power_kw(
@@ -576,6 +607,22 @@ def _estimated_power_kw(
     Prefers the J1979 torque PIDs (actual torque % × reference torque → crank
     power via ω); otherwise a fuel-energy estimate: burned chemical power ×
     brake thermal efficiency × (1 − driveline loss).
+
+    **Only the fuel the air can burn counts** (M01.6). Rich of stoich the
+    extra fuel leaves as CO and HC, not work, so the energy is capped at the
+    stoichiometric fuel for the measured air, ``min(fuel, air / AFR_stoich)``,
+    with the profile's fuel (:func:`fuel_properties`: E10 is 14.08 by mass,
+    never gasoline's 14.7 by default). Uncapped, the estimate scaled with the
+    fuel flow: at λ 0.85 it read 1/0.85 = 17.6 % high, so two pulls at
+    different commanded AFR compared as different power. Lean of stoich every
+    gram of fuel burns and the fuel flow stands. The cap also removes the
+    MAF ÷ measured-λ route's dependence on the λ reading for rich rows.
+
+    The air is :func:`_air_g_s`. **Without air the fuel route refuses**
+    (``None`` for the channel; NaN on a row whose air is missing): a fuel flow
+    that cannot be bounded is the uncapped figure the cap exists to stop, so it
+    is not substituted. On a frame with no MAF and no MAP+rpm the channel is
+    absent, the same contract as every other missing input here.
     """
     rpm = _series(wide, "obd:RPM", "decoded:ECM_RPM")
     torque_pct = _series(wide, "obd:ACTUAL_ENGINE_TORQUE")
@@ -584,10 +631,19 @@ def _estimated_power_kw(
         torque_nm = torque_pct / 100.0 * ref_torque
         crank_kw = torque_nm * rpm * (2.0 * np.pi / 60.0) / 1000.0
         return crank_kw * (1.0 - vehicle.drivetrain_loss_fraction)
-    if fuel_g_s is not None:
-        crank_kw = (fuel_g_s / 1000.0) * fuel.lhv_mj_per_kg * 1000.0 * vehicle.thermal_efficiency
-        return crank_kw * (1.0 - vehicle.drivetrain_loss_fraction)
-    return None
+    if fuel_g_s is None:
+        return None
+    air_g_s = _air_g_s(wide, vehicle)
+    if air_g_s is None:
+        return None
+    # skipna=False: a row missing either side has no bounded burn, so NaN...
+    burned_g_s = pd.concat([fuel_g_s, air_g_s / fuel.afr_stoich], axis=1).min(axis=1, skipna=False)
+    # ...except no fuel, which burns nothing whatever the air: a fuel-cut row
+    # (0 g/s, M01.4) without a MAF sample is 0 power, not NaN (2 rows of
+    # 2026-09-20T152758 read NaN without this).
+    burned_g_s = burned_g_s.mask(fuel_g_s == 0, 0.0)
+    crank_kw = (burned_g_s / 1000.0) * fuel.lhv_mj_per_kg * 1000.0 * vehicle.thermal_efficiency
+    return crank_kw * (1.0 - vehicle.drivetrain_loss_fraction)
 
 
 #: Below this road speed an rpm/speed ratio is unreliable (Task 4.6): speed
@@ -771,17 +827,28 @@ def compute_derived_channels(
             out["derived:AVG_ECONOMY_L_PER_100KM"] = avg
 
     if rpm is not None and speed is not None:
-        # Idle is an *indicator* integral: 1.0 where idling, 0.0 where
-        # driving, NaN where either input is unsampled — so unsampled
-        # stretches bridge (capped) instead of silently dropping the time.
-        both = rpm.notna() & speed.notna()
-        idling = pd.Series(np.nan, index=out.index, dtype=float)
-        idling[both] = (
-            (rpm[both] > _IDLE_RPM_FLOOR) & (speed[both] < _IDLE_SPEED_CEIL_KPH)
-        ).astype(float)
-        out["derived:IDLE_TIME_S"] = _cumulative_time_integral(out, idling)
+        out["derived:IDLE_TIME_S"] = _cumulative_time_integral(out, _idle_indicators(rpm, speed)[0])
 
     return out
+
+
+def _idle_indicators(rpm: pd.Series, speed: pd.Series) -> tuple[pd.Series, pd.Series]:
+    """``(idling, running)`` indicator series for the time integrals.
+
+    1.0 where true, 0.0 where false, NaN where rpm or speed is unsampled — so
+    unsampled stretches bridge (capped) instead of silently dropping the
+    time. Both are defined on the *same* rows (rpm and speed both sampled), and
+    idling implies running (both use ``ENGINE_RUNNING_MIN_RPM``), so the idle
+    integral never exceeds the running one and their ratio is a fraction.
+    """
+    both = rpm.notna() & speed.notna()
+    running = pd.Series(np.nan, index=rpm.index, dtype=float)
+    running[both] = (rpm[both] >= _IDLE_RPM_FLOOR).astype(float)
+    idling = pd.Series(np.nan, index=rpm.index, dtype=float)
+    idling[both] = ((rpm[both] >= _IDLE_RPM_FLOOR) & (speed[both] < _IDLE_SPEED_CEIL_KPH)).astype(
+        float
+    )
+    return idling, running
 
 
 #: Narrowband (zirconia) O2 sensor rich/lean switch threshold — standard
@@ -1243,11 +1310,29 @@ DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("obd:INTAKE_PRESSURE", "decoded:MAP"),
         ("obd:BAROMETRIC_PRESSURE",),
     ),
-    # Torque PIDs (actual % x reference, at rpm), else the fuel-energy estimate.
+    # Torque PIDs (actual % x reference, at rpm), else the fuel-energy estimate
+    # capped at the stoichiometric fuel for the air (M01.6). That route needs
+    # air, MAF or speed-density (MAP and rpm), and any air also yields a fuel
+    # flow (air / AFR), so the fuel-rate PID and the lambda refinements are
+    # optional inputs (DERIVED_CHANNEL_OPTIONAL_INPUTS), not a requirement. The
+    # conjunctive form of torque OR MAF OR (MAP AND rpm), redundant groups
+    # dropped.
     "derived:ESTIMATED_POWER_HP": (
-        ("obd:RPM", "decoded:ECM_RPM", "derived:FUEL_RATE_LPH"),
-        ("obd:ACTUAL_ENGINE_TORQUE", "derived:FUEL_RATE_LPH"),
-        ("obd:ENGINE_REFERENCE_TORQUE", "derived:FUEL_RATE_LPH"),
+        ("obd:RPM", "decoded:ECM_RPM", "obd:MAF", "decoded:MAF"),
+        (
+            "obd:ACTUAL_ENGINE_TORQUE",
+            "obd:MAF",
+            "decoded:MAF",
+            "obd:INTAKE_PRESSURE",
+            "decoded:MAP",
+        ),
+        (
+            "obd:ENGINE_REFERENCE_TORQUE",
+            "obd:MAF",
+            "decoded:MAF",
+            "obd:INTAKE_PRESSURE",
+            "decoded:MAP",
+        ),
     ),
     "derived:ESTIMATED_TORQUE_NM": (
         ("derived:ESTIMATED_POWER_HP",),
@@ -1457,7 +1542,17 @@ class TripSummary:
     avg_economy_mpg: float | None
     co2_kg: float | None
     idle_time_s: float | None
+    #: Idle time over :attr:`engine_running_s` (M01.6). It divided by
+    #: ``duration_s`` until 2026-11-13 (trip-summary schema v5), which counts
+    #: key-on engine-off time, so a drive that sat at KOEO read a smaller idle
+    #: fraction than it idled. ``None`` when the engine never ran or rpm or
+    #: speed is absent.
     idle_fraction: float | None
+    #: Time the engine ran (rpm >= ``ENGINE_RUNNING_MIN_RPM``, the definition
+    #: ``vehicle_state`` shares) on the rows that carry rpm and speed, the
+    #: idle-time integral's own rows: the denominator of :attr:`idle_fraction`.
+    #: ``None`` when rpm or speed is absent; ``0.0`` when the engine never ran.
+    engine_running_s: float | None
     max_speed_kph: float | None
     #: Trip average speed (distance / elapsed time), not average of the speed
     #: trace — cheap from the same totals ``summarize_trip`` already has, and
@@ -1576,6 +1671,7 @@ def summarize_trip(
             co2_kg=None,
             idle_time_s=None,
             idle_fraction=None,
+            engine_running_s=None,
             max_speed_kph=None,
             avg_speed_kph=None,
             zero_to_60_mph_s=None,
@@ -1606,6 +1702,11 @@ def summarize_trip(
         avg_l100 = fuel_used_l / distance_km * 100.0
         avg_mpg = (distance_km * _MI_PER_KM) / (fuel_used_l * _GAL_PER_L)
     speed = _road_speed(enriched, speed_correction)
+    rpm = _series(enriched, "obd:RPM", "decoded:ECM_RPM")
+    engine_running_s: float | None = None
+    if rpm is not None and speed is not None:
+        running = _cumulative_time_integral(enriched, _idle_indicators(rpm, speed)[1])
+        engine_running_s = float(running.iloc[-1])
     max_speed = float(speed.max()) if speed is not None and speed.notna().any() else None
     avg_speed = (
         distance_km / (duration_s / 3600.0) if distance_km is not None and duration_s > 0 else None
@@ -1627,8 +1728,11 @@ def summarize_trip(
         co2_kg=(fuel_used_l * fuel.co2_kg_per_l if fuel_used_l is not None else None),
         idle_time_s=idle_time_s,
         idle_fraction=(
-            idle_time_s / duration_s if idle_time_s is not None and duration_s > 0 else None
+            idle_time_s / engine_running_s
+            if idle_time_s is not None and engine_running_s is not None and engine_running_s > 0
+            else None
         ),
+        engine_running_s=engine_running_s,
         max_speed_kph=max_speed,
         avg_speed_kph=avg_speed,
         zero_to_60_mph_s=zero_60,

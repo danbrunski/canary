@@ -986,15 +986,17 @@ def test_live_trip_integrals_match_batch_compute_derived_channels(
     values — not just "both increase", but numerically equal."""
     from src.signals.derived import compute_derived_channels
 
-    n = 8
+    n = 12
     start = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
     timestamps = [start + timedelta(seconds=i) for i in range(n)]
-    # First two rows idle (RPM up, stopped); rest is a steady-ish drive —
-    # exercises every cumulative channel (distance, fuel, CO2, idle, avg
-    # economy) in one pass.
-    rpm_values = [800.0, 800.0, 1500.0, 1800.0, 2000.0, 2200.0, 2400.0, 2500.0]
-    speed_values = [0.0, 0.0, 20.0, 35.0, 50.0, 60.0, 70.0, 80.0]
-    maf_values = [3.0, 3.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0]
+    # Two rows cranking at 300 rpm (not running, so not idle), two at exactly
+    # 400 (ENGINE_RUNNING_MIN_RPM: running, so idle, M01.6), two idling at
+    # 800, then a steady-ish drive — exercises every cumulative channel
+    # (distance, fuel, CO2, idle, avg economy) in one pass.
+    rpm_values = [300.0, 300.0, 400.0, 400.0, 800.0, 800.0]
+    rpm_values += [1500.0, 1800.0, 2000.0, 2200.0, 2400.0, 2500.0]
+    speed_values = [0.0] * 6 + [20.0, 35.0, 50.0, 60.0, 70.0, 80.0]
+    maf_values = [2.0, 2.0, 3.0, 3.0, 3.0, 3.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0]
 
     wide = pd.DataFrame(
         {
@@ -1026,6 +1028,9 @@ def test_live_trip_integrals_match_batch_compute_derived_channels(
         "derived:AVG_ECONOMY_L_PER_100KM",
     ):
         assert live[channel] == pytest.approx(batch_last[channel]), channel
+    # Idle indicator 0,0,1,1,1,1,0,... at 1 Hz: trapezoid 0.5 + 1 + 1 + 1 + 0.5.
+    # A floor of 200 (or `>` against 400 on either path) moves it off 4.0.
+    assert batch_last["derived:IDLE_TIME_S"] == pytest.approx(4.0)
 
 
 def test_live_and_batch_apply_the_same_speed_ratio_and_fuel_cut(

@@ -77,7 +77,12 @@ DEFAULT_DIDS_PATH = DIDS_YAML
 #:     measured ratio to GPS. Cached frames carry the old values for unchanged
 #:     inputs. The key now hashes the profile's ``dyno.yaml`` too, where that
 #:     ratio is recorded, so a re-measured ratio invalidates frames.
-FEATURE_FRAME_CACHE_VERSION = 11
+#: 12 — M01.6 (2026-11-13): ``derived:ESTIMATED_POWER_HP`` /
+#:     ``ESTIMATED_TORQUE_NM`` on the fuel-energy route count only the
+#:     stoichiometric fuel for the measured air, so rich rows read lower (at
+#:     lambda 0.85 by 0.85x), and the route is absent without an air source.
+#:     ``derived:IDLE_TIME_S`` counts idle from rpm >= 400 (was > 200).
+FEATURE_FRAME_CACHE_VERSION = 12
 
 
 def build_feature_frame_cache_key(

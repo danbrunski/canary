@@ -49,7 +49,13 @@ TRIP_SUMMARY_FILENAME = "trip_summary.json"
 #: stored drives (2026-10-10T153117, 2026-09-20T152758; the fuel-cut share
 #: differs by drive).
 #: Economy, distance and speed trends do not carry across this version.
-SCHEMA_VERSION = 4
+#: v5 (2026-11-13, M01.6): ``idle_fraction`` divides idle time by the new
+#: ``engine_running_s`` (rpm >= 400, the ``vehicle_state`` definition) instead
+#: of the session duration, which counted key-on engine-off time; idle time
+#: counts from rpm >= 400 (was > 200, which took cranking as idle). Distance,
+#: fuel and economy are unchanged, so their trends carry across v5; idle
+#: fraction trends do not.
+SCHEMA_VERSION = 5
 
 
 @dataclass(frozen=True)

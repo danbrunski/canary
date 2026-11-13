@@ -137,7 +137,7 @@ class TripIntegrals:
         if sample.rpm is not None and sample.speed_kph is not None:
             idling = (
                 1.0
-                if (sample.rpm > IDLE_RPM_FLOOR and sample.speed_kph < IDLE_SPEED_CEIL_KPH)
+                if (sample.rpm >= IDLE_RPM_FLOOR and sample.speed_kph < IDLE_SPEED_CEIL_KPH)
                 else 0.0
             )
             increment, self.idle_marker = _trapezoid(self.idle_marker, now_utc, idling)

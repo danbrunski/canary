@@ -5,11 +5,14 @@ GPS records update a latest-fix snapshot and accumulate a persistent trip
 odometer (distance + time moving). Both are surfaced on the dashboard System
 page via ``build_status``.
 
-Distance is integrated from ``gps:speed`` (km/h) over the wall-clock interval
-between consecutive fixes, gated on a small moving threshold so GPS jitter while
-parked never accrues phantom miles. Totals persist to a JSON sidecar so they
-survive daemon restarts — the "miles / time driven with the unit plugged in"
-the operator asked for.
+Distance is the trapezoid integral of ``gps:speed`` (km/h) over the wall-clock
+interval between consecutive fixes (M01.6), gated on a small moving threshold
+so GPS jitter while parked never accrues phantom miles. ``gps:speed`` arrives
+already snapped to 0 below 5 km/h by the collector
+(``gps_collector._STATIONARY_SPEED_KMH``), so crawling below that is not
+counted: 12.2 m of a 12.1 km drive (0.10 %) on 2026-10-27T173734. Totals
+persist to a JSON sidecar so they survive daemon restarts — the "miles / time
+driven with the unit plugged in" the operator asked for.
 
 The trip-end edge (Task 5.4) is **not** GPS-only (D03.29). On 2026-09-23 the
 receiver reported ``fix_quality`` 0 on all 3,278 samples of a 27-minute drive;
@@ -202,6 +205,8 @@ class GpsTracker:
         self._latest: dict[str, float] = {}
         self._latest_ts: datetime | None = None
         self._last_speed_epoch: float | None = None
+        #: The previous fix's speed: the odometer's trapezoid needs both ends.
+        self._last_speed_kmh: float | None = None
         self._last_persist_epoch: float | None = None
         self._road_speed: Signal | None = None
         self._road_speed_accepted_epoch: float | None = None
@@ -420,13 +425,23 @@ class GpsTracker:
         return None
 
     def _accumulate(self, speed_kmh: float, epoch: float) -> None:
-        """The GPS odometer. Vehicle speed never reaches it (module docstring)."""
+        """The GPS odometer. Vehicle speed never reaches it (module docstring).
+
+        Trapezoid rule between consecutive fixes (M01.6): the segment's mean
+        speed, not its closing speed. The rectangle rule this replaced read
+        12,058.2 m on 2026-10-27T173734 where the trapezoid reads 12,111.2 m
+        and the road-speed integral over the same window 12,113.2 m. A segment
+        counts as moving when either end is at the moving threshold.
+        """
         last = self._last_speed_epoch
+        last_kmh = self._last_speed_kmh
         self._last_speed_epoch = epoch
-        if last is not None:
+        self._last_speed_kmh = speed_kmh
+        if last is not None and last_kmh is not None:
             dt = epoch - last
-            if 0 < dt <= _MAX_INTEGRATION_GAP_S and speed_kmh >= _MOVING_THRESHOLD_KMH:
-                self._totals.distance_km += speed_kmh * (dt / 3600.0)
+            moving = max(speed_kmh, last_kmh) >= _MOVING_THRESHOLD_KMH
+            if 0 < dt <= _MAX_INTEGRATION_GAP_S and moving:
+                self._totals.distance_km += (speed_kmh + last_kmh) / 2.0 * (dt / 3600.0)
                 self._totals.moving_time_s += dt
         self._maybe_persist(epoch)
 
