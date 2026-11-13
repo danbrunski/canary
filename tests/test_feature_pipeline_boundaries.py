@@ -71,13 +71,18 @@ DEPENDS_ON: dict[str, frozenset[str]] = {
         }
     ),
     "feature_cache": frozenset(),
-    "live": frozenset({"feature_transform"}),
+    "live": frozenset({"bus_freshness", "feature_transform", "trip_integrals"}),
+    # R27.6: state groups extracted from LiveFeatureSource.
+    "trip_integrals": frozenset(),
+    "bus_freshness": frozenset(),
     "capture_inputs": frozenset(),
 }
 
 #: The new owners (the first nine entries above that R14 created).
 NEW_OWNERS = tuple(
-    name for name in DEPENDS_ON if name not in {"feature_cache", "live", "capture_inputs"}
+    name
+    for name in DEPENDS_ON
+    if name not in {"feature_cache", "live", "capture_inputs", "trip_integrals", "bus_freshness"}
 )
 
 #: Packages an owner must never import: the layers above ``features``, its
