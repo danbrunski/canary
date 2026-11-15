@@ -21,7 +21,7 @@ import pytest
 from src.collection.gps_collector import reading_to_records
 from src.collection.gps_nmea import GpsReading
 from src.collection.imu_collector import ACCEL_CHANNELS, GYRO_CHANNELS
-from src.collection.pid_decoders import PID_DECODERS
+from src.collection.obd_registry import PID_DECODERS
 from src.decode.bindings import load_bindings
 from src.preprocessing.imu_decimation import IMU_TICK_COLUMNS
 from src.preprocessing.imu_live import LiveImuFrame

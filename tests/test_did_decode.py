@@ -15,14 +15,9 @@ from pathlib import Path
 import pandas as pd
 
 from src.config import CanaryConfig
-from src.decode.dids import (
-    DID_SOURCE,
-    DidAccess,
-    DidEntry,
-    DidMap,
-    decode_did_rows,
-)
+from src.decode.dids import DID_SOURCE, DidAccess, DidEntry, DidMap
 from src.features.live import LiveFeatureSource
+from src.preprocessing.decode import decode_did_rows
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config
 

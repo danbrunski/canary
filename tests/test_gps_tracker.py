@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -77,6 +78,26 @@ def test_persistence_round_trip(tmp_path: Path) -> None:
     reloaded = GpsTracker(state_path=state)
     assert reloaded.trip_status()["distance_km"] == pytest.approx(0.03, abs=1e-6)
     assert reloaded.trip_status()["moving_time_seconds"] == pytest.approx(3.0)
+
+
+def test_persist_survives_a_failed_fsync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """R23.13: the odometer's fsync is best effort -- a failed one is logged and
+    the totals still land (at worst one persist interval is not durable)."""
+    state = tmp_path / "trip.json"
+    tracker = GpsTracker(state_path=state, persist_interval_seconds=0.0)
+    for epoch in (100.0, 101.0):
+        tracker.observe(_speed(epoch, 36.0))
+
+    def broken(fd: int) -> None:
+        raise OSError(5, "EIO")
+
+    monkeypatch.setattr(os, "fsync", broken)
+    tracker.persist()
+    assert GpsTracker(state_path=state).trip_status()["distance_km"] > 0.0
+    assert "fsync failed" in caplog.text
+    assert [p.name for p in tmp_path.iterdir()] == ["trip.json"]
 
 
 def test_non_object_state_file_starts_fresh(tmp_path: Path) -> None:

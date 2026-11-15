@@ -15,17 +15,14 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from src.collection.can_obd_collector import (
-    _initial_request_states,
-    _issue_batched_request,
-    build_poll_requests,
-    run_can_obd_loop,
-)
+from src.collection.can_obd_loop import _issue_batched_request, run_can_obd_loop
 from src.collection.obd_scheduler import (
     CanObdSpec,
+    _initial_request_states,
     _PollRequestState,
     _request_accounting_error,
     _request_sends_judged,
+    build_poll_requests,
 )
 from src.config import CanBusConfig
 from src.daemon.inference_metrics import InferenceTimingRecorder

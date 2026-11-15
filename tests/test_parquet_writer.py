@@ -429,6 +429,46 @@ def test_flushed_chunk_is_complete_and_durable(tmp_path: Path) -> None:
     assert list(path.parent.glob("*.tmp")) == []
 
 
+def test_a_failed_chunk_fsync_is_logged_and_the_chunk_still_published(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The Parquet writer's fsync stays best effort (R23.13): failing the
+    collector over it would lose more telemetry than the power cut."""
+    import os
+
+    def broken(fd: int) -> None:
+        raise OSError(5, "EIO")
+
+    monkeypatch.setattr(os, "fsync", broken)
+    writer = ParquetTelemetryWriter(tmp_path, max_rows=1)
+    path = writer.write(TelemetryRecord.obd(1000.0, "RPM", 800, "rpm"))
+    assert path is not None
+    assert pq.read_table(path).num_rows == 1  # type: ignore[no-untyped-call]
+    assert "fsync failed" in caplog.text
+
+
+def test_chunk_is_fsynced_before_and_after_its_rename_by_the_time_write_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R23.13 must-not-change: a chunk is durable when the write returns. The
+    temp file is fsynced before the rename and the directory after it."""
+    import os
+
+    events: list[str] = []
+    real_fsync = os.fsync
+
+    def fsync(fd: int) -> None:
+        target = Path(os.readlink(f"/proc/self/fd/{fd}"))
+        events.append("dir" if target.is_dir() else f"file:{target.name}")
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    writer = ParquetTelemetryWriter(tmp_path, max_rows=1)
+    path = writer.write(TelemetryRecord.obd(1000.0, "RPM", 800, "rpm"))
+    assert path is not None
+    assert events == [f"file:{path.name}.tmp", "dir"]
+
+
 # ---------------------------------------------------------------------------
 # enforce_storage_cap — the byte-bounded ring buffer (Phase 8.2)
 # ---------------------------------------------------------------------------

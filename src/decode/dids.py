@@ -23,7 +23,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-import pandas as pd
 from pydantic import Field, model_validator
 
 from src.decode import slices
@@ -31,6 +30,9 @@ from src.decode.memory_relations import (
     FlagEquivalenceRelation,
     MemoryArithmeticRelation,
     MemoryRelation,
+    relation_channel_names,
+    relation_reads,
+    window_key,
 )
 from src.decode.slices import ByteSlice, LinearScale, PlausibleRange
 from src.paths import DIDS_YAML
@@ -56,7 +58,7 @@ MEMORY_SOURCE = "mem"
 #: Channel prefix the OBD scheduler / ELM327 path use for raw Mode-22 DID
 #: poll responses (``DID_1208`` etc.), value carried as the hex payload
 #: string in ``value_text``.
-_RAW_DID_CHANNEL_PREFIX = "DID_"
+RAW_DID_CHANNEL_PREFIX = "DID_"
 
 
 #: One evidence record for every catalog (R05.9): the DID catalog's refusal
@@ -513,105 +515,6 @@ def decode_memory_window(channel: MemoryChannel, payload: bytes, offset: int) ->
     return channel.raw_from(payload[offset:])
 
 
-def check_known_answer(channel: MemoryChannel, word: int, did_raw: int) -> bool:
-    """Whether `did_raw` is what `channel`'s declared relation predicts.
-
-    ``word`` is the memory channel's raw value and ``did_raw`` the raw value
-    of the cross-check DID, both read at the same instant.
-    """
-    known = channel.known_answer
-    if known is None:
-        raise ValueError(f"{channel.name} declares no known-answer check")
-    if known.relation == "clamped_high_byte":
-        return did_raw == max(known.floor, word >> 8)
-    if known.relation == "equals_did":
-        return did_raw == word
-    if known.relation == "linear_did":
-        assert known.word_scale is not None and known.did_scale is not None
-        reference = did_raw * known.did_scale + (known.did_offset or 0.0)
-        allowed = max(known.tolerance or 0.0, (known.relative_tolerance or 0.0) * abs(reference))
-        return abs(word * known.word_scale - reference) <= allowed
-    if known.relation == "reciprocal_did":
-        assert known.constant is not None and known.tolerance is not None
-        return word > 0 and abs(known.constant / word - did_raw) <= known.tolerance
-    raise ValueError(f"unhandled known-answer relation {known.relation!r}")
-
-
-def relation_channel_names(owner: MemoryChannel, relation: MemoryRelation) -> tuple[str, ...]:
-    """Every memory channel `relation` (declared on `owner`) reads, owner first."""
-    return tuple(dict.fromkeys((owner.name, *relation.channels())))
-
-
-def memory_checks(
-    channel: MemoryChannel, catalog: Sequence[MemoryChannel]
-) -> list[tuple[MemoryChannel, MemoryRelation]]:
-    """Every declared relation in `catalog` that reads `channel`.
-
-    A relation verifies each channel it reads, not only the one it is
-    declared on: ``0x1252 = trunc(0x124E/2) + trunc(0x1250/2)`` would fail if
-    any of the three moved. So whether a channel is checkable is a question
-    about the catalog, never about the channel's own entry.
-    """
-    return [
-        (owner, relation)
-        for owner in catalog
-        for relation in owner.relations
-        if channel.name in relation_channel_names(owner, relation)
-    ]
-
-
-def is_memory_checkable(channel: MemoryChannel, catalog: Sequence[MemoryChannel]) -> bool:
-    """Whether anything can re-verify `channel`: a DID known answer or a relation."""
-    return channel.known_answer is not None or bool(memory_checks(channel, catalog))
-
-
-def _window_key(channel: MemoryChannel) -> str:
-    return channel.window or f"\x00{channel.name}"
-
-
-def relation_reads(
-    subject: MemoryChannel,
-    owner: MemoryChannel,
-    relation: MemoryRelation,
-    by_name: Mapping[str, MemoryChannel],
-) -> list[tuple[int, int]]:
-    """The service-0x23 reads (address, length) one sample of a check takes.
-
-    Channels sharing a window come back in one reply, as the collector reads
-    them. The read holding `subject` is widened by the subject's width on
-    both sides, so the same reply also carries the neighbouring bytes the
-    relation must fail on. The subject's read comes first.
-    """
-    groups: dict[str, list[MemoryChannel]] = {}
-    for name in relation_channel_names(owner, relation):
-        channel = by_name[name]
-        groups.setdefault(_window_key(channel), []).append(channel)
-    reads: list[tuple[int, int]] = []
-    subject_key = _window_key(subject)
-    for key in [subject_key, *(k for k in groups if k != subject_key)]:
-        members = groups[key]
-        start = min(c.address for c in members)
-        end = max(c.address + c.length for c in members)
-        if key == subject_key:
-            span_start, span_length = neighbour_span(subject)
-            start = min(start, span_start)
-            end = max(end, span_start + span_length)
-        reads.append((start, end - start))
-    return reads
-
-
-def neighbour_span(subject: MemoryChannel) -> tuple[int, int]:
-    """The (address, length) read that carries `subject` and both neighbours.
-
-    Widened by the subject's width on each side: a check is only evidence
-    if it fails on the bytes beside the address, so every verifier read --
-    a relation's or a DID known answer's -- takes them in the same reply.
-    """
-    start = subject.address - subject.byte_length
-    end = subject.address + subject.length + subject.byte_length
-    return start, end - start
-
-
 class DidMap(StrictModel):
     """Top-level dids.yaml document."""
 
@@ -684,7 +587,7 @@ class DidMap(StrictModel):
                 unknown = [name for name in names if name not in by_name]
                 if unknown:
                     raise ValueError(f"{where} names unknown memory channel(s) {unknown}")
-                windows = {_window_key(by_name[name]) for name in names}
+                windows = {window_key(by_name[name]) for name in names}
                 if isinstance(relation, MemoryArithmeticRelation):
                     shared = owner.window is not None and all(
                         by_name[name].window == owner.window for name in relation.operands
@@ -1010,9 +913,9 @@ def decode_raw_did_reading(
     returned with unit ``"raw"`` — see :func:`decode_did_rows` for why that
     is useful rather than a failure.
     """
-    if source in FOREIGN_DID_SOURCES or not channel.startswith(_RAW_DID_CHANNEL_PREFIX):
+    if source in FOREIGN_DID_SOURCES or not channel.startswith(RAW_DID_CHANNEL_PREFIX):
         return None
-    entry = by_hex.get(channel[len(_RAW_DID_CHANNEL_PREFIX) :].upper())
+    entry = by_hex.get(channel[len(RAW_DID_CHANNEL_PREFIX) :].upper())
     if entry is None:
         return None
     if not isinstance(payload_hex, str) or not payload_hex:
@@ -1028,123 +931,3 @@ def decode_raw_did_reading(
     if scaled is None:
         return DecodedDid(entry=entry, value=float(raw_int), unit="raw")
     return DecodedDid(entry=entry, value=float(scaled), unit=entry.unit)
-
-
-def decode_did_rows(long_frame: pd.DataFrame, did_map: DidMap) -> pd.DataFrame:
-    """Append ``did:<NAME>`` rows decoded from raw ``DID_<hex>`` poll readings.
-
-    The Mode-22 counterpart of :func:`src.preprocessing.decode.decode_can_rows`.
-    The OBD scheduler / ELM327 path emit a polled DID as an ``obd``-source
-    row with ``channel="DID_<hex>"`` and the raw response payload as a hex
-    string in ``value_text``. This decodes those against ``did_map`` into
-    named, scaled signals so the rest of the pipeline sees
-    ``did:ECM_AIR_CHARGE`` numeric columns (recipes target them, IF/LSTM
-    learn their residual distribution, the gauge shows them in engineering
-    units).
-
-    When a DID's ``scale`` isn't pinned in ``dids.yaml`` (e.g.
-    ``ECM_AIR_CHARGE``, whose engineering unit is still outstanding), the **raw
-    integer** is emitted instead of a scaled value — anomaly detection
-    works on deviation from baseline, so unscaled-but-consistent counts are
-    perfectly usable; the absolute calibration only matters for human-facing
-    units.
-
-    Returns a new frame with the decoded rows appended + re-sorted. The
-    input is not mutated. Empty / no-DID-rows / no-matching-DID inputs are
-    returned unchanged.
-    """
-    if long_frame.empty or "channel" not in long_frame.columns:
-        return long_frame
-
-    raw = long_frame[long_frame["channel"].astype("string").str.startswith(_RAW_DID_CHANNEL_PREFIX)]
-    if "source" in raw.columns:
-        raw = raw[~raw["source"].isin(FOREIGN_DID_SOURCES)]
-    if raw.empty:
-        return long_frame
-
-    by_hex = did_entries_by_hex(did_map)
-    if not by_hex:
-        return long_frame
-
-    # Column lists, not ``iterrows`` (a Series per row), and each distinct
-    # reading is decoded once: a polled DID repeats the same few payloads, so a
-    # session has far fewer distinct ``(source, channel, value_text)`` triples
-    # than raw rows. ``source`` is in the key because the decode refuses a
-    # foreign source; the frame is already stripped of those, so it never
-    # splits a group in practice.
-    n = len(raw)
-    timestamps = raw["timestamp"].tolist()
-    channels = raw["channel"].tolist()
-    texts = raw["value_text"].tolist() if "value_text" in raw.columns else [None] * n
-    sources = raw["source"].tolist() if "source" in raw.columns else [""] * n
-    sessions = raw["session"].tolist() if "session" in raw.columns else [None] * n
-    session_paths = raw["session_path"].tolist() if "session_path" in raw.columns else [None] * n
-    decoded_cache: dict[tuple[str, str, str], DecodedDid | None] = {}
-    columns: dict[str, list[Any]] = {
-        name: []
-        for name in (
-            "timestamp",
-            "channel",
-            "value_number",
-            "unit",
-            "session",
-            "session_path",
-            "source_channel",
-        )
-    }
-    for i in range(n):
-        text = texts[i]
-        channel = str(channels[i])
-        source = str(sources[i])
-        if isinstance(text, str):
-            key = (source, channel, text)
-            if key in decoded_cache:
-                hit = decoded_cache[key]
-            else:
-                hit = decoded_cache[key] = decode_raw_did_reading(
-                    by_hex, channel, text, source=source
-                )
-        else:
-            # Not a hex string: ``decode_raw_did_reading`` returns None for it.
-            hit = None
-        if hit is None:
-            continue
-        entry, numeric = hit.entry, hit.value
-        columns["timestamp"].append(timestamps[i])
-        columns["channel"].append(entry.name)
-        columns["value_number"].append(numeric)
-        columns["unit"].append(hit.unit)
-        columns["session"].append(sessions[i])
-        columns["session_path"].append(session_paths[i])
-        columns["source_channel"].append(f"{DID_SOURCE}:{entry.name}")
-
-    n_decoded = len(columns["timestamp"])
-    if not n_decoded:
-        return long_frame
-
-    decoded = pd.DataFrame(
-        {
-            "timestamp": columns["timestamp"],
-            "source": DID_SOURCE,
-            "channel": columns["channel"],
-            "value_number": columns["value_number"],
-            "value_text": None,
-            "value_bool": None,
-            "unit": columns["unit"],
-            "payload": None,
-            "metadata_json": None,
-            "session": columns["session"],
-            "session_path": columns["session_path"],
-            "source_channel": columns["source_channel"],
-            "value": columns["value_number"],
-        }
-    )
-    # Align columns with the input so concat doesn't introduce NaN-only extras.
-    for col in long_frame.columns:
-        if col not in decoded.columns:
-            decoded[col] = None
-    decoded = decoded[list(long_frame.columns)]
-    combined = pd.concat([long_frame, decoded], ignore_index=True)
-    return combined.sort_values(["timestamp", "source", "channel"], kind="stable").reset_index(
-        drop=True
-    )

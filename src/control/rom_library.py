@@ -37,7 +37,6 @@ decision).
 from __future__ import annotations
 
 import json
-import os
 import re
 import threading
 from collections.abc import Callable, Sequence
@@ -63,7 +62,7 @@ from src.analysis.rom_image import (
     tables_payload,
 )
 from src.analysis.rom_map import ROM_MAP_FILE, RomMap, load_rom_map
-from src.atomic_write import atomic_write_text
+from src.atomic_write import atomic_write_bytes, atomic_write_text
 from src.vehicle.tune_revisions import TuneRevisionRegistry, load_tune_revisions
 
 RomSource = Literal["upload_plain", "upload_osirisrom", "ecu_read", "rom_editor_export"]
@@ -348,9 +347,7 @@ class RomLibrary:
             created = not meta_path.exists()
             meta: dict[str, Any]
             if created:
-                tmp = self.root / f"{sha}.bin.{os.getpid()}.tmp"
-                tmp.write_bytes(image)
-                tmp.replace(self._bin(sha))
+                atomic_write_bytes(self._bin(sha), image, unique_tmp=True)
                 meta = {
                     "schema_version": METADATA_VERSION,
                     "sha256": sha,

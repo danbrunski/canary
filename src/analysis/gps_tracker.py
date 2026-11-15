@@ -39,12 +39,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from src.atomic_write import atomic_write_text
 from src.can_ids import parse_can_channel
 from src.decode.bindings import Bindings, Signal, apply_scaling, decode_raw, is_plausible
 from src.storage.sidecar import read_json_object
@@ -698,24 +698,13 @@ class GpsTracker:
         if self._state_path is None:
             return
         try:
-            self._state_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self._state_path.with_name(f".{self._state_path.name}.tmp")
             payload = json.dumps(
                 {
                     "distance_km": self._totals.distance_km,
                     "moving_time_s": self._totals.moving_time_s,
                 }
             )
-            with open(tmp, "w") as handle:
-                handle.write(payload)
-                handle.flush()
-                os.fsync(handle.fileno())
-            tmp.replace(self._state_path)
-            dir_fd = os.open(self._state_path.parent, os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
+            atomic_write_text(self._state_path, payload, mkdir=True, durable=True, hidden_tmp=True)
         except OSError as exc:
             log.warning(
                 "trip odometer persist failed",

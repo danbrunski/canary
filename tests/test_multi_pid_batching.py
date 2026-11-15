@@ -195,7 +195,7 @@ def test_client_batch_transmits_nothing_in_passive_mode() -> None:
 
 import threading  # noqa: E402
 
-from src.collection.can_obd_collector import (  # noqa: E402
+from src.collection.can_obd_loop import (  # noqa: E402
     MAX_CONSECUTIVE_BATCH_FAILURES,
     run_can_obd_loop,
 )
@@ -476,7 +476,7 @@ def test_loop_falls_back_when_the_ecu_refuses_batches(monkeypatch: pytest.Monkey
 def test_batch_size_steps_down_instead_of_giving_up(clock: FakeClock) -> None:
     """An ECU that takes 4 PIDs but refuses 6 should end up batching at 4, not
     fall back to single-PID. 'Supports batching' is not binary."""
-    from src.collection.can_obd_collector import _next_batch_size
+    from src.collection.can_obd_loop import _next_batch_size
 
     assert [_next_batch_size(n) for n in (6, 4, 2)] == [4, 2, 1]
 

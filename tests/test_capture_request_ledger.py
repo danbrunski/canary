@@ -30,7 +30,7 @@ from src.analysis.capture_coverage import (
     recompute_capture_quality,
 )
 from src.collection import bus_budget, can_obd_loop, capture_lifetime, tuning_profile, tx_gate
-from src.collection.can_obd_collector import run_can_obd_loop
+from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.capture_lifetime import (
     LONG_GAP_CAPACITY,
     LONG_GAP_SECONDS,

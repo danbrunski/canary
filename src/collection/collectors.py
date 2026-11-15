@@ -23,11 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.collection import tuning_profile
 from src.collection.can_collector import ReceiveStatsCallback, collect_can_from_config
-from src.collection.can_obd_collector import (
-    CanObdSpec,
-    ObdSchedulerMetrics,
-    collect_can_obd_from_config,
-)
+from src.collection.can_obd_collector import collect_can_obd_from_config
 from src.collection.capture_profiles import CaptureProfileSources, CaptureProfileStore
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
@@ -36,8 +32,10 @@ from src.collection.hat_revision import kline_pins, resolve_hat_revision
 from src.collection.imu_collector import ImuHealth, collect_imu_from_config
 from src.collection.kline_collector import KlineCollector
 from src.collection.obd_scheduler import (
+    CanObdSpec,
     ForcePollTrigger,
     FreezeFrameTrigger,
+    ObdSchedulerMetrics,
     did_alias_table,
     profile_did_union,
 )

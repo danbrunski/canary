@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -12,6 +11,7 @@ from typing import Any
 import pandas as pd
 
 from src.artifact_hash import sha256_file, sha256_json
+from src.atomic_write import atomic_write_text, publish_atomic, temp_path
 from src.config import CanaryConfig, require_profile_scoped
 from src.decode.dbc import DEFAULT_DBC_DIR
 from src.paths import BINDINGS_YAML, DIDS_YAML
@@ -193,19 +193,19 @@ def _write_feature_frame_cache(
     metadata: Mapping[str, Any],
 ) -> None:
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.tmp")
+    tmp_path = temp_path(cache_path, unique=True)
     meta_path = cache_path.with_suffix(".json")
-    meta_tmp_path = meta_path.with_name(f".{meta_path.name}.{os.getpid()}.tmp")
     try:
         features.to_pickle(tmp_path)
-        tmp_path.replace(cache_path)
+        publish_atomic(tmp_path, cache_path, durable=False)
         sidecar = {
             **dict(metadata),
             "rows": int(len(features)),
             "columns": [str(column) for column in features.columns],
         }
-        meta_tmp_path.write_text(json.dumps(sidecar, indent=2, sort_keys=True) + "\n")
-        meta_tmp_path.replace(meta_path)
+        atomic_write_text(
+            meta_path, json.dumps(sidecar, indent=2, sort_keys=True) + "\n", unique_tmp=True
+        )
         log.info(
             "wrote feature frame cache",
             extra={
@@ -215,14 +215,13 @@ def _write_feature_frame_cache(
             },
         )
     except Exception as exc:  # noqa: BLE001 - cache write failures should not fail training
-        for path in (tmp_path, meta_tmp_path):
-            try:
-                path.unlink()
-            except OSError as cleanup_exc:
-                log.debug(
-                    "failed to remove incomplete feature-frame cache file",
-                    extra={"path": str(path), "error": str(cleanup_exc)},
-                )
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError as cleanup_exc:
+            log.debug(
+                "failed to remove incomplete feature-frame cache file",
+                extra={"path": str(tmp_path), "error": str(cleanup_exc)},
+            )
         log.warning(
             "feature frame cache write failed; continuing without cache",
             extra={"cache": str(cache_path), "error": str(exc)},

@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from src.collection.can_obd_client import decode_baro, decode_percent_b_minus_128
-from src.collection.can_obd_collector import _batched_pid_width
+from src.collection.can_obd_io import _batched_pid_width
 from src.collection.isotp import split_batched_response
 from src.collection.obd_registry import MODE01_REGISTRY
 from src.yaml_load import load_yaml

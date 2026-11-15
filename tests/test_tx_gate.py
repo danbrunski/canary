@@ -20,7 +20,7 @@ import pytest
 
 from src.collection import capture_lifetime, tx_gate
 from src.collection.can_obd_client import CanObdClient
-from src.collection.can_obd_collector import run_can_obd_loop
+from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.obd_scheduler import CanObdSpec
 from src.config import CanBusConfig
 

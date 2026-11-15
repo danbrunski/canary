@@ -17,17 +17,17 @@ import pytest
 from pydantic import ValidationError
 
 from src.collection.can_obd_client import ObdResponse
-from src.collection.can_obd_collector import _decode_response
+from src.collection.obd_response_decode import _decode_response
 from src.collection.obd_scheduler import _PollRequest
 from src.decode.dids import (
     MemoryChannel,
     MemoryKnownAnswer,
     apply_memory_scaling,
-    check_known_answer,
     decode_memory_raw,
     load_did_map,
     plan_memory_reads,
 )
+from src.decode.memory_relations import check_known_answer
 from src.paths import DIDS_YAML
 from src.yaml_load import load_yaml
 

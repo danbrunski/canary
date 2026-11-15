@@ -27,7 +27,7 @@ import pytest
 import yaml
 
 from src.collection import tuning_profile, tx_gate
-from src.collection.can_obd_collector import run_can_obd_loop
+from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.capture_profiles import (
     CaptureProfile,
     CaptureProfileCatalog,

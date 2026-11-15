@@ -13,13 +13,8 @@ import yaml
 from src.atomic_write import atomic_write_text
 from src.collection import tuning_profile
 from src.config import CanaryConfig
-from src.decode.dids import (
-    DidMap,
-    MemoryChannel,
-    is_memory_checkable,
-    load_did_map,
-    memory_checks,
-)
+from src.decode.dids import DidMap, MemoryChannel, load_did_map
+from src.decode.memory_relations import is_memory_checkable, memory_checks
 from src.file_memo import StampedCache, file_stamp
 from src.vehicle.profiles import (
     active_registry,

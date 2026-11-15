@@ -5,7 +5,7 @@ The daemon's periodic Mode 06 poll (Task 3.1, generalizes the Mode 03/07/0A
 DTC poll's ``kind="dtc"`` scheduling mechanism, Task 1.3 — see
 ``src.collection.obd_scheduler``) lands here one decoded OBD reading at a
 time (channel ``MONITOR_RESULTS``, a hex-encoded raw Mode 06 payload — see
-``src.collection.can_obd_collector._response_to_reading``), via a
+``src.collection.obd_response_decode._response_to_reading``), via a
 ``monitor`` telemetry sink mirroring
 :class:`~src.control.dtc_state.DtcState`'s single-writer in-memory-state
 pattern. Each update:

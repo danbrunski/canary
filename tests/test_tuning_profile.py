@@ -17,7 +17,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.collection import tuning_profile, tx_gate
-from src.collection.can_obd_collector import run_can_obd_loop
+from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.capture_profiles import CaptureProfile
 from src.collection.obd_scheduler import (
     CanObdSpec,
@@ -622,7 +622,7 @@ def test_metrics_payload_labels_the_unfiltered_request_count() -> None:
 def test_capture_rate_uses_capture_epoch_and_observed_interval() -> None:
     from collections import deque
 
-    from src.collection.can_obd_collector import CanObdLoopStats
+    from src.collection.obd_scheduler import CanObdLoopStats
 
     stats = CanObdLoopStats(recent_reads={"RPM": deque([90.0, 110.0, 115.0])})
     rates, observed = stats.capture_rates(now=120.0, started_at=100.0)

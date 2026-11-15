@@ -164,7 +164,8 @@ def test_the_loop_keeps_no_copy_of_the_moved_state() -> None:
 
 
 def test_the_loop_entrypoints_are_unchanged() -> None:
-    assert can_obd_collector.run_can_obd_loop is can_obd_loop.run_can_obd_loop
+    # The collector calls the loop's entrypoint (no longer re-exports it, R23.15).
+    assert vars(can_obd_collector)["run_can_obd_loop"] is can_obd_loop.run_can_obd_loop
     for name in (
         "_memory_burst",
         "_session_budget_at",

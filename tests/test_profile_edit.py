@@ -19,7 +19,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from src.collection import bus_budget, tuning_profile, tx_gate, vin_read
-from src.collection.can_obd_collector import run_can_obd_loop
+from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.obd_scheduler import CanObdSpec, DidSessionSpec
 from src.collection.obd_scheduler.spec import _bus_budget_requests_per_second
 from src.config import CanaryConfig, CanBusConfig, ProfilesConfig, VehicleParameters

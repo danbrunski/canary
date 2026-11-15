@@ -15,7 +15,7 @@ import time
 import can
 import pytest
 
-from src.collection import can_obd_collector
+from src.collection import can_obd_io
 from src.collection.can_collector import frame_to_record
 from src.collection.sensor_can_collector import frame_to_records
 from src.decode.sensor_can import load_sensor_can_catalog
@@ -48,7 +48,7 @@ def test_broadcast_obd_and_sensor_paths_stamp_a_frame_identically(
     )
     catalog = load_sensor_can_catalog(REPO_ROOT / "data/sensor_can_signals.yaml")
 
-    obd_at = can_obd_collector._frame_arrival(broadcast).at
+    obd_at = can_obd_io._frame_arrival(broadcast).at
     broadcast_at = frame_to_record(broadcast).timestamp.timestamp()
     (sensor_record,) = frame_to_records(catalog, sensor)
 

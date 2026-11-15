@@ -27,6 +27,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from src.atomic_write import atomic_write_text
 from src.paths import CONTROL_DIR
 
 log = logging.getLogger(__name__)
@@ -92,21 +93,15 @@ def _parse(text: str) -> dict[str, PairedDevice]:
 
 
 def _durable_write(path: Path, text: str) -> None:
-    """Write, fsync, rename, fsync the directory: survives a power cut, 0600."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        os.write(fd, text.encode("utf-8"))
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    os.replace(tmp, path)
-    dir_fd = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(dir_fd)
-    finally:
-        os.close(dir_fd)
+    """Write, fsync, rename, fsync the directory: survives a power cut, 0600.
+
+    A failed fsync raises (``strict_fsync``): :meth:`PairedDevices.pair` and
+    :meth:`~PairedDevices.rename` make a change live only once the disk took
+    it. One fixed hidden temp name: every save runs under the store's lock.
+    """
+    atomic_write_text(
+        path, text, mkdir=True, durable=True, strict_fsync=True, hidden_tmp=True, mode=0o600
+    )
 
 
 class PairedDevices:

@@ -95,9 +95,11 @@ from src.collection.isotp import (
     positive_response_service,
     split_batched_response,
 )
-from src.collection.obd_registry import mode01_registry_width
-from src.collection.pid_decoders import (  # re-exported: R02.13 moved them
+from src.collection.obd_registry import (  # PID_DECODERS re-exported: R23.14 moved it
     PID_DECODERS,
+    mode01_registry_width,
+)
+from src.collection.pid_decoders import (  # re-exported: R02.13 moved them
     TIMING_ADVANCE_UNAVAILABLE,
     decode_absolute_load,
     decode_baro,

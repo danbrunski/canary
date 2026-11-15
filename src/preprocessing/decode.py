@@ -61,6 +61,15 @@ import pyarrow as pa
 from src.artifact_hash import sha256_json
 from src.can_ids import parse_can_channel
 from src.decode.bindings import Bindings, Signal
+from src.decode.dids import (
+    DID_SOURCE,
+    FOREIGN_DID_SOURCES,
+    RAW_DID_CHANNEL_PREFIX,
+    DecodedDid,
+    DidMap,
+    decode_raw_did_reading,
+    did_entries_by_hex,
+)
 from src.decode.on_read import can_channel_spellings
 from src.decode.slices import payload_lengths, sentinel_channel, slice_raw_column
 from src.paths import BINDINGS_YAML
@@ -491,6 +500,127 @@ def _repeated(labels: list[Any], counts: np.ndarray[Any, np.dtype[Any]], dtype: 
 #: importable from here. Resolved by name on first access: a static import
 #: would put the reader back under the module it must sit above.
 _MOVED_TO_DECODED_READER = frozenset({"read_session_decoded", "read_session_decoded_subset"})
+
+
+def decode_did_rows(long_frame: pd.DataFrame, did_map: DidMap) -> pd.DataFrame:
+    """Append ``did:<NAME>`` rows decoded from raw ``DID_<hex>`` poll readings.
+
+    The Mode-22 counterpart of :func:`decode_can_rows` (R23.15 moved it here
+    from ``decode/dids.py``, which then no longer needed pandas).
+    The OBD scheduler / ELM327 path emit a polled DID as an ``obd``-source
+    row with ``channel="DID_<hex>"`` and the raw response payload as a hex
+    string in ``value_text``. This decodes those against ``did_map`` into
+    named, scaled signals so the rest of the pipeline sees
+    ``did:ECM_AIR_CHARGE`` numeric columns (recipes target them, IF/LSTM
+    learn their residual distribution, the gauge shows them in engineering
+    units).
+
+    When a DID's ``scale`` isn't pinned in ``dids.yaml`` (e.g.
+    ``ECM_AIR_CHARGE``, whose engineering unit is still outstanding), the **raw
+    integer** is emitted instead of a scaled value — anomaly detection
+    works on deviation from baseline, so unscaled-but-consistent counts are
+    perfectly usable; the absolute calibration only matters for human-facing
+    units.
+
+    Returns a new frame with the decoded rows appended + re-sorted. The
+    input is not mutated. Empty / no-DID-rows / no-matching-DID inputs are
+    returned unchanged.
+    """
+    if long_frame.empty or "channel" not in long_frame.columns:
+        return long_frame
+
+    raw = long_frame[long_frame["channel"].astype("string").str.startswith(RAW_DID_CHANNEL_PREFIX)]
+    if "source" in raw.columns:
+        raw = raw[~raw["source"].isin(FOREIGN_DID_SOURCES)]
+    if raw.empty:
+        return long_frame
+
+    by_hex = did_entries_by_hex(did_map)
+    if not by_hex:
+        return long_frame
+
+    # Column lists, not ``iterrows`` (a Series per row), and each distinct
+    # reading is decoded once: a polled DID repeats the same few payloads, so a
+    # session has far fewer distinct ``(source, channel, value_text)`` triples
+    # than raw rows. ``source`` is in the key because the decode refuses a
+    # foreign source; the frame is already stripped of those, so it never
+    # splits a group in practice.
+    n = len(raw)
+    timestamps = raw["timestamp"].tolist()
+    channels = raw["channel"].tolist()
+    texts = raw["value_text"].tolist() if "value_text" in raw.columns else [None] * n
+    sources = raw["source"].tolist() if "source" in raw.columns else [""] * n
+    sessions = raw["session"].tolist() if "session" in raw.columns else [None] * n
+    session_paths = raw["session_path"].tolist() if "session_path" in raw.columns else [None] * n
+    decoded_cache: dict[tuple[str, str, str], DecodedDid | None] = {}
+    columns: dict[str, list[Any]] = {
+        name: []
+        for name in (
+            "timestamp",
+            "channel",
+            "value_number",
+            "unit",
+            "session",
+            "session_path",
+            "source_channel",
+        )
+    }
+    for i in range(n):
+        text = texts[i]
+        channel = str(channels[i])
+        source = str(sources[i])
+        if isinstance(text, str):
+            key = (source, channel, text)
+            if key in decoded_cache:
+                hit = decoded_cache[key]
+            else:
+                hit = decoded_cache[key] = decode_raw_did_reading(
+                    by_hex, channel, text, source=source
+                )
+        else:
+            # Not a hex string: ``decode_raw_did_reading`` returns None for it.
+            hit = None
+        if hit is None:
+            continue
+        entry, numeric = hit.entry, hit.value
+        columns["timestamp"].append(timestamps[i])
+        columns["channel"].append(entry.name)
+        columns["value_number"].append(numeric)
+        columns["unit"].append(hit.unit)
+        columns["session"].append(sessions[i])
+        columns["session_path"].append(session_paths[i])
+        columns["source_channel"].append(f"{DID_SOURCE}:{entry.name}")
+
+    n_decoded = len(columns["timestamp"])
+    if not n_decoded:
+        return long_frame
+
+    decoded = pd.DataFrame(
+        {
+            "timestamp": columns["timestamp"],
+            "source": DID_SOURCE,
+            "channel": columns["channel"],
+            "value_number": columns["value_number"],
+            "value_text": None,
+            "value_bool": None,
+            "unit": columns["unit"],
+            "payload": None,
+            "metadata_json": None,
+            "session": columns["session"],
+            "session_path": columns["session_path"],
+            "source_channel": columns["source_channel"],
+            "value": columns["value_number"],
+        }
+    )
+    # Align columns with the input so concat doesn't introduce NaN-only extras.
+    for col in long_frame.columns:
+        if col not in decoded.columns:
+            decoded[col] = None
+    decoded = decoded[list(long_frame.columns)]
+    combined = pd.concat([long_frame, decoded], ignore_index=True)
+    return combined.sort_values(["timestamp", "source", "channel"], kind="stable").reset_index(
+        drop=True
+    )
 
 
 def __getattr__(name: str) -> Any:

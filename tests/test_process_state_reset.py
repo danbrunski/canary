@@ -174,6 +174,8 @@ _IMMUTABLE_CALLS = frozenset(
         "get_args",
         "getLogger",
         "int",
+        # pid_decoders.linear: a decoder closed over two ints and a unit (R23.14).
+        "linear",
         "str",
         "tuple",
     }
@@ -199,12 +201,12 @@ NOT_STATE: dict[tuple[str, str], str] = {
             ("kline/protocol.py", "SERVICE_NAMES"),
             ("obd_registry.py", "MODE01_REGISTRY"),
             ("obd_registry.py", "MODE09_REGISTRY"),
+            ("obd_registry.py", "PID_DECODERS"),
             ("obd_registry.py", "SERVICE_REGISTRY"),
             ("obd_scheduler/cadence.py", "TIER_RATE_FACTORS"),
             ("obd_scheduler/spec.py", "DTC_POLL_CHANNELS"),
             ("obd_scheduler/spec.py", "SERVICE_POLL_CHANNELS"),
             ("obd_scheduler/spec.py", "_PID_IDS_BY_NAME"),
-            ("pid_decoders.py", "PID_DECODERS"),
             ("pids.py", "PIDS_BY_NAME"),
             ("request_eligibility.py", "MATRIX"),
             ("tx_gate.py", "_TRUTHY"),

@@ -365,7 +365,7 @@ class ChannelProducer:
 
     ``kind`` says which code path, so a test can hold each claim to its
     producer (``tests/test_committee_producers.py``): a Mode 01 PID name in
-    ``pid_decoders.PID_DECODERS``, a ``data/bindings.yaml`` signal, a channel
+    ``obd_registry.PID_DECODERS``, a ``data/bindings.yaml`` signal, a channel
     the GPS or IMU collector records, a per-tick IMU aggregate in
     ``imu_decimation.IMU_TICK_COLUMNS`` that ``imu_live.LiveImuFrame`` also
     emits, or one of :data:`MEMBER_TRANSFORMS`. ``pending`` is the honest

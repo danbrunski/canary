@@ -47,7 +47,7 @@ import pytest
 
 from src.collection import bus_budget, can_obd_loop, capture_generation, tuning_profile, tx_gate
 from src.collection.calibration_id import CalibrationIdSpec
-from src.collection.can_obd_collector import run_can_obd_loop
+from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.obd_reading import ObdReading
 from src.collection.obd_scheduler import did_alias_table
 from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock

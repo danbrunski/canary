@@ -26,11 +26,16 @@ channels").
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import Field, model_validator
 
 from src.strict_model import StrictModel
+
+if TYPE_CHECKING:
+    # dids.py imports this module at load (its catalog validator reads
+    # relations), so the channel type is for annotations only.
+    from src.decode.dids import MemoryChannel
 
 
 def trunc_div(numerator: int, divisor: int) -> int:
@@ -323,8 +328,124 @@ MemoryRelation = Annotated[
 VALUE_RELATION_KINDS = frozenset({"memory", "mode01_pid"})
 
 
+# ---------------------------------------------------------------------------
+# Verification helpers: which checks read a channel, what reads one sample of
+# a check takes, and whether a DID known answer holds (R23.15 moved them here
+# from ``decode/dids.py``; their callers are the verifier and the
+# calibration view).
+# ---------------------------------------------------------------------------
+
+
+def check_known_answer(channel: MemoryChannel, word: int, did_raw: int) -> bool:
+    """Whether `did_raw` is what `channel`'s declared relation predicts.
+
+    ``word`` is the memory channel's raw value and ``did_raw`` the raw value
+    of the cross-check DID, both read at the same instant.
+    """
+    known = channel.known_answer
+    if known is None:
+        raise ValueError(f"{channel.name} declares no known-answer check")
+    if known.relation == "clamped_high_byte":
+        return did_raw == max(known.floor, word >> 8)
+    if known.relation == "equals_did":
+        return did_raw == word
+    if known.relation == "linear_did":
+        assert known.word_scale is not None and known.did_scale is not None
+        reference = did_raw * known.did_scale + (known.did_offset or 0.0)
+        allowed = max(known.tolerance or 0.0, (known.relative_tolerance or 0.0) * abs(reference))
+        return abs(word * known.word_scale - reference) <= allowed
+    if known.relation == "reciprocal_did":
+        assert known.constant is not None and known.tolerance is not None
+        return word > 0 and abs(known.constant / word - did_raw) <= known.tolerance
+    raise ValueError(f"unhandled known-answer relation {known.relation!r}")
+
+
+def relation_channel_names(owner: MemoryChannel, relation: MemoryRelation) -> tuple[str, ...]:
+    """Every memory channel `relation` (declared on `owner`) reads, owner first."""
+    return tuple(dict.fromkeys((owner.name, *relation.channels())))
+
+
+def memory_checks(
+    channel: MemoryChannel, catalog: Sequence[MemoryChannel]
+) -> list[tuple[MemoryChannel, MemoryRelation]]:
+    """Every declared relation in `catalog` that reads `channel`.
+
+    A relation verifies each channel it reads, not only the one it is
+    declared on: ``0x1252 = trunc(0x124E/2) + trunc(0x1250/2)`` would fail if
+    any of the three moved. So whether a channel is checkable is a question
+    about the catalog, never about the channel's own entry.
+    """
+    return [
+        (owner, relation)
+        for owner in catalog
+        for relation in owner.relations
+        if channel.name in relation_channel_names(owner, relation)
+    ]
+
+
+def is_memory_checkable(channel: MemoryChannel, catalog: Sequence[MemoryChannel]) -> bool:
+    """Whether anything can re-verify `channel`: a DID known answer or a relation."""
+    return channel.known_answer is not None or bool(memory_checks(channel, catalog))
+
+
+def window_key(channel: MemoryChannel) -> str:
+    """What groups `channel` with the others it is read beside: its window,
+    or a key no window can take."""
+    return channel.window or f"\x00{channel.name}"
+
+
+def relation_reads(
+    subject: MemoryChannel,
+    owner: MemoryChannel,
+    relation: MemoryRelation,
+    by_name: Mapping[str, MemoryChannel],
+) -> list[tuple[int, int]]:
+    """The service-0x23 reads (address, length) one sample of a check takes.
+
+    Channels sharing a window come back in one reply, as the collector reads
+    them. The read holding `subject` is widened by the subject's width on
+    both sides, so the same reply also carries the neighbouring bytes the
+    relation must fail on. The subject's read comes first.
+    """
+    groups: dict[str, list[MemoryChannel]] = {}
+    for name in relation_channel_names(owner, relation):
+        channel = by_name[name]
+        groups.setdefault(window_key(channel), []).append(channel)
+    reads: list[tuple[int, int]] = []
+    subject_key = window_key(subject)
+    for key in [subject_key, *(k for k in groups if k != subject_key)]:
+        members = groups[key]
+        start = min(c.address for c in members)
+        end = max(c.address + c.length for c in members)
+        if key == subject_key:
+            span_start, span_length = neighbour_span(subject)
+            start = min(start, span_start)
+            end = max(end, span_start + span_length)
+        reads.append((start, end - start))
+    return reads
+
+
+def neighbour_span(subject: MemoryChannel) -> tuple[int, int]:
+    """The (address, length) read that carries `subject` and both neighbours.
+
+    Widened by the subject's width on each side: a check is only evidence
+    if it fails on the bytes beside the address, so every verifier read --
+    a relation's or a DID known answer's -- takes them in the same reply.
+    """
+    start = subject.address - subject.byte_length
+    end = subject.address + subject.length + subject.byte_length
+    return start, end - start
+
+
 __all__ = [
     "VALUE_RELATION_KINDS",
+    "check_known_answer",
+    "is_memory_checkable",
+    "memory_checks",
+    "neighbour_span",
+    "relation_channel_names",
+    "relation_reads",
+    "window_key",
     "FlagEquivalenceRelation",
     "InvariantRelation",
     "MemoryArithmeticRelation",

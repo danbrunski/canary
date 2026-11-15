@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from src.collection.can_obd_client import ObdResponse
-from src.collection.can_obd_collector import _decode_response
+from src.collection.obd_response_decode import _decode_response
 from src.collection.obd_scheduler import _PollRequest
 from src.decode.dids import (
     apply_memory_scaling,

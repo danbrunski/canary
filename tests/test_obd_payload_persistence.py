@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.collection.can_obd_collector import _response_to_reading
 from src.collection.isotp import ObdResponse
 from src.collection.obd_collector import ObdReading, reading_to_record
+from src.collection.obd_response_decode import _response_to_reading
 from src.collection.obd_scheduler import _PollRequest
 from src.storage.parquet_writer import ParquetTelemetryWriter
 

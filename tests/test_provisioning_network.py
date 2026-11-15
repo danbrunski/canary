@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from collections.abc import Sequence
 from pathlib import Path
@@ -11,6 +12,7 @@ import pytest
 
 from src.provisioning.improv import WifiCredentials
 from src.provisioning.network import (
+    KIND_INTERNAL,
     PROFILE_PREFIX,
     JoinRefusedError,
     NetworkManagerCli,
@@ -24,6 +26,7 @@ from src.provisioning.network import (
     render_keyfile,
     split_terse,
     unescape_value,
+    write_secret_file,
 )
 
 SCAN_OUTPUT = "\n".join(
@@ -203,6 +206,39 @@ def test_join_success_writes_a_0600_keyfile(tmp_path: Path) -> None:
     assert runner.called("nmcli", "--wait", "30", "connection", "up", "uuid")
     # The secret never reaches an argv.
     assert not any("longenough" in " ".join(call) for call in runner.calls)
+
+
+def test_join_whose_keyfile_fsync_failed_is_an_internal_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R23.13: the keyfile write's fsync is strict, so a disk that did not take
+    the profile fails the join before NetworkManager is asked to load it."""
+
+    def broken(fd: int) -> None:
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(os, "fsync", broken)
+    runner = FakeRunner({SCAN: RunResult(0, SCAN_OUTPUT, "")})
+    result = _cli(runner, tmp_path).join(WifiCredentials("Starlink", "longenough"), timeout_s=30)
+    assert not result.ok
+    assert result.kind == KIND_INTERNAL
+    assert "Input/output error" in result.detail
+    assert not runner.called("nmcli", "connection", "load")
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_secret_file_temp_name_is_fixed_and_hidden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A temp a crash leaves holds a PSK: the fixed hidden name means the next
+    write replaces it instead of orphaning it."""
+    path = tmp_path / profile_filename("Starlink")
+    stale = tmp_path / f".{path.name}.tmp"
+    stale.write_text("psk=old")
+    write_secret_file(path, "psk=new\n")
+    assert path.read_text() == "psk=new\n"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert sorted(p.name for p in tmp_path.iterdir()) == [path.name]
 
 
 def test_failed_join_removes_a_new_profile(tmp_path: Path) -> None:

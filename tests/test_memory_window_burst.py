@@ -25,7 +25,7 @@ import can
 import pytest
 
 from src.collection import bus_budget, can_obd_loop, tuning_profile, tx_gate
-from src.collection.can_obd_collector import run_can_obd_loop
+from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.capture_profiles import CaptureProfile, CaptureProfileCatalog
 from src.collection.obd_collector import ObdReading
 from src.collection.obd_registry import MODE01_REGISTRY

@@ -46,10 +46,7 @@ except ImportError:  # loaded as `scripts.record` — repo root on path, not scr
 from src.can_ids import parse_standard_can_id
 from src.collection.can_bus import bus_factory
 from src.collection.can_collector import record
-from src.collection.can_obd_collector import (
-    CanObdSpec,
-    record_can_obd,
-)
+from src.collection.can_obd_collector import record_can_obd
 from src.collection.obd_collector import (
     JsonlReadingWriter,
     ObdSpec,
@@ -57,6 +54,7 @@ from src.collection.obd_collector import (
     resolve_pids,
     supervise_obd_capture,
 )
+from src.collection.obd_scheduler import CanObdSpec
 from src.collection.reconnect import DEFAULT_RECONNECT_POLICY
 from src.log import configure_logging
 from src.paths import DIDS_YAML

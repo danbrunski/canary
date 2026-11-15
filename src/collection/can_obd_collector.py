@@ -16,7 +16,7 @@ The public surfaces mirror the ELM327 collector:
 
 The loop itself is ``can_obd_loop``, its wire I/O ``can_obd_io`` and the
 response decoder ``obd_response_decode`` (R02.9). Mode 01 PIDs are decoded
-through ``pid_decoders.PID_DECODERS``; Mode 22 DIDs are emitted as
+through ``obd_registry.PID_DECODERS``; Mode 22 DIDs are emitted as
 ``DID_<hex>`` with the response payload hex string, matching the
 ``record.py --obd-dids`` sidecar shape.
 """
@@ -32,65 +32,14 @@ from collections.abc import Callable
 import can
 
 from src.collection.can_bus import broadcast_tap, bus_factory
-from src.collection.can_obd_client import (
-    PID_DECODERS,
-)
-
-# The loop, its wire I/O and the response decoder live in their own modules
-# (R02.9); the names below stay importable from here. Monkeypatch the loop's
-# ``next_wake_at`` / ``_drain_frames_until`` on ``can_obd_loop``, not here.
-from src.collection.can_obd_io import (
-    BatchedQueryResult,
-    QueryResult,
-    _batched_pid_width,
-    _drain_frames_until,
-    _frame_arrival,
-    _query_batched_with_tap,
-    _query_with_tap,
-    _read_calibration_id,
-    _recv_and_tap,
-    _send_session_control,
-)
-from src.collection.can_obd_loop import (
-    MAX_CONSECUTIVE_BATCH_FAILURES,
-    BatchGovernor,
-    BatchOutcome,
-    _cycle_plan_for,
-    _issue_batched_request,
-    _loop_request_verdict,
-    _next_batch_size,
-    run_can_obd_loop,
-)
-from src.collection.frame_time import KERNEL_STAMP_MAX_SKEW_SECONDS, FrameArrival
-from src.collection.isotp import (
-    MAX_RESPONSE_PENDING_EXTENSIONS,
-    RESPONSE_PENDING_EXTENSION_SECONDS,
-)
+from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.obd_reading import (
     JsonlReadingWriter,
     ObdReading,
     reading_to_record,
 )
-from src.collection.obd_response_decode import (
-    _decode_response,
-    _response_to_reading,
-)
-from src.collection.obd_scheduler import (
-    AUTO_PIDS,
-    DEFAULT_DID_REQUEST_ID,
-    CanObdLoopStats,
-    CanObdSpec,
-    DidSessionSpec,
-    ObdSchedulerMetrics,
-    PollRequest,
-    PollRequestState,
-    _initial_request_states,
-    _PollRequest,
-    build_poll_requests,
-    parse_did_token,
-    parse_pid_token,
-    resolve_did_session_spec,
-)
+from src.collection.obd_registry import PID_DECODERS
+from src.collection.obd_scheduler import CanObdSpec, ObdSchedulerMetrics
 from src.collection.queueing import (
     CollectorHandoffStats,
     HandoffStats,
@@ -495,45 +444,6 @@ def record_can_obd(
 
 __all__ = [
     "AUTO_BASELINE_PID_NAMES",
-    "AUTO_PIDS",
-    "DEFAULT_DID_REQUEST_ID",
-    "KERNEL_STAMP_MAX_SKEW_SECONDS",
-    "MAX_CONSECUTIVE_BATCH_FAILURES",
-    "MAX_RESPONSE_PENDING_EXTENSIONS",
-    "RESPONSE_PENDING_EXTENSION_SECONDS",
-    "BatchGovernor",
-    "BatchOutcome",
-    "BatchedQueryResult",
-    "CanObdLoopStats",
-    "CanObdSpec",
-    "DidSessionSpec",
-    "FrameArrival",
-    "ObdSchedulerMetrics",
-    "QueryResult",
-    "RecordingResult",
-    "build_poll_requests",
     "collect_can_obd_from_config",
-    "parse_did_token",
-    "parse_pid_token",
     "record_can_obd",
-    "resolve_did_session_spec",
-    "run_can_obd_loop",
-    "PollRequest",
-    "PollRequestState",
-    "_PollRequest",
-    "_batched_pid_width",
-    "_cycle_plan_for",
-    "_decode_response",
-    "_drain_frames_until",
-    "_frame_arrival",
-    "_initial_request_states",
-    "_issue_batched_request",
-    "_loop_request_verdict",
-    "_next_batch_size",
-    "_query_batched_with_tap",
-    "_query_with_tap",
-    "_read_calibration_id",
-    "_recv_and_tap",
-    "_response_to_reading",
-    "_send_session_control",
 ]

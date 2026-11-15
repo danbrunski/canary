@@ -28,11 +28,11 @@ from src.decode.dids import (
     DID_SOURCE,
     FOREIGN_DID_SOURCES,
     DidMap,
-    decode_did_rows,
     decode_raw_did_reading,
     did_entries_by_hex,
     load_repo_did_map,
 )
+from src.preprocessing.decode import decode_did_rows
 from src.storage.broadcast_storage import (
     _RECENT_INTERARRIVALS,
     CanChangeFilter,
@@ -354,7 +354,10 @@ def test_decode_did_rows_matches_the_iterrows_loop(session: bool, session_path: 
 def test_decode_did_rows_decodes_each_distinct_reading_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # decode_did_rows lives in preprocessing.decode since R23.15 and looks the
+    # per-reading decoder up there; the real one is still dids'.
     import src.decode.dids as dids
+    import src.preprocessing.decode as row_decode
 
     did_map = load_repo_did_map()
     assert did_map is not None
@@ -366,7 +369,7 @@ def test_decode_did_rows_decodes_each_distinct_reading_once(
         calls.append((channel, payload_hex))
         return real(by_hex, channel, payload_hex, source=source)
 
-    monkeypatch.setattr(dids, "decode_raw_did_reading", counting)
+    monkeypatch.setattr(row_decode, "decode_raw_did_reading", counting)
     decode_did_rows(frame, did_map)
     raw = frame[frame["channel"].str.startswith("DID_") & (frame["source"] != "kline")]
     distinct = {

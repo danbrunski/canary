@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -109,6 +110,24 @@ def test_a_pairing_the_disk_refused_does_not_work(
     with pytest.raises(OSError):
         store.pair("Pixel", method="test")
     assert store.list() == []
+
+
+def test_a_pairing_whose_fsync_failed_does_not_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R23.13: the real write path, failing at the fsync rather than the
+    write. The registry's fsync is strict, so the pairing never goes live and
+    no token is handed out."""
+    store = PairedDevices(tmp_path / "devices.json")
+
+    def broken(fd: int) -> None:
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(os, "fsync", broken)
+    with pytest.raises(OSError, match="Input/output error"):
+        store.pair("Pixel", method="test")
+    assert store.list() == []
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
 
 
 def test_names_are_cleaned() -> None:

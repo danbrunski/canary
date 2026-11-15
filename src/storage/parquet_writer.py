@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -35,7 +34,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from src.atomic_write import atomic_write_text
+from src.atomic_write import atomic_write_text, publish_atomic, temp_path
 from src.config import DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS
 from src.session import SessionPaths, make_session_dir, make_unique_session_dir, session_paths
 from src.storage.broadcast_storage import CanChangeFilter, CanStorage
@@ -735,30 +734,8 @@ def _write_table_atomic(table: Any, path: Path, *, compression: str) -> None:
     cut (key-off, no UPS) can leave the rename committed but the data still in
     the page cache, i.e. a renamed-but-empty truncated chunk.
     """
-    tmp_path = path.with_name(f"{path.name}.tmp")
+    tmp_path = temp_path(path)
     if tmp_path.exists():
         tmp_path.unlink()
     _PQ.write_table(table, tmp_path, compression=compression)
-    _fsync_path(tmp_path)
-    tmp_path.replace(path)
-    _fsync_path(path.parent)
-
-
-def _fsync_path(path: Path) -> None:
-    """Best-effort fsync of a file or directory; logs and continues on failure.
-
-    A failed fsync means that write isn't guaranteed durable, but crashing the
-    collector would lose more — so it's best-effort. Used to make each Parquet
-    chunk + its directory entry survive a power loss.
-    """
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except OSError as exc:
-        log.warning("fsync open failed for %s: %s", path, exc)
-        return
-    try:
-        os.fsync(fd)
-    except OSError as exc:
-        log.warning("fsync failed for %s: %s", path, exc)
-    finally:
-        os.close(fd)
+    publish_atomic(tmp_path, path, durable=True)

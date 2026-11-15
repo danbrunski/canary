@@ -27,6 +27,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
 
+from src.atomic_write import atomic_write_text
 from src.provisioning.improv import WifiCredentials
 
 log = logging.getLogger(__name__)
@@ -293,15 +294,15 @@ def _journal_path(path: Path) -> Path:
 
 
 def write_secret_file(path: Path, text: str) -> None:
-    """Atomically write a 0600 file: the secret is never readable, even briefly."""
-    tmp = path.with_name(f".{path.name}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        os.write(fd, text.encode("utf-8"))
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    os.replace(tmp, path)
+    """Atomically write a 0600 file: the secret is never readable, even briefly.
+
+    Hidden temp name: NetworkManager's keyfile plugin skips dot-files. Fixed,
+    not unique: callers hold the backend lock, and a temp a crash left (it
+    holds a PSK) is replaced by the next write rather than orphaned. A failed
+    fsync raises, so a join reports an internal error instead of loading a
+    profile the disk may not hold.
+    """
+    atomic_write_text(path, text, durable=True, strict_fsync=True, hidden_tmp=True, mode=0o600)
 
 
 # --- the backend ----------------------------------------------------------

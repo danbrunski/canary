@@ -122,8 +122,7 @@ def _decode_subset(
     session happened to store. Row-local, so a part of a session decodes
     exactly as the whole session would.
     """
-    from src.decode.dids import decode_did_rows
-    from src.preprocessing.decode import decode_can_rows
+    from src.preprocessing.decode import decode_can_rows, decode_did_rows
 
     is_can = long["source"] == "can"
     rest = long.loc[~is_can]

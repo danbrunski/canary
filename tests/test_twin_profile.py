@@ -41,7 +41,7 @@ from src.analysis.plant_validation import load_interventions
 from src.analysis.target_phi import load_twin_definition
 from src.analysis.twin_runner import BFS_CHANNEL_SETS, STAGES
 from src.collection import bus_budget, tuning_profile
-from src.collection.can_obd_collector import run_can_obd_loop
+from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.capture_profiles import (
     CAPTURE_CONTEXT_MODE01,
     CaptureProfile,

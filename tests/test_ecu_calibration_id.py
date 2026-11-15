@@ -23,7 +23,7 @@ from src.collection.calibration_id import (
     decode_calibration_id,
     resolve_calibration_id_spec,
 )
-from src.collection.can_obd_collector import run_can_obd_loop
+from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.obd_scheduler import CanObdLoopStats, CanObdSpec, DidSessionSpec
 from src.config import CanaryConfig
 from src.control.calibration import (
@@ -39,7 +39,8 @@ from src.control.tuning_readiness import (
     vehicle_state_entry,
 )
 from src.dashboard.status import build_status
-from src.decode.dids import DidAccess, is_memory_checkable, load_did_map
+from src.decode.dids import DidAccess, load_did_map
+from src.decode.memory_relations import is_memory_checkable
 from src.yaml_load import load_yaml
 from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock, isotp_frames
 

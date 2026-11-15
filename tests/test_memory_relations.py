@@ -34,17 +34,13 @@ from src.analysis.memory_verification import (
     verify_channel,
 )
 from src.control.calibration import memory_channel_state
-from src.decode.dids import (
-    DidMap,
-    MemoryChannel,
-    is_memory_checkable,
-    load_did_map,
-    memory_checks,
-    relation_reads,
-)
+from src.decode.dids import DidMap, MemoryChannel, load_did_map
 from src.decode.memory_relations import (
     MemoryArithmeticRelation,
     Mode01PidRelation,
+    is_memory_checkable,
+    memory_checks,
+    relation_reads,
     trunc_div,
 )
 from src.paths import DIDS_YAML

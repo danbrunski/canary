@@ -8,14 +8,17 @@ unknown).
 
 from __future__ import annotations
 
+import struct
+from collections.abc import Callable
+
 import pytest
 
+from src.collection import obd_registry, pid_decoders
 from src.collection.can_obd_client import PID_DECODERS
 from src.collection.obd_registry import (
     MODE01_REGISTRY,
     MODE09_REGISTRY,
     SERVICE_REGISTRY,
-    assert_pid_tables_consistent,
     classify_pid,
     decode_cvn,
     decode_fuel_rate,
@@ -49,38 +52,92 @@ def test_registry_reuses_pid_decoders_callables_not_copies() -> None:
         assert MODE01_REGISTRY[pid].decoder is decoder
 
 
-def test_assert_pid_tables_consistent_passes_on_real_tables() -> None:
-    """The startup assertion (Task 1.1) is a no-op against the real tables."""
-    assert_pid_tables_consistent()
+def test_pid_decoders_is_the_polled_rows_of_the_spec() -> None:
+    """R23.14: PID_DECODERS is derived from the registry's own rows, in PID
+    order, so the import-time consistency assertion has nothing left to check."""
+    assert PID_DECODERS == {
+        row.pid: (row.channel, row.decoder) for row in obd_registry._MODE01_SPEC if row.polled
+    }
+    assert list(PID_DECODERS) == sorted(PID_DECODERS)
+    assert not hasattr(obd_registry, "assert_pid_tables_consistent")
 
 
-def test_assert_pid_tables_consistent_catches_name_drift() -> None:
-    """A deliberately mismatched channel name must be caught, not silently
-    accepted."""
-    broken = dict(PID_DECODERS)
-    pid, (_name, decoder) = next(iter(broken.items()))
-    broken[pid] = ("SOME_OTHER_CHANNEL_NAME", decoder)
-    with pytest.raises(ValueError, match="channel-name drift"):
-        assert_pid_tables_consistent(pid_decoders=broken)
+def test_spec_rows_are_keyword_only() -> None:
+    with pytest.raises(TypeError):
+        obd_registry._Row(0x0C, "RPM")  # type: ignore[call-arg, misc]
 
 
-def test_assert_pid_tables_consistent_catches_decoder_drift() -> None:
-    """A deliberately mismatched decoder function must be caught."""
-    pid, (name, _decoder) = next(iter(PID_DECODERS.items()))
-    broken = dict(PID_DECODERS)
-    broken[pid] = (name, lambda data: None)
-    with pytest.raises(ValueError, match="decoder drift"):
-        assert_pid_tables_consistent(pid_decoders=broken)
+#: Every ``linear()`` decoder beside the formula it replaced, written the way
+#: the hand-written decoder computed it (R23.14). The sweep pins them equal
+#: bit for bit: a scale written as a float multiplier would not be
+#: (``35 * 0.01 != 35 / 100.0``).
+_LINEAR_FORMULAS = [
+    (pid_decoders.decode_rpm, 2, lambda r: r / 4.0, "rpm"),
+    (pid_decoders.decode_speed, 1, float, "kph"),
+    (pid_decoders.decode_temp_minus_40, 1, lambda r: float(r - 40), "degC"),
+    (pid_decoders.decode_percent_a_over_255, 1, lambda r: r * 100.0 / 255.0, "%"),
+    (pid_decoders.decode_percent_b_minus_128, 1, lambda r: (r - 128) * 100.0 / 128.0, "%"),
+    (pid_decoders.decode_maf, 2, lambda r: r / 100.0, "g/s"),
+    (pid_decoders.decode_intake_pressure, 1, float, "kPa"),
+    (pid_decoders.decode_baro, 1, float, "kPa"),
+    (pid_decoders.decode_o2_voltage, 1, lambda r: r / 200.0, "V"),
+    (pid_decoders.decode_control_module_voltage, 2, lambda r: r / 1000.0, "V"),
+    (pid_decoders.decode_run_time, 2, float, "s"),
+    (pid_decoders.decode_distance_km, 2, float, "km"),
+    (pid_decoders.decode_warmups, 1, float, "count"),
+    (pid_decoders.decode_fuel_status, 1, float, "bitmask"),
+    (pid_decoders.decode_catalyst_temp, 2, lambda r: r / 10.0 - 40.0, "degC"),
+    (pid_decoders.decode_absolute_load, 2, lambda r: r * 100.0 / 255.0, "%"),
+    (obd_registry.decode_fuel_pressure, 1, lambda r: float(r * 3), "kPa"),
+    (obd_registry.decode_bitmask_a, 1, float, "bitmask"),
+    (obd_registry.decode_enum, 1, float, "enum"),
+    (obd_registry.decode_fuel_rail_pressure_vac, 2, lambda r: r * 0.079, "kPa"),
+    (obd_registry.decode_fuel_rail_gauge_pressure, 2, lambda r: float(r * 10), "kPa"),
+    (decode_minutes, 2, float, "min"),
+    (obd_registry.decode_abs_evap_pressure, 2, lambda r: r / 200.0, "kPa"),
+    (obd_registry.decode_evap_pressure_pa, 2, lambda r: float(r - 32767), "Pa"),
+    (decode_injection_timing, 2, lambda r: (r - 26880) / 128.0, "deg"),
+    (decode_fuel_rate, 2, lambda r: r / 20.0, "L/h"),
+    (decode_torque_percent, 1, lambda r: float(r - 125), "%"),
+    (obd_registry.decode_reference_torque, 2, float, "Nm"),
+]
 
 
-def test_assert_pid_tables_consistent_catches_missing_registry_entry() -> None:
-    """A PID_DECODERS entry with no matching MODE01_REGISTRY row must be
-    caught, not silently skipped."""
-    stripped = dict(MODE01_REGISTRY)
-    pid = next(iter(PID_DECODERS))
-    del stripped[pid]
-    with pytest.raises(ValueError, match="MODE01_REGISTRY does not"):
-        assert_pid_tables_consistent(mode01_registry=stripped)
+@pytest.mark.parametrize(
+    ("decoder", "width", "formula", "unit"),
+    _LINEAR_FORMULAS,
+    ids=[decoder.__name__ for decoder, *_ in _LINEAR_FORMULAS],
+)
+def test_linear_decoders_match_their_formula_bit_for_bit(
+    decoder: Callable[[bytes], tuple[float, str] | None],
+    width: int,
+    formula: Callable[[int], float],
+    unit: str,
+) -> None:
+    for raw in range(1 << (8 * width)):
+        payload = raw.to_bytes(width, "big") + b"\xa5"
+        result = decoder(payload)
+        assert result is not None
+        value, got_unit = result
+        expected = formula(raw)
+        assert type(value) is float and got_unit == unit
+        assert struct.pack(">d", value) == struct.pack(">d", expected), (raw, value, expected)
+    assert decoder(bytes(width - 1)) is None
+
+
+def test_linear_signed_and_float_scale() -> None:
+    signed = pid_decoders.decode_evap_vapor_pressure_signed
+    for raw in range(-32768, 32768, 7):
+        assert signed(raw.to_bytes(2, "big", signed=True)) == (raw / 4.0, "Pa")
+    assert pid_decoders.linear(2, "1/100", 0, "g/s")(bytes([0, 35])) == (35 / 100.0, "g/s")
+    assert 35 / 100.0 != 35 * 0.01  # why the scale is a rational, not a multiplier
+    assert pid_decoders.decode_rpm.__name__ == "linear(2, 1/4, 0, 'rpm')"
+
+
+def test_obd_standard_and_fuel_type_share_one_decoder() -> None:
+    assert (
+        MODE01_REGISTRY[0x1C].decoder is MODE01_REGISTRY[0x51].decoder is obd_registry.decode_enum
+    )
 
 
 def test_support_group_assignment() -> None:

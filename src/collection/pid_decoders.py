@@ -4,7 +4,8 @@ Pure functions of a response payload: no python-can, no transport. They lived
 inside ``can_obd_client`` beside ``CanObdClient``, which made ``obd_registry``
 import the transport client (including the private ``need_bytes``) and forced the
 client to take ``byte_length_for`` by injection to dodge the import cycle.
-``can_obd_client`` re-exports every name here.
+``can_obd_client`` re-exports every name here. ``PID_DECODERS``, the table of
+polled PIDs, is derived from the registry's rows in ``obd_registry`` (R23.14).
 
 This is a relocation, not a merge: the ELM327 path's decoders
 (``obd_collector`` / ``pids``) stay separate by the July decision
@@ -15,19 +16,58 @@ This is a relocation, not a merge: the ELM327 path's decoders
 from __future__ import annotations
 
 from collections.abc import Callable
+from fractions import Fraction
 
 # ---------------------------------------------------------------------------
 # PID decoders — SAE J1979 standardized formulas.
 # Each takes the response payload (bytes after `41 PID`) and returns
-# (value, unit). Decoders match python-obd's output for the same PIDs.
-# Where the PID returns a single byte and the formula is "A−40" or
-# "A * 100 / 255", we keep it explicit for readability over micro-DRY.
+# (value, unit), or None when the payload is too short. Decoders match
+# python-obd's output for the same PIDs.
 # ---------------------------------------------------------------------------
+
+#: The decoder shape every Mode 01 PID shares.
+PidDecoder = Callable[[bytes], tuple[float, str] | None]
 
 
 def need_bytes(data: bytes, n: int) -> bool:
     """Whether ``data`` carries at least ``n`` payload bytes."""
     return len(data) >= n
+
+
+def linear(
+    width: int,
+    scale: int | float | str | Fraction,
+    offset: int,
+    unit: str,
+    *,
+    signed: bool = False,
+) -> PidDecoder:
+    """A decoder for ``raw * scale + offset``, ``raw`` the first ``width``
+    payload bytes as a big-endian integer (R23.14).
+
+    ``scale`` is exact: ``"100/255"`` or ``Fraction(1, 4)`` is that rational,
+    and a float is its own binary value. The value is ``raw * numerator /
+    denominator`` in integer arithmetic with one correctly rounded division,
+    so ``"1/100"`` gives what ``raw / 100.0`` gave and ``0.079`` what
+    ``raw * 0.079`` gave, bit for bit (``raw * 0.01`` would not). ``offset``
+    is an integer, added after the scale; the formulas written ``(A - 128) *
+    100/128`` are ``linear(1, "100/128", -100, ...)``, exact because the
+    scaled value is.
+    """
+    ratio = Fraction(scale)
+    numerator, denominator = ratio.numerator, ratio.denominator
+
+    def decode(data: bytes) -> tuple[float, str] | None:
+        if len(data) < width:
+            return None
+        raw = int.from_bytes(data[:width], "big", signed=signed)
+        value = raw * numerator / denominator
+        return (value + offset if offset else value, unit)
+
+    decode.__qualname__ = decode.__name__ = (
+        f"linear({width}, {ratio}, {offset}, {unit!r}{', signed' if signed else ''})"
+    )
+    return decode
 
 
 def decode_monitor_status(data: bytes) -> tuple[float, str] | None:
@@ -55,56 +95,19 @@ def decode_mil_on(data: bytes) -> bool | None:
     return bool(data[0] & 0x80)
 
 
-def decode_rpm(data: bytes) -> tuple[float, str] | None:
-    if not need_bytes(data, 2):
-        return None
-    return ((data[0] * 256 + data[1]) / 4.0, "rpm")
-
-
-def decode_speed(data: bytes) -> tuple[float, str] | None:
-    if not need_bytes(data, 1):
-        return None
-    return (float(data[0]), "kph")
-
-
-def decode_temp_minus_40(data: bytes) -> tuple[float, str] | None:
-    """COOLANT_TEMP / INTAKE_TEMP / AMBIANT_AIR_TEMP / OIL_TEMP."""
-    if not need_bytes(data, 1):
-        return None
-    return (float(data[0] - 40), "degC")
-
-
-def decode_percent_a_over_255(data: bytes) -> tuple[float, str] | None:
-    """THROTTLE_POS / ENGINE_LOAD / RELATIVE_THROTTLE_POS / FUEL_LEVEL / etc."""
-    if not need_bytes(data, 1):
-        return None
-    return (data[0] * 100.0 / 255.0, "%")
-
-
-def decode_percent_b_minus_128(data: bytes) -> tuple[float, str] | None:
-    """SHORT_FUEL_TRIM / LONG_FUEL_TRIM, both banks. Range −100% to +99.2%."""
-    if not need_bytes(data, 1):
-        return None
-    return ((data[0] - 128) * 100.0 / 128.0, "%")
-
-
-def decode_maf(data: bytes) -> tuple[float, str] | None:
-    if not need_bytes(data, 2):
-        return None
-    return ((data[0] * 256 + data[1]) / 100.0, "g/s")
-
-
-def decode_intake_pressure(data: bytes) -> tuple[float, str] | None:
-    if not need_bytes(data, 1):
-        return None
-    return (float(data[0]), "kPa")
-
-
-def decode_baro(data: bytes) -> tuple[float, str] | None:
-    if not need_bytes(data, 1):
-        return None
-    return (float(data[0]), "kPa")
-
+decode_rpm = linear(2, "1/4", 0, "rpm")
+decode_speed = linear(1, 1, 0, "kph")
+#: COOLANT_TEMP / INTAKE_TEMP / AMBIANT_AIR_TEMP / OIL_TEMP.
+decode_temp_minus_40 = linear(1, 1, -40, "degC")
+#: THROTTLE_POS / ENGINE_LOAD / RELATIVE_THROTTLE_POS / FUEL_LEVEL /
+#: COMMANDED_EGR / EVAPORATIVE_PURGE / etc.
+decode_percent_a_over_255 = linear(1, "100/255", 0, "%")
+#: SHORT_FUEL_TRIM / LONG_FUEL_TRIM, both banks, and EGR_ERROR:
+#: ``(A - 128) * 100/128``. Range -100% to +99.2%.
+decode_percent_b_minus_128 = linear(1, "100/128", -100, "%")
+decode_maf = linear(2, "1/100", 0, "g/s")
+decode_intake_pressure = linear(1, 1, 0, "kPa")
+decode_baro = linear(1, 1, 0, "kPa")
 
 #: Raw 0xFF on PID 0x0E is the ECU's "not available" sentinel, not a reading.
 #: It decodes to exactly 63.5 degBTDC — the top of the A/2-64 scale — which is
@@ -138,35 +141,20 @@ def decode_timing_advance(data: bytes) -> tuple[float, str] | None:
     return (data[0] / 2.0 - 64.0, "degBTDC")
 
 
-def decode_o2_voltage(data: bytes) -> tuple[float, str] | None:
-    """Narrowband O2 voltage; byte B is short-term fuel trim if present."""
-    if not need_bytes(data, 1):
-        return None
-    return (data[0] / 200.0, "V")
+#: Narrowband O2 voltage; byte B is short-term fuel trim if present.
+decode_o2_voltage = linear(1, "1/200", 0, "V")
 
 
-def decode_control_module_voltage(data: bytes) -> tuple[float, str] | None:
-    if not need_bytes(data, 2):
-        return None
-    return ((data[0] * 256 + data[1]) / 1000.0, "V")
+decode_control_module_voltage = linear(2, "1/1000", 0, "V")
 
 
-def decode_run_time(data: bytes) -> tuple[float, str] | None:
-    if not need_bytes(data, 2):
-        return None
-    return (float(data[0] * 256 + data[1]), "s")
+decode_run_time = linear(2, 1, 0, "s")
 
 
-def decode_distance_km(data: bytes) -> tuple[float, str] | None:
-    if not need_bytes(data, 2):
-        return None
-    return (float(data[0] * 256 + data[1]), "km")
+decode_distance_km = linear(2, 1, 0, "km")
 
 
-def decode_warmups(data: bytes) -> tuple[float, str] | None:
-    if not need_bytes(data, 1):
-        return None
-    return (float(data[0]), "count")
+decode_warmups = linear(1, 1, 0, "count")
 
 
 def decode_commanded_lambda(data: bytes) -> tuple[float, str] | None:
@@ -209,135 +197,46 @@ def decode_wide_lambda(data: bytes) -> tuple[float, str] | None:
     sensor voltage or current. λ is the model-relevant channel; the raw
     voltage/current goes unused. Single-sourced here (not ``obd_registry.py``)
     because sensors 1/2 (0x24/0x25/0x34/0x35) and sensor 5 (0x28) are polled
-    directly via ``PID_DECODERS``; the remaining wide-lambda PIDs still import this
-    from here for their unpolled-but-decodable registry entries.
+    (``PID_DECODERS``); the registry rows for the rest decode with it too.
     """
     if not need_bytes(data, 2):
         return None
     return ((data[0] * 256 + data[1]) / 32768.0, "ratio")
 
 
-def decode_fuel_status(data: bytes) -> tuple[float, str] | None:
-    """PID 0x03 fuel-system status.
-
-    SAE J1979 returns two bitmask bytes. The first byte carries the primary
-    fuel-system state for vehicles with one bank; preserving it as a numeric
-    bitmask keeps the channel model-friendly while avoiding a vehicle-specific
-    enum interpretation in the collector.
-    """
-    if not need_bytes(data, 1):
-        return None
-    return (float(data[0]), "bitmask")
+#: PID 0x03 fuel-system status. SAE J1979 returns two bitmask bytes. The
+#: first carries the primary fuel-system state for vehicles with one bank;
+#: preserving it as a numeric bitmask keeps the channel model-friendly while
+#: avoiding a vehicle-specific enum interpretation in the collector.
+decode_fuel_status = linear(1, 1, 0, "bitmask")
 
 
-def decode_evap_vapor_pressure_signed(data: bytes) -> tuple[float, str] | None:
-    """PID 0x32: signed 16-bit / 4 Pa. Negative = vacuum."""
-    if not need_bytes(data, 2):
-        return None
-    raw = int.from_bytes(data[:2], byteorder="big", signed=True)
-    return (raw / 4.0, "Pa")
+#: PID 0x32: signed 16-bit / 4 Pa. Negative = vacuum.
+decode_evap_vapor_pressure_signed = linear(2, "1/4", 0, "Pa", signed=True)
 
 
-def decode_egr_percent(data: bytes) -> tuple[float, str] | None:
-    """COMMANDED_EGR: A * 100/255."""
-    return decode_percent_a_over_255(data)
+#: COMMANDED_EGR: A * 100/255.
+decode_egr_percent = decode_percent_a_over_255
 
 
-def decode_egr_error(data: bytes) -> tuple[float, str] | None:
-    """EGR_ERROR: (A − 128) * 100/128. Range −100%..+99.2%."""
-    return decode_percent_b_minus_128(data)
+#: EGR_ERROR: (A - 128) * 100/128. Range -100%..+99.2%.
+decode_egr_error = decode_percent_b_minus_128
 
 
-def decode_evap_purge(data: bytes) -> tuple[float, str] | None:
-    return decode_percent_a_over_255(data)
+decode_evap_purge = decode_percent_a_over_255
 
 
-def decode_catalyst_temp(data: bytes) -> tuple[float, str] | None:
-    """CATALYST_TEMP_*: ((A*256+B) / 10) − 40. Often unsupported on US-spec
-    light vehicles even when claimed."""
-    if not need_bytes(data, 2):
-        return None
-    return ((data[0] * 256 + data[1]) / 10.0 - 40.0, "degC")
+#: CATALYST_TEMP_*: ((A*256+B) / 10) - 40. Often unsupported on US-spec
+#: light vehicles even when claimed.
+decode_catalyst_temp = linear(2, "1/10", -40, "degC")
 
 
-def decode_absolute_load(data: bytes) -> tuple[float, str] | None:
-    """ABSOLUTE_LOAD (PID 0x43): 2-byte percent, ``(A*256+B) * 100/255``.
-
-    Task 2.3: SAE J1979 defines this PID as 2-byte (unlike the 1-byte
-    ``decode_percent_a_over_255`` family) so it can read past 100% — real
-    under boost/load on many engines. The old 1-byte decode silently
-    truncated/wrapped above that.
-    """
-    if not need_bytes(data, 2):
-        return None
-    return ((data[0] * 256 + data[1]) * 100.0 / 255.0, "%")
-
-
-#: Registry: PID number → (name, decoder). Drives both the
-#: ``read_supported`` flow and any caller that wants to translate a numeric
-#: PID into a named telemetry channel.
-PID_DECODERS: dict[int, tuple[str, Callable[[bytes], tuple[float, str] | None]]] = {
-    0x01: ("MONITOR_STATUS", decode_monitor_status),
-    0x03: ("FUEL_STATUS", decode_fuel_status),
-    0x04: ("ENGINE_LOAD", decode_percent_a_over_255),
-    0x05: ("COOLANT_TEMP", decode_temp_minus_40),
-    0x06: ("SHORT_FUEL_TRIM_1", decode_percent_b_minus_128),
-    0x07: ("LONG_FUEL_TRIM_1", decode_percent_b_minus_128),
-    0x08: ("SHORT_FUEL_TRIM_2", decode_percent_b_minus_128),
-    0x09: ("LONG_FUEL_TRIM_2", decode_percent_b_minus_128),
-    0x0B: ("INTAKE_PRESSURE", decode_intake_pressure),
-    0x0C: ("RPM", decode_rpm),
-    0x0D: ("SPEED", decode_speed),
-    0x0E: ("TIMING_ADVANCE", decode_timing_advance),
-    0x0F: ("INTAKE_TEMP", decode_temp_minus_40),
-    0x10: ("MAF", decode_maf),
-    0x11: ("THROTTLE_POS", decode_percent_a_over_255),
-    0x14: ("O2_B1S1", decode_o2_voltage),
-    0x15: ("O2_B1S2", decode_o2_voltage),
-    0x18: ("O2_B2S1", decode_o2_voltage),
-    0x19: ("O2_B2S2", decode_o2_voltage),
-    0x1F: ("RUN_TIME", decode_run_time),
-    0x21: ("DISTANCE_W_MIL", decode_distance_km),
-    # Wide-range O2 λ, bank-1 sensor 1/2 (Task 2.1): 0x24/0x25 are the
-    # "equivalence ratio" variant, 0x34/0x35 the "current" variant — probe
-    # which the ECM answers; the ECM claiming support for one over the
-    # other is normal, so both are decoded identically (decode_wide_lambda
-    # ignores the raw voltage/current bytes either way).
-    0x24: ("O2_WR_LAMBDA_S1", decode_wide_lambda),
-    0x25: ("O2_WR_LAMBDA_S2", decode_wide_lambda),
-    # Sensor 5: bank 2 sensor 1 under the PID 0x13 O2 layout, bank 3 sensor 1
-    # under 0x1D. Which bank it is belongs to the vehicle
-    # (``WIDEBAND_LAMBDA`` in src.signals.vehicle_signals). Polled since
-    # D03.34 (2026-09-26).
-    0x28: ("O2_WR_LAMBDA_S5", decode_wide_lambda),
-    0x2C: ("COMMANDED_EGR", decode_egr_percent),
-    0x2D: ("EGR_ERROR", decode_egr_error),
-    0x2E: ("EVAPORATIVE_PURGE", decode_evap_purge),
-    0x2F: ("FUEL_LEVEL", decode_percent_a_over_255),
-    0x30: ("WARMUPS_SINCE_DTC_CLEAR", decode_warmups),
-    0x31: ("DISTANCE_SINCE_DTC_CLEAR", decode_distance_km),
-    0x32: ("EVAP_VAPOR_PRESSURE", decode_evap_vapor_pressure_signed),
-    0x33: ("BAROMETRIC_PRESSURE", decode_baro),
-    0x34: ("O2_WR_CURRENT_S1", decode_wide_lambda),
-    0x35: ("O2_WR_CURRENT_S2", decode_wide_lambda),
-    0x3C: ("CATALYST_TEMP_B1S1", decode_catalyst_temp),
-    0x3D: ("CATALYST_TEMP_B2S1", decode_catalyst_temp),
-    0x3E: ("CATALYST_TEMP_B1S2", decode_catalyst_temp),
-    0x3F: ("CATALYST_TEMP_B2S2", decode_catalyst_temp),
-    0x42: ("CONTROL_MODULE_VOLTAGE", decode_control_module_voltage),
-    0x43: ("ABSOLUTE_LOAD", decode_absolute_load),
-    0x44: ("COMMANDED_EQUIV_RATIO", decode_commanded_lambda),
-    0x45: ("RELATIVE_THROTTLE_POS", decode_percent_a_over_255),
-    0x46: ("AMBIANT_AIR_TEMP", decode_temp_minus_40),
-    # Throttle/pedal family (Task 2.2): one-time probe on the Xterra's real
-    # ECM (both KOEO and engine-running) confirmed it answers these four but
-    # not 0x48/0x4B — see data/nissan-xterra-2008/pid-probe-2026-07-22.md.
-    0x47: ("ABS_THROTTLE_POS_B", decode_percent_a_over_255),
-    0x49: ("ACCEL_PEDAL_POS_D", decode_percent_a_over_255),
-    0x4A: ("ACCEL_PEDAL_POS_E", decode_percent_a_over_255),
-    0x4C: ("COMMANDED_THROTTLE_ACTUATOR", decode_percent_a_over_255),
-    0x5C: ("OIL_TEMP", decode_temp_minus_40),
-}
+#: ABSOLUTE_LOAD (PID 0x43): 2-byte percent, ``(A*256+B) * 100/255``.
+#: Task 2.3: SAE J1979 defines this PID as 2-byte (unlike the 1-byte
+#: ``decode_percent_a_over_255`` family) so it can read past 100% — real
+#: under boost/load on many engines. The old 1-byte decode silently
+#: truncated/wrapped above that.
+decode_absolute_load = linear(2, "100/255", 0, "%")
 
 
 # ---------------------------------------------------------------------------
@@ -375,7 +274,8 @@ def parse_dtc_payload(data: bytes) -> list[str]:
 
 __all__ = [
     "need_bytes",
-    "PID_DECODERS",
+    "PidDecoder",
+    "linear",
     "TIMING_ADVANCE_UNAVAILABLE",
     "decode_absolute_load",
     "decode_baro",

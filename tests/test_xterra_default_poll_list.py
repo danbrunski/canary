@@ -22,9 +22,8 @@ from src.collection.capture_profiles import (
     CaptureProfile,
     CaptureProfileCatalog,
 )
-from src.collection.obd_registry import MODE01_REGISTRY, PollTier
+from src.collection.obd_registry import MODE01_REGISTRY, PID_DECODERS, PollTier
 from src.collection.obd_scheduler.cadence import TIER_RATE_FACTORS
-from src.collection.pid_decoders import PID_DECODERS
 from src.features.capture_inputs import model_input_warnings
 from src.yaml_load import load_yaml
 

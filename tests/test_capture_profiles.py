@@ -1280,7 +1280,7 @@ def test_active_profile_cannot_be_deleted_via_a_case_variant(tmp_path: Path) -> 
 def test_collectors_enable_multi_pid_batching_from_config() -> None:
     """Batched PIDs share one request and one timestamp — the whole point of a
     capture reading as synchronous rows rather than interleaved samples."""
-    from src.collection.can_obd_collector import CanObdSpec
+    from src.collection.obd_scheduler import CanObdSpec
 
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     assert config.collection.obd_batch_max_pids == 6, "batch when the protocol allows it"

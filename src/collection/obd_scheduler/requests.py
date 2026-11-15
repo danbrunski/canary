@@ -516,9 +516,9 @@ def _pid_channel_and_tier(pid: int) -> tuple[str, PollTier]:
     tables keyed by the same pid, with nothing tying them together. Both now
     come from a single ``lookup()`` call so they can never split. Falls back
     to ``PID_DECODERS``'s name / a "medium" tier only if the registry somehow
-    lacks the pid (`assert_pid_tables_consistent` makes that unreachable for
-    any pid `build_poll_requests` can produce, since it only builds requests
-    for pids already in `PID_DECODERS`).
+    lacks the pid (unreachable for any pid `build_poll_requests` can produce:
+    it only builds requests for pids in `PID_DECODERS`, which R23.14 derives
+    from the registry's own rows).
     """
     definition = lookup(0x01, pid)
     if definition is None:

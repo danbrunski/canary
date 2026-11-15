@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 
 from src.collection import discovery as discovery_registry
 from src.collection import tuning_profile
-from src.collection.can_obd_collector import run_can_obd_loop
+from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.capture_profiles import CaptureProfile
 from src.collection.obd_collector import ObdReading, reading_to_record
 from src.collection.obd_scheduler import (

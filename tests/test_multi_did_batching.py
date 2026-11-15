@@ -24,7 +24,7 @@ import can
 import pytest
 
 from src.analysis.did_scan import BatchRead, sweep_dids_batched
-from src.collection.can_obd_collector import run_can_obd_loop
+from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.isotp import (
     MAX_BATCHED_DIDS,
     build_batched_did_request_payload,

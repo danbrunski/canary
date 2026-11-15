@@ -19,7 +19,6 @@ from pydantic import ValidationError
 from src.analysis.ecu_application import load_application_model
 from src.decode.dids import (
     apply_memory_scaling,
-    check_known_answer,
     decode_memory_raw,
     decode_memory_window,
     load_did_map,
@@ -29,6 +28,7 @@ from src.decode.memory_relations import (
     InvariantRelation,
     MemoryArithmeticRelation,
     MemoryRelation,
+    check_known_answer,
 )
 from src.paths import DIDS_YAML
 from tests.test_memory_catalog_knock_lambda import LIVE_READ_METHODS

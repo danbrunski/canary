@@ -23,7 +23,7 @@ import threading
 import pytest
 
 from src.collection import tuning_profile, tx_gate
-from src.collection.can_obd_collector import run_can_obd_loop
+from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.capture_profiles import CaptureProfile
 from src.collection.obd_collector import ObdReading
 from src.collection.obd_scheduler import (

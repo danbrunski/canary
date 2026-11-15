@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any, cast
 
 from src.analysis.memory_verification import MemoryVerificationClient
-from src.decode.dids import MemoryChannel, MemoryKnownAnswer, is_memory_checkable, load_did_map
+from src.decode.dids import MemoryChannel, MemoryKnownAnswer, load_did_map
+from src.decode.memory_relations import is_memory_checkable
 from tools.verify_memory_channels import (
     ChannelVerdict,
     plan_restamp,

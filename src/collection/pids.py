@@ -2,7 +2,7 @@
 
 The source of truth for that one transport only, through python-OBD's
 command objects. The CAN-native path decodes through
-``pid_decoders.PID_DECODERS`` with its metadata in ``obd_registry``; the two
+``obd_registry.PID_DECODERS`` with its metadata in ``obd_registry``; the two
 PID sets are complementary by design (the July decision), not a single table.
 Adding a PID here reaches the ELM327 collector only.
 

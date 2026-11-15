@@ -365,7 +365,7 @@ def test_did_catalog_entries_are_pinned_to_the_firmware(pin: dict[str, Any]) -> 
     (0x1125 as bank 2, the pre-2026-10-04 catalog) or short for long fails
     here even though no capture can pair a trim DID with its PID yet.
     """
-    from src.collection.pid_decoders import PID_DECODERS
+    from src.collection.obd_registry import PID_DECODERS
 
     entry = next(e for e in load_did_map(DIDS_PATH).dids if e.did == pin["did"])
     assert entry.name == pin["name"]
@@ -437,7 +437,7 @@ def test_did_scale_reproduces_the_ecm_own_pid_conversion(pin: dict[str, Any]) ->
     two must agree exactly, not within a step: 0x1117's old 100/256 lies
     within one PID 0x04 step of 100/255 everywhere and fails only that.
     """
-    from src.collection.pid_decoders import PID_DECODERS
+    from src.collection.obd_registry import PID_DECODERS
     from src.decode.dids import apply_scaling, decode_did_raw
 
     entry = next(e for e in load_did_map(DIDS_PATH).dids if e.did == pin["did"])

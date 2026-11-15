@@ -1,16 +1,17 @@
 """Typed SAE J1979 PID / service registry (Task 6.1).
 
-``pid_decoders.PID_DECODERS`` is the minimal "PID number → (name, decoder)"
-table the streaming collector polls. This module is the *metadata* layer on top
-of it: every public observation PID/service exposed by the scheduled poller, with the
+Every public observation PID/service exposed by the scheduled poller, with the
 information the dashboard and coverage views (Task 6.3) need to explain *why* a
-supported PID is or isn't a usable telemetry channel.
+supported PID is or isn't a usable telemetry channel. ``PID_DECODERS``, the
+minimal "PID number → (name, decoder)" table the streaming collector polls, is
+derived from the ``polled`` rows of the Mode 01 spec here (R23.14): one fact,
+one table, so the two cannot drift.
 
 Design:
 
-* The numeric Mode 01 decoders stay single-sourced in ``pid_decoders`` — this
+* The polled Mode 01 decoders stay single-sourced in ``pid_decoders`` — this
   module *imports* them, never re-implements them. PIDs whose J1979 formula is
-  well-defined but not in ``PID_DECODERS`` get a decoder defined here; PIDs that
+  well-defined but not polled get a decoder defined here; PIDs that
   are real and supportable but whose value we deliberately don't decode get
   ``decoder=None`` so they classify as "supported but not decoded" rather than
   vanishing (Risk R7 in the plan).
@@ -27,17 +28,37 @@ send those or any other service byte.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
 from src.collection.pid_decoders import (
-    PID_DECODERS,
+    PidDecoder,
+    decode_absolute_load,
+    decode_baro,
+    decode_catalyst_temp,
+    decode_commanded_lambda,
+    decode_control_module_voltage,
+    decode_distance_km,
+    decode_egr_error,
+    decode_egr_percent,
+    decode_evap_purge,
+    decode_evap_vapor_pressure_signed,
+    decode_fuel_status,
+    decode_intake_pressure,
+    decode_maf,
+    decode_monitor_status,
     decode_o2_voltage,
     decode_percent_a_over_255,
     decode_percent_b_minus_128,
+    decode_rpm,
+    decode_run_time,
+    decode_speed,
+    decode_temp_minus_40,
+    decode_timing_advance,
+    decode_warmups,
     decode_wide_lambda,
-    need_bytes,
+    linear,
     parse_dtc_payload,
 )
 
@@ -45,6 +66,7 @@ __all__ = [
     "MISFIRE_COUNT_CHANNEL_PREFIX",
     "MODE01_REGISTRY",
     "MODE09_REGISTRY",
+    "PID_DECODERS",
     "SERVICE_REGISTRY",
     "Category",
     "DashboardHint",
@@ -52,7 +74,6 @@ __all__ = [
     "PidDefinition",
     "PollTier",
     "ServiceDefinition",
-    "assert_pid_tables_consistent",
     "classify_pid",
     "decode_ascii",
     "decode_calibration_ids",
@@ -137,101 +158,36 @@ class ServiceDefinition:
 
 
 # ---------------------------------------------------------------------------
-# Decoders for well-defined J1979 PIDs not carried by PID_DECODERS.
-# Single-source rule: numeric decoders already in pid_decoders are imported,
-# never duplicated. These cover formula-stable PIDs it doesn't.
+# Decoders for well-defined J1979 PIDs the collector does not poll.
+# Single-source rule: decoders already in pid_decoders are imported, never
+# duplicated. These cover formula-stable PIDs it doesn't.
 # ---------------------------------------------------------------------------
 
-
-def decode_fuel_pressure(data: bytes) -> tuple[float, str] | None:
-    """PID 0x0A: gauge fuel pressure, ``A * 3`` kPa."""
-    if not need_bytes(data, 1):
-        return None
-    return (float(data[0] * 3), "kPa")
-
-
-def decode_bitmask_a(data: bytes) -> tuple[float, str] | None:
-    """Single-byte status bitmask (secondary-air status, O2-present, …)."""
-    if not need_bytes(data, 1):
-        return None
-    return (float(data[0]), "bitmask")
-
-
-def decode_obd_standard(data: bytes) -> tuple[float, str] | None:
-    """PID 0x1C: which OBD standard the ECU conforms to (enum code)."""
-    if not need_bytes(data, 1):
-        return None
-    return (float(data[0]), "enum")
-
-
-def decode_fuel_rail_pressure_vac(data: bytes) -> tuple[float, str] | None:
-    """PID 0x22: fuel rail pressure rel. to manifold vacuum, ``*0.079`` kPa."""
-    if not need_bytes(data, 2):
-        return None
-    return ((data[0] * 256 + data[1]) * 0.079, "kPa")
-
-
-def decode_fuel_rail_gauge_pressure(data: bytes) -> tuple[float, str] | None:
-    """PID 0x23 / 0x59: fuel rail gauge/absolute pressure, ``*10`` kPa."""
-    if not need_bytes(data, 2):
-        return None
-    return (float((data[0] * 256 + data[1]) * 10), "kPa")
-
-
-def decode_minutes(data: bytes) -> tuple[float, str] | None:
-    """PID 0x4D / 0x4E: a time counter in minutes, ``A*256+B``."""
-    if not need_bytes(data, 2):
-        return None
-    return (float(data[0] * 256 + data[1]), "min")
-
-
-def decode_fuel_type(data: bytes) -> tuple[float, str] | None:
-    """PID 0x51: fuel type (enum code; 1 = gasoline, 4 = diesel, …)."""
-    if not need_bytes(data, 1):
-        return None
-    return (float(data[0]), "enum")
-
-
-def decode_abs_evap_pressure(data: bytes) -> tuple[float, str] | None:
-    """PID 0x53: absolute evap system vapor pressure, ``(A*256+B)/200`` kPa."""
-    if not need_bytes(data, 2):
-        return None
-    return ((data[0] * 256 + data[1]) / 200.0, "kPa")
-
-
-def decode_evap_pressure_pa(data: bytes) -> tuple[float, str] | None:
-    """PID 0x54: evap system vapor pressure, ``(A*256+B) - 32767`` Pa."""
-    if not need_bytes(data, 2):
-        return None
-    return (float((data[0] * 256 + data[1]) - 32767), "Pa")
-
-
-def decode_injection_timing(data: bytes) -> tuple[float, str] | None:
-    """PID 0x5D: fuel injection timing, ``((A*256+B) - 26880)/128`` deg."""
-    if not need_bytes(data, 2):
-        return None
-    return (((data[0] * 256 + data[1]) - 26880) / 128.0, "deg")
-
-
-def decode_fuel_rate(data: bytes) -> tuple[float, str] | None:
-    """PID 0x5E: engine fuel rate, ``(A*256+B)/20`` L/h."""
-    if not need_bytes(data, 2):
-        return None
-    return ((data[0] * 256 + data[1]) / 20.0, "L/h")
-
-
-def decode_torque_percent(data: bytes) -> tuple[float, str] | None:
-    """PID 0x61 / 0x62: driver-demand / actual engine torque, ``A - 125`` %."""
-    if not need_bytes(data, 1):
-        return None
-    return (float(data[0] - 125), "%")
-
-
-def decode_reference_torque(data: bytes) -> tuple[float, str] | None:
-    """PID 0x63: engine reference torque, ``A*256+B`` Nm."""
-    if not need_bytes(data, 2):
-        return None
-    return (float(data[0] * 256 + data[1]), "Nm")
+#: PID 0x0A: gauge fuel pressure, ``A * 3`` kPa.
+decode_fuel_pressure = linear(1, 3, 0, "kPa")
+#: Single-byte status bitmask (secondary-air status, O2-present, …).
+decode_bitmask_a = linear(1, 1, 0, "bitmask")
+#: Single-byte enum code: PID 0x1C (which OBD standard the ECU conforms to),
+#: PID 0x51 (fuel type; 1 = gasoline, 4 = diesel, …).
+decode_enum = linear(1, 1, 0, "enum")
+#: PID 0x22: fuel rail pressure rel. to manifold vacuum, ``*0.079`` kPa.
+decode_fuel_rail_pressure_vac = linear(2, 0.079, 0, "kPa")
+#: PID 0x23 / 0x59: fuel rail gauge/absolute pressure, ``*10`` kPa.
+decode_fuel_rail_gauge_pressure = linear(2, 10, 0, "kPa")
+#: PID 0x4D / 0x4E: a time counter in minutes, ``A*256+B``.
+decode_minutes = linear(2, 1, 0, "min")
+#: PID 0x53: absolute evap system vapor pressure, ``(A*256+B)/200`` kPa.
+decode_abs_evap_pressure = linear(2, "1/200", 0, "kPa")
+#: PID 0x54: evap system vapor pressure, ``(A*256+B) - 32767`` Pa.
+decode_evap_pressure_pa = linear(2, 1, -32767, "Pa")
+#: PID 0x5D: fuel injection timing, ``((A*256+B) - 26880)/128`` deg.
+decode_injection_timing = linear(2, "1/128", -210, "deg")
+#: PID 0x5E: engine fuel rate, ``(A*256+B)/20`` L/h.
+decode_fuel_rate = linear(2, "1/20", 0, "L/h")
+#: PID 0x61 / 0x62: driver-demand / actual engine torque, ``A - 125`` %.
+decode_torque_percent = linear(1, 1, -125, "%")
+#: PID 0x63: engine reference torque, ``A*256+B`` Nm.
+decode_reference_torque = linear(2, 1, 0, "Nm")
 
 
 # --- Mode 09 vehicle-information decoders (text, not numeric) --------------
@@ -415,852 +371,1138 @@ def mode01_support_group(pid: int) -> int:
     return 0x00
 
 
-# (pid, channel, display, category, unit, byte_length, poll_tier, hint, decoder)
-# decoder None ⇒ supported-but-not-decoded. Both the decoder AND the channel
-# name are pulled from PID_DECODERS (Task 1.1) for any PID it carries, so the
-# two tables can't independently drift on what a shared PID is called or how
-# it's decoded — PID_DECODERS is canonical for the ~40 PIDs it covers; this
-# spec only hand-types name/decoder for PIDs PID_DECODERS doesn't have.
-def _pd(pid: int) -> Decoder | None:
-    entry = PID_DECODERS.get(pid)
-    return entry[1] if entry is not None else None
+@dataclass(frozen=True, kw_only=True)
+class _Row:
+    """One Mode 01 PID as written in :data:`_MODE01_SPEC`.
+
+    ``decoder=None`` means supported-but-not-decoded. ``polled`` puts the PID
+    in :data:`PID_DECODERS`, the table the streaming collector polls: that
+    table is derived from these rows, so a polled PID's channel name and
+    decoder cannot differ between the two (R23.14 replaced the import-time
+    ``assert_pid_tables_consistent`` with this construction).
+    """
+
+    pid: int
+    channel: str
+    display_name: str
+    category: Category
+    unit: str
+    #: Expected service-payload length in bytes.
+    byte_length: int
+    poll_tier: PollTier
+    dashboard_hint: DashboardHint
+    decoder: PidDecoder | None
+    polled: bool = False
 
 
-def _pd_name(pid: int) -> str:
-    entry = PID_DECODERS.get(pid)
-    if entry is None:
-        raise KeyError(f"PID 0x{pid:02X} has no PID_DECODERS entry to source a channel name from")
-    return entry[0]
-
-
-_MODE01_SPEC: tuple[
-    tuple[int, str, str, Category, str, int, PollTier, DashboardHint, Decoder | None], ...
-] = (
-    (
-        0x01,
-        _pd_name(0x01),
-        "Monitor Status / DTC Count",
-        "status",
-        "count",
-        4,
-        "slow",
-        "indicator",
-        _pd(0x01),
-    ),
-    (
-        0x03,
-        _pd_name(0x03),
-        "Fuel System Status",
-        "fuel",
-        "bitmask",
-        2,
-        "medium",
-        "indicator",
-        _pd(0x03),
-    ),
-    (0x04, _pd_name(0x04), "Calculated Engine Load", "engine", "%", 1, "fast", "gauge", _pd(0x04)),
-    (
-        0x05,
-        _pd_name(0x05),
-        "Engine Coolant Temp",
-        "temperature",
-        "degC",
-        1,
-        "medium",
-        "gauge",
-        _pd(0x05),
-    ),
-    (0x06, _pd_name(0x06), "Short Fuel Trim B1", "fuel", "%", 1, "medium", "graph", _pd(0x06)),
-    (0x07, _pd_name(0x07), "Long Fuel Trim B1", "fuel", "%", 1, "medium", "graph", _pd(0x07)),
-    (0x08, _pd_name(0x08), "Short Fuel Trim B2", "fuel", "%", 1, "medium", "graph", _pd(0x08)),
-    (0x09, _pd_name(0x09), "Long Fuel Trim B2", "fuel", "%", 1, "medium", "graph", _pd(0x09)),
-    (
-        0x0A,
-        "FUEL_PRESSURE",
-        "Fuel Pressure",
-        "pressure",
-        "kPa",
-        1,
-        "medium",
-        "gauge",
-        decode_fuel_pressure,
-    ),
-    (
-        0x0B,
-        _pd_name(0x0B),
-        "Intake Manifold Pressure",
-        "pressure",
-        "kPa",
-        1,
-        "fast",
-        "gauge",
-        _pd(0x0B),
-    ),
-    (0x0C, _pd_name(0x0C), "Engine RPM", "engine", "rpm", 2, "fast", "gauge", _pd(0x0C)),
-    (0x0D, _pd_name(0x0D), "Vehicle Speed", "speed", "kph", 1, "fast", "gauge", _pd(0x0D)),
-    (0x0E, _pd_name(0x0E), "Timing Advance", "engine", "degBTDC", 1, "fast", "graph", _pd(0x0E)),
-    (
-        0x0F,
-        _pd_name(0x0F),
-        "Intake Air Temp",
-        "temperature",
-        "degC",
-        1,
-        "medium",
-        "gauge",
-        _pd(0x0F),
-    ),
-    (0x10, _pd_name(0x10), "Mass Air Flow", "air", "g/s", 2, "fast", "gauge", _pd(0x10)),
-    (0x11, _pd_name(0x11), "Throttle Position", "engine", "%", 1, "fast", "gauge", _pd(0x11)),
-    (
-        0x12,
-        "SECONDARY_AIR_STATUS",
-        "Commanded Secondary Air",
-        "emissions",
-        "bitmask",
-        1,
-        "slow",
-        "indicator",
-        decode_bitmask_a,
-    ),
-    (
-        0x13,
-        "O2_SENSORS_PRESENT_2B",
-        "O2 Sensors Present (2 banks)",
-        "o2",
-        "bitmask",
-        1,
-        "slow",
-        "indicator",
-        decode_bitmask_a,
-    ),
-    (0x14, _pd_name(0x14), "O2 Sensor B1S1", "o2", "V", 2, "fast", "graph", _pd(0x14)),
-    (0x15, _pd_name(0x15), "O2 Sensor B1S2", "o2", "V", 2, "fast", "graph", _pd(0x15)),
-    (0x16, "O2_B1S3", "O2 Sensor B1S3", "o2", "V", 2, "medium", "graph", decode_o2_voltage),
-    (0x17, "O2_B1S4", "O2 Sensor B1S4", "o2", "V", 2, "medium", "graph", decode_o2_voltage),
-    (0x18, _pd_name(0x18), "O2 Sensor B2S1", "o2", "V", 2, "fast", "graph", _pd(0x18)),
-    (0x19, _pd_name(0x19), "O2 Sensor B2S2", "o2", "V", 2, "fast", "graph", _pd(0x19)),
-    (0x1A, "O2_B2S3", "O2 Sensor B2S3", "o2", "V", 2, "medium", "graph", decode_o2_voltage),
-    (0x1B, "O2_B2S4", "O2 Sensor B2S4", "o2", "V", 2, "medium", "graph", decode_o2_voltage),
-    (
-        0x1C,
-        "OBD_STANDARD",
-        "OBD Standard Conformance",
-        "info",
-        "enum",
-        1,
-        "slow",
-        "text",
-        decode_obd_standard,
-    ),
-    (
-        0x1D,
-        "O2_SENSORS_PRESENT_4B",
-        "O2 Sensors Present (4 banks)",
-        "o2",
-        "bitmask",
-        1,
-        "slow",
-        "indicator",
-        decode_bitmask_a,
-    ),
-    (
-        0x1E,
-        "AUX_INPUT_STATUS",
-        "Auxiliary Input Status",
-        "status",
-        "bitmask",
-        1,
-        "slow",
-        "indicator",
-        decode_bitmask_a,
-    ),
-    (0x1F, _pd_name(0x1F), "Engine Run Time", "engine", "s", 2, "medium", "text", _pd(0x1F)),
-    (0x21, _pd_name(0x21), "Distance with MIL On", "status", "km", 2, "slow", "text", _pd(0x21)),
-    (
-        0x22,
-        "FUEL_RAIL_PRESSURE_VAC",
-        "Fuel Rail Pressure (vac ref)",
-        "pressure",
-        "kPa",
-        2,
-        "medium",
-        "gauge",
-        decode_fuel_rail_pressure_vac,
-    ),
-    (
-        0x23,
-        "FUEL_RAIL_GAUGE_PRESSURE",
-        "Fuel Rail Gauge Pressure",
-        "pressure",
-        "kPa",
-        2,
-        "medium",
-        "gauge",
-        decode_fuel_rail_gauge_pressure,
-    ),
-    (
-        0x24,
-        _pd_name(0x24),
-        "Wide-Range O2 λ S1",
-        "o2",
-        "ratio",
-        4,
-        "fast",
-        "graph",
-        _pd(0x24),
-    ),
-    (
-        0x25,
-        _pd_name(0x25),
-        "Wide-Range O2 λ S2",
-        "o2",
-        "ratio",
-        4,
-        "fast",
-        "graph",
-        _pd(0x25),
-    ),
-    (
-        0x26,
-        "O2_WR_LAMBDA_S3",
-        "Wide-Range O2 λ S3",
-        "o2",
-        "ratio",
-        4,
-        "medium",
-        "graph",
-        decode_wide_lambda,
-    ),
-    (
-        0x27,
-        "O2_WR_LAMBDA_S4",
-        "Wide-Range O2 λ S4",
-        "o2",
-        "ratio",
-        4,
-        "medium",
-        "graph",
-        decode_wide_lambda,
-    ),
-    (
-        0x28,
-        _pd_name(0x28),
-        "Wide-Range O2 λ S5",
-        "o2",
-        "ratio",
-        4,
-        # Fast, like S1 (0x24): an upstream wide-band sensor under either O2
-        # layout (bank 2 under PID 0x13, bank 3 under 0x1D).
-        "fast",
-        "graph",
-        _pd(0x28),
-    ),
-    (
-        0x29,
-        "O2_WR_LAMBDA_S6",
-        "Wide-Range O2 λ S6",
-        "o2",
-        "ratio",
-        4,
-        "medium",
-        "graph",
-        decode_wide_lambda,
-    ),
-    (
-        0x2A,
-        "O2_WR_LAMBDA_S7",
-        "Wide-Range O2 λ S7",
-        "o2",
-        "ratio",
-        4,
-        "medium",
-        "graph",
-        decode_wide_lambda,
-    ),
-    (
-        0x2B,
-        "O2_WR_LAMBDA_S8",
-        "Wide-Range O2 λ S8",
-        "o2",
-        "ratio",
-        4,
-        "medium",
-        "graph",
-        decode_wide_lambda,
-    ),
-    (0x2C, _pd_name(0x2C), "Commanded EGR", "emissions", "%", 1, "medium", "graph", _pd(0x2C)),
-    (0x2D, _pd_name(0x2D), "EGR Error", "emissions", "%", 1, "medium", "graph", _pd(0x2D)),
-    (
-        0x2E,
-        _pd_name(0x2E),
-        "Commanded Evap Purge",
-        "emissions",
-        "%",
-        1,
-        "medium",
-        "graph",
-        _pd(0x2E),
-    ),
-    (0x2F, _pd_name(0x2F), "Fuel Tank Level", "fuel", "%", 1, "slow", "gauge", _pd(0x2F)),
-    (
-        0x30,
-        _pd_name(0x30),
-        "Warm-ups Since Codes Cleared",
-        "status",
-        "count",
-        1,
-        "slow",
-        "text",
-        _pd(0x30),
-    ),
-    (
-        0x31,
-        _pd_name(0x31),
-        "Distance Since Codes Cleared",
-        "status",
-        "km",
-        2,
-        "slow",
-        "text",
-        _pd(0x31),
-    ),
-    (
-        0x32,
-        _pd_name(0x32),
-        "Evap System Vapor Pressure",
-        "pressure",
-        "Pa",
-        2,
-        "medium",
-        "graph",
-        _pd(0x32),
-    ),
-    (
-        0x33,
-        _pd_name(0x33),
-        "Barometric Pressure",
-        "pressure",
-        "kPa",
-        1,  # J1979: A = kPa. Was 2 — desynced every batch containing it.
-        "slow",
-        "gauge",
-        _pd(0x33),
-    ),
-    (
-        0x34,
-        _pd_name(0x34),
-        "Wide-Range O2 λ (current) S1",
-        "o2",
-        "ratio",
-        4,
-        "fast",
-        "graph",
-        _pd(0x34),
-    ),
-    (
-        0x35,
-        _pd_name(0x35),
-        "Wide-Range O2 λ (current) S2",
-        "o2",
-        "ratio",
-        4,
-        "fast",
-        "graph",
-        _pd(0x35),
-    ),
-    (
-        0x36,
-        "O2_WR_CURRENT_S3",
-        "Wide-Range O2 λ (current) S3",
-        "o2",
-        "ratio",
-        4,
-        "medium",
-        "graph",
-        decode_wide_lambda,
-    ),
-    (
-        0x37,
-        "O2_WR_CURRENT_S4",
-        "Wide-Range O2 λ (current) S4",
-        "o2",
-        "ratio",
-        4,
-        "medium",
-        "graph",
-        decode_wide_lambda,
-    ),
-    (
-        0x38,
-        "O2_WR_CURRENT_S5",
-        "Wide-Range O2 λ (current) S5",
-        "o2",
-        "ratio",
-        4,
-        "medium",
-        "graph",
-        decode_wide_lambda,
-    ),
-    (
-        0x39,
-        "O2_WR_CURRENT_S6",
-        "Wide-Range O2 λ (current) S6",
-        "o2",
-        "ratio",
-        4,
-        "medium",
-        "graph",
-        decode_wide_lambda,
-    ),
-    (
-        0x3A,
-        "O2_WR_CURRENT_S7",
-        "Wide-Range O2 λ (current) S7",
-        "o2",
-        "ratio",
-        4,
-        "medium",
-        "graph",
-        decode_wide_lambda,
-    ),
-    (
-        0x3B,
-        "O2_WR_CURRENT_S8",
-        "Wide-Range O2 λ (current) S8",
-        "o2",
-        "ratio",
-        4,
-        "medium",
-        "graph",
-        decode_wide_lambda,
-    ),
-    (
-        0x3C,
-        _pd_name(0x3C),
-        "Catalyst Temp B1S1",
-        "temperature",
-        "degC",
-        2,
-        "slow",
-        "graph",
-        _pd(0x3C),
-    ),
-    (
-        0x3D,
-        _pd_name(0x3D),
-        "Catalyst Temp B2S1",
-        "temperature",
-        "degC",
-        2,
-        "slow",
-        "graph",
-        _pd(0x3D),
-    ),
-    (
-        0x3E,
-        _pd_name(0x3E),
-        "Catalyst Temp B1S2",
-        "temperature",
-        "degC",
-        2,
-        "slow",
-        "graph",
-        _pd(0x3E),
-    ),
-    (
-        0x3F,
-        _pd_name(0x3F),
-        "Catalyst Temp B2S2",
-        "temperature",
-        "degC",
-        2,
-        "slow",
-        "graph",
-        _pd(0x3F),
-    ),
-    (
-        0x41,
-        "MONITOR_STATUS_DRIVE_CYCLE",
-        "Monitor Status This Drive Cycle",
-        "status",
-        "bitmask",
-        4,
-        "slow",
-        "indicator",
-        None,
-    ),
-    (
-        0x42,
-        _pd_name(0x42),
-        "Control Module Voltage",
-        "electrical",
-        "V",
-        2,
-        "fast",
-        "gauge",
-        _pd(0x42),
-    ),
-    (0x43, _pd_name(0x43), "Absolute Load Value", "engine", "%", 2, "fast", "graph", _pd(0x43)),
-    (
-        0x44,
-        _pd_name(0x44),
-        "Commanded Equivalence Ratio",
-        "fuel",
-        "ratio",
-        2,
-        "medium",
-        "graph",
-        _pd(0x44),
-    ),
-    (
-        0x45,
-        _pd_name(0x45),
-        "Relative Throttle Position",
-        "engine",
-        "%",
-        1,
-        "fast",
-        "graph",
-        _pd(0x45),
-    ),
-    (
-        0x46,
-        _pd_name(0x46),
-        "Ambient Air Temp",
-        "temperature",
-        "degC",
-        1,
-        "slow",
-        "gauge",
-        _pd(0x46),
-    ),
-    (
-        0x47,
-        "ABS_THROTTLE_POS_B",
-        "Absolute Throttle Position B",
-        "engine",
-        "%",
-        1,
-        "medium",
-        "graph",
-        decode_percent_a_over_255,
-    ),
-    (
-        0x48,
-        "ABS_THROTTLE_POS_C",
-        "Absolute Throttle Position C",
-        "engine",
-        "%",
-        1,
-        "medium",
-        "graph",
-        decode_percent_a_over_255,
-    ),
-    (
-        0x49,
-        "ACCEL_PEDAL_POS_D",
-        "Accelerator Pedal Position D",
-        "engine",
-        "%",
-        1,
-        "fast",
-        "graph",
-        decode_percent_a_over_255,
-    ),
-    (
-        0x4A,
-        "ACCEL_PEDAL_POS_E",
-        "Accelerator Pedal Position E",
-        "engine",
-        "%",
-        1,
-        "fast",
-        "graph",
-        decode_percent_a_over_255,
-    ),
-    (
-        0x4B,
-        "ACCEL_PEDAL_POS_F",
-        "Accelerator Pedal Position F",
-        "engine",
-        "%",
-        1,
-        "fast",
-        "graph",
-        decode_percent_a_over_255,
-    ),
-    (
-        0x4C,
-        "COMMANDED_THROTTLE_ACTUATOR",
-        "Commanded Throttle Actuator",
-        "engine",
-        "%",
-        1,
-        "fast",
-        "graph",
-        decode_percent_a_over_255,
-    ),
-    (
-        0x4D,
-        "TIME_RUN_WITH_MIL",
-        "Time Run with MIL On",
-        "status",
-        "min",
-        2,
-        "slow",
-        "text",
-        decode_minutes,
-    ),
-    (
-        0x4E,
-        "TIME_SINCE_DTC_CLEAR",
-        "Time Since Codes Cleared",
-        "status",
-        "min",
-        2,
-        "slow",
-        "text",
-        decode_minutes,
-    ),
-    (0x51, "FUEL_TYPE", "Fuel Type", "info", "enum", 1, "slow", "text", decode_fuel_type),
-    (
-        0x52,
-        "ETHANOL_PERCENT",
-        "Ethanol Fuel %",
-        "fuel",
-        "%",
-        1,
-        "slow",
-        "gauge",
-        decode_percent_a_over_255,
-    ),
-    (
-        0x53,
-        "ABS_EVAP_VAPOR_PRESSURE",
-        "Absolute Evap Vapor Pressure",
-        "pressure",
-        "kPa",
-        2,
-        "medium",
-        "graph",
-        decode_abs_evap_pressure,
-    ),
-    (
-        0x54,
-        "EVAP_VAPOR_PRESSURE_ABS",
-        "Evap System Vapor Pressure",
-        "pressure",
-        "Pa",
-        2,
-        "medium",
-        "graph",
-        decode_evap_pressure_pa,
-    ),
-    (
-        0x55,
-        "SHORT_O2_TRIM_B1",
-        "Short-Term Sec O2 Trim B1",
-        "o2",
-        "%",
-        2,  # J1979: A = this bank, B = bank 3 (unused; decoder reads A)
-        "medium",
-        "graph",
-        decode_percent_b_minus_128,
-    ),
-    (
-        0x56,
-        "LONG_O2_TRIM_B1",
-        "Long-Term Sec O2 Trim B1",
-        "o2",
-        "%",
-        2,  # J1979: A = this bank, B = bank 3 (unused; decoder reads A)
-        "medium",
-        "graph",
-        decode_percent_b_minus_128,
-    ),
-    (
-        0x57,
-        "SHORT_O2_TRIM_B2",
-        "Short-Term Sec O2 Trim B2",
-        "o2",
-        "%",
-        2,  # J1979: A = this bank, B = bank 4 (unused; decoder reads A)
-        "medium",
-        "graph",
-        decode_percent_b_minus_128,
-    ),
-    (
-        0x58,
-        "LONG_O2_TRIM_B2",
-        "Long-Term Sec O2 Trim B2",
-        "o2",
-        "%",
-        2,  # J1979: A = this bank, B = bank 4 (unused; decoder reads A)
-        "medium",
-        "graph",
-        decode_percent_b_minus_128,
-    ),
-    (
-        0x59,
-        "FUEL_RAIL_ABS_PRESSURE",
-        "Fuel Rail Absolute Pressure",
-        "pressure",
-        "kPa",
-        2,
-        "medium",
-        "gauge",
-        decode_fuel_rail_gauge_pressure,
-    ),
-    (
-        0x5A,
-        "RELATIVE_ACCEL_PEDAL_POS",
-        "Relative Accelerator Pedal",
-        "engine",
-        "%",
-        1,
-        "fast",
-        "graph",
-        decode_percent_a_over_255,
-    ),
-    (
-        0x5B,
-        "HYBRID_BATTERY_LIFE",
-        "Hybrid Battery Pack Life",
-        "electrical",
-        "%",
-        1,
-        "slow",
-        "gauge",
-        decode_percent_a_over_255,
-    ),
-    (
-        0x5C,
-        _pd_name(0x5C),
-        "Engine Oil Temp",
-        "temperature",
-        "degC",
-        1,
-        "medium",
-        "gauge",
-        _pd(0x5C),
-    ),
-    (
-        0x5D,
-        "FUEL_INJECTION_TIMING",
-        "Fuel Injection Timing",
-        "engine",
-        "deg",
-        2,
-        "medium",
-        "graph",
-        decode_injection_timing,
-    ),
-    (
-        0x5E,
-        "ENGINE_FUEL_RATE",
-        "Engine Fuel Rate",
-        "fuel",
-        "L/h",
-        2,
-        "medium",
-        "gauge",
-        decode_fuel_rate,
-    ),
-    (
-        0x61,
-        "DRIVER_DEMAND_TORQUE",
-        "Driver's Demand Torque",
-        "torque",
-        "%",
-        1,
-        "fast",
-        "graph",
-        decode_torque_percent,
-    ),
-    (
-        0x62,
-        "ACTUAL_ENGINE_TORQUE",
-        "Actual Engine Torque",
-        "torque",
-        "%",
-        1,
-        "fast",
-        "graph",
-        decode_torque_percent,
-    ),
-    (
-        0x63,
-        "ENGINE_REFERENCE_TORQUE",
-        "Engine Reference Torque",
-        "torque",
-        "Nm",
-        2,
-        "slow",
-        "text",
-        decode_reference_torque,
+_MODE01_SPEC: tuple[_Row, ...] = (
+    _Row(
+        pid=0x01,
+        channel="MONITOR_STATUS",
+        display_name="Monitor Status / DTC Count",
+        category="status",
+        unit="count",
+        byte_length=4,
+        poll_tier="slow",
+        dashboard_hint="indicator",
+        decoder=decode_monitor_status,
+        polled=True,
+    ),
+    _Row(
+        pid=0x03,
+        channel="FUEL_STATUS",
+        display_name="Fuel System Status",
+        category="fuel",
+        unit="bitmask",
+        byte_length=2,
+        poll_tier="medium",
+        dashboard_hint="indicator",
+        decoder=decode_fuel_status,
+        polled=True,
+    ),
+    _Row(
+        pid=0x04,
+        channel="ENGINE_LOAD",
+        display_name="Calculated Engine Load",
+        category="engine",
+        unit="%",
+        byte_length=1,
+        poll_tier="fast",
+        dashboard_hint="gauge",
+        decoder=decode_percent_a_over_255,
+        polled=True,
+    ),
+    _Row(
+        pid=0x05,
+        channel="COOLANT_TEMP",
+        display_name="Engine Coolant Temp",
+        category="temperature",
+        unit="degC",
+        byte_length=1,
+        poll_tier="medium",
+        dashboard_hint="gauge",
+        decoder=decode_temp_minus_40,
+        polled=True,
+    ),
+    _Row(
+        pid=0x06,
+        channel="SHORT_FUEL_TRIM_1",
+        display_name="Short Fuel Trim B1",
+        category="fuel",
+        unit="%",
+        byte_length=1,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_percent_b_minus_128,
+        polled=True,
+    ),
+    _Row(
+        pid=0x07,
+        channel="LONG_FUEL_TRIM_1",
+        display_name="Long Fuel Trim B1",
+        category="fuel",
+        unit="%",
+        byte_length=1,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_percent_b_minus_128,
+        polled=True,
+    ),
+    _Row(
+        pid=0x08,
+        channel="SHORT_FUEL_TRIM_2",
+        display_name="Short Fuel Trim B2",
+        category="fuel",
+        unit="%",
+        byte_length=1,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_percent_b_minus_128,
+        polled=True,
+    ),
+    _Row(
+        pid=0x09,
+        channel="LONG_FUEL_TRIM_2",
+        display_name="Long Fuel Trim B2",
+        category="fuel",
+        unit="%",
+        byte_length=1,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_percent_b_minus_128,
+        polled=True,
+    ),
+    _Row(
+        pid=0x0A,
+        channel="FUEL_PRESSURE",
+        display_name="Fuel Pressure",
+        category="pressure",
+        unit="kPa",
+        byte_length=1,
+        poll_tier="medium",
+        dashboard_hint="gauge",
+        decoder=decode_fuel_pressure,
+    ),
+    _Row(
+        pid=0x0B,
+        channel="INTAKE_PRESSURE",
+        display_name="Intake Manifold Pressure",
+        category="pressure",
+        unit="kPa",
+        byte_length=1,
+        poll_tier="fast",
+        dashboard_hint="gauge",
+        decoder=decode_intake_pressure,
+        polled=True,
+    ),
+    _Row(
+        pid=0x0C,
+        channel="RPM",
+        display_name="Engine RPM",
+        category="engine",
+        unit="rpm",
+        byte_length=2,
+        poll_tier="fast",
+        dashboard_hint="gauge",
+        decoder=decode_rpm,
+        polled=True,
+    ),
+    _Row(
+        pid=0x0D,
+        channel="SPEED",
+        display_name="Vehicle Speed",
+        category="speed",
+        unit="kph",
+        byte_length=1,
+        poll_tier="fast",
+        dashboard_hint="gauge",
+        decoder=decode_speed,
+        polled=True,
+    ),
+    _Row(
+        pid=0x0E,
+        channel="TIMING_ADVANCE",
+        display_name="Timing Advance",
+        category="engine",
+        unit="degBTDC",
+        byte_length=1,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_timing_advance,
+        polled=True,
+    ),
+    _Row(
+        pid=0x0F,
+        channel="INTAKE_TEMP",
+        display_name="Intake Air Temp",
+        category="temperature",
+        unit="degC",
+        byte_length=1,
+        poll_tier="medium",
+        dashboard_hint="gauge",
+        decoder=decode_temp_minus_40,
+        polled=True,
+    ),
+    _Row(
+        pid=0x10,
+        channel="MAF",
+        display_name="Mass Air Flow",
+        category="air",
+        unit="g/s",
+        byte_length=2,
+        poll_tier="fast",
+        dashboard_hint="gauge",
+        decoder=decode_maf,
+        polled=True,
+    ),
+    _Row(
+        pid=0x11,
+        channel="THROTTLE_POS",
+        display_name="Throttle Position",
+        category="engine",
+        unit="%",
+        byte_length=1,
+        poll_tier="fast",
+        dashboard_hint="gauge",
+        decoder=decode_percent_a_over_255,
+        polled=True,
+    ),
+    _Row(
+        pid=0x12,
+        channel="SECONDARY_AIR_STATUS",
+        display_name="Commanded Secondary Air",
+        category="emissions",
+        unit="bitmask",
+        byte_length=1,
+        poll_tier="slow",
+        dashboard_hint="indicator",
+        decoder=decode_bitmask_a,
+    ),
+    _Row(
+        pid=0x13,
+        channel="O2_SENSORS_PRESENT_2B",
+        display_name="O2 Sensors Present (2 banks)",
+        category="o2",
+        unit="bitmask",
+        byte_length=1,
+        poll_tier="slow",
+        dashboard_hint="indicator",
+        decoder=decode_bitmask_a,
+    ),
+    _Row(
+        pid=0x14,
+        channel="O2_B1S1",
+        display_name="O2 Sensor B1S1",
+        category="o2",
+        unit="V",
+        byte_length=2,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_o2_voltage,
+        polled=True,
+    ),
+    _Row(
+        pid=0x15,
+        channel="O2_B1S2",
+        display_name="O2 Sensor B1S2",
+        category="o2",
+        unit="V",
+        byte_length=2,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_o2_voltage,
+        polled=True,
+    ),
+    _Row(
+        pid=0x16,
+        channel="O2_B1S3",
+        display_name="O2 Sensor B1S3",
+        category="o2",
+        unit="V",
+        byte_length=2,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_o2_voltage,
+    ),
+    _Row(
+        pid=0x17,
+        channel="O2_B1S4",
+        display_name="O2 Sensor B1S4",
+        category="o2",
+        unit="V",
+        byte_length=2,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_o2_voltage,
+    ),
+    _Row(
+        pid=0x18,
+        channel="O2_B2S1",
+        display_name="O2 Sensor B2S1",
+        category="o2",
+        unit="V",
+        byte_length=2,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_o2_voltage,
+        polled=True,
+    ),
+    _Row(
+        pid=0x19,
+        channel="O2_B2S2",
+        display_name="O2 Sensor B2S2",
+        category="o2",
+        unit="V",
+        byte_length=2,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_o2_voltage,
+        polled=True,
+    ),
+    _Row(
+        pid=0x1A,
+        channel="O2_B2S3",
+        display_name="O2 Sensor B2S3",
+        category="o2",
+        unit="V",
+        byte_length=2,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_o2_voltage,
+    ),
+    _Row(
+        pid=0x1B,
+        channel="O2_B2S4",
+        display_name="O2 Sensor B2S4",
+        category="o2",
+        unit="V",
+        byte_length=2,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_o2_voltage,
+    ),
+    _Row(
+        pid=0x1C,
+        channel="OBD_STANDARD",
+        display_name="OBD Standard Conformance",
+        category="info",
+        unit="enum",
+        byte_length=1,
+        poll_tier="slow",
+        dashboard_hint="text",
+        decoder=decode_enum,
+    ),
+    _Row(
+        pid=0x1D,
+        channel="O2_SENSORS_PRESENT_4B",
+        display_name="O2 Sensors Present (4 banks)",
+        category="o2",
+        unit="bitmask",
+        byte_length=1,
+        poll_tier="slow",
+        dashboard_hint="indicator",
+        decoder=decode_bitmask_a,
+    ),
+    _Row(
+        pid=0x1E,
+        channel="AUX_INPUT_STATUS",
+        display_name="Auxiliary Input Status",
+        category="status",
+        unit="bitmask",
+        byte_length=1,
+        poll_tier="slow",
+        dashboard_hint="indicator",
+        decoder=decode_bitmask_a,
+    ),
+    _Row(
+        pid=0x1F,
+        channel="RUN_TIME",
+        display_name="Engine Run Time",
+        category="engine",
+        unit="s",
+        byte_length=2,
+        poll_tier="medium",
+        dashboard_hint="text",
+        decoder=decode_run_time,
+        polled=True,
+    ),
+    _Row(
+        pid=0x21,
+        channel="DISTANCE_W_MIL",
+        display_name="Distance with MIL On",
+        category="status",
+        unit="km",
+        byte_length=2,
+        poll_tier="slow",
+        dashboard_hint="text",
+        decoder=decode_distance_km,
+        polled=True,
+    ),
+    _Row(
+        pid=0x22,
+        channel="FUEL_RAIL_PRESSURE_VAC",
+        display_name="Fuel Rail Pressure (vac ref)",
+        category="pressure",
+        unit="kPa",
+        byte_length=2,
+        poll_tier="medium",
+        dashboard_hint="gauge",
+        decoder=decode_fuel_rail_pressure_vac,
+    ),
+    _Row(
+        pid=0x23,
+        channel="FUEL_RAIL_GAUGE_PRESSURE",
+        display_name="Fuel Rail Gauge Pressure",
+        category="pressure",
+        unit="kPa",
+        byte_length=2,
+        poll_tier="medium",
+        dashboard_hint="gauge",
+        decoder=decode_fuel_rail_gauge_pressure,
+    ),
+    # Wide-range O2 λ, bank-1 sensor 1/2 (Task 2.1): 0x24/0x25 are the
+    # "equivalence ratio" variant, 0x34/0x35 the "current" variant — probe
+    # which the ECM answers; the ECM claiming support for one over the
+    # other is normal, so both are decoded identically (decode_wide_lambda
+    # ignores the raw voltage/current bytes either way).
+    _Row(
+        pid=0x24,
+        channel="O2_WR_LAMBDA_S1",
+        display_name="Wide-Range O2 λ S1",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+        polled=True,
+    ),
+    _Row(
+        pid=0x25,
+        channel="O2_WR_LAMBDA_S2",
+        display_name="Wide-Range O2 λ S2",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+        polled=True,
+    ),
+    _Row(
+        pid=0x26,
+        channel="O2_WR_LAMBDA_S3",
+        display_name="Wide-Range O2 λ S3",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+    ),
+    _Row(
+        pid=0x27,
+        channel="O2_WR_LAMBDA_S4",
+        display_name="Wide-Range O2 λ S4",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+    ),
+    # Sensor 5: bank 2 sensor 1 under the PID 0x13 O2 layout, bank 3 sensor 1
+    # under 0x1D. Which bank it is belongs to the vehicle
+    # (``WIDEBAND_LAMBDA`` in src.signals.vehicle_signals). Polled since
+    # D03.34 (2026-09-26); fast, like S1 (0x24): an upstream wide-band sensor
+    # under either O2 layout.
+    _Row(
+        pid=0x28,
+        channel="O2_WR_LAMBDA_S5",
+        display_name="Wide-Range O2 λ S5",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+        polled=True,
+    ),
+    _Row(
+        pid=0x29,
+        channel="O2_WR_LAMBDA_S6",
+        display_name="Wide-Range O2 λ S6",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+    ),
+    _Row(
+        pid=0x2A,
+        channel="O2_WR_LAMBDA_S7",
+        display_name="Wide-Range O2 λ S7",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+    ),
+    _Row(
+        pid=0x2B,
+        channel="O2_WR_LAMBDA_S8",
+        display_name="Wide-Range O2 λ S8",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+    ),
+    _Row(
+        pid=0x2C,
+        channel="COMMANDED_EGR",
+        display_name="Commanded EGR",
+        category="emissions",
+        unit="%",
+        byte_length=1,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_egr_percent,
+        polled=True,
+    ),
+    _Row(
+        pid=0x2D,
+        channel="EGR_ERROR",
+        display_name="EGR Error",
+        category="emissions",
+        unit="%",
+        byte_length=1,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_egr_error,
+        polled=True,
+    ),
+    _Row(
+        pid=0x2E,
+        channel="EVAPORATIVE_PURGE",
+        display_name="Commanded Evap Purge",
+        category="emissions",
+        unit="%",
+        byte_length=1,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_evap_purge,
+        polled=True,
+    ),
+    _Row(
+        pid=0x2F,
+        channel="FUEL_LEVEL",
+        display_name="Fuel Tank Level",
+        category="fuel",
+        unit="%",
+        byte_length=1,
+        poll_tier="slow",
+        dashboard_hint="gauge",
+        decoder=decode_percent_a_over_255,
+        polled=True,
+    ),
+    _Row(
+        pid=0x30,
+        channel="WARMUPS_SINCE_DTC_CLEAR",
+        display_name="Warm-ups Since Codes Cleared",
+        category="status",
+        unit="count",
+        byte_length=1,
+        poll_tier="slow",
+        dashboard_hint="text",
+        decoder=decode_warmups,
+        polled=True,
+    ),
+    _Row(
+        pid=0x31,
+        channel="DISTANCE_SINCE_DTC_CLEAR",
+        display_name="Distance Since Codes Cleared",
+        category="status",
+        unit="km",
+        byte_length=2,
+        poll_tier="slow",
+        dashboard_hint="text",
+        decoder=decode_distance_km,
+        polled=True,
+    ),
+    _Row(
+        pid=0x32,
+        channel="EVAP_VAPOR_PRESSURE",
+        display_name="Evap System Vapor Pressure",
+        category="pressure",
+        unit="Pa",
+        byte_length=2,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_evap_vapor_pressure_signed,
+        polled=True,
+    ),
+    _Row(
+        pid=0x33,
+        channel="BAROMETRIC_PRESSURE",
+        display_name="Barometric Pressure",
+        category="pressure",
+        unit="kPa",
+        byte_length=1,  # J1979: A = kPa. Was 2 — desynced every batch containing it.
+        poll_tier="slow",
+        dashboard_hint="gauge",
+        decoder=decode_baro,
+        polled=True,
+    ),
+    _Row(
+        pid=0x34,
+        channel="O2_WR_CURRENT_S1",
+        display_name="Wide-Range O2 λ (current) S1",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+        polled=True,
+    ),
+    _Row(
+        pid=0x35,
+        channel="O2_WR_CURRENT_S2",
+        display_name="Wide-Range O2 λ (current) S2",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+        polled=True,
+    ),
+    _Row(
+        pid=0x36,
+        channel="O2_WR_CURRENT_S3",
+        display_name="Wide-Range O2 λ (current) S3",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+    ),
+    _Row(
+        pid=0x37,
+        channel="O2_WR_CURRENT_S4",
+        display_name="Wide-Range O2 λ (current) S4",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+    ),
+    _Row(
+        pid=0x38,
+        channel="O2_WR_CURRENT_S5",
+        display_name="Wide-Range O2 λ (current) S5",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+    ),
+    _Row(
+        pid=0x39,
+        channel="O2_WR_CURRENT_S6",
+        display_name="Wide-Range O2 λ (current) S6",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+    ),
+    _Row(
+        pid=0x3A,
+        channel="O2_WR_CURRENT_S7",
+        display_name="Wide-Range O2 λ (current) S7",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+    ),
+    _Row(
+        pid=0x3B,
+        channel="O2_WR_CURRENT_S8",
+        display_name="Wide-Range O2 λ (current) S8",
+        category="o2",
+        unit="ratio",
+        byte_length=4,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_wide_lambda,
+    ),
+    _Row(
+        pid=0x3C,
+        channel="CATALYST_TEMP_B1S1",
+        display_name="Catalyst Temp B1S1",
+        category="temperature",
+        unit="degC",
+        byte_length=2,
+        poll_tier="slow",
+        dashboard_hint="graph",
+        decoder=decode_catalyst_temp,
+        polled=True,
+    ),
+    _Row(
+        pid=0x3D,
+        channel="CATALYST_TEMP_B2S1",
+        display_name="Catalyst Temp B2S1",
+        category="temperature",
+        unit="degC",
+        byte_length=2,
+        poll_tier="slow",
+        dashboard_hint="graph",
+        decoder=decode_catalyst_temp,
+        polled=True,
+    ),
+    _Row(
+        pid=0x3E,
+        channel="CATALYST_TEMP_B1S2",
+        display_name="Catalyst Temp B1S2",
+        category="temperature",
+        unit="degC",
+        byte_length=2,
+        poll_tier="slow",
+        dashboard_hint="graph",
+        decoder=decode_catalyst_temp,
+        polled=True,
+    ),
+    _Row(
+        pid=0x3F,
+        channel="CATALYST_TEMP_B2S2",
+        display_name="Catalyst Temp B2S2",
+        category="temperature",
+        unit="degC",
+        byte_length=2,
+        poll_tier="slow",
+        dashboard_hint="graph",
+        decoder=decode_catalyst_temp,
+        polled=True,
+    ),
+    _Row(
+        pid=0x41,
+        channel="MONITOR_STATUS_DRIVE_CYCLE",
+        display_name="Monitor Status This Drive Cycle",
+        category="status",
+        unit="bitmask",
+        byte_length=4,
+        poll_tier="slow",
+        dashboard_hint="indicator",
+        decoder=None,
+    ),
+    _Row(
+        pid=0x42,
+        channel="CONTROL_MODULE_VOLTAGE",
+        display_name="Control Module Voltage",
+        category="electrical",
+        unit="V",
+        byte_length=2,
+        poll_tier="fast",
+        dashboard_hint="gauge",
+        decoder=decode_control_module_voltage,
+        polled=True,
+    ),
+    _Row(
+        pid=0x43,
+        channel="ABSOLUTE_LOAD",
+        display_name="Absolute Load Value",
+        category="engine",
+        unit="%",
+        byte_length=2,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_absolute_load,
+        polled=True,
+    ),
+    _Row(
+        pid=0x44,
+        channel="COMMANDED_EQUIV_RATIO",
+        display_name="Commanded Equivalence Ratio",
+        category="fuel",
+        unit="ratio",
+        byte_length=2,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_commanded_lambda,
+        polled=True,
+    ),
+    _Row(
+        pid=0x45,
+        channel="RELATIVE_THROTTLE_POS",
+        display_name="Relative Throttle Position",
+        category="engine",
+        unit="%",
+        byte_length=1,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_percent_a_over_255,
+        polled=True,
+    ),
+    _Row(
+        pid=0x46,
+        channel="AMBIANT_AIR_TEMP",
+        display_name="Ambient Air Temp",
+        category="temperature",
+        unit="degC",
+        byte_length=1,
+        poll_tier="slow",
+        dashboard_hint="gauge",
+        decoder=decode_temp_minus_40,
+        polled=True,
+    ),
+    # Throttle/pedal family (Task 2.2): one-time probe on the Xterra's real
+    # ECM (both KOEO and engine-running) confirmed it answers 0x47/0x49/0x4A/
+    # 0x4C but not 0x48/0x4B — see data/nissan-xterra-2008/pid-probe-2026-07-22.md.
+    _Row(
+        pid=0x47,
+        channel="ABS_THROTTLE_POS_B",
+        display_name="Absolute Throttle Position B",
+        category="engine",
+        unit="%",
+        byte_length=1,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_percent_a_over_255,
+        polled=True,
+    ),
+    _Row(
+        pid=0x48,
+        channel="ABS_THROTTLE_POS_C",
+        display_name="Absolute Throttle Position C",
+        category="engine",
+        unit="%",
+        byte_length=1,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_percent_a_over_255,
+    ),
+    _Row(
+        pid=0x49,
+        channel="ACCEL_PEDAL_POS_D",
+        display_name="Accelerator Pedal Position D",
+        category="engine",
+        unit="%",
+        byte_length=1,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_percent_a_over_255,
+        polled=True,
+    ),
+    _Row(
+        pid=0x4A,
+        channel="ACCEL_PEDAL_POS_E",
+        display_name="Accelerator Pedal Position E",
+        category="engine",
+        unit="%",
+        byte_length=1,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_percent_a_over_255,
+        polled=True,
+    ),
+    _Row(
+        pid=0x4B,
+        channel="ACCEL_PEDAL_POS_F",
+        display_name="Accelerator Pedal Position F",
+        category="engine",
+        unit="%",
+        byte_length=1,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_percent_a_over_255,
+    ),
+    _Row(
+        pid=0x4C,
+        channel="COMMANDED_THROTTLE_ACTUATOR",
+        display_name="Commanded Throttle Actuator",
+        category="engine",
+        unit="%",
+        byte_length=1,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_percent_a_over_255,
+        polled=True,
+    ),
+    _Row(
+        pid=0x4D,
+        channel="TIME_RUN_WITH_MIL",
+        display_name="Time Run with MIL On",
+        category="status",
+        unit="min",
+        byte_length=2,
+        poll_tier="slow",
+        dashboard_hint="text",
+        decoder=decode_minutes,
+    ),
+    _Row(
+        pid=0x4E,
+        channel="TIME_SINCE_DTC_CLEAR",
+        display_name="Time Since Codes Cleared",
+        category="status",
+        unit="min",
+        byte_length=2,
+        poll_tier="slow",
+        dashboard_hint="text",
+        decoder=decode_minutes,
+    ),
+    _Row(
+        pid=0x51,
+        channel="FUEL_TYPE",
+        display_name="Fuel Type",
+        category="info",
+        unit="enum",
+        byte_length=1,
+        poll_tier="slow",
+        dashboard_hint="text",
+        decoder=decode_enum,
+    ),
+    _Row(
+        pid=0x52,
+        channel="ETHANOL_PERCENT",
+        display_name="Ethanol Fuel %",
+        category="fuel",
+        unit="%",
+        byte_length=1,
+        poll_tier="slow",
+        dashboard_hint="gauge",
+        decoder=decode_percent_a_over_255,
+    ),
+    _Row(
+        pid=0x53,
+        channel="ABS_EVAP_VAPOR_PRESSURE",
+        display_name="Absolute Evap Vapor Pressure",
+        category="pressure",
+        unit="kPa",
+        byte_length=2,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_abs_evap_pressure,
+    ),
+    _Row(
+        pid=0x54,
+        channel="EVAP_VAPOR_PRESSURE_ABS",
+        display_name="Evap System Vapor Pressure",
+        category="pressure",
+        unit="Pa",
+        byte_length=2,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_evap_pressure_pa,
+    ),
+    _Row(
+        pid=0x55,
+        channel="SHORT_O2_TRIM_B1",
+        display_name="Short-Term Sec O2 Trim B1",
+        category="o2",
+        unit="%",
+        byte_length=2,  # J1979: A = this bank, B = bank 3 (unused; decoder reads A)
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_percent_b_minus_128,
+    ),
+    _Row(
+        pid=0x56,
+        channel="LONG_O2_TRIM_B1",
+        display_name="Long-Term Sec O2 Trim B1",
+        category="o2",
+        unit="%",
+        byte_length=2,  # J1979: A = this bank, B = bank 3 (unused; decoder reads A)
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_percent_b_minus_128,
+    ),
+    _Row(
+        pid=0x57,
+        channel="SHORT_O2_TRIM_B2",
+        display_name="Short-Term Sec O2 Trim B2",
+        category="o2",
+        unit="%",
+        byte_length=2,  # J1979: A = this bank, B = bank 4 (unused; decoder reads A)
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_percent_b_minus_128,
+    ),
+    _Row(
+        pid=0x58,
+        channel="LONG_O2_TRIM_B2",
+        display_name="Long-Term Sec O2 Trim B2",
+        category="o2",
+        unit="%",
+        byte_length=2,  # J1979: A = this bank, B = bank 4 (unused; decoder reads A)
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_percent_b_minus_128,
+    ),
+    _Row(
+        pid=0x59,
+        channel="FUEL_RAIL_ABS_PRESSURE",
+        display_name="Fuel Rail Absolute Pressure",
+        category="pressure",
+        unit="kPa",
+        byte_length=2,
+        poll_tier="medium",
+        dashboard_hint="gauge",
+        decoder=decode_fuel_rail_gauge_pressure,
+    ),
+    _Row(
+        pid=0x5A,
+        channel="RELATIVE_ACCEL_PEDAL_POS",
+        display_name="Relative Accelerator Pedal",
+        category="engine",
+        unit="%",
+        byte_length=1,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_percent_a_over_255,
+    ),
+    _Row(
+        pid=0x5B,
+        channel="HYBRID_BATTERY_LIFE",
+        display_name="Hybrid Battery Pack Life",
+        category="electrical",
+        unit="%",
+        byte_length=1,
+        poll_tier="slow",
+        dashboard_hint="gauge",
+        decoder=decode_percent_a_over_255,
+    ),
+    _Row(
+        pid=0x5C,
+        channel="OIL_TEMP",
+        display_name="Engine Oil Temp",
+        category="temperature",
+        unit="degC",
+        byte_length=1,
+        poll_tier="medium",
+        dashboard_hint="gauge",
+        decoder=decode_temp_minus_40,
+        polled=True,
+    ),
+    _Row(
+        pid=0x5D,
+        channel="FUEL_INJECTION_TIMING",
+        display_name="Fuel Injection Timing",
+        category="engine",
+        unit="deg",
+        byte_length=2,
+        poll_tier="medium",
+        dashboard_hint="graph",
+        decoder=decode_injection_timing,
+    ),
+    _Row(
+        pid=0x5E,
+        channel="ENGINE_FUEL_RATE",
+        display_name="Engine Fuel Rate",
+        category="fuel",
+        unit="L/h",
+        byte_length=2,
+        poll_tier="medium",
+        dashboard_hint="gauge",
+        decoder=decode_fuel_rate,
+    ),
+    _Row(
+        pid=0x61,
+        channel="DRIVER_DEMAND_TORQUE",
+        display_name="Driver's Demand Torque",
+        category="torque",
+        unit="%",
+        byte_length=1,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_torque_percent,
+    ),
+    _Row(
+        pid=0x62,
+        channel="ACTUAL_ENGINE_TORQUE",
+        display_name="Actual Engine Torque",
+        category="torque",
+        unit="%",
+        byte_length=1,
+        poll_tier="fast",
+        dashboard_hint="graph",
+        decoder=decode_torque_percent,
+    ),
+    _Row(
+        pid=0x63,
+        channel="ENGINE_REFERENCE_TORQUE",
+        display_name="Engine Reference Torque",
+        category="torque",
+        unit="Nm",
+        byte_length=2,
+        poll_tier="slow",
+        dashboard_hint="text",
+        decoder=decode_reference_torque,
     ),
 )
 
 
 def _build_mode01() -> dict[int, PidDefinition]:
     table: dict[int, PidDefinition] = {}
-    for pid, channel, display, category, unit, blen, tier, hint, decoder in _MODE01_SPEC:
-        table[pid] = PidDefinition(
+    for row in _MODE01_SPEC:
+        table[row.pid] = PidDefinition(
             mode=0x01,
-            pid=pid,
-            channel=channel,
-            display_name=display,
-            category=category,
-            unit=unit,
-            byte_length=blen,
-            poll_tier=tier,
-            dashboard_hint=hint,
-            decoder=decoder,
-            support_group=mode01_support_group(pid),
+            pid=row.pid,
+            channel=row.channel,
+            display_name=row.display_name,
+            category=row.category,
+            unit=row.unit,
+            byte_length=row.byte_length,
+            poll_tier=row.poll_tier,
+            dashboard_hint=row.dashboard_hint,
+            decoder=row.decoder,
+            support_group=mode01_support_group(row.pid),
         )
     return table
 
 
 MODE01_REGISTRY: dict[int, PidDefinition] = _build_mode01()
 
-
-def assert_pid_tables_consistent(
-    pid_decoders: Mapping[int, tuple[str, Decoder]] | None = None,
-    mode01_registry: Mapping[int, PidDefinition] | None = None,
-) -> None:
-    """Fail fast if ``PID_DECODERS`` drifts from ``MODE01_REGISTRY`` (Task 1.1).
-
-    ``_MODE01_SPEC`` already sources name+decoder for every shared PID from
-    ``PID_DECODERS`` via ``_pd``/``_pd_name``, so this should be structurally
-    unreachable in practice — but "structurally impossible" has been wrong
-    before in this codebase, so keep it as a cheap regression guard. Runs
-    once at import time against the real tables; parameterized so a test can
-    feed it a deliberately-broken pair without monkeypatching module state.
-    Raises ``ValueError`` (not ``assert``) so it can't be optimized away
-    with ``python -O``.
-    """
-    pid_decoders = PID_DECODERS if pid_decoders is None else pid_decoders
-    mode01_registry = MODE01_REGISTRY if mode01_registry is None else mode01_registry
-    for pid, (name, decoder) in pid_decoders.items():
-        definition = mode01_registry.get(pid)
-        if definition is None:
-            raise ValueError(
-                f"PID_DECODERS has 0x{pid:02X} ({name!r}) but MODE01_REGISTRY does not"
-            )
-        if definition.channel != name:
-            raise ValueError(
-                f"PID 0x{pid:02X} channel-name drift: PID_DECODERS={name!r} "
-                f"MODE01_REGISTRY={definition.channel!r}"
-            )
-        if definition.decoder is not decoder:
-            raise ValueError(
-                f"PID 0x{pid:02X} decoder drift: PID_DECODERS and MODE01_REGISTRY "
-                "reference different decoder functions"
-            )
-
-
-assert_pid_tables_consistent()
+#: PID number → (channel name, decoder) for every PID the collector polls.
+#: Drives the ``read_supported`` flow and any caller that translates a
+#: numeric PID into a named telemetry channel. Derived from the ``polled``
+#: rows of :data:`_MODE01_SPEC`, so it is a view of the registry, not a
+#: second copy of it.
+PID_DECODERS: dict[int, tuple[str, PidDecoder]] = {
+    row.pid: (row.channel, row.decoder)
+    for row in _MODE01_SPEC
+    if row.polled and row.decoder is not None
+}
 
 
 # ---------------------------------------------------------------------------

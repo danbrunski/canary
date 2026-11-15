@@ -24,7 +24,8 @@ from src.config import CanaryConfig
 from src.control.calibration import memory_verify_summary, record_verify_results
 from src.dashboard.api import create_app
 from src.dashboard.status import model_manifest_summary
-from src.decode.dids import MemoryChannel, is_memory_checkable, load_did_map
+from src.decode.dids import MemoryChannel, load_did_map
+from src.decode.memory_relations import is_memory_checkable
 from src.file_memo import FileStamp, StampedCache, file_stamp
 from src.paths import DIDS_YAML
 from src.storage.capture_manifest import CaptureManifest

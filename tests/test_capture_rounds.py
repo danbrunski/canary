@@ -32,7 +32,7 @@ from src.analysis.channels import (
 )
 from src.analysis.compare import compare_channels
 from src.collection import capture_generation, tuning_profile, tx_gate
-from src.collection.can_obd_collector import run_can_obd_loop
+from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.capture_profiles import CaptureProfile
 from src.collection.obd_collector import TS_SCHEMA_VERSION, ObdReading, reading_to_record
 from src.collection.obd_scheduler import (

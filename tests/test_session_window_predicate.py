@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.collection import can_obd_collector, obd_scheduler, tuning_profile
+from src.collection import can_obd_loop, obd_scheduler, tuning_profile
 from src.collection.capture_profiles import CaptureProfile
 from src.collection.obd_scheduler import (
     CanObdSpec,
@@ -119,7 +119,7 @@ def test_memory_read_is_counted_in_the_cycle_plan(memory_profile: CaptureProfile
     requests = build_poll_requests(None, spec)
     states = [_PollRequestState() for _ in requests]
     controller = DidWindowController(_SESSION, [_memory_index(requests)], now=0.0)
-    plan = can_obd_collector._cycle_plan_for(
+    plan = can_obd_loop._cycle_plan_for(
         requests, states, spec, controller, 1.0, profile_gated=True, batch_max_pids=1
     )
     assert plan is not None
@@ -132,9 +132,7 @@ def test_attempted_memory_read_waits_for_the_next_window(memory_profile: Capture
     index = _memory_index(requests)
     controller = DidWindowController(_SESSION, [index], now=0.0)
     controller.phase = "window"
-    verdict = can_obd_collector._loop_request_verdict(
-        controller, True, set(), index, requests[index]
-    )
+    verdict = can_obd_loop._loop_request_verdict(controller, True, set(), index, requests[index])
     assert verdict.verdict == "deferred"
     assert verdict.reason == "attempted_this_window"
 
@@ -142,9 +140,9 @@ def test_attempted_memory_read_waits_for_the_next_window(memory_profile: Capture
 @pytest.mark.parametrize(
     "function",
     [
-        can_obd_collector._loop_request_verdict,
+        can_obd_loop._loop_request_verdict,
         obd_scheduler._next_request_due_at,
-        can_obd_collector._cycle_plan_for,
+        can_obd_loop._cycle_plan_for,
         obd_scheduler._resolved_polling_plan,
     ],
 )

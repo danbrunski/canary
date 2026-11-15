@@ -19,17 +19,7 @@ from typing import Any, Literal, Protocol
 
 from src.atomic_write import atomic_write_text
 from src.collection.obd_scheduler.spec import DidSessionSpec
-from src.decode.dids import (
-    DidMap,
-    MemoryChannel,
-    apply_memory_scaling,
-    check_known_answer,
-    is_memory_sentinel,
-    memory_checks,
-    neighbour_span,
-    relation_channel_names,
-    relation_reads,
-)
+from src.decode.dids import DidMap, MemoryChannel, apply_memory_scaling, is_memory_sentinel
 from src.decode.memory_relations import (
     VALUE_RELATION_KINDS,
     FlagEquivalenceRelation,
@@ -37,6 +27,11 @@ from src.decode.memory_relations import (
     MemoryArithmeticRelation,
     MemoryRelation,
     Mode01PidRelation,
+    check_known_answer,
+    memory_checks,
+    neighbour_span,
+    relation_channel_names,
+    relation_reads,
 )
 from src.yaml_load import load_yaml
 

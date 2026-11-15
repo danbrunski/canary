@@ -17,13 +17,13 @@ from pydantic import ValidationError
 from src.analysis.channels import parse_spec, read_channels
 from src.analysis.tuning_frame import Provider, build_tuning_frame
 from src.collection.can_obd_client import ObdResponse
-from src.collection.can_obd_collector import _decode_response
 from src.collection.capture_profiles import (
     CaptureProfile,
     CaptureProfileSources,
     CaptureProfileStore,
 )
 from src.collection.isotp import build_memory_read_payload
+from src.collection.obd_response_decode import _decode_response
 from src.collection.obd_scheduler import (
     CanObdSpec,
     _PollRequest,

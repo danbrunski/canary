@@ -13,26 +13,14 @@ import can
 import pytest
 
 from src.can_ids import parse_standard_can_id
-from src.collection.can_obd_collector import (
-    AUTO_BASELINE_PID_NAMES,
-    MAX_RESPONSE_PENDING_EXTENSIONS,
-    CanObdSpec,
-    DidSessionSpec,
-    ObdSchedulerMetrics,
-    _PollRequest,
-    _query_with_tap,
-    _response_to_reading,
-    build_poll_requests,
-    parse_did_token,
-    parse_pid_token,
-    record_can_obd,
-    resolve_did_session_spec,
-    run_can_obd_loop,
-)
+from src.collection.can_obd_collector import AUTO_BASELINE_PID_NAMES, record_can_obd
+from src.collection.can_obd_io import _query_with_tap
+from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.custom_pids import CustomPid
-from src.collection.isotp import DEFAULT_REQUEST_ID, ObdResponse
+from src.collection.isotp import DEFAULT_REQUEST_ID, MAX_RESPONSE_PENDING_EXTENSIONS, ObdResponse
 from src.collection.obd_collector import JsonlReadingWriter
 from src.collection.obd_registry import MODE01_REGISTRY
+from src.collection.obd_response_decode import _response_to_reading
 from src.collection.obd_scheduler import (
     AUTO_MISS_BACKOFF_SECONDS,
     CAPTURE_MISS_BACKOFF_SECONDS,
@@ -40,12 +28,20 @@ from src.collection.obd_scheduler import (
     MAX_MISS_BACKOFF_SECONDS,
     PRIORITY_MISS_BACKOFF_SECONDS,
     CanObdLoopStats,
+    CanObdSpec,
+    DidSessionSpec,
     ForcePollTrigger,
     FreezeFrameTrigger,
+    ObdSchedulerMetrics,
     SessionControlResult,
+    _PollRequest,
     _PollRequestState,
     _select_next_due_request,
     _update_response_state,
+    build_poll_requests,
+    parse_did_token,
+    parse_pid_token,
+    resolve_did_session_spec,
 )
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanBusConfig
@@ -1725,7 +1721,7 @@ def test_repeated_refusals_back_off_but_a_success_clears_everything() -> None:
 
 
 def _send_exit(bus: object, stats: CanObdLoopStats) -> SessionControlResult:
-    from src.collection.can_obd_collector import _send_session_control
+    from src.collection.can_obd_io import _send_session_control
 
     return _send_session_control(
         bus,  # type: ignore[arg-type]
@@ -1863,8 +1859,8 @@ def test_capture_profile_sets_the_did_window_cadence() -> None:
 
 def test_single_pid_readings_still_stamp_themselves() -> None:
     """Only the batch path shares a stamp; the single-PID path is unchanged."""
-    from src.collection.can_obd_collector import _response_to_reading
     from src.collection.isotp import ObdResponse
+    from src.collection.obd_response_decode import _response_to_reading
 
     request = _PollRequest(
         kind="pid", service=0x01, identifier=0x0C, request_id=0x7DF, channel="RPM"
@@ -1880,7 +1876,7 @@ def test_single_pid_readings_still_stamp_themselves() -> None:
 def test_query_with_tap_records_the_frame_arrival_and_its_clock(clock: FakeClock) -> None:
     """C02.7: a sane bus-driver stamp is the acquisition clock; an adapter
     reporting 0.0 falls back to userspace time and says so."""
-    from src.collection.can_obd_collector import KERNEL_STAMP_MAX_SKEW_SECONDS
+    from src.collection.frame_time import KERNEL_STAMP_MAX_SKEW_SECONDS
 
     request = _PollRequest(
         kind="pid", service=0x01, identifier=0x0C, request_id=0x7DF, channel="RPM"
@@ -2029,3 +2025,42 @@ def test_record_can_obd_stops_when_the_readings_file_hits_a_full_disk(tmp_path: 
     manifest = json.loads(paths.manifest.read_text())
     assert manifest["stopped_by"] == "disk_error"
     assert "No space left on device" in manifest["error"]
+
+
+def test_nothing_imports_a_re_export_from_the_collector() -> None:
+    """R23.15: ``can_obd_collector`` imported 64 names from the loop, its wire
+    I/O, the decoder and the scheduler; 35 of them it never used itself, 21
+    of those had importers through it.
+    Every import from it now names something it defines, so a caller reaches
+    the module that owns a name (and a monkeypatch lands where it acts)."""
+    import ast
+
+    from src.collection import can_obd_collector
+    from src.paths import REPO_ROOT
+
+    module = Path(can_obd_collector.__file__)
+    body = ast.parse(module.read_text(encoding="utf-8")).body
+    defined = {n.name for n in body if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)}
+    defined |= {n.name for n in body if isinstance(n, ast.ClassDef)}
+    defined |= {
+        t.id
+        for n in body
+        if isinstance(n, ast.Assign)
+        for t in n.targets
+        if isinstance(t, ast.Name)
+    }
+    assert set(can_obd_collector.__all__) <= defined
+    offenders = []
+    for root in ("src", "scripts", "tools", "tests"):
+        for path in (REPO_ROOT / root).rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            if "can_obd_collector import" not in text:
+                continue
+            for node in ast.walk(ast.parse(text)):
+                if isinstance(node, ast.ImportFrom) and node.module == can_obd_collector.__name__:
+                    offenders += [
+                        f"{path.relative_to(REPO_ROOT)}: {alias.name}"
+                        for alias in node.names
+                        if alias.name not in defined
+                    ]
+    assert offenders == []

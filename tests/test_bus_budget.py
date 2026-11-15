@@ -143,8 +143,7 @@ def test_status_reports_the_effective_rate_not_the_configured_one() -> None:
     achieved rate is distinguishable from a fault, which requires the two
     numbers to agree.
     """
-    from src.collection.can_obd_collector import CanObdLoopStats
-    from src.collection.obd_scheduler import CanObdSpec, _scheduler_metrics
+    from src.collection.obd_scheduler import CanObdLoopStats, CanObdSpec, _scheduler_metrics
     from src.config import CanBusConfig
 
     spec = CanObdSpec(

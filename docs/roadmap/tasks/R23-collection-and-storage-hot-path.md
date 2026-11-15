@@ -506,7 +506,7 @@ session-name parser.
     `test_capture_profiles.py` and `test_feature_policy.py`; ruff, format and
     mypy clean.
 
-- [ ] **R23.13 Four durable atomic writes beside `atomic_write.py`.**
+- [x] **R23.13 Four durable atomic writes beside `atomic_write.py`.**
   `os.fsync` appears in exactly four files, each with its own
   tmp + fsync + replace + fsync-directory sequence:
   `analysis/gps_tracker.py`, `control/paired_devices.py`,
@@ -514,24 +514,93 @@ session-name parser.
   `atomic_write_text` does not fsync and uses a fixed `<name>.tmp`, so
   `features/feature_cache.py` and `control/rom_library.py` hand-build a
   per-process temp name.
-  - [ ] `atomic_write_bytes(path, data, *, durable=False, unique_tmp=False)`,
+  - [x] `atomic_write_bytes(path, data, *, durable=False, unique_tmp=False)`,
     the same flags on `atomic_write_text`, `fsync_dir(path)`, and
     `publish_atomic(tmp, path, durable=True)` for the pyarrow case.
+    Done 2026-11-15. `src/atomic_write.py` has all four plus `temp_path(path,
+    *, unique=False, hidden=False)` (names the temp file a library writes
+    itself) and four keywords the migrated sites needed: `mkdir` on both writers and `mode`
+    (the temp file is created with those bits, so the paired-device registry
+    and the NetworkManager keyfiles stay 0600 from the first byte; a leftover
+    temp is unlinked first so it cannot lend its old bits), `hidden_tmp`
+    (the fixed `.<name>.tmp`) and `strict_fsync`. `unique_tmp` is
+    `.<name>.<pid>.<random>.tmp`, for writers of one path that are not
+    serialized. A failed write removes its temp.
+    Which site does what (verifier round 2 restored HEAD's contract at the two
+    strict sites, which the first pass had made best effort):
+    | site | fsync | temp name |
+    |---|---|---|
+    | `paired_devices._durable_write` | strict: raises, so `pair` / `rename` never go live on a disk that refused | fixed hidden, saves run under the store's lock |
+    | `network.write_secret_file` | strict: the join returns `KIND_INTERNAL` before `nmcli connection load`; now also fsyncs the directory | fixed hidden (NetworkManager skips dot-files; a crash's 0600 PSK temp is replaced by the next write, not orphaned); callers hold the backend lock |
+    | `parquet_writer._write_table_atomic` | best effort, logged (as `_fsync_path` was; now deleted) | `<name>.tmp`, unchanged |
+    | `gps_tracker.persist` | best effort, logged | fixed hidden, as at HEAD |
+    | `feature_cache._write_feature_frame_cache`, `RomLibrary.add` | not durable | unique (they replaced hand-built per-pid names) |
+    `os.fsync` now appears in `src/atomic_write.py` only, pinned by
+    `test_atomic_write.py::test_os_fsync_lives_only_in_atomic_write`; the
+    fsync order (temp file, rename, directory) by
+    `test_durable_write_fsyncs_file_before_rename_and_directory_after` and
+    `test_publish_atomic_durable_orders_fsyncs_around_the_rename`; strictness
+    by `test_strict_fsync_raises_removes_the_temp_and_keeps_the_old_file`
+    (13 tests in the new `tests/test_atomic_write.py`). With `os.fsync`
+    raising: `test_paired_devices.py::test_a_pairing_whose_fsync_failed_does_not_work`
+    (pair raises, `list()` empty) and
+    `test_provisioning_network.py::test_join_whose_keyfile_fsync_failed_is_an_internal_error`
+    both fail with `strict_fsync=False` at those sites and pass with it;
+    `test_gps_tracker.py::test_persist_survives_a_failed_fsync` and
+    `test_parquet_writer.py::test_a_failed_chunk_fsync_is_logged_and_the_chunk_still_published`
+    pin the best-effort sites; `test_secret_file_temp_name_is_fixed_and_hidden`
+    the PSK temp.
   - Must not change: a parquet chunk is durable when the write returns.
+    Held: `test_parquet_writer.py::test_chunk_is_fsynced_before_and_after_its_rename_by_the_time_write_returns`
+    records the fsyncs during one `writer.write` and asserts
+    `[file:<chunk>.tmp, dir]` before it returns; the chunk keeps its
+    `<name>.tmp` temp name, so the partial-write test's leftover glob is
+    unchanged.
 
-- [ ] **R23.14 Two PID tables for one fact.** `PID_DECODERS` and
+- [x] **R23.14 Two PID tables for one fact.** `PID_DECODERS` and
   `MODE01_REGISTRY` carry the same name and decoder for about forty PIDs, and
   `assert_pid_tables_consistent()` runs at import because they once drifted.
   `_MODE01_SPEC` is 92 rows of nine-field positional tuples.
   `decode_obd_standard` and `decode_fuel_type` have identical bodies.
-  - [ ] Derive one table from the other and delete the assertion; keyword
+  - [x] Derive one table from the other and delete the assertion; keyword
     fields on the spec rows; a `linear(width, scale, offset, unit)` factory for
     the formula-only decoders.
+    Done 2026-11-15. `_MODE01_SPEC` is 92 `_Row(...)` rows (a frozen
+    `kw_only` dataclass, `polled=True` on the 48 the collector polls);
+    `PID_DECODERS` moved from `pid_decoders.py` to `obd_registry.py` and is
+    `{row.pid: (row.channel, row.decoder) for row in _MODE01_SPEC if
+    row.polled}`, so `assert_pid_tables_consistent`, `_pd` and `_pd_name` are
+    gone. Importers repointed (`can_obd_client` re-exports it from the
+    registry; `artifact_lineage` and four tests import it there).
+    `pid_decoders.linear(width, scale, offset, unit, *, signed=False)` builds
+    29 formula-only decoders (17 in `pid_decoders`, 12 in `obd_registry`);
+    `scale` is an exact rational (`"100/255"`, or a float's own binary value
+    for `0.079`) applied as `raw * num / den` with one correctly rounded
+    division, which is what keeps `raw / 100.0` and `raw * 0.079` bit for bit.
+    `decode_obd_standard` and `decode_fuel_type` are one `decode_enum`;
+    `decode_egr_percent` / `decode_egr_error` / `decode_evap_purge` are
+    aliases of the decoders they wrapped. The λ decoders, the 0xFF timing
+    sentinel and the monitor-status mask stay hand-written.
+    Evidence: a differential against HEAD (old modules loaded from `git show`
+    in a scratch script, not in the repo) compared every `PID_DECODERS`
+    entry (48, same keys, order and names), every `MODE01_REGISTRY` (92) and
+    `MODE09_REGISTRY` (6) field, the Mode 02 `lookup` view, and all 42
+    `decode_*` names over 118,027 payloads (every 0-2 byte payload, sampled
+    3- and 4-byte ones, Mode 09 text and CVN cases) by IEEE-754 bit pattern,
+    type and unit: 21,834,995 decoder calls, 0 diffs.
+    `test_obd_registry.py::test_linear_decoders_match_their_formula_bit_for_bit`
+    keeps that pin in the repo: each of the 28 `linear` decoders against the
+    expression it replaced, over its whole raw range.
+    `test_pid_decoders_is_the_polled_rows_of_the_spec` and
+    `test_spec_rows_are_keyword_only` pin the construction;
+    `test_analysis_ground_truth.py` (`catalog_pins`) passes. A `linear`
+    decode costs ~280 ns against ~190 ns hand-written (microbenchmark, laptop):
+    about 10 µs a second at the collector's ~100 PID reads a second.
   - Declined before and still declined (R02): merging the two λ decoders
     (their names carry φ versus λ) or the `decode_*` families across modules.
   - Pin with the ground-truth suite's `catalog_pins`.
 
-- [ ] **R23.15 Smaller moves.**
+- [x] **R23.15 Smaller moves.**
   - `can_obd_collector.py` re-exports 66 names, 45 of which nothing imports.
     Repoint the dozen real users at `can_obd_loop` / `can_obd_io` /
     `obd_response_decode` and delete the rest.
@@ -540,6 +609,28 @@ session-name parser.
     are `analysis/memory_verification.py` and `control/calibration.py` belong
     in `decode/memory_relations.py`; `decode_did_rows` is the only reason the
     module imports pandas.
+  - Done 2026-11-15. Measured by `ast`: `can_obd_collector` imported 64 names
+    and used 29 of them itself; of the 35 it only passed on, 21 had importers
+    through it (all tests, plus `control/monitor_state.py`'s docstring) and 14
+    had none. Every import from it in `src`, `scripts`, `tools` and `tests`
+    (29 files, plus two tests reaching `can_obd_collector.<name>` by attribute)
+    now names its home module (`can_obd_loop`, `can_obd_io`,
+    `obd_response_decode`, `obd_scheduler`, `isotp`, `frame_time`); the 35
+    imports are deleted and `__all__` lists only the module's own three
+    names. `test_can_obd_collector.py::test_nothing_imports_a_re_export_from_the_collector`
+    refuses any import from the collector of a name it does not define.
+    `check_known_answer`, `relation_channel_names`, `memory_checks`,
+    `is_memory_checkable`, `relation_reads`, `neighbour_span` and
+    `_window_key` (now public `window_key`, since `dids.py`'s catalog
+    validator still calls it) moved to `decode/memory_relations.py` (the
+    channel type imported under `TYPE_CHECKING`; `dids.py` imports the three
+    its validator uses). `decode_did_rows` had four callers (two in `src`, two
+    tests), so it moved beside `decode_can_rows` in `preprocessing/decode.py`;
+    `_RAW_DID_CHANNEL_PREFIX` became public for it. `import src.decode.dids`
+    no longer loads pandas. Every moved function's `ast.dump` (docstrings
+    aside) equals HEAD's but for the two renames. Callers repointed:
+    `memory_verification.py`, `calibration.py`, `session_decode.py`,
+    `plausibility/offline.py` and eight tests.
 
 ## Looked at and fine
 
