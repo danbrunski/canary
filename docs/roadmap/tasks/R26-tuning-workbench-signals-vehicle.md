@@ -387,13 +387,20 @@ The cross-cutting copies found here (`_aware`, `_iso`,
     the per-spec `long[long["spec"] == name]` filter, with a test that the
     aligned output is identical.
 
-- [ ] **R26.9 `GpsTracker` is daemon state that lives in `analysis/`.**
+- [x] **R26.9 `GpsTracker` is daemon state that lives in `analysis/`.**
   733 lines; `observe` runs per telemetry record and `persist` fsyncs. It is
   imported by `daemon/components.py`, three dashboard modules and
   `control/trip_end.py`.
-  - [ ] Use the durable helper from R23.13 in `persist`. Moving the class out
+  - [x] Use the durable helper from R23.13 in `persist`. Moving the class out
     of `analysis/` needs a layer decision in `tests/test_layering.py`; do it
     only if something else forces it.
+    **Done 2026-11-15 with R23.13 (a9742919).** `persist` is
+    `atomic_write_text(self._state_path, payload, mkdir=True, durable=True,
+    hidden_tmp=True)`: best-effort fsync (a failure is logged and the totals
+    still land), the fixed hidden `.<name>.tmp` it had at HEAD. Pinned by
+    `tests/test_gps_tracker.py::test_persist_survives_a_failed_fsync` and
+    `tests/test_atomic_write.py`'s "os.fsync only in atomic_write" check. The
+    class stays in `analysis/`: nothing forced the move.
 
 - [ ] **R26.10 Per-row Python loops on session frames.** Mostly cold; listed
   so they are found once.
