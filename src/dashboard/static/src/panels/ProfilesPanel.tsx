@@ -137,7 +137,7 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
     run("save", async () => {
       await updateProfileName(token, slug, draftName.trim());
       setEditingSlug(null);
-      refresh();
+      await refresh();
     });
 
   const describeEdit = (result: VehicleProfileEditResponse, what: string): string => {
@@ -154,7 +154,7 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
       async () => {
         const result = await revertProfile(token, slug, fields);
         setNotice({ kind: "ok", text: describeEdit(result, "Reverted") });
-        refresh();
+        await refresh();
       },
       { okText: null },
     );
@@ -166,7 +166,7 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
         const result = await deleteProfile(token, slug);
         setConfirmingSlug(null);
         setLastDeleted(result);
-        refresh();
+        await refresh();
       },
       { okText: null },
     );
@@ -178,7 +178,7 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
         await restoreProfile(token, slug);
         setLastDeleted(null);
         setNotice({ kind: "ok", text: `Restored ${slug}: it is back as the tracked file has it.` });
-        refresh();
+        await refresh();
       },
       { okText: null },
     );
@@ -186,7 +186,7 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
   const onEdited = (result: VehicleProfileEditResponse) => {
     setEditorSlug(null);
     setNotice({ kind: "ok", text: describeEdit(result, "Saved") });
-    refresh();
+    void refresh();
   };
 
   return (

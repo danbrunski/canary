@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { getRomTypicalValues } from "../../../api/workbench";
-
+import { useNow } from "../../../hooks/useNow";
 import {
   CANDIDATE_EVENT_CHOICES,
   DEFERRED_ADVICE,
@@ -214,16 +214,6 @@ function Choice<T extends string>({
       {value === "" && <p className="text-xs text-fg-faint">Choose one: there is no default.</p>}
     </fieldset>
   );
-}
-
-/** The time, ticking while the component is mounted. */
-function useNow(intervalMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), intervalMs);
-    return () => window.clearInterval(timer);
-  }, [intervalMs]);
-  return now;
 }
 
 /** Seconds since `startedAt`, ticking while the component is mounted. */

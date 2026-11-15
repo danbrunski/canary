@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import {
   getControlVersion,
@@ -15,7 +15,8 @@ import { Panel } from "../components/Panel";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
 import { useControlStream } from "../hooks/useControlStream";
-import { describeError } from "../hooks/useControlResource";
+import { useFirstFailure } from "../hooks/useFirstFailure";
+import { describeError, useControlResource } from "../hooks/useControlResource";
 import type {
   CaptureState,
   JobRecord,
@@ -44,52 +45,31 @@ interface ControlPanelProps {
  *  reads `token` to gate its own actions. */
 export function ControlPanel({ token, companion }: ControlPanelProps) {
   const controlStream = useControlStream(token);
-  // One snapshot, written by one setter: every read replaces all five.
-  const [control, setControl] = useState<ControlSnapshot | null>(null);
+  const { notice, setNotice, busy, run: runAction } = useAsyncAction();
+
+  // One snapshot, replaced whole by every read. The first read of a token
+  // reports its failure; the 5 s re-reads stay quiet.
+  const read = useCallback(() => readControl(token), [token]);
+  const reportFailure = useCallback(
+    (err: unknown) => setNotice({ kind: "error", text: errorText(err) }),
+    [setNotice],
+  );
+  const fetcher = useFirstFailure(read, reportFailure);
+  // Clearing the token clears what it read (`enabled: false` drops the data).
+  const { data: control, refresh: refreshControl } = useControlResource(fetcher, {
+    enabled: Boolean(token),
+    intervalMs: 5000,
+  });
   const preflight = control?.preflight ?? null;
   const version = control?.version ?? null;
   const capture = control?.capture ?? null;
   const jobs = control?.jobs ?? NO_JOBS;
   const sequenceDetector = control?.sequenceDetector ?? null;
-  const { notice, setNotice, busy, run: runAction } = useAsyncAction();
   const [purpose, setPurpose] = useState("");
   const [protocol, setProtocol] = useState("drive");
   const [vehicleState, setVehicleState] = useState("driving");
   const [tagLabel, setTagLabel] = useState("");
   const [stopReason, setStopReason] = useState("");
-
-  const refreshControl = useCallback(async () => {
-    if (!token) return;
-    setControl(await readControl(token));
-  }, [token]);
-
-  // Clearing the token clears what it read: on the change, while rendering,
-  // rather than in the effect a commit later.
-  const [readToken, setReadToken] = useState(token);
-  if (token !== readToken) {
-    setReadToken(token);
-    if (!token) setControl(null);
-  }
-
-  useEffect(() => {
-    if (!token) return;
-    let cancelled = false;
-    // The first read reports its failure; the 5 s re-reads stay quiet.
-    const load = async (report: boolean): Promise<void> => {
-      try {
-        const next = await readControl(token);
-        if (!cancelled) setControl(next);
-      } catch (err) {
-        if (!cancelled && report) setNotice({ kind: "error", text: errorText(err) });
-      }
-    };
-    void load(true);
-    const timer = window.setInterval(() => void load(false), 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [setNotice, token]);
 
   // Every mutating control gates on the token and refreshes afterwards;
   // wrapping the shared runner here keeps all call sites (including the

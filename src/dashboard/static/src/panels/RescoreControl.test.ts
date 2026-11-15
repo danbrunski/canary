@@ -1,6 +1,6 @@
 import { createElement } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { mockHttp } from "../test/harness";
 import type { AnomalyEvent, JobRecord, ReplayWindowReport } from "../types";
@@ -164,4 +164,89 @@ describe("RescoreControl (Task 4.1)", () => {
     expect(screen.queryByText("Isolation Forest")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "re-score this window" })).toBeInTheDocument();
   }, 10000);
+});
+
+describe("RescoreControl job poll timing (R28.3)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  async function submit() {
+    mocks.submitJob.mockResolvedValue({ job: job({ status: "queued" }) });
+    const view = render(createElement(RescoreControl, { token: "secret", event: EVENT }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /re-score this window/ }));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    return view;
+  }
+
+  it("first looks 2 s after the submit, then 2 s after each answer settles", async () => {
+    vi.useFakeTimers();
+    mocks.getJob.mockResolvedValue({ job: job({ status: "running" }) });
+    await submit();
+    expect(mocks.getJob).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1999);
+    });
+    expect(mocks.getJob).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mocks.getJob).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(mocks.getJob).toHaveBeenCalledTimes(2);
+  });
+
+  it("never asks again while an answer is outstanding", async () => {
+    vi.useFakeTimers();
+    mocks.getJob.mockReturnValue(new Promise(() => {}));
+    await submit();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(mocks.getJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops polling once the job is done", async () => {
+    vi.useFakeTimers();
+    mocks.getJob.mockResolvedValue({ job: job({ status: "succeeded" }) });
+    mocks.getJobResult.mockResolvedValue({ job: job({ status: "succeeded" }), result: REPORT });
+    await submit();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(screen.getByText("Isolation Forest")).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(mocks.getJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a failed read as the failure and stops", async () => {
+    vi.useFakeTimers();
+    mocks.getJob.mockRejectedValue(new Error("daemon went away"));
+    await submit();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(screen.getByText("daemon went away")).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(mocks.getJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops polling on unmount", async () => {
+    vi.useFakeTimers();
+    mocks.getJob.mockResolvedValue({ job: job({ status: "running" }) });
+    const { unmount } = await submit();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(mocks.getJob).toHaveBeenCalledTimes(1);
+    unmount();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(mocks.getJob).toHaveBeenCalledTimes(1);
+  });
 });

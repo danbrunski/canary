@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { Panel } from "../components/Panel";
 import { HttpError, getReplay, startReplay, stopReplay } from "../api/http";
 import type { RunAction } from "../hooks/useAsyncAction";
 import { describeError, useControlResource } from "../hooks/useControlResource";
+import { useNow } from "../hooks/useNow";
 import { buttonClass, inputClass } from "../styles";
 import type { ReplayStatus, SessionSummary } from "../types";
 import { formatElapsed } from "../util/time";
@@ -187,10 +188,6 @@ export function ReplayCard({ token, run, sessions, selectedSessionId }: ReplayCa
  *  on the 3 s replay-status poll, which would otherwise make "elapsed" jump
  *  in 3 s steps instead of counting smoothly. */
 function ReplayElapsed({ startedAt }: { startedAt: string }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, []);
+  const now = useNow();
   return <>{formatElapsed(startedAt, now)}</>;
 }

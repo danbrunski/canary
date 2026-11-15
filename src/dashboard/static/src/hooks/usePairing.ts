@@ -7,6 +7,7 @@ import {
   type PairingRequestCreated,
   type PairingRequestStatus,
 } from "../api/http";
+import { usePolling } from "./usePolling";
 import { deviceName, failureMessage, loadActiveRequest, saveActiveRequest } from "../pairing";
 
 const POLL_MS = 1000;
@@ -33,12 +34,16 @@ export function usePairing(onPaired: (token: string) => void) {
     setView(next);
   }, []);
 
-  useEffect(() => {
-    if (request === null) return;
-    const controller = new AbortController();
-    const poll = async () => {
+  // The poll loop is `usePolling`'s (a slow answer never overlaps the next
+  // request, and unmount or a finished request aborts the one in flight).
+  // Every outcome is handled here, in the fetcher, because each one either
+  // ends the request (which switches the poll off) or is the next waiting view.
+  const poll = useCallback(
+    async (signal: AbortSignal): Promise<null> => {
+      if (request === null) return null;
       try {
-        const status = await getPairingRequest(request, controller.signal);
+        const status = await getPairingRequest(request, signal);
+        if (signal.aborted) return null;
         if (status.status === "approved" && status.token) {
           finish({ phase: "idle" });
           onPairedRef.current(status.token);
@@ -48,17 +53,14 @@ export function usePairing(onPaired: (token: string) => void) {
           finish({ phase: "failed", message: status.detail || "Pairing did not finish." });
         }
       } catch (error: unknown) {
-        if (controller.signal.aborted) return;
+        if (signal.aborted) return null;
         finish({ phase: "failed", message: failureMessage(error) });
       }
-    };
-    void poll();
-    const timer = window.setInterval(() => void poll(), POLL_MS);
-    return () => {
-      controller.abort();
-      window.clearInterval(timer);
-    };
-  }, [request, finish]);
+      return null;
+    },
+    [request, finish],
+  );
+  usePolling(poll, { enabled: request !== null, intervalMs: POLL_MS });
 
   const start = useCallback(async () => {
     setView({ phase: "waiting", status: null });

@@ -6,10 +6,11 @@
 // Nothing is called an active cell unless the operator asserts this ROM and
 // slot are running and nothing the daemon knows contradicts it (`traceGate`).
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { getCaptureProfiles } from "../api/http";
 import { useLiveFullStatus } from "./statusDemand";
+import { useNow } from "./useNow";
 import type { GridOverlay } from "../panels/cellOverlay";
 import { liveValue, streamRow, tracePosition } from "../lib/romMaps";
 import type { RomTable } from "../lib/romMaps";
@@ -93,7 +94,7 @@ export function useLiveOverlay({
   // neither makes the assertion false nor needs asking again. (ROM Maps cleared
   // it on a slot change because its dropdown chose which slot to trace.)
   const [confirmed, setConfirmed] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
+  const now = useNow(250);
   // Per table: the last ECM sample stepped (its X timestamp) and the
   // disagreement tally (W05.3). Render state, not a ref, because the step
   // happens while rendering (below).
@@ -101,11 +102,6 @@ export function useLiveOverlay({
     seen: Record<string, number>;
     tally: Record<string, EcmTally>;
   }>({ seen: {}, tally: {} });
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 250);
-    return () => window.clearInterval(timer);
-  }, []);
-
   // The vehicle's capture-profile catalog, to name a profile that carries the
   // trace channels when the active one does not (W05.4).
   const catalog = useControlResource(

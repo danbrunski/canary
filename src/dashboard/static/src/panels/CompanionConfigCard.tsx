@@ -51,7 +51,7 @@ export function CompanionConfigCard({ companion, token }: CompanionConfigCardPro
       setNotice(null);
       try {
         await work();
-        refresh();
+        await refresh();
       } catch (err) {
         setNotice({ kind: "error", text: describeError(err) });
       } finally {

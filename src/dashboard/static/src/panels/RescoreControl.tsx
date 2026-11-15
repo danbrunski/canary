@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { getJob, getJobResult, submitJob } from "../api/http";
 import { describeError } from "../hooks/useControlResource";
+import { usePolling } from "../hooks/usePolling";
 import { badgeClass, buttonClass, cn, placeholderClass } from "../styles";
 import type { AnomalyEvent, ReplayWindowReport } from "../types";
 
@@ -15,6 +16,13 @@ interface RescoreState {
   error: string | null;
   report: ReplayWindowReport | null;
 }
+
+type JobPoll =
+  | { kind: "pending" }
+  | { kind: "succeeded"; report: ReplayWindowReport | null }
+  | { kind: "failed"; error: string };
+
+const PENDING: JobPoll = { kind: "pending" };
 
 const IDLE: RescoreState = { status: "idle", jobId: null, error: null, report: null };
 
@@ -42,39 +50,40 @@ export function RescoreControl({ token, event }: RescoreControlProps) {
     if (state.status !== "idle") setState(IDLE);
   }
 
-  useEffect(() => {
-    if (state.status !== "running" || !state.jobId || !token) return;
-    const jobId = state.jobId;
-    let cancelled = false;
-    const timer = window.setInterval(() => {
-      void (async () => {
-        try {
-          const res = await getJob(token, jobId);
-          if (cancelled) return;
-          if (res.job.status === "succeeded") {
-            const withResult = await getJobResult(token, jobId);
-            if (cancelled) return;
-            setState({ status: "succeeded", jobId, error: null, report: withResult.result });
-          } else if (res.job.status === "failed" || res.job.status === "cancelled") {
-            setState({
-              status: "failed",
-              jobId,
-              error: `replay_window job ${res.job.status}`,
-              report: null,
-            });
-          }
-        } catch (err) {
-          if (!cancelled) {
-            setState({ status: "failed", jobId, error: describeError(err), report: null });
-          }
-        }
-      })();
-    }, POLL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [state.status, state.jobId, token]);
+  // Poll the job while it runs: the first look is one interval after the
+  // submit (the job cannot be done sooner), and a slow answer never overlaps
+  // the next request. A terminal answer is committed to `state` below, which
+  // turns the poll off.
+  const jobId = state.status === "running" ? state.jobId : null;
+  const fetchJob = useCallback(
+    async (signal: AbortSignal): Promise<JobPoll> => {
+      if (!token || !jobId) return PENDING;
+      const res = await getJob(token, jobId, signal);
+      if (res.job.status === "succeeded") {
+        const withResult = await getJobResult(token, jobId, signal);
+        return { kind: "succeeded", report: withResult.result };
+      }
+      if (res.job.status === "failed" || res.job.status === "cancelled") {
+        return { kind: "failed", error: `replay_window job ${res.job.status}` };
+      }
+      return PENDING;
+    },
+    [token, jobId],
+  );
+  const poll = usePolling(fetchJob, {
+    enabled: Boolean(token) && jobId !== null,
+    intervalMs: POLL_MS,
+    delayFirst: true,
+  });
+  if (jobId !== null && !poll.stale) {
+    if (poll.error !== null) {
+      setState({ status: "failed", jobId, error: describeError(poll.error), report: null });
+    } else if (poll.data?.kind === "succeeded") {
+      setState({ status: "succeeded", jobId, error: null, report: poll.data.report });
+    } else if (poll.data?.kind === "failed") {
+      setState({ status: "failed", jobId, error: poll.data.error, report: null });
+    }
+  }
 
   if (!token) return null;
 

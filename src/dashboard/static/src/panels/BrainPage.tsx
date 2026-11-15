@@ -394,7 +394,7 @@ export function BrainPage({ token }: BrainPageProps) {
         kind: "ok",
         text: created ? `queued ${job.job_id}` : `already ${jobStateText(job)}`,
       });
-      jobs.refresh();
+      await jobs.refresh();
     } catch (err) {
       setNotice({ kind: "error", text: err instanceof Error ? err.message : String(err) });
     }

@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { getNetwork, setProvisioningWindow } from "../api/http";
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { useControlResource } from "../hooks/useControlResource";
+import { useNow } from "../hooks/useNow";
 import {
   buttonClass,
   cn,
@@ -46,12 +47,7 @@ type Stamped = NetworkResponse & { receivedAt: number };
 
 function useCountdown(data: Stamped | null): number {
   const open = (data?.provisioning.window_remaining_s ?? 0) > 0;
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!open) return undefined;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [open]);
+  const now = useNow(1000, open);
   if (!data) return 0;
   const elapsed = Math.max(0, now - data.receivedAt) / 1000;
   return Math.max(0, data.provisioning.window_remaining_s - elapsed);
@@ -185,7 +181,7 @@ export function NetworkPanel({ token, status }: NetworkPanelProps) {
       minutes > 0 ? "open window" : "close window",
       async () => {
         await setProvisioningWindow(token, minutes);
-        refresh();
+        await refresh();
       },
       { okText },
     );

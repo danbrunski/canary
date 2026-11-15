@@ -101,9 +101,9 @@ export function EcuBackupCard({
     } catch (err) {
       setPosted(refused(refusalText(err)));
     } finally {
+      await polled.refresh();
       setBusy(false);
       setConfirming(false);
-      polled.refresh();
     }
   }
 
@@ -115,8 +115,8 @@ export function EcuBackupCard({
     } catch (err) {
       setNotice({ kind: "error", text: refusalText(err) });
     } finally {
+      await polled.refresh();
       setBusy(false);
-      polled.refresh();
     }
   }
 

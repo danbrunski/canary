@@ -154,7 +154,7 @@ export function UpdateCard({ token }: UpdateCardProps) {
           requestedAt: response.request.requested_at,
         });
         setConfirming(false);
-        refresh();
+        await refresh();
       },
       { okText: null },
     );

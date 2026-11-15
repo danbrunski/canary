@@ -222,7 +222,7 @@ export function RomEditorPage({
       setOpened({ entry, name: file.name, existed: entry.created === false });
       setChosen(entry.sha256);
       writeShaToUrl(entry.sha256);
-      library.refresh();
+      await library.refresh();
     } catch (err) {
       if (load.current === mine) setRefusal(`${file.name}: ${refusalText(err)}`);
     } finally {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import {
@@ -11,6 +11,7 @@ import {
 import type { AcceptedBaselineOverrideSummary, AnomalyEvent, StatusResponse } from "../types";
 import { STALE_THRESHOLD_MS, computeFreshness } from "../util/freshness";
 import { useLocalStorageJson } from "../hooks/useLocalStorage";
+import { useNow } from "../hooks/useNow";
 
 interface StatusStripProps {
   status: StatusResponse | null;
@@ -26,11 +27,7 @@ interface StatusStripProps {
 export function StatusStrip({ status, channels, events }: StatusStripProps) {
   // Re-tick once a second so freshness / anomaly-age stay live without a
   // telemetry message arriving.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, []);
+  const now = useNow();
 
   const freshnessMs = computeFreshness(channels, now);
   const stale = freshnessMs !== null && freshnessMs > STALE_THRESHOLD_MS;

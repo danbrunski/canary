@@ -1,8 +1,8 @@
 // Behaviour of ControlPanel's Capture section, pinned before R08.12 moved it
 // onto <Panel>: the header states idle/active, Start sends the typed fields,
 // Tag and Stop act on the open window, and every action waits for a token.
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { mockHttp } from "../test/harness";
 import type { CaptureState } from "../types";
@@ -79,6 +79,7 @@ function button(panel: HTMLElement, name: string): HTMLButtonElement {
 }
 
 describe("ControlPanel capture section", () => {
+  afterEach(() => vi.useRealTimers());
   beforeEach(() => {
     mocks.startCapture.mockResolvedValue({ capture: ACTIVE });
     mocks.tagCapture.mockResolvedValue({ tag: {}, capture: ACTIVE });
@@ -150,5 +151,104 @@ describe("ControlPanel capture section", () => {
     expect(button(panel, "Tag")).toBeDisabled();
     expect(button(panel, "Stop")).toBeDisabled();
     expect(mocks.getCurrentCapture).not.toHaveBeenCalled();
+  });
+});
+
+describe("ControlPanel poll timing (R28.3)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("reads at once, then 5 s after each read settles", async () => {
+    vi.useFakeTimers();
+    serve(null);
+    render(<ControlPanel token="t" companion={COMPANION} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.getCurrentCapture).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4999);
+    });
+    expect(mocks.getCurrentCapture).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mocks.getCurrentCapture).toHaveBeenCalledTimes(2);
+  });
+
+  it("never overlaps a slow read", async () => {
+    vi.useFakeTimers();
+    serve(null);
+    mocks.getCurrentCapture.mockReturnValue(new Promise(() => {}));
+    render(<ControlPanel token="t" companion={COMPANION} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(mocks.getCurrentCapture).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a failed first read, not a failed re-read", async () => {
+    vi.useFakeTimers();
+    serve(null);
+    mocks.getCurrentCapture
+      .mockRejectedValueOnce(new Error("first read down"))
+      .mockRejectedValue(new Error("re-read down"));
+    render(<ControlPanel token="t" companion={COMPANION} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByText("first read down")).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(mocks.getCurrentCapture).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("re-read down")).not.toBeInTheDocument();
+  });
+
+  it("stops reading on unmount", async () => {
+    vi.useFakeTimers();
+    serve(null);
+    const { unmount } = render(<ControlPanel token="t" companion={COMPANION} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    unmount();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(mocks.getCurrentCapture).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds a capture start busy until the follow-up read lands (no second Start in the gap)", async () => {
+    vi.useFakeTimers();
+    serve(null);
+    mocks.startCapture.mockResolvedValue({ capture: ACTIVE });
+    render(<ControlPanel token="t" companion={COMPANION} />);
+    const panel = capturePanel();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(button(panel, "Start")).toBeEnabled();
+
+    // The read that follows the action is slow; it is the only thing outstanding.
+    let landed!: (value: unknown) => void;
+    mocks.getCurrentCapture.mockReturnValue(
+      new Promise((resolve) => {
+        landed = resolve;
+      }),
+    );
+    fireEvent.click(button(panel, "Start"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.startCapture).toHaveBeenCalledTimes(1);
+    // `capture` is still null, so only `busy` keeps Start from a second click
+    // (which the daemon answers 409), and "completed" is not claimed yet.
+    expect(button(panel, "Start")).toBeDisabled();
+    expect(screen.queryByText("capture start completed.")).not.toBeInTheDocument();
+
+    await act(async () => {
+      landed({ capture: ACTIVE, active: true, detail: null });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByText("capture start completed.")).toBeInTheDocument();
+    expect(within(panel.querySelector("header")!).getByText("active")).toBeInTheDocument();
   });
 });

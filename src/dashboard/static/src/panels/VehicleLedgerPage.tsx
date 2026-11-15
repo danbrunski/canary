@@ -156,7 +156,7 @@ export function VehicleLedgerPage({ token }: VehicleLedgerPageProps) {
     try {
       await work();
       setForm(null);
-      refresh();
+      await refresh();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {

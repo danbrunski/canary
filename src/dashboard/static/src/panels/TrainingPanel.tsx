@@ -100,7 +100,7 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
         kind: "ok",
         text: `${response.job.kind} queued on ${target === "local" ? "laptop" : "Pi"}.`,
       });
-      refresh();
+      await refresh();
     } catch (err) {
       setNotice({ kind: "error", text: describeError(err) });
     } finally {

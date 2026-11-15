@@ -27,6 +27,12 @@ export interface PollingOptions {
    *  `intervalMs`. A slow poll (a 30 s one) would otherwise leave a transient
    *  failure on screen for a whole interval. */
   retryMs?: number;
+  /** Wait one `intervalMs` before the first fetch instead of fetching on
+   *  mount. For a poll that cannot have an answer yet (a job submitted a
+   *  moment ago). A restart (`refresh`, a new `fetcher`) waits again. Ignored
+   *  with `intervalMs: null`: a one-shot has no interval to wait, so it
+   *  fetches at once rather than never. */
+  delayFirst?: boolean;
 }
 
 export interface PollingState<T> {
@@ -40,7 +46,12 @@ export interface PollingState<T> {
    *  parameters changed) and the new fetch has not settled yet. Lets a page
    *  show "Loading…" over the old view instead of passing it off as current. */
   stale: boolean;
-  refresh: () => void;
+  /** Read again now. The promise settles when that read settles, success or
+   *  failure (the failure shows in `error`, never as a rejection); it also
+   *  settles, without a result, when a newer read supersedes it, the hook is
+   *  disabled, or it unmounts. A caller that must show fresh data before it
+   *  reports done (an action's follow-up read) returns it. */
+  refresh: () => Promise<void>;
 }
 
 interface Snapshot<T> {
@@ -67,7 +78,7 @@ function isAbort(err: unknown): boolean {
  *  the loop). An `AbortError` is cancellation, never reported as an error. */
 export function usePolling<T>(
   fetcher: (signal: AbortSignal) => Promise<T>,
-  { enabled = true, intervalMs, retryMs }: PollingOptions,
+  { enabled = true, intervalMs, retryMs, delayFirst = false }: PollingOptions,
 ): PollingState<T> {
   const [snapshot, setSnapshot] = useState<Snapshot<T>>(() => initial<T>(enabled));
   const [wasEnabled, setWasEnabled] = useState(enabled);
@@ -80,7 +91,23 @@ export function usePolling<T>(
     setSnapshot(initial<T>(enabled));
   }
 
-  const refresh = useCallback(() => setTick((t) => t + 1), []);
+  // Callers of `refresh` awaiting the read it starts. The loop that the tick
+  // restarts takes the list and releases it when its first read settles, or
+  // when that loop is torn down first (superseded, disabled, unmounted).
+  const waiting = useRef<Array<() => void>>([]);
+  // A refresh in the same batch as the unmount lands on the list after the
+  // running loop took its share, so nothing else would drain it.
+  useEffect(
+    () => () => {
+      for (const resolve of waiting.current.splice(0)) resolve();
+    },
+    [],
+  );
+  const refresh = useCallback(() => {
+    const settled = new Promise<void>((resolve) => waiting.current.push(resolve));
+    setTick((t) => t + 1);
+    return settled;
+  }, []);
 
   // The cadence the running loop reads each time it arms its timer, and the
   // loop's re-arm hook (`null` while no loop runs). Declared before the loop's
@@ -94,7 +121,15 @@ export function usePolling<T>(
 
   const repeating = intervalMs !== null;
   useEffect(() => {
-    if (!enabled) return;
+    const mine = waiting.current;
+    waiting.current = [];
+    const release = (): void => {
+      for (const resolve of mine.splice(0)) resolve();
+    };
+    if (!enabled) {
+      release();
+      return;
+    }
     const controller = new AbortController();
     let timer: number | null = null;
     let cancelled = false;
@@ -125,21 +160,25 @@ export function usePolling<T>(
         if (cancelled || controller.signal.aborted || isAbort(err)) return;
         failed = true;
         setSnapshot((prev) => ({ data: prev.data, error: err, loading: false, source: fetcher }));
+      } finally {
+        release();
       }
       inFlight = false;
       settledAt = Date.now();
       arm();
     };
     rearm.current = arm;
-    void load();
+    if (delayFirst && repeating) arm();
+    else void load();
 
     return () => {
       cancelled = true;
+      release();
       rearm.current = null;
       controller.abort();
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [fetcher, enabled, repeating, tick]);
+  }, [fetcher, enabled, repeating, delayFirst, tick]);
 
   const { data, error, loading, source } = snapshot;
   const stale = enabled && !loading && source !== fetcher;

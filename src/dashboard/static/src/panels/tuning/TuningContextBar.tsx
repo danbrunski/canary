@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
+import { useNow } from "../../hooks/useNow";
 import type { TuningContext } from "../../hooks/useTuningContext";
 import { cn } from "../../styles";
 import type { ReadinessEntry, ReadinessKey, StatusResponse, WorkbenchItem } from "../../types";
@@ -70,15 +71,10 @@ const segmentClass =
  *  calibration, capture, selected log, loaded ROM, readiness. Each segment
  *  names its empty state and links to the page that fills it. */
 export function TuningContextBar({ status, context, onNavigate }: Props) {
-  const [now, setNow] = useState(() => Date.now());
   const [openChip, setOpenChip] = useState<ReadinessKey | null>(null);
   const capture = status?.capture_profile;
   const captureActive = capture?.active === true;
-  useEffect(() => {
-    if (!captureActive) return;
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, [captureActive]);
+  const now = useNow(1000, captureActive);
 
   const vehicle = status?.profile?.name || status?.vehicle || "vehicle unknown";
   const readiness = status?.tuning_readiness ?? null;

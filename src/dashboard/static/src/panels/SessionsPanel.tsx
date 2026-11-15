@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { listSessions } from "../api/http";
 import { Notice } from "../components/Notice";
 import { useAsyncAction } from "../hooks/useAsyncAction";
+import { useFirstFailure } from "../hooks/useFirstFailure";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
-import { describeError } from "../hooks/useControlResource";
+import { describeError, useControlResource } from "../hooks/useControlResource";
 import type { SessionSummary } from "../types";
 import { ReplayCard } from "./ReplayCard";
 import { SessionsCard } from "./SessionsCard";
 import { TOKEN_FIRST } from "../lib/tokenMessages";
+
+const NO_SESSIONS: SessionSummary[] = [];
 
 interface SessionsPanelProps {
   token: string;
@@ -23,44 +26,28 @@ interface SessionsPanelProps {
  *  selected here. Owns the session poll and the shared selection so both
  *  cards read the same list/session without a second fetch. */
 export function SessionsPanel({ token, companion }: SessionsPanelProps) {
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState("");
   const [showCaptures, setShowCaptures] = useState(false);
   const { notice, setNotice, busy, run: runAction } = useAsyncAction();
 
-  const refreshSessions = useCallback(async () => {
-    if (!token) return;
-    const next = await listSessions(token, undefined, undefined, showCaptures);
-    setSessions(next.sessions);
-  }, [token, showCaptures]);
-
-  // Clearing the token clears the list: on the change, while rendering,
-  // rather than in the effect a commit later.
-  const [listedToken, setListedToken] = useState(token);
-  if (token !== listedToken) {
-    setListedToken(token);
-    if (!token) setSessions([]);
-  }
-
-  useEffect(() => {
-    if (!token) return;
-    let cancelled = false;
-    // The first read reports its failure; the 5 s re-reads stay quiet.
-    const load = async (report: boolean): Promise<void> => {
-      try {
-        const next = await listSessions(token, undefined, undefined, showCaptures);
-        if (!cancelled) setSessions(next.sessions);
-      } catch (err) {
-        if (!cancelled && report) setNotice({ kind: "error", text: describeError(err) });
-      }
-    };
-    void load(true);
-    const timer = window.setInterval(() => void load(false), 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [token, showCaptures, setNotice]);
+  // The first read of a (token, captures) pair reports its failure; the 5 s
+  // re-reads stay quiet.
+  const read = useCallback(
+    async (signal: AbortSignal) =>
+      (await listSessions(token, signal, undefined, showCaptures)).sessions,
+    [token, showCaptures],
+  );
+  const reportFailure = useCallback(
+    (err: unknown) => setNotice({ kind: "error", text: describeError(err) }),
+    [setNotice],
+  );
+  const fetcher = useFirstFailure(read, reportFailure);
+  // Clearing the token clears the list (`enabled: false` drops the data).
+  const { data, refresh: refreshSessions } = useControlResource(fetcher, {
+    enabled: Boolean(token),
+    intervalMs: 5000,
+  });
+  const sessions = data ?? NO_SESSIONS;
 
   // Keep the selection valid as the polled list changes; default to the
   // latest session once one becomes available (same rule `SessionsCard`

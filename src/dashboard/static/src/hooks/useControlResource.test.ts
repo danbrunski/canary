@@ -124,7 +124,9 @@ describe("useControlResource polling (R08.9)", () => {
     });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(result.current.data).toBe(7);
-    act(() => result.current.refresh());
+    act(() => {
+      void result.current.refresh();
+    });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });

@@ -99,7 +99,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
         hasQuestion ? clarifyingQuestion.trim() : null,
         hasAnswer ? clarifyingAnswer.trim() : null,
       );
-      feedback.refresh();
+      await feedback.refresh();
       // Enrichment is per-verdict, not per-draft — clear it once it's landed.
       setHypothesis("");
       setClarifyingQuestion("");

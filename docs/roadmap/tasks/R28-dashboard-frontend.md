@@ -146,7 +146,7 @@ neither earlier review covered.
   - [ ] Confirm a saved profile that carries `kline` round-trips through
     `CaptureProfileEditor` (it clones and spreads, so it should; unverified).
 
-- [ ] **R28.3 Hand-rolled `setInterval` polling has regrown beside
+- [~] **R28.3 Hand-rolled `setInterval` polling has regrown beside
   `usePolling` (R08.9).** `panels/SessionsPanel.tsx` and
   `panels/ControlPanel.tsx` each carry the same block,
   `void load(true); const timer = window.setInterval(() => void load(false), 5000)`,
@@ -157,13 +157,79 @@ neither earlier review covered.
   `ReplayCard`, `NetworkPanel`, `TestSessionPanel`, `TuningContextBar`) beside
   `hooks/useNow.ts`, and `romEditor/SimForm.tsx` defines a private `useNow`
   identical to the shared one.
-  - [ ] Move the two panel reads to `useControlResource(fetcher, {intervalMs})`,
-    keeping "first read reports, re-reads stay quiet".
-  - [ ] `RescoreControl` becomes a `usePolling` enabled while the job runs.
-  - [ ] Replace the six clocks and `SimForm`'s copy with `useNow`.
-  - [ ] Make it stay fixed: a lint rule or a source test that fails on
-    `setInterval` outside `hooks/` (`useTagQueue`'s flush is a queue, not a
-    poll; allow it by name).
+  - [x] Move the two panel reads to `useControlResource(fetcher, {intervalMs})`,
+    keeping "first read reports, re-reads stay quiet". `SessionsPanel` and
+    `ControlPanel` read through `useControlResource(…, {intervalMs: 5000,
+    enabled: Boolean(token)})`; the new `hooks/useFirstFailure` wraps the read
+    so only the first failed read of a (token, captures) pair sets the notice.
+    Tests (fake timers): `SessionsPanel.test.ts` and `ControlPanel.test.tsx`
+    "poll timing" blocks pin first read immediate, next 5 s after settle (4999
+    ms none, 5000 ms one), no overlap with a never-answering read, first
+    failure reported / re-read failure quiet, no read after unmount;
+    `useFirstFailure.test.ts` (4). Deliberate differences, both the point of the
+    item: the cadence is 5 s after a read *settles* (was a fixed `setInterval`),
+    and a failed post-action refresh no longer
+    replaces the action's "completed" notice (below).
+    Ordering: `usePolling`'s `refresh()` returns a `Promise<void>` that settles
+    when the read it starts settles (success or failure), and also when a newer
+    read supersedes it, the hook is disabled, or it unmounts; it never rejects.
+    Every post-action caller returns/awaits it (`ControlPanel` and
+    `SessionsPanel` `then:`, `TestSessionPanel.refreshBoth`,
+    `CalibrationPage.refresh`, and the `await refresh()` tails of the actions in
+    `NetworkPanel`, `PowerPanel`, `ProfilesPanel`, `TuningPanel`, `UpdateCard`,
+    `PairedDevicesPanel`, `VehicleLedgerPage`, `TreadWearCard`, `TrainingPanel`,
+    `BrainPage`, `CompanionConfigCard`, `AnomalyPanel`, `RomEditorPage`,
+    `EcuBackupCard`), so `busy` holds, and "completed" waits, until the panel
+    shows the new state. Without it Capture start re-enabled for a round trip
+    while `capture` was still null, and a second click got a 409. Pinned by
+    `ControlPanel.test.tsx` "holds a capture start busy until the follow-up read
+    lands" (fails with `then` not returning the refresh) and the four `refresh
+    promise` tests in `usePolling.test.ts`. A failed follow-up read stays quiet
+    (the promise resolves and nothing new is shown): a choice the operator can
+    revisit if it should be loud.
+    Settle guarantee, also pinned: a `refresh()` in the same batch as the
+    unmount settles (`usePolling.test.ts`, fails without the unmount drain);
+    `delayFirst` with `intervalMs: null` is ignored, so a one-shot fetches at
+    once instead of never settling.
+    **Waits now declared.** Only `ControlPanel` and `SessionsPanel` already
+    held busy for their follow-up read (`then: refreshX`). Sixteen panels used
+    to fire `refresh()` and forget it and now hold busy until it settles:
+    `NetworkPanel`, `PowerPanel`, `ProfilesPanel`, `TuningPanel`, `UpdateCard`,
+    `PairedDevicesPanel`, `VehicleLedgerPage`, `TreadWearCard`, `TrainingPanel`,
+    `BrainPage`, `CompanionConfigCard`, `AnomalyPanel`, `RomEditorPage`,
+    `EcuBackupCard`, `TestSessionPanel` (`refreshBoth`) and `CalibrationPage`.
+    Two read differently from the rest: `EcuBackupCard`'s await sits in
+    `finally`, before `setBusy(false)`/`setConfirming(false)`, so the card stays
+    busy and the confirm stays open until the read lands; `AnomalyPanel` clears
+    the hypothesis and question fields only after the read. Exposure: `fetchJson`
+    has no timeout, so a Pi that dies after a successful POST keeps these panels
+    busy until the browser gives up on the request.
+  - [ ] Control reads have no timeout; a hung follow-up read holds busy (the
+    waits above make every action's busy state as long as its read). Decide a
+    timeout in `api/core` (or a per-call `AbortSignal.timeout`) and whether a
+    timed-out follow-up read should be loud; not done here on purpose.
+  - [x] `RescoreControl` becomes a `usePolling` enabled while the job runs.
+    New `usePolling` option `delayFirst` keeps the old first look one 2 s
+    interval after the submit; `getJob`/`getJobResult` take an optional signal.
+    Tests: `RescoreControl.test.ts` "job poll timing" (first look at 2000 ms not
+    1999, chained 2 s, no overlap, stops on success/failure/unmount);
+    `usePolling.test.ts` (delayFirst). `hooks/usePairing` also rides
+    `usePolling` (immediate first poll, 1 s, every outcome handled in the
+    fetcher so it still stops on any failure/approval): `usePairing.test.ts`
+    (4) plus the existing `PairingCard.test.tsx` timing.
+  - [x] Replace the six clocks and `SimForm`'s copy with `useNow`. `useNow`
+    gained `enabled` (default true) so `NetworkPanel` (window open),
+    `ReplayBanner` (replay running) and `TuningContextBar` (capture active)
+    keep their conditional tick; `useLiveOverlay`'s 250 ms clock uses it too.
+    `useNow.test.ts` (4: 1 s default, custom interval, disabled = no timer,
+    unmount).
+  - [x] Make it stay fixed: the `dashboard-setinterval` rule in
+    `tests/test_source_rules.py` (already present, allowlist) fails on
+    `setInterval` outside `hooks/`; its allowlist is cut to `AlarmsPanel.tsx`
+    (an alarm-rule evaluator tick, not a poll or clock). `pytest
+    tests/test_source_rules.py -n0`: 32 passed. Gate: `pnpm typecheck`, `pnpm
+    lint`, `pnpm format` clean; `pnpm test` 138 files / 1474 tests passed;
+    `pnpm e2e` 46 passed, 3 skipped.
 
 - [ ] **R28.4 A shared control-route test harness, before R28.5.** The same
   `route()` mock keyed on `` `${method} ${path}` `` is hand-written in six

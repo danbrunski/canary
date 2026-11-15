@@ -46,9 +46,8 @@ export function CalibrationPage({
   const { notice, busy, run } = useAsyncAction();
   const [carryReason, setCarryReason] = useState("");
 
-  const refresh = () => {
-    calibrationRes.refresh();
-    memoryRes.refresh();
+  const refresh = async (): Promise<void> => {
+    await Promise.all([calibrationRes.refresh(), memoryRes.refresh()]);
   };
 
   const groups = useMemo(() => {

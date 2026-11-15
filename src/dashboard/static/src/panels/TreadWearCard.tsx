@@ -91,7 +91,7 @@ export function TreadWearCard({ token }: TreadWearCardProps) {
         pressurePsi: action === "pressure_changed" ? number : undefined,
       });
       setValue("");
-      refresh();
+      await refresh();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
     } finally {

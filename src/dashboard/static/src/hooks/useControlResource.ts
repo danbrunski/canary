@@ -13,7 +13,8 @@ export interface ResourceState<T, E = string> {
   /** The fetcher changed and its first fetch has not settled; `data` and
    *  `error` are the previous parameters'. See `usePolling`. */
   stale: boolean;
-  refresh: () => void;
+  /** Read again; settles when that read does (see `usePolling`). */
+  refresh: () => Promise<void>;
 }
 
 interface Options<E> {

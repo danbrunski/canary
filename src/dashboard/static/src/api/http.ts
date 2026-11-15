@@ -512,8 +512,8 @@ export function cancelJob(token: string, jobId: string): Promise<JobResponse> {
   });
 }
 
-export function getJob(token: string, jobId: string): Promise<JobResponse> {
-  return controlJson<JobResponse>(`/control/jobs/${encodeURIComponent(jobId)}`, token);
+export function getJob(token: string, jobId: string, signal?: AbortSignal): Promise<JobResponse> {
+  return controlJson<JobResponse>(`/control/jobs/${encodeURIComponent(jobId)}`, token, { signal });
 }
 
 export function getJobLogs(token: string, jobId: string): Promise<JobLogsResponse> {
@@ -524,8 +524,18 @@ export function getJobLogs(token: string, jobId: string): Promise<JobLogsRespons
  *  `replay_window` job writes on success; `result` reads `null` until the
  *  job's report file lands (still running/queued). 404s for any other job
  *  kind, same as `describeError` already renders. */
-export function getJobResult(token: string, jobId: string): Promise<JobResultResponse> {
-  return controlJson<JobResultResponse>(`/control/jobs/${encodeURIComponent(jobId)}/result`, token);
+export function getJobResult(
+  token: string,
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<JobResultResponse> {
+  return controlJson<JobResultResponse>(
+    `/control/jobs/${encodeURIComponent(jobId)}/result`,
+    token,
+    {
+      signal,
+    },
+  );
 }
 
 export function uploadModelArtifact(

@@ -1,5 +1,5 @@
 import { createElement } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 import { HttpErrorStub, mockHttp } from "../test/harness";
@@ -165,5 +165,78 @@ describe("SessionsPanel (Task 3.1 — promotes the extracted SessionsCard)", () 
         "refusing to start replay: vehicle_state=engine_running (replay is a bench/desk tool; wait for ignition_only/engine_off or key out first)",
       ),
     ).toBeInTheDocument();
+  });
+
+  describe("poll timing (R28.3)", () => {
+    const EMPTY_REPLAY = {
+      replay: {
+        running: false,
+        replay_id: null,
+        source_session_id: null,
+        started_at: null,
+        speed: null,
+        loop: null,
+        output_session_dir: null,
+        output_anomalies_path: null,
+      },
+    };
+    beforeEach(() => {
+      mocks.getReplay.mockResolvedValue(EMPTY_REPLAY);
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it("reads at once, then 5 s after each read settles, never overlapping", async () => {
+      vi.useFakeTimers();
+      const pending: Array<(value: unknown) => void> = [];
+      mocks.listSessions.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+      render(createElement(SessionsPanel, { token: "secret", companion: COMPANION }));
+      expect(mocks.listSessions).toHaveBeenCalledTimes(1);
+      // A slow first read: nothing else starts while it is unanswered.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20_000);
+      });
+      expect(mocks.listSessions).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        pending[0]({ sessions: [session()], count: 1 });
+        await vi.advanceTimersByTimeAsync(4999);
+      });
+      expect(mocks.listSessions).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(mocks.listSessions).toHaveBeenCalledTimes(2);
+    });
+
+    it("reports a failed first read but not a failed re-read", async () => {
+      vi.useFakeTimers();
+      mocks.listSessions
+        .mockRejectedValueOnce(new Error("first read down"))
+        .mockRejectedValue(new Error("re-read down"));
+      render(createElement(SessionsPanel, { token: "secret", companion: COMPANION }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByText("first read down")).toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(mocks.listSessions).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText("re-read down")).not.toBeInTheDocument();
+      expect(screen.getByText("first read down")).toBeInTheDocument();
+    });
+
+    it("stops reading on unmount", async () => {
+      vi.useFakeTimers();
+      mocks.listSessions.mockResolvedValue({ sessions: [], count: 0 });
+      const { unmount } = render(
+        createElement(SessionsPanel, { token: "secret", companion: COMPANION }),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      unmount();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(mocks.listSessions).toHaveBeenCalledTimes(1);
+    });
   });
 });

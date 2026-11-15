@@ -115,7 +115,7 @@ export function PowerPanel({ token }: PowerPanelProps) {
         throw new Error("Enter a positive number of minutes.");
       }
       await setKeepAlive(token, parsed);
-      refresh();
+      await refresh();
     });
 
   const onCancelHold = () =>
@@ -123,7 +123,7 @@ export function PowerPanel({ token }: PowerPanelProps) {
       "cancel hold",
       async () => {
         await setKeepAlive(token, 0);
-        refresh();
+        await refresh();
       },
       { okText: "Keep-alive hold cancelled." },
     );

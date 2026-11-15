@@ -34,7 +34,7 @@ export function useStatus(intervalMs = 5000) {
   const lastKey = useRef(key);
   const { refresh: refreshFull } = full;
   useEffect(() => {
-    if (key !== null && lastKey.current !== null && key !== lastKey.current) refreshFull();
+    if (key !== null && lastKey.current !== null && key !== lastKey.current) void refreshFull();
     lastKey.current = key;
   }, [key, refreshFull]);
 

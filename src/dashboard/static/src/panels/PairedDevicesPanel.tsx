@@ -222,7 +222,7 @@ export function PairedDevicesPanel({ token }: PairedDevicesPanelProps) {
       label,
       async () => {
         await action();
-        refresh();
+        await refresh();
       },
       { okText },
     );

@@ -470,35 +470,10 @@ RULES: tuple[Rule, ...] = (
         ),
         allowed={
             **_grant(
-                "a private 1 s clock beside hooks/useNow; R28.3 replaces it with useNow",
+                "an alarm-rule evaluator tick (reads the live channels each second); neither a "
+                "fetch nor a clock",
                 {
                     "src/dashboard/static/src/panels/AlarmsPanel.tsx": 1,
-                    "src/dashboard/static/src/panels/NetworkPanel.tsx": 1,
-                    "src/dashboard/static/src/panels/ReplayBanner.tsx": 1,
-                    "src/dashboard/static/src/panels/ReplayCard.tsx": 1,
-                    "src/dashboard/static/src/panels/StatusStrip.tsx": 1,
-                    "src/dashboard/static/src/panels/TestSessionPanel.tsx": 1,
-                    "src/dashboard/static/src/panels/tuning/TuningContextBar.tsx": 1,
-                },
-            ),
-            **_grant(
-                "5 s hand-rolled poll with no in-flight guard; R28.3 moves it to "
-                "useControlResource",
-                {
-                    "src/dashboard/static/src/panels/ControlPanel.tsx": 1,
-                    "src/dashboard/static/src/panels/SessionsPanel.tsx": 1,
-                },
-            ),
-            **_grant(
-                "job poll; R28.3 makes it a usePolling enabled while the job runs",
-                {
-                    "src/dashboard/static/src/panels/RescoreControl.tsx": 1,
-                },
-            ),
-            **_grant(
-                "a private copy of useNow; R28.3 replaces it with hooks/useNow",
-                {
-                    "src/dashboard/static/src/panels/tuning/romEditor/SimForm.tsx": 1,
                 },
             ),
         },

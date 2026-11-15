@@ -20,6 +20,7 @@ import {
 } from "../api/http";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { describeError, useControlResource } from "../hooks/useControlResource";
+import { useNow } from "../hooks/useNow";
 import { useTagQueue } from "../hooks/useTagQueue";
 import type { TestEvent, TestProfile, TestProfileError } from "../types";
 import { Notice } from "../components/Notice";
@@ -41,7 +42,8 @@ export function TestSessionPanel({ token }: TestSessionPanelProps) {
   const [purpose, setPurpose] = useState("");
   const { notice, setNotice, busy, run } = useAsyncAction();
   const [endArmed, setEndArmed] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
+  // 1 Hz tick so the elapsed clock stays live.
+  const now = useNow();
 
   const selectedProfile: TestProfile | null =
     profiles.find((p) => p.id === selectedProfileId) ?? profiles[0] ?? null;
@@ -72,9 +74,8 @@ export function TestSessionPanel({ token }: TestSessionPanelProps) {
     captureRes.status === 403 ||
     preflightRes.status === 401 ||
     preflightRes.status === 403;
-  const refreshBoth = () => {
-    captureRes.refresh();
-    preflightRes.refresh();
+  const refreshBoth = async (): Promise<void> => {
+    await Promise.all([captureRes.refresh(), preflightRes.refresh()]);
   };
 
   const {
@@ -117,12 +118,6 @@ export function TestSessionPanel({ token }: TestSessionPanelProps) {
       setSelectedProfileId(profiles[0].id);
     }
   }
-
-  // 1 Hz tick so the elapsed clock stays live.
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     if (selectedProfileId) writeString(PROFILE_KEY, selectedProfileId);

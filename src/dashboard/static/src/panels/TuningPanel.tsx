@@ -60,7 +60,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
     run("apply", async () => {
       await updateTuning(token, parseDraft(), "dashboard edit");
       setEstimate(null);
-      refresh();
+      await refresh();
     });
 
   const onRevert = () =>
@@ -69,7 +69,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
       if (!Number.isInteger(v) || v < 1) throw new Error("Enter a version ≥ 1.");
       await revertTuning(token, v);
       setRevertVersion("");
-      refresh();
+      await refresh();
     });
 
   const cfg = data?.tuning;

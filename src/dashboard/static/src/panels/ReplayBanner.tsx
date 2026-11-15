@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-
+import { useNow } from "../hooks/useNow";
 import type { ReplayStatus } from "../types";
 import { formatElapsed } from "../util/time";
 
@@ -16,12 +15,7 @@ interface ReplayBannerProps {
  *  replay is running; that's the "replay-block-absent" case the FE tests
  *  cover alongside active/inactive. */
 export function ReplayBanner({ replay }: ReplayBannerProps) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!replay?.running) return;
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, [replay?.running]);
+  const now = useNow(1000, replay?.running === true);
 
   if (!replay?.running) return null;
 
