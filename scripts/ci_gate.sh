@@ -210,6 +210,8 @@ elapsed=$(( $(date +%s) - start ))
 printf '%s green %s (%ss)%s\n' "$sha" "$(date -u +%FT%TZ)" "$elapsed" \
   "${flaky:+ flaky-under-load: $flaky}" >"$stamp_dir/$sha"
 echo "✓ ci_gate: ${sha:0:7} green in ${elapsed}s -- stamped; git push will accept it"
-if [[ $elapsed -gt 120 ]]; then
-  echo "  (well over the ~1 minute budget: if tests, re-measure with scripts/mark_slow_tests.py)" >&2
+# Budget: about four minutes, about six with the dashboard steps (operator,
+# 2026-11-15; AGENTS.md "Lint/test gate").
+if [[ $elapsed -gt 480 ]]; then
+  echo "  (well over the ~4 minute budget: if tests, re-measure with scripts/mark_slow_tests.py)" >&2
 fi

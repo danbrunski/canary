@@ -106,10 +106,14 @@ include = ["src", "src.*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "N", "W"]
+# PEP 695 rewrites (`type` aliases, generic classes and functions). Every one
+# is an unsafe fix that changes evaluation or MRO, so they wait for a generics
+# sweep of their own (operator, 2026-11-15; R30.6).
+ignore = ["UP040", "UP046", "UP047"]
 
 [tool.mypy]
 # Matches the 3.12 venv that AGENTS.md mandates for everything under src/.

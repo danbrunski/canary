@@ -230,6 +230,9 @@ did not change.
       `obd:LONG_FUEL_TRIM_1`, the J1979 decode bounds [-100, 100] %. That
       decode is the contract's `observed_as` for `stft_b1`/`ltft_b1`.
       `rom_editor.STFT_LIMIT` and `LTFT_LIMIT` name those bounds.
+      **Operator, 2026-11-15: keep ±100 %** (the PID decode), not the ECM's
+      measured +25 % STFT clamp. The bound says what the PID can carry, not
+      what this ECM's calibration allows.
     - **The CLI.** `rom_sim._run_bounds` runs right after `_need`, before any
       work. It refuses with `argument_invalid`:
       - `--seed` below 0;
