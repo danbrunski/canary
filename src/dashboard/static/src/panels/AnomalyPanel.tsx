@@ -1,12 +1,21 @@
 import { useCallback, useMemo, useState } from "react";
 
 import { getFeedback, postFeedback } from "../api/http";
+import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
+import { followUpFailureText } from "../hooks/followUpRead";
 import { useControlResource } from "../hooks/useControlResource";
 import { scoreView, windowReference, type AnomalyLevel } from "../anomalyScore";
 import type { ScoresBySource } from "../hooks/useScoreStream";
-import { badgeClass, cn, inputClass, placeholderClass, selectClass } from "../styles";
+import {
+  badgeClass,
+  cn,
+  inputClass,
+  placeholderClass,
+  selectClass,
+  type NoticeState,
+} from "../styles";
 import type { AnomalyEvent } from "../types";
 import { formatTimestamp } from "../util/time";
 import { LiveModelScores } from "./LiveModelScores";
@@ -62,6 +71,8 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
   // whichever event the label buttons are next clicked for. Cleared after
   // a successful submit.
   const [hypothesis, setHypothesis] = useState("");
+  // The verdict is on file but the refreshed feedback could not be read.
+  const [feedbackNotice, setFeedbackNotice] = useState<NoticeState | null>(null);
   const [clarifyingQuestion, setClarifyingQuestion] = useState("");
   const [clarifyingAnswer, setClarifyingAnswer] = useState("");
   // Backend pairing rule (AnomalyFeedback._clarifying_pair_is_complete):
@@ -89,6 +100,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
     if (!token || clarifyingPairIncomplete) return;
     const key = eventKey(e);
     setLocalLabels((prev) => ({ ...prev, [key]: label }));
+    setFeedbackNotice(null);
     try {
       await postFeedback(
         token,
@@ -99,7 +111,8 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
         hasQuestion ? clarifyingQuestion.trim() : null,
         hasAnswer ? clarifyingAnswer.trim() : null,
       );
-      await feedback.refresh();
+      const lost = followUpFailureText(await feedback.refresh());
+      if (lost) setFeedbackNotice({ kind: "error", text: lost });
       // Enrichment is per-verdict, not per-draft — clear it once it's landed.
       setHypothesis("");
       setClarifyingQuestion("");
@@ -261,6 +274,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
               </button>
             )}
             <ModelEvidencePanel event={selectedEvent} relatedEvents={relatedEvents} token={token} />
+            <Notice notice={feedbackNotice} className="mb-2" />
             {token && (
               <div className="mb-2 flex flex-wrap items-center gap-1.5">
                 <input

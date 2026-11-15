@@ -7,6 +7,7 @@ import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
 import { TRAINING_JOB_KINDS } from "../lib/jobKinds";
 import { Sparkline } from "../components/Sparkline";
+import { reloaded } from "../hooks/followUpRead";
 import { companionAccess, type CompanionSettings } from "../hooks/useCompanionSettings";
 import { describeError, useControlResource } from "../hooks/useControlResource";
 import {
@@ -100,7 +101,7 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
         kind: "ok",
         text: `${response.job.kind} queued on ${target === "local" ? "laptop" : "Pi"}.`,
       });
-      await refresh();
+      await reloaded(refresh());
     } catch (err) {
       setNotice({ kind: "error", text: describeError(err) });
     } finally {

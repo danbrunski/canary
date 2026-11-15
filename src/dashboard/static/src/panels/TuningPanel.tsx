@@ -4,6 +4,7 @@ import { estimateTuning, getTuning, revertTuning, updateTuning } from "../api/ht
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
+import { reloaded } from "../hooks/followUpRead";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { useControlResource } from "../hooks/useControlResource";
 import { buttonClass, cn, inputClass } from "../styles";
@@ -60,7 +61,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
     run("apply", async () => {
       await updateTuning(token, parseDraft(), "dashboard edit");
       setEstimate(null);
-      await refresh();
+      await reloaded(refresh());
     });
 
   const onRevert = () =>
@@ -69,7 +70,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
       if (!Number.isInteger(v) || v < 1) throw new Error("Enter a version ≥ 1.");
       await revertTuning(token, v);
       setRevertVersion("");
-      await refresh();
+      await reloaded(refresh());
     });
 
   const cfg = data?.tuning;
@@ -82,6 +83,8 @@ export function TuningPanel({ token }: TuningPanelProps) {
         `v${cfg.version} · ${cfg.threshold_overrides.length} ovr · ${cfg.suppression_rules.length} rules · ${cfg.debounce_policies.length} pol`
       }
     >
+      {/* Outside the gate, which a failed follow-up read turns into its error. */}
+      <Notice notice={notice} className="mb-2" />
       <ResourceGate
         enabled={Boolean(token)}
         tokenPurpose="view and edit tuning"
@@ -92,8 +95,6 @@ export function TuningPanel({ token }: TuningPanelProps) {
       >
         {() => (
           <>
-            <Notice notice={notice} className="mb-2" />
-
             <textarea
               className={cn(inputClass, "h-72 w-full resize-y font-num text-[0.78rem]")}
               value={draft}

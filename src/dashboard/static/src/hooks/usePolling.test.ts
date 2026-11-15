@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { usePolling } from "./usePolling";
+import { usePolling, type RefreshOutcome } from "./usePolling";
 
 describe("usePolling delayFirst (R28.3)", () => {
   afterEach(() => vi.useRealTimers());
@@ -200,5 +200,119 @@ describe("usePolling refresh promise (R28.3)", () => {
     });
     expect(done).toBe(true);
     expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+describe("usePolling refresh outcome (R28.3, operator 2026-11-15: a failed follow-up is loud)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  /** Call `refresh()` and keep what it resolved to. */
+  function track(refresh: () => Promise<RefreshOutcome>): { outcome: RefreshOutcome | null } {
+    const seen: { outcome: RefreshOutcome | null } = { outcome: null };
+    void refresh().then((o) => {
+      seen.outcome = o;
+    });
+    return seen;
+  }
+
+  it("is ok when the read succeeds", async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn(() => Promise.resolve(1));
+    const { result } = renderHook(() => usePolling(fetcher, { intervalMs: null }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    let seen!: { outcome: RefreshOutcome | null };
+    act(() => {
+      seen = track(result.current.refresh);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(seen.outcome).toEqual({ status: "ok" });
+  });
+
+  it("is failed, carrying the raw error, when the read fails", async () => {
+    vi.useFakeTimers();
+    const down = new Error("down");
+    const fetcher = vi.fn().mockResolvedValueOnce(1).mockRejectedValueOnce(down);
+    const { result } = renderHook(() => usePolling(fetcher, { intervalMs: null }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    let seen!: { outcome: RefreshOutcome | null };
+    act(() => {
+      seen = track(result.current.refresh);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(seen.outcome).toEqual({ status: "failed", error: down });
+  });
+
+  it("is abandoned, not failed, when a newer read supersedes it", async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn(() => new Promise<number>(() => {}));
+    const { result } = renderHook(() => usePolling(fetcher, { intervalMs: null }));
+    let first!: { outcome: RefreshOutcome | null };
+    act(() => {
+      first = track(result.current.refresh);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    act(() => {
+      void result.current.refresh();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(first.outcome).toEqual({ status: "abandoned" });
+  });
+
+  it("is abandoned, not failed, on unmount and while disabled", async () => {
+    vi.useFakeTimers();
+    const hanging = vi.fn(() => new Promise<number>(() => {}));
+    const mounted = renderHook(() => usePolling(hanging, { intervalMs: null }));
+    let unmounted!: { outcome: RefreshOutcome | null };
+    act(() => {
+      unmounted = track(mounted.result.current.refresh);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    mounted.unmount();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(unmounted.outcome).toEqual({ status: "abandoned" });
+
+    const off = renderHook(() =>
+      usePolling(() => Promise.resolve(1), { enabled: false, intervalMs: null }),
+    );
+    let disabled!: { outcome: RefreshOutcome | null };
+    act(() => {
+      disabled = track(off.result.current.refresh);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(disabled.outcome).toEqual({ status: "abandoned" });
+  });
+
+  it("an aborted read (the fetcher rejects with AbortError) is abandoned, not failed", async () => {
+    vi.useFakeTimers();
+    const abort = Object.assign(new Error("aborted"), { name: "AbortError" });
+    const fetcher = vi.fn().mockResolvedValueOnce(1).mockRejectedValueOnce(abort);
+    const { result } = renderHook(() => usePolling(fetcher, { intervalMs: null }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    let seen!: { outcome: RefreshOutcome | null };
+    act(() => {
+      seen = track(result.current.refresh);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(seen.outcome).toEqual({ status: "abandoned" });
   });
 });

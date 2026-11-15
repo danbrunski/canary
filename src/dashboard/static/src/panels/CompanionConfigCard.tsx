@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 
 import { clearPi, discoverPis, getCompanionStatus, HttpError, selectPi } from "../api/http";
 import { Notice } from "../components/Notice";
+import { reloaded } from "../hooks/followUpRead";
 import { describeError } from "../hooks/useControlResource";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
 import { usePolling } from "../hooks/usePolling";
@@ -51,7 +52,7 @@ export function CompanionConfigCard({ companion, token }: CompanionConfigCardPro
       setNotice(null);
       try {
         await work();
-        await refresh();
+        await reloaded(refresh());
       } catch (err) {
         setNotice({ kind: "error", text: describeError(err) });
       } finally {

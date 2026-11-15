@@ -10,8 +10,9 @@ import {
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
+import { reloaded } from "../hooks/followUpRead";
 import { useAsyncAction } from "../hooks/useAsyncAction";
-import { useControlResource } from "../hooks/useControlResource";
+import { describeError, useControlResource } from "../hooks/useControlResource";
 import type {
   ProfileResolution,
   VehicleParameterField,
@@ -137,7 +138,7 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
     run("save", async () => {
       await updateProfileName(token, slug, draftName.trim());
       setEditingSlug(null);
-      await refresh();
+      await reloaded(refresh());
     });
 
   const describeEdit = (result: VehicleProfileEditResponse, what: string): string => {
@@ -154,7 +155,7 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
       async () => {
         const result = await revertProfile(token, slug, fields);
         setNotice({ kind: "ok", text: describeEdit(result, "Reverted") });
-        await refresh();
+        await reloaded(refresh());
       },
       { okText: null },
     );
@@ -166,7 +167,7 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
         const result = await deleteProfile(token, slug);
         setConfirmingSlug(null);
         setLastDeleted(result);
-        await refresh();
+        await reloaded(refresh());
       },
       { okText: null },
     );
@@ -178,7 +179,7 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
         await restoreProfile(token, slug);
         setLastDeleted(null);
         setNotice({ kind: "ok", text: `Restored ${slug}: it is back as the tracked file has it.` });
-        await refresh();
+        await reloaded(refresh());
       },
       { okText: null },
     );
@@ -186,7 +187,9 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
   const onEdited = (result: VehicleProfileEditResponse) => {
     setEditorSlug(null);
     setNotice({ kind: "ok", text: describeEdit(result, "Saved") });
-    void refresh();
+    reloaded(refresh()).catch((err: unknown) =>
+      setNotice({ kind: "error", text: describeError(err) }),
+    );
   };
 
   return (
@@ -194,6 +197,8 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
       title="Profiles"
       count={data ? `${data.count} vehicle${data.count === 1 ? "" : "s"}` : undefined}
     >
+      {/* Outside the gate, which a failed follow-up read turns into its error. */}
+      <Notice notice={notice} className="mb-2" />
       <ResourceGate
         enabled={Boolean(token)}
         tokenPurpose="view and edit vehicle profiles"
@@ -207,7 +212,6 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
           const pending = data.pending_restart ?? [];
           return (
             <>
-              <Notice notice={notice} className="mb-2" />
               {lastDeleted && (
                 <DeletedResult result={lastDeleted} onDismiss={() => setLastDeleted(null)} />
               )}

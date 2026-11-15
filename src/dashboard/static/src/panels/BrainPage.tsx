@@ -13,6 +13,7 @@ import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
 import { Sparkline } from "../components/Sparkline";
+import { reloaded } from "../hooks/followUpRead";
 import { useControlResource } from "../hooks/useControlResource";
 import {
   buttonClass,
@@ -394,7 +395,7 @@ export function BrainPage({ token }: BrainPageProps) {
         kind: "ok",
         text: created ? `queued ${job.job_id}` : `already ${jobStateText(job)}`,
       });
-      await jobs.refresh();
+      await reloaded(jobs.refresh());
     } catch (err) {
       setNotice({ kind: "error", text: err instanceof Error ? err.message : String(err) });
     }

@@ -9,8 +9,10 @@ import {
 } from "../../api/workbench";
 import { Notice } from "../../components/Notice";
 import { Panel } from "../../components/Panel";
+import { combineOutcomes } from "../../hooks/followUpRead";
 import { useAsyncAction } from "../../hooks/useAsyncAction";
 import { useControlResource } from "../../hooks/useControlResource";
+import type { RefreshOutcome } from "../../hooks/usePolling";
 import { buttonClass, inputClass } from "../../styles";
 import type { StatusResponse } from "../../types";
 import type { MemoryChannel, MemoryState, VerifyMemoryResponse } from "../../types/workbench";
@@ -46,9 +48,8 @@ export function CalibrationPage({
   const { notice, busy, run } = useAsyncAction();
   const [carryReason, setCarryReason] = useState("");
 
-  const refresh = async (): Promise<void> => {
-    await Promise.all([calibrationRes.refresh(), memoryRes.refresh()]);
-  };
+  const refresh = async (): Promise<RefreshOutcome> =>
+    combineOutcomes(...(await Promise.all([calibrationRes.refresh(), memoryRes.refresh()])));
 
   const groups = useMemo(() => {
     const result = new Map<string, MemoryChannel[]>();

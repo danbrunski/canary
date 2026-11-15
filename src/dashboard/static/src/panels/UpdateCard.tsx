@@ -4,6 +4,7 @@ import { NetworkError } from "../api/http";
 import { getUpdate, requestUpdate } from "../api/update";
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
+import { reloaded } from "../hooks/followUpRead";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { describeError } from "../hooks/useControlResource";
 import { usePolling } from "../hooks/usePolling";
@@ -154,7 +155,7 @@ export function UpdateCard({ token }: UpdateCardProps) {
           requestedAt: response.request.requested_at,
         });
         setConfirming(false);
-        await refresh();
+        await reloaded(refresh());
       },
       { okText: null },
     );

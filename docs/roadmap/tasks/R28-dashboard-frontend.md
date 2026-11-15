@@ -170,9 +170,12 @@ neither earlier review covered.
     item: the cadence is 5 s after a read *settles* (was a fixed `setInterval`),
     and a failed post-action refresh no longer
     replaces the action's "completed" notice (below).
-    Ordering: `usePolling`'s `refresh()` returns a `Promise<void>` that settles
-    when the read it starts settles (success or failure), and also when a newer
-    read supersedes it, the hook is disabled, or it unmounts; it never rejects.
+    Ordering: `usePolling`'s `refresh()` returns a `Promise<RefreshOutcome>` that
+    settles when the read it starts settles, and also when a newer read
+    supersedes it, the hook is disabled, or it unmounts; it never rejects. The
+    outcome is `{status: "ok"}`, `{status: "failed", error}` or
+    `{status: "abandoned"}` (superseded, disabled, unmounted, aborted: never a
+    failure).
     Every post-action caller returns/awaits it (`ControlPanel` and
     `SessionsPanel` `then:`, `TestSessionPanel.refreshBoth`,
     `CalibrationPage.refresh`, and the `await refresh()` tails of the actions in
@@ -184,9 +187,48 @@ neither earlier review covered.
     while `capture` was still null, and a second click got a 409. Pinned by
     `ControlPanel.test.tsx` "holds a capture start busy until the follow-up read
     lands" (fails with `then` not returning the refresh) and the four `refresh
-    promise` tests in `usePolling.test.ts`. A failed follow-up read stays quiet
-    (the promise resolves and nothing new is shown): a choice the operator can
-    revisit if it should be loud.
+    promise` tests in `usePolling.test.ts`. **Operator 2026-11-15: a failed
+    follow-up read is loud.** The action went through, so the panel says so in
+    its existing action-error slot: "Done, but the refreshed view could not be
+    loaded: <describeError>" (`FollowUpReadError`), instead of "<label>
+    completed." and a silently stale view. Background poll re-reads stay quiet
+    (`useFirstFailure`); only the read an action awaits is loud. It lives in
+    one place, `hooks/followUpRead.ts`: `useAsyncAction`'s `then` applies
+    `requireFresh` to whatever it returns (so `then: refresh` needed no change
+    in `ControlPanel`, `SessionsPanel`, `CustomPidsPanel`, `RomLibraryPage`,
+    `CaptureProfileEditor`, and `TestSessionPanel`/`CalibrationPage`, whose
+    two-read refresh now returns `combineOutcomes`), and a hand-rolled action
+    writes `await reloaded(refresh())` inside the try that already shows its
+    error (`NetworkPanel`, `PowerPanel`, `ProfilesPanel`, `TuningPanel`,
+    `UpdateCard`, `PairedDevicesPanel`, `VehicleLedgerPage`, `TreadWearCard`,
+    `TrainingPanel`, `BrainPage`, `CompanionConfigCard`, `RomEditorPage`).
+    Handled differently: `EcuBackupCard` reads the outcome in its `finally`
+    (`followUpFailureText`) so the controls still re-enable; after a start only
+    when the POST succeeded (a refused start shows its refusal, never "Done,
+    but"), and a cancel keeps its own error over the read's; `TreadWearCard`
+    renders `saveError` in its early-return error branch too, since a failed
+    read turns the whole card into the error text; `AnomalyPanel` had no action-error slot and gained a
+    `Notice` above the verdict row, and the verdict's optimistic mark stays
+    (the POST succeeded); `ProfilesPanel.onEdited`'s fire-and-forget read now
+    sets the notice too. `PowerPanel`, `TuningPanel`, `ProfilesPanel` and
+    `PairedDevicesPanel` had their `Notice` inside `ResourceGate`, which a
+    failed read turns into its error text and so hid the action's message; it
+    moved above the gate. `followUpSources.test.ts` fails on any `refresh…()` call in `panels`,
+    `hooks` or `components` whose outcome is discarded (bare `await`/`void`,
+    inside `Promise.all`, a `.then`/`.catch` chain, an arrow body), unless it is
+    handed to `reloaded`/`combineOutcomes`/`followUpFailureText`/`requireFresh`
+    or returned/assigned; three background or manual re-reads are listed with a
+    reason (`useStatus`'s `refreshFull`, `ControlPanel`'s Refresh button,
+    `TestSessionPanel`'s re-run preflight button).
+    Pinned by `usePolling.test.ts` "refresh outcome" (ok, failed with the raw
+    error, superseded, unmount, disabled and aborted are not failures),
+    `followUpRead.test.ts`, and one "says so when the read after ... fails"
+    test each in `ControlPanel.test.tsx`, `PowerPanel.test.ts`,
+    `VehicleLedgerPage.test.tsx`, `TreadWearCard.render.test.tsx` and
+    `EcuBackupCard.test.tsx` (each fails with `requireFresh`/
+    `followUpFailureText` made no-ops; the tread test also fails without the
+    `saveError` line, the ECU refused-start test without the `started` guard).
+    Still quiet, see the open sub-item below.
     Settle guarantee, also pinned: a `refresh()` in the same batch as the
     unmount settles (`usePolling.test.ts`, fails without the unmount drain);
     `delayFirst` with `intervalMs: null` is ignored, so a one-shot fetches at
@@ -206,8 +248,24 @@ neither earlier review covered.
     busy until the browser gives up on the request.
   - [ ] Control reads have no timeout; a hung follow-up read holds busy (the
     waits above make every action's busy state as long as its read). Decide a
-    timeout in `api/core` (or a per-call `AbortSignal.timeout`) and whether a
-    timed-out follow-up read should be loud; not done here on purpose.
+    timeout in `api/core` (or a per-call `AbortSignal.timeout`); not done here
+    on purpose. A timed-out follow-up read would now surface through the loud
+    path above (a timeout that rejects the fetcher is a `failed` outcome; one
+    that aborts it would read as `abandoned`, so use a rejecting timeout).
+  - [ ] Four fire-and-forget follow-up reads are still quiet: the child
+    callbacks `DiagnosticFunctionsPage` `onDone`, `TrainingPanel` `onApproved`
+    and `RomLibraryPage`/`EcuBackupCard` `onLibraryChanged` (typed
+    `() => void`, called after the child's own action), and `TestSessionPanel`'s
+    "re-run preflight" button (a manual re-read, deliberately listed in
+    `followUpSources.test.ts`). Make the first four take the outcome (or a
+    `reloaded` promise) and show it in the child's notice slot.
+    Known holes in the `followUpSources.test.ts` guard, found verifying
+    2026-11-15 (nothing in `src` uses them today): `const p = refresh();` with
+    `p` unused passes (`=` counts as consumed; ESLint `no-unused-vars` catches
+    the unused name); `refresh?.()` is not matched; a handler prop
+    (`onDone={refresh}`) is invisible to it, which is where the four callbacks
+    above live. One false positive: `then: () => refresh()` is flagged (write
+    `then: refresh`). Close the handler-prop hole with the callbacks.
   - [x] `RescoreControl` becomes a `usePolling` enabled while the job runs.
     New `usePolling` option `delayFirst` keeps the old first look one 2 s
     interval after the submit; `getJob`/`getJobResult` take an optional signal.

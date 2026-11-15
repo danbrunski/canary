@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { cancelRomBackup, getRomBackup, startRomBackup } from "../../api/workbench";
 import { Notice } from "../../components/Notice";
 import { Panel } from "../../components/Panel";
+import { followUpFailureText } from "../../hooks/followUpRead";
 import { useControlResource } from "../../hooks/useControlResource";
 import {
   backupPreconditions,
@@ -96,12 +97,17 @@ export function EcuBackupCard({
   async function start() {
     setBusy(true);
     setNotice(null);
+    // The follow-up read is only news when the start went through: a refused
+    // start already says why, and "Done, but" would be wrong beside it.
+    let started = false;
     try {
       setPosted(await startRomBackup(token));
+      started = true;
     } catch (err) {
       setPosted(refused(refusalText(err)));
     } finally {
-      await polled.refresh();
+      const lost = followUpFailureText(await polled.refresh());
+      if (lost && started) setNotice({ kind: "error", text: lost });
       setBusy(false);
       setConfirming(false);
     }
@@ -115,7 +121,8 @@ export function EcuBackupCard({
     } catch (err) {
       setNotice({ kind: "error", text: refusalText(err) });
     } finally {
-      await polled.refresh();
+      const lost = followUpFailureText(await polled.refresh());
+      if (lost) setNotice((prev) => prev ?? { kind: "error", text: lost });
       setBusy(false);
     }
   }

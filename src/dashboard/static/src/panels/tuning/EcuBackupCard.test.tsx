@@ -145,6 +145,47 @@ describe("ECU backup card (W08.8)", () => {
     expect(confirm).not.toHaveBeenCalled();
   });
 
+  it("says so when the read after starting a backup fails (the POST went through)", async () => {
+    let reads = 0;
+    control.mockImplementation((path: string, _token: string, init?: RequestInit) => {
+      const key = `${init?.method ?? "GET"} ${path}`;
+      if (key === "POST /control/rom/backup")
+        return Promise.resolve(backupState({ state: "running", blocks_total: 16645 }) as never);
+      if (key === "GET /control/rom/backup")
+        return ++reads === 1
+          ? Promise.resolve(backupState() as never)
+          : Promise.reject(new Error("pi went away"));
+      return Promise.reject(new Error(`unexpected ${key}`));
+    });
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: "Back up ECU…" }));
+    const dialog = within(screen.getByRole("group", { name: "Confirm ECU backup" }));
+    fireEvent.click(dialog.getByRole("button", { name: "Start backup" }));
+    expect(
+      await screen.findByText("Done, but the refreshed view could not be loaded: pi went away"),
+    ).toBeInTheDocument();
+  });
+
+  it('a refused start with an unreachable daemon shows the refusal, not "Done, but"', async () => {
+    let reads = 0;
+    control.mockImplementation((path: string, _token: string, init?: RequestInit) => {
+      const key = `${init?.method ?? "GET"} ${path}`;
+      if (key === "POST /control/rom/backup") return Promise.reject(new Error("no route to pi"));
+      if (key === "GET /control/rom/backup")
+        return ++reads === 1
+          ? Promise.resolve(backupState() as never)
+          : Promise.reject(new Error("pi went away"));
+      return Promise.reject(new Error(`unexpected ${key}`));
+    });
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: "Back up ECU…" }));
+    const dialog = within(screen.getByRole("group", { name: "Confirm ECU backup" }));
+    fireEvent.click(dialog.getByRole("button", { name: "Start backup" }));
+    expect(await screen.findByText(/Refused: no route to pi/)).toBeInTheDocument();
+    await waitFor(() => expect(reads).toBeGreaterThan(1));
+    expect(screen.queryByText(/Done, but/)).not.toBeInTheDocument();
+  });
+
   it("'Not now' closes the confirmation without starting", async () => {
     route(backupState());
     renderCard();

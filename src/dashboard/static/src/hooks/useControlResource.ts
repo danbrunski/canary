@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import { HttpError, NetworkError } from "../api/http";
-import { usePolling } from "./usePolling";
+import { usePolling, type RefreshOutcome } from "./usePolling";
 
 export interface ResourceState<T, E = string> {
   data: T | null;
@@ -13,8 +13,8 @@ export interface ResourceState<T, E = string> {
   /** The fetcher changed and its first fetch has not settled; `data` and
    *  `error` are the previous parameters'. See `usePolling`. */
   stale: boolean;
-  /** Read again; settles when that read does (see `usePolling`). */
-  refresh: () => Promise<void>;
+  /** Read again; settles with how that read ended (see `usePolling`). */
+  refresh: () => Promise<RefreshOutcome>;
 }
 
 interface Options<E> {

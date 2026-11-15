@@ -35,6 +35,16 @@ export interface PollingOptions {
   delayFirst?: boolean;
 }
 
+/** How a `refresh()` ended. `failed` is the one outcome an action's follow-up
+ *  must not swallow: the action went through, and the view it was waiting to
+ *  show could not be read. `abandoned` is not a failure of any read: a newer
+ *  read took over, the hook was disabled, or the panel unmounted. */
+export type RefreshOutcome =
+  { status: "ok" } | { status: "failed"; error: unknown } | { status: "abandoned" };
+
+const OK: RefreshOutcome = { status: "ok" };
+const ABANDONED: RefreshOutcome = { status: "abandoned" };
+
 export interface PollingState<T> {
   /** Last successful result; kept across later failures. */
   data: T | null;
@@ -46,12 +56,14 @@ export interface PollingState<T> {
    *  parameters changed) and the new fetch has not settled yet. Lets a page
    *  show "Loading…" over the old view instead of passing it off as current. */
   stale: boolean;
-  /** Read again now. The promise settles when that read settles, success or
-   *  failure (the failure shows in `error`, never as a rejection); it also
-   *  settles, without a result, when a newer read supersedes it, the hook is
+  /** Read again now. The promise settles when that read settles and never
+   *  rejects: it resolves to `ok`, to `failed` with the raw error (also in
+   *  `error`), or to `abandoned` when a newer read supersedes it, the hook is
    *  disabled, or it unmounts. A caller that must show fresh data before it
-   *  reports done (an action's follow-up read) returns it. */
-  refresh: () => Promise<void>;
+   *  reports done (an action's follow-up read) returns it to the action runner
+   *  or passes it through `reloaded` (`followUpRead.ts`), which turns `failed`
+   *  into the error the operator sees; a poll re-read that fails stays quiet. */
+  refresh: () => Promise<RefreshOutcome>;
 }
 
 interface Snapshot<T> {
@@ -94,17 +106,17 @@ export function usePolling<T>(
   // Callers of `refresh` awaiting the read it starts. The loop that the tick
   // restarts takes the list and releases it when its first read settles, or
   // when that loop is torn down first (superseded, disabled, unmounted).
-  const waiting = useRef<Array<() => void>>([]);
+  const waiting = useRef<Array<(outcome: RefreshOutcome) => void>>([]);
   // A refresh in the same batch as the unmount lands on the list after the
   // running loop took its share, so nothing else would drain it.
   useEffect(
     () => () => {
-      for (const resolve of waiting.current.splice(0)) resolve();
+      for (const resolve of waiting.current.splice(0)) resolve(ABANDONED);
     },
     [],
   );
   const refresh = useCallback(() => {
-    const settled = new Promise<void>((resolve) => waiting.current.push(resolve));
+    const settled = new Promise<RefreshOutcome>((resolve) => waiting.current.push(resolve));
     setTick((t) => t + 1);
     return settled;
   }, []);
@@ -123,11 +135,11 @@ export function usePolling<T>(
   useEffect(() => {
     const mine = waiting.current;
     waiting.current = [];
-    const release = (): void => {
-      for (const resolve of mine.splice(0)) resolve();
+    const release = (outcome: RefreshOutcome): void => {
+      for (const resolve of mine.splice(0)) resolve(outcome);
     };
     if (!enabled) {
-      release();
+      release(ABANDONED);
       return;
     }
     const controller = new AbortController();
@@ -152,16 +164,19 @@ export function usePolling<T>(
       timer = null;
       inFlight = true;
       failed = false;
+      let outcome = ABANDONED;
       try {
         const next = await fetcher(controller.signal);
         if (cancelled) return;
         setSnapshot({ data: next, error: null, loading: false, source: fetcher });
+        outcome = OK;
       } catch (err) {
         if (cancelled || controller.signal.aborted || isAbort(err)) return;
         failed = true;
         setSnapshot((prev) => ({ data: prev.data, error: err, loading: false, source: fetcher }));
+        outcome = { status: "failed", error: err };
       } finally {
-        release();
+        release(outcome);
       }
       inFlight = false;
       settledAt = Date.now();
@@ -173,7 +188,7 @@ export function usePolling<T>(
 
     return () => {
       cancelled = true;
-      release();
+      release(ABANDONED);
       rearm.current = null;
       controller.abort();
       if (timer !== null) window.clearTimeout(timer);

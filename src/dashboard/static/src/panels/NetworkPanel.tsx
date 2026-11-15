@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from "react";
 import { getNetwork, setProvisioningWindow } from "../api/http";
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
+import { reloaded } from "../hooks/followUpRead";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { useControlResource } from "../hooks/useControlResource";
 import { useNow } from "../hooks/useNow";
@@ -181,7 +182,7 @@ export function NetworkPanel({ token, status }: NetworkPanelProps) {
       minutes > 0 ? "open window" : "close window",
       async () => {
         await setProvisioningWindow(token, minutes);
-        await refresh();
+        await reloaded(refresh());
       },
       { okText },
     );

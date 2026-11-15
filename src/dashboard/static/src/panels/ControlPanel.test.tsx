@@ -251,4 +251,21 @@ describe("ControlPanel poll timing (R28.3)", () => {
     expect(screen.getByText("capture start completed.")).toBeInTheDocument();
     expect(within(panel.querySelector("header")!).getByText("active")).toBeInTheDocument();
   });
+  // Operator, 2026-11-15: the action went through, so a follow-up read that
+  // fails must say so instead of leaving a silently stale panel.
+  it("says so when the read after a successful start fails (the POST went through)", async () => {
+    serve(null);
+    render(<ControlPanel token="t" companion={COMPANION} />);
+    const panel = capturePanel();
+    await waitFor(() => expect(button(panel, "Start")).toBeEnabled());
+
+    mocks.getCurrentCapture.mockRejectedValue(new Error("pi went away"));
+    fireEvent.click(button(panel, "Start"));
+    expect(
+      await screen.findByText("Done, but the refreshed view could not be loaded: pi went away"),
+    ).toBeInTheDocument();
+    expect(mocks.startCapture).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("capture start completed.")).not.toBeInTheDocument();
+    expect(button(panel, "Start")).toBeEnabled();
+  });
 });

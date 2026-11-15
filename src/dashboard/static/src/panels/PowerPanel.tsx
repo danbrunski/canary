@@ -4,6 +4,7 @@ import { getPowerStatus, setKeepAlive } from "../api/http";
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
+import { reloaded } from "../hooks/followUpRead";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { useControlResource } from "../hooks/useControlResource";
 import {
@@ -115,7 +116,7 @@ export function PowerPanel({ token }: PowerPanelProps) {
         throw new Error("Enter a positive number of minutes.");
       }
       await setKeepAlive(token, parsed);
-      await refresh();
+      await reloaded(refresh());
     });
 
   const onCancelHold = () =>
@@ -123,13 +124,15 @@ export function PowerPanel({ token }: PowerPanelProps) {
       "cancel hold",
       async () => {
         await setKeepAlive(token, 0);
-        await refresh();
+        await reloaded(refresh());
       },
       { okText: "Keep-alive hold cancelled." },
     );
 
   return (
     <Panel title="Power / UPS">
+      {/* Outside the gate, which a failed follow-up read turns into its error. */}
+      <Notice notice={notice} className="mb-2" />
       <ResourceGate
         enabled={Boolean(token)}
         tokenPurpose="view UPS status"
@@ -143,7 +146,6 @@ export function PowerPanel({ token }: PowerPanelProps) {
           const holdActive = power.keepalive_remaining_s > 0;
           return (
             <>
-              <Notice notice={notice} className="mb-2" />
               {!power.watchdog_running && (
                 <p className={cn(placeholderClass, "mb-3")}>
                   The <code>ups-shutdown</code> watchdog isn't running (or hasn't written its first

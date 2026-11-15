@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { getTires, recordTireEvent } from "../api/http";
 import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
+import { reloaded } from "../hooks/followUpRead";
 import { useControlResource } from "../hooks/useControlResource";
 import {
   cn,
@@ -68,6 +69,8 @@ export function TreadWearCard({ token }: TreadWearCardProps) {
     return (
       <Panel title="Tread wear">
         <p className={cn(placeholderClass, "text-bad")}>{error ?? "no data"}</p>
+        {/* A failed read after a save puts the card in this state; the save's own message must still show. */}
+        {saveError && <p className="text-bad">{saveError}</p>}
       </Panel>
     );
   }
@@ -91,7 +94,7 @@ export function TreadWearCard({ token }: TreadWearCardProps) {
         pressurePsi: action === "pressure_changed" ? number : undefined,
       });
       setValue("");
-      await refresh();
+      await reloaded(refresh());
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
     } finally {

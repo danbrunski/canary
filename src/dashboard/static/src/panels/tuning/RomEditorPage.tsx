@@ -12,6 +12,7 @@ import {
 import { Notice } from "../../components/Notice";
 import { Panel } from "../../components/Panel";
 import { SegmentedControl, type SegmentOption } from "../../components/SegmentedControl";
+import { reloaded } from "../../hooks/followUpRead";
 import { TelemetryChannelsContext } from "../../hooks/telemetryChannels";
 import { describeError, useControlResource } from "../../hooks/useControlResource";
 import { useIsNarrow } from "../../hooks/useMediaQuery";
@@ -222,7 +223,7 @@ export function RomEditorPage({
       setOpened({ entry, name: file.name, existed: entry.created === false });
       setChosen(entry.sha256);
       writeShaToUrl(entry.sha256);
-      await library.refresh();
+      await reloaded(library.refresh());
     } catch (err) {
       if (load.current === mine) setRefusal(`${file.name}: ${refusalText(err)}`);
     } finally {

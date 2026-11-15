@@ -14,6 +14,7 @@ import {
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
+import { reloaded } from "../hooks/followUpRead";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { useControlResource } from "../hooks/useControlResource";
 import { formatWhen, methodLabel } from "../lib/pairedDevices";
@@ -222,13 +223,15 @@ export function PairedDevicesPanel({ token }: PairedDevicesPanelProps) {
       label,
       async () => {
         await action();
-        await refresh();
+        await reloaded(refresh());
       },
       { okText },
     );
 
   return (
     <Panel title="Paired devices" count={data ? data.devices.length : undefined}>
+      {/* Outside the gate, which a failed follow-up read turns into its error. */}
+      <Notice notice={notice} className="mb-3" />
       <ResourceGate
         enabled={Boolean(token)}
         tokenPurpose="manage paired devices"
@@ -239,7 +242,6 @@ export function PairedDevicesPanel({ token }: PairedDevicesPanelProps) {
       >
         {(snap) => (
           <>
-            <Notice notice={notice} className="mb-3" />
             <WaitingList requests={snap.requests} busy={busy !== null} act={act} token={token} />
             <section>
               <h3 className={sectionTitle}>Paired</h3>

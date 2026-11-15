@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { VehicleLedgerEvent } from "../types";
 
-vi.mock("../api/http", () => ({
+vi.mock("../api/http", async (importOriginal) => ({
+  // describeError (a failed follow-up read) needs the real error classes.
+  ...(await importOriginal<typeof import("../api/http")>()),
   getVehicleLedger: vi.fn(),
   saveVehicleEvent: vi.fn(),
   deleteVehicleEvent: vi.fn(),
@@ -102,5 +104,20 @@ describe("VehicleLedgerPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(api.deleteVehicleEvent).toHaveBeenCalledWith("t", gauge.id));
     confirm.mockRestore();
+  });
+
+  it("says so when the read after a save fails (the save went through)", async () => {
+    vi.mocked(api.getVehicleLedger).mockResolvedValueOnce({ events: [gauge], count: 1 });
+    vi.mocked(api.saveVehicleEvent).mockResolvedValue({ event: gauge });
+    render(<VehicleLedgerPage token="t" />);
+    await screen.findByText(/Tread depth gauge reading: 15.0 mm/);
+
+    vi.mocked(api.getVehicleLedger).mockRejectedValue(new Error("pi went away"));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(
+      await screen.findByText("Done, but the refreshed view could not be loaded: pi went away"),
+    ).toBeInTheDocument();
+    expect(api.saveVehicleEvent).toHaveBeenCalledTimes(1);
   });
 });

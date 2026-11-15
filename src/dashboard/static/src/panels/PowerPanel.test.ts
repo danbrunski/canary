@@ -191,4 +191,20 @@ describe("PowerPanel", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Cancel hold" }));
     await waitFor(() => expect(mocks.setKeepAlive).toHaveBeenCalledWith("secret", 0));
   });
+
+  // Operator, 2026-11-15: the POST went through, so a failed follow-up read is
+  // said out loud rather than leaving the old hold on screen unexplained.
+  it("says so when the read after a keep-alive change fails", async () => {
+    mocks.getPowerStatus.mockResolvedValueOnce(snapshot());
+    mocks.setKeepAlive.mockResolvedValue(snapshot({ keepalive_remaining_s: 600 }));
+    render(createElement(PowerPanel, { token: "secret" }));
+    await screen.findByText("external power");
+
+    mocks.getPowerStatus.mockRejectedValue(new Error("pi went away"));
+    fireEvent.click(screen.getByRole("button", { name: "Keep alive" }));
+    expect(
+      await screen.findByText("Done, but the refreshed view could not be loaded: pi went away"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("keep alive completed.")).not.toBeInTheDocument();
+  });
 });

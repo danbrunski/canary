@@ -1,7 +1,9 @@
 import { useCallback, useState } from "react";
 
 import type { NoticeState } from "../styles";
+import { requireFresh } from "./followUpRead";
 import { describeError } from "./useControlResource";
+import type { RefreshOutcome } from "./usePolling";
 
 /** The narrowed `run(label, action)` shape a panel builds around its own
  *  `useAsyncAction` (fixed precheck + refresh) and hands down to its
@@ -13,8 +15,11 @@ interface RunOptions {
    *  notice) — e.g. a "enter the control token first" gate. */
   precheck?: () => string | null;
   /** Runs inside the try after `action` succeeds (e.g. a refresh). A throw
-   *  here surfaces as the error notice, matching the hand-rolled panels. */
-  then?: () => Promise<void> | void;
+   *  here surfaces as the error notice, matching the hand-rolled panels. A
+   *  refresh passed here as is (`then: refresh`) returns its outcome, and a
+   *  failed one surfaces as the notice too: the action went through, the
+   *  view could not be reloaded. */
+  then?: () => Promise<RefreshOutcome | void> | void;
   /** Success-notice text. Defaults to `"<label> completed."`; pass `null`
    *  to show no success notice (the caller sets its own). */
   okText?: string | null;
@@ -39,7 +44,7 @@ export function useAsyncAction() {
       setNotice(null);
       try {
         await action();
-        await opts.then?.();
+        requireFresh(await opts.then?.());
         if (opts.okText !== null) {
           setNotice({ kind: "ok", text: opts.okText ?? `${label} completed.` });
         }

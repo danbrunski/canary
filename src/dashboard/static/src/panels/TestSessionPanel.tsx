@@ -18,9 +18,11 @@ import {
   startCapture,
   stopCapture,
 } from "../api/http";
+import { combineOutcomes } from "../hooks/followUpRead";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { describeError, useControlResource } from "../hooks/useControlResource";
 import { useNow } from "../hooks/useNow";
+import type { RefreshOutcome } from "../hooks/usePolling";
 import { useTagQueue } from "../hooks/useTagQueue";
 import type { TestEvent, TestProfile, TestProfileError } from "../types";
 import { Notice } from "../components/Notice";
@@ -74,9 +76,8 @@ export function TestSessionPanel({ token }: TestSessionPanelProps) {
     captureRes.status === 403 ||
     preflightRes.status === 401 ||
     preflightRes.status === 403;
-  const refreshBoth = async (): Promise<void> => {
-    await Promise.all([captureRes.refresh(), preflightRes.refresh()]);
-  };
+  const refreshBoth = async (): Promise<RefreshOutcome> =>
+    combineOutcomes(...(await Promise.all([captureRes.refresh(), preflightRes.refresh()])));
 
   const {
     recent,
@@ -251,7 +252,7 @@ export function TestSessionPanel({ token }: TestSessionPanelProps) {
           onPurposeChange={setPurpose}
           busy={Boolean(busy)}
           onStart={start}
-          onRerunPreflight={refreshBoth}
+          onRerunPreflight={() => void refreshBoth()}
           recent={recent}
           orphans={orphans}
           onClearOrphans={clearOrphans}

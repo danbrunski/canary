@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 
 import { deleteVehicleEvent, getVehicleLedger, saveVehicleEvent } from "../api/http";
 import { Panel } from "../components/Panel";
+import { reloaded } from "../hooks/followUpRead";
 import { useControlResource } from "../hooks/useControlResource";
 import {
   buttonClass,
@@ -156,7 +157,7 @@ export function VehicleLedgerPage({ token }: VehicleLedgerPageProps) {
     try {
       await work();
       setForm(null);
-      await refresh();
+      await reloaded(refresh());
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
