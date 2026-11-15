@@ -164,7 +164,7 @@ they started.
   - [~] `[tool.ruff] target-version` is `py311`; `requires-python` and mypy
     say 3.12. Set `py312`, run one `ruff check --fix`, commit that alone.
     **Tried 2026-11-15, not applied.** `py312` turns on UP040, UP046 and
-    UP047: 23 new findings in 18 files (3 `TypeAlias` -> `type`, 10
+    UP047: 23 new findings in 16 files (3 `TypeAlias` -> `type`, 10
     `Generic[T]` classes, 10 generic functions; `src/yaml_load.py`,
     `src/jsonl_store.py`, `src/models/manager.py`, `src/collection/isotp.py`,
     `src/collection/reconnect.py`, `tests/waits.py`, ...). Every one is an
