@@ -32,7 +32,7 @@ import json
 import logging
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -57,11 +57,12 @@ __all__ = [
 
 DEFAULT_VEHICLE_LEDGER_PATH = CONTROL_DIR / "vehicle_ledger.jsonl"
 
+#: The one definition of a ledger entry's kind (R29.5): the daemon's request
+#: schema, the MCP ``record_vehicle_event`` tool and the store all use it.
 VehicleEventKind = Literal["maintenance", "mod", "repair", "observation", "dtc"]
-#: The valid kinds, as a set, for request validation at the API edge.
-VEHICLE_EVENT_KINDS: frozenset[str] = frozenset(
-    {"maintenance", "mod", "repair", "observation", "dtc"}
-)
+#: The valid kinds, as a set (``scripts/vehicle_log.py`` choices), derived from
+#: :data:`VehicleEventKind` so the two cannot differ.
+VEHICLE_EVENT_KINDS: frozenset[str] = frozenset(get_args(VehicleEventKind))
 
 
 TireAction = Literal["tread_measured", "rotated", "replaced", "pressure_changed"]

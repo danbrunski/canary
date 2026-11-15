@@ -9,8 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.collection.capture_profiles import MAX_TARGET_RATE_HZ, CaptureProfile
 from src.control.obd_request import encode_request_body, parse_data_hex
+from src.models.feedback import FeedbackLabel
 from src.provisioning.gate import MAX_WINDOW_MINUTES
-from src.vehicle.vehicle_ledger import PhysicalInterventionKind, TireRecord
+from src.vehicle.vehicle_ledger import PhysicalInterventionKind, TireRecord, VehicleEventKind
 
 
 class _ControlRequest(BaseModel):
@@ -115,7 +116,7 @@ class FeedbackRequest(_ControlRequest):
     """Operator verdict on one anomaly event."""
 
     event: dict[str, Any]
-    label: str
+    label: FeedbackLabel
     reason: str | None = None
     driving_context: dict[str, Any] = Field(default_factory=dict)
     labeled_by: str | None = None
@@ -133,7 +134,7 @@ class VehicleEventRequest(_ControlRequest):
     """New vehicle maintenance/intervention ledger entry (Task 3.3)."""
 
     occurred_at: date
-    kind: str
+    kind: VehicleEventKind
     title: str
     details: str = ""
     odometer_km: float | None = None

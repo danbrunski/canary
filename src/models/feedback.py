@@ -28,7 +28,7 @@ import logging
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -51,11 +51,12 @@ __all__ = [
 #: Mirror of ``DaemonConfig.feedback_log`` (R01.2: ``src.paths.CONTROL_DIR``).
 DEFAULT_FEEDBACK_PATH = CONTROL_DIR / "anomaly_feedback.jsonl"
 
+#: The one definition of a verdict (R29.5): the store, the daemon's request
+#: schema and the MCP ``record_feedback`` tool all use it.
 FeedbackLabel = Literal["true_positive", "false_positive", "ignored", "needs_review"]
-#: The valid verdicts, as a set, for request validation at the API edge.
-FEEDBACK_LABELS: frozenset[str] = frozenset(
-    {"true_positive", "false_positive", "ignored", "needs_review"}
-)
+#: The valid verdicts, as a set, derived from :data:`FeedbackLabel` so the two
+#: cannot differ.
+FEEDBACK_LABELS: frozenset[str] = frozenset(get_args(FeedbackLabel))
 
 
 def anomaly_key(event: dict[str, Any]) -> str:

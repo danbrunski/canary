@@ -126,3 +126,109 @@ def test_mis_shaped_delegate_is_refused_at_registration() -> None:
             object(),  # type: ignore[arg-type]
             object(),  # type: ignore[arg-type]
         )
+
+
+# --- R29.5: a closure may not restate its delegate's signature wrongly --------
+
+#: Tools that stay hand-written closures (``cfg``-derived arguments,
+#: conditional registration, or two delegates behind one tool): the delegate(s)
+#: each forwards to, and the delegate parameters the closure fills itself and
+#: so does not expose. A closure's tool inputs must be exactly its delegates'
+#: parameters minus those. R29.4 (``get_binned_analysis`` dropped ``units``)
+#: was this drift; a new closure that is not listed here fails the next test.
+_INJECTED = frozenset({"client", "audit"})
+
+
+def _closure_delegates() -> dict[str, tuple[tuple[Any, ...], frozenset[str]]]:
+    from src.mcp_server.tools import (
+        analysis,
+        behavior,
+        logs,
+        search,
+        service_health,
+        sessions,
+        telemetry,
+        tuning_analysis,
+    )
+    from src.mcp_server.write_tools import capture_profiles, captures, models
+
+    return {
+        "get_session_timeseries": ((sessions.get_session_timeseries,), frozenset()),
+        "tail_daemon_log": ((logs.tail_daemon_log,), frozenset({"fallback_path"})),
+        "get_service_health": ((service_health.get_service_health,), frozenset()),
+        "search_anomaly_log": (
+            (search.search_anomaly_log,),
+            frozenset({"anomalies_dir", "audit_path"}),
+        ),
+        "signal_lookup": ((analysis.signal_lookup,), frozenset({"catalog_path"})),
+        "query_telemetry": ((telemetry.query_telemetry,), frozenset({"query_runner"})),
+        "get_behavior_deviations": (
+            (behavior.get_behavior_deviations,),
+            frozenset({"config_path"}),
+        ),
+        # ``profile`` is the CLI's ``--profile``; the MCP tools always run on the
+        # configured default profile, so it is deliberately not a tool input.
+        "get_delivery_error": (
+            (tuning_analysis.get_delivery_error,),
+            frozenset({"config_path", "profile"}),
+        ),
+        "compare_tuning_sessions": (
+            (tuning_analysis.compare_tuning_sessions,),
+            frozenset({"config_path", "profile"}),
+        ),
+        # One tool, two delegates: a named profile starts a profile capture,
+        # otherwise the legacy tag window.
+        "start_capture": (
+            (captures.start_capture, capture_profiles.start_capture),
+            frozenset(),
+        ),
+        "stop_capture": ((captures.stop_capture,), frozenset()),
+        "upload_model_artifact": ((models.upload_model_artifact,), frozenset()),
+    }
+
+
+async def test_every_closure_exposes_exactly_its_delegates_parameters(tmp_path: Path) -> None:
+    import inspect
+
+    from src.mcp_server import server as server_module
+
+    listing = await _listing(tmp_path)
+    closures = _closure_delegates()
+    delegated = {
+        entry.delegate.__name__
+        for entry in (*server_module.READ_DELEGATIONS, *server_module.WRITE_DELEGATIONS)
+    }
+    unlisted = set(listing) - delegated - set(closures)
+    assert not unlisted, f"closure tools with no declared delegate: {sorted(unlisted)}"
+    assert not set(closures) & delegated, "a tool is both a Delegation row and a closure"
+    for name, (delegates, hidden) in closures.items():
+        expected: set[str] = set()
+        for delegate in delegates:
+            expected |= set(inspect.signature(delegate).parameters)
+        expected -= _INJECTED | hidden
+        assert set(listing[name]["inputSchema"].get("properties", {})) == expected, name
+
+
+async def test_ledger_kind_literal_is_one_definition(tmp_path: Path) -> None:
+    """The MCP tool, the daemon's request schema and ``VEHICLE_EVENT_KINDS``
+    all carry the same kinds (R29.5)."""
+    from src.dashboard.schemas import VehicleEventRequest
+    from src.vehicle.vehicle_ledger import VEHICLE_EVENT_KINDS
+
+    listing = await _listing(tmp_path)
+    tool_kinds = set(listing["record_vehicle_event"]["inputSchema"]["properties"]["kind"]["enum"])
+    route_kinds = set(VehicleEventRequest.model_json_schema()["properties"]["kind"]["enum"])
+    assert tool_kinds == route_kinds == set(VEHICLE_EVENT_KINDS)
+
+
+async def test_feedback_label_literal_is_one_definition(tmp_path: Path) -> None:
+    """The MCP tool, the daemon's request schema and ``FEEDBACK_LABELS`` carry
+    the same verdicts. The tool once offered ``unknown`` (the daemon refuses
+    it) and could not send ``ignored`` or ``needs_review`` (R29.5)."""
+    from src.dashboard.schemas import FeedbackRequest
+    from src.models.feedback import FEEDBACK_LABELS
+
+    listing = await _listing(tmp_path)
+    tool_labels = set(listing["record_feedback"]["inputSchema"]["properties"]["label"]["enum"])
+    route_labels = set(FeedbackRequest.model_json_schema()["properties"]["label"]["enum"])
+    assert tool_labels == route_labels == set(FEEDBACK_LABELS)

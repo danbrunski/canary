@@ -16,8 +16,8 @@ from src.dashboard.schemas import (
     FeedbackRequest,
     VehicleEventRequest,
 )
-from src.models.feedback import FEEDBACK_LABELS, FeedbackStore
-from src.vehicle.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore
+from src.models.feedback import FeedbackStore
+from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
 
 def build_router(ctx: ControlContext) -> APIRouter:
@@ -40,15 +40,10 @@ def build_router(ctx: ControlContext) -> APIRouter:
         request: FeedbackRequest,
     ) -> dict[str, Any]:
         store = _feedback()
-        if request.label not in FEEDBACK_LABELS:
-            raise HTTPException(
-                status_code=422,
-                detail=f"label must be one of {sorted(FEEDBACK_LABELS)}",
-            )
         try:
             fb = store.record(
                 event=request.event,
-                label=request.label,  # type: ignore[arg-type]  # checked above
+                label=request.label,
                 reason=request.reason,
                 driving_context=request.driving_context,
                 labeled_by=request.labeled_by,
@@ -58,8 +53,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
             )
         except PydanticValidationError as exc:
             # Task S.3: an incomplete clarifying question/answer pair (see
-            # `AnomalyFeedback._clarifying_pair_is_complete`) — a 422, same
-            # as the label check above, not a 500.
+            # `AnomalyFeedback._clarifying_pair_is_complete`) — a 422, not a 500.
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         publish_control_event("anomaly.feedback", "ok", fb.to_dict())
         return {"feedback": fb.to_dict()}
@@ -79,14 +73,9 @@ def build_router(ctx: ControlContext) -> APIRouter:
         request: VehicleEventRequest,
     ) -> dict[str, Any]:
         store = _vehicle_ledger()
-        if request.kind not in VEHICLE_EVENT_KINDS:
-            raise HTTPException(
-                status_code=422,
-                detail=f"kind must be one of {sorted(VEHICLE_EVENT_KINDS)}",
-            )
         event = store.record(
             occurred_at=request.occurred_at,
-            kind=request.kind,  # type: ignore[arg-type]  # checked above
+            kind=request.kind,
             title=request.title,
             details=request.details,
             odometer_km=request.odometer_km,

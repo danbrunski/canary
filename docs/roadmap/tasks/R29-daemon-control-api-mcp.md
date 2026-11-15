@@ -355,19 +355,71 @@ it; go after that work lands.
     284 passed; ruff, ruff format, mypy src clean. `docs/mcp-server.md` already
     documented `units`.
 
-- [ ] **R29.5 Fifteen MCP tools are closures that restate their delegate's
+- [x] **R29.5 Fifteen MCP tools are closures that restate their delegate's
   signature.** `record_feedback` and `record_vehicle_event` exist only to
   narrow a `str` to a `Literal`, which `bind_delegation` and FastMCP already
   do. `search_anomaly_log` has 14 parameters in the closure and 16 in the
   delegate. `VehicleEventKind` is defined twice, restated as two tuples, and
   the daemon's `VehicleEventRequest.kind` is a bare `str`.
-  - [ ] Convert the pure forwards to delegations with `Literal` parameters.
+  - [x] Convert the pure forwards to delegations with `Literal` parameters.
     Keep closures only where `cfg`-derived arguments or conditional
     registration need one.
-  - [ ] A test that every remaining closure's parameter names equal its
+    **Done 2026-11-15.** `record_feedback` and `record_vehicle_event` are
+    `Delegation` rows in `WRITE_DELEGATIONS`; their closures are gone and the
+    hand-rolled `if kind not in (...)` refusals with them (a bad value is now
+    refused by FastMCP's schema validation instead of returning
+    `{"ok": false}`). The closures' docstrings moved onto the delegates so the
+    tool text has one source. Twelve closures remain, each needing a
+    `cfg`-derived argument, conditional registration, a capture guard or two
+    delegates behind one tool (`start_capture`, `stop_capture`).
+    Before/after dump of the full tool list (HEAD in a scratch worktree vs this
+    tree, both through `build_server` + `list_tools`): 2 of 80 tools differ, no
+    name, required-ness or default changed. Differences: `record_feedback.label`,
+    `record_vehicle_event.kind` and `.intervention` gain `enum` (the
+    point of the item); both descriptions are dedented 4 spaces (module-level
+    delegate docstring vs nested closure), and are otherwise word-for-word
+    identical except `record_feedback`'s first line, which now names the four
+    daemon labels (see "Found during R29.5" below). The daemon routes' 422
+    `detail` for an unknown label or kind is now pydantic's error list rather
+    than the old "must be one of" string; nothing in the tree reads it.
+    `tests/fixtures/mcp_tool_snapshot.json` regenerated with exactly these
+    hunks.
+  - [x] A test that every remaining closure's parameter names equal its
     delegate's. It would have caught R29.4.
-  - [ ] One definition of the event-kind literal, used by the route schema
+    `tests/test_mcp_tool_snapshot.py::test_every_closure_exposes_exactly_its_delegates_parameters`:
+    each closure tool is declared with its delegate(s) and the parameters it
+    fills itself (`fallback_path`, `anomalies_dir`/`audit_path`, `catalog_path`,
+    `query_runner`, `config_path`, and `profile` on the two tuning tools, which
+    is the CLI's `--profile` and deliberately not an MCP input); the tool's
+    inputs must equal the delegates' parameters minus those, and a closure not
+    declared there fails. Mutation check: deleting `unsafe_axes` from the
+    `compare_tuning_sessions` closure fails it (and the snapshot).
+  - [x] One definition of the event-kind literal, used by the route schema
     too.
+    `src.vehicle.vehicle_ledger.VehicleEventKind` is the only definition:
+    `VEHICLE_EVENT_KINDS = frozenset(get_args(VehicleEventKind))`,
+    `VehicleEventRequest.kind` is `VehicleEventKind` (was `str`; the route's
+    hand check is deleted, an unknown kind is still a 422 from validation,
+    `test_vehicle_ledger_routes.py::test_invalid_kind_rejected`), and the MCP
+    write tool imports it (and `PhysicalInterventionKind`, replacing its
+    `InterventionKind` copy). `test_ledger_kind_literal_is_one_definition`
+    pins the tool, the route schema and the set to the same kinds.
+    **Found during R29.5, same drift:** the MCP `record_feedback` literal was
+    `true_positive|false_positive|unknown` while the daemon accepts
+    `src.models.feedback.FeedbackLabel` (`true_positive|false_positive|ignored|needs_review`),
+    so `label="unknown"` always 422'd and `ignored`/`needs_review` were
+    unreachable over MCP. The MCP tool and `FeedbackRequest.label` now use
+    `FeedbackLabel` (the route's `not in FEEDBACK_LABELS` check is deleted,
+    `FEEDBACK_LABELS = frozenset(get_args(FeedbackLabel))`), the snapshot's
+    `record_feedback.label` enum is the four daemon labels (its description's
+    first line no longer says `unknown`), and
+    `test_feedback_label_literal_is_one_definition` pins tool, route schema and
+    set (it fails against HEAD's MCP literal). The dashboard's
+    `AnomalyPanel.tsx` label ids already match.
+    `pytest tests/test_mcp_*.py test_layering test_source_rules
+    test_write_tool_schema_contract test_vehicle_ledger_routes
+    test_vehicle_ledger test_route_table_snapshot test_script_cli_snapshot`:
+    462 passed; `ruff check .`, `ruff format --check .`, `mypy src` clean.
 
 - [ ] **R29.6 `create_app` threads about 45 daemon objects through four
   layers.** The same names are spelled out in `create_app`'s signature, the

@@ -254,6 +254,8 @@ WRITE_DELEGATIONS: tuple[Delegation, ...] = (
     Delegation(classification_write_tool.classify_session, needs_audit=True),
     Delegation(replay_write_tool.start_replay, needs_audit=True),
     Delegation(replay_write_tool.stop_replay, needs_audit=True),
+    Delegation(feedback_tool.record_feedback, needs_audit=True),
+    Delegation(vehicle_ledger_write_tool.record_vehicle_event, needs_audit=True),
     Delegation(replay_tool.get_replay_status),
 )
 
@@ -697,115 +699,6 @@ def _register_write_tools(
         if (status.get("capture_profile") or {}).get("active"):
             return await capture_profiles_write_tool.stop_capture(client, audit)
         return await captures_tool.stop_capture(client, audit, reason=reason)
-
-    @mcp.tool()
-    async def record_feedback(
-        event: dict[str, Any],
-        label: str,
-        reason: str | None = None,
-        driving_context: dict[str, Any] | None = None,
-        labeled_by: str | None = None,
-        hypothesis: str | None = None,
-        clarifying_question: str | None = None,
-        clarifying_answer: str | None = None,
-    ) -> dict[str, Any]:
-        """Record true_positive/false_positive/unknown verdict on an anomaly.
-
-        Pass the whole `event` dict straight through from
-        `get_recent_anomalies` — the store keys on the event, and these
-        events have no id field.
-        """
-        # Cast at the boundary — FastMCP infers the schema from the str
-        # annotation so the model passes a free string, and we validate it
-        # against the Literal alias inside the tool body.
-        if label not in ("true_positive", "false_positive", "unknown"):
-            return {
-                "ok": False,
-                "error": ("label must be one of 'true_positive', 'false_positive', 'unknown'"),
-            }
-        # Narrow once for mypy — the runtime check above already proved the value.
-        narrowed_label: feedback_tool.FeedbackLabel = label  # type: ignore[assignment]
-        return await feedback_tool.record_feedback(
-            client,
-            audit,
-            event=event,
-            label=narrowed_label,
-            reason=reason,
-            driving_context=driving_context,
-            labeled_by=labeled_by,
-            hypothesis=hypothesis,
-            clarifying_question=clarifying_question,
-            clarifying_answer=clarifying_answer,
-        )
-
-    @mcp.tool()
-    async def record_vehicle_event(
-        occurred_at: str,
-        kind: str,
-        title: str,
-        details: str = "",
-        odometer_km: float | None = None,
-        affected_channels: list[str] | None = None,
-        corpus_boundary: bool = False,
-        event_id: str | None = None,
-        tires: dict[str, Any] | None = None,
-        intervention: str | None = None,
-    ) -> dict[str, Any]:
-        """Log a maintenance/mod/repair/observation to the vehicle ledger (3.3).
-
-        ``occurred_at`` is an ISO date (``YYYY-MM-DD``). Set
-        ``corpus_boundary=True`` when the event changes what "normal" looks
-        like (a mod or repair) so training can optionally start fresh from
-        it (``--since-boundary``).
-
-        Pass ``event_id`` (from `list_vehicle_events`) to CORRECT an existing
-        entry: the correction replaces it on disk, and the original is gone.
-        Re-state the whole event, not just the changed field. Removing an
-        entry outright is ``DELETE /control/vehicle-ledger/{id}``.
-
-        ``tires`` records a tire fact the tire-wear trend reads:
-        ``{"action": "tread_measured", "tread_depth_mm": 9.5}`` (a gauge
-        reading on the driven axle, the baseline for estimated tread depth),
-        or ``{"action": "rotated" | "replaced" | "pressure_changed"}``.
-
-        ``intervention`` classifies an event that changed the vehicle or its
-        instruments: ``"hardware"``, ``"fuel"`` or ``"instrumentation"``
-        (E01.4 investigation memory). A correction re-states it too, or the
-        classification is erased with the rest of the old entry.
-        """
-        if intervention is not None and intervention not in (
-            "hardware",
-            "fuel",
-            "instrumentation",
-        ):
-            return {
-                "ok": False,
-                "error": "intervention must be one of 'hardware', 'fuel', 'instrumentation'",
-            }
-        narrowed_intervention: vehicle_ledger_write_tool.InterventionKind | None = intervention  # type: ignore[assignment]
-        if kind not in ("maintenance", "mod", "repair", "observation", "dtc"):
-            return {
-                "ok": False,
-                "error": (
-                    "kind must be one of 'maintenance', 'mod', 'repair', 'observation', 'dtc'"
-                ),
-            }
-        # Narrow once for mypy — the runtime check above already proved the value.
-        narrowed_kind: vehicle_ledger_write_tool.VehicleEventKind = kind  # type: ignore[assignment]
-        return await vehicle_ledger_write_tool.record_vehicle_event(
-            client,
-            audit,
-            occurred_at=occurred_at,
-            kind=narrowed_kind,
-            title=title,
-            details=details,
-            odometer_km=odometer_km,
-            affected_channels=affected_channels,
-            corpus_boundary=corpus_boundary,
-            event_id=event_id,
-            tires=tires,
-            intervention=narrowed_intervention,
-        )
 
     @mcp.tool()
     async def upload_model_artifact(

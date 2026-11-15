@@ -9,15 +9,21 @@ ledger.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from src.mcp_server.audit import MCPAuditLogger
 from src.mcp_server.client import DaemonClient
 from src.mcp_server.write_tools._shared import audited_post
+from src.models.feedback import FeedbackLabel
 
-FeedbackLabel = Literal["true_positive", "false_positive", "unknown"]
 
-
+# Takes the *whole event*, not an id: ``FeedbackStore.record`` derives its key
+# with ``anomaly_key(event)``, and anomaly events carry no ``id`` field. This
+# tool once sent ``{anomaly_id, label, note}``, none of which ``FeedbackRequest``
+# accepts, so with ``extra="forbid"`` every call 422'd. The docstring is the
+# tool description a client reads. ``hypothesis`` / ``clarifying_question`` /
+# ``clarifying_answer`` are the Task S.3 enrichment: the question/answer pair
+# must be complete, or the store answers 422.
 async def record_feedback(
     client: DaemonClient,
     audit: MCPAuditLogger,
@@ -31,31 +37,11 @@ async def record_feedback(
     clarifying_question: str | None = None,
     clarifying_answer: str | None = None,
 ) -> dict[str, Any]:
-    """Record a verdict on an anomaly event.
+    """Record a true_positive/false_positive/ignored/needs_review verdict on an anomaly.
 
-    Takes the *whole event*, not an id. ``FeedbackStore.record`` derives its
-    key with ``anomaly_key(event)``, and anomaly events carry no ``id`` field
-    at all — they have ``dedupe_key``. This tool previously sent
-    ``{anomaly_id, label, note}``, none of which ``FeedbackRequest`` accepts,
-    so with ``extra="forbid"`` on the route every call 422'd and the
-    active-labeling loop was unreachable over MCP.
-
-    Parameters
-    ----------
-    event:
-        The anomaly event dict, passed through from ``get_recent_anomalies``.
-    label:
-        ``"true_positive"``, ``"false_positive"``, or ``"unknown"``.
-    reason:
-        Free-text explanation — included in the retraining ledger so future
-        triage has context.
-    driving_context:
-        What the vehicle was doing, when that isn't evident from the event.
-    labeled_by:
-        Who/what recorded the verdict.
-    hypothesis / clarifying_question / clarifying_answer:
-        Task S.3 enrichment. The question/answer pair must be complete —
-        supplying one without the other is a 422 from the store.
+    Pass the whole `event` dict straight through from
+    `get_recent_anomalies` — the store keys on the event, and these
+    events have no id field.
     """
     body: dict[str, Any] = {"event": event, "label": label}
     if reason is not None:
@@ -75,4 +61,4 @@ async def record_feedback(
     )
 
 
-__all__ = ["record_feedback", "FeedbackLabel"]
+__all__ = ["record_feedback"]
