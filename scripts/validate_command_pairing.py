@@ -46,12 +46,12 @@ import numpy as np
 import pandas as pd
 
 try:
-    from _cli import (
+    from _cli import (  # type: ignore[import-not-found]
         add_bindings_arg,
         add_log_level_arg,
     )
 except ImportError:  # loaded as `scripts.validate_command_pairing`: repo root on path
-    from scripts._cli import (  # type: ignore[no-redef]
+    from scripts._cli import (
         add_bindings_arg,
         add_log_level_arg,
     )

@@ -78,6 +78,11 @@ they started.
     delete the four `_scoped*` functions; migrate the direct callers.
   - [ ] A pandas-free `tools/_cli.py` with `add_config_profile_args` and
     `load_scoped`.
+  - [ ] `tools/replay_window.py` never scopes its config. Found verifying
+    R30.6, 2026-11-15. On a normal config (profiles enabled) it dies with
+    `UnscopedConfigError: featurize_wide_frame needs a profile-scoped
+    config`, and it runs only with `profiles.enabled: false`. Migrate it with
+    the other tools, and add a test that runs it on a profiles-enabled config.
   - Pinned by `test_script_cli_snapshot.py`, `test_script_imports.py`,
     `test_bus_tool.py`.
 
@@ -122,11 +127,53 @@ they started.
   (iterating a `Hashable`), six `import-not-found` / `unused-ignore` pairs
   from the `try: from _cli … except ImportError: from scripts._cli` dance,
   and four singletons.
-  - [ ] Add `scripts` and `tools` to `files` with `explicit_package_bases`
+  - [x] Add `scripts` and `tools` to `files` with `explicit_package_bases`
     and `namespace_packages`; fix `timing_compare`; give the `_cli` dance one
     targeted ignore. About 10 s more on a warm gate.
-  - [ ] `[tool.ruff] target-version` is `py311`; `requires-python` and mypy
+    **Done 2026-11-15.** `[tool.mypy]` now has `files = ["src", "tests",
+    "scripts", "tools"]`, `namespace_packages = true`,
+    `explicit_package_bases = true`; bare `mypy`: "Success: no issues found in
+    1422 source files" (was 1310; +112 = every `scripts/` and `tools/`
+    module). The tree had 22 errors in 9 files by then (the dead file is gone,
+    R30.7). Fixed for real: `timing_compare` (`iterrows()` index is
+    `Hashable`: one `cast` to the `(rpm_cell, load_cell)` interval pair, which
+    also cleared six `has-type`); `obd_coverage` (`dict` -> `dict[str, Any]`);
+    `catalog._scoped_config` (`config: CanaryConfig = load_config(args)`, the
+    Any came from the unresolved `_cli`); `replay_window` (it read
+    `config.alerts.anomalies_dir`, which does not exist: `AlertsConfig` has no
+    such field, so omitting `--anomalies-dir` raised `AttributeError`; now
+    `config.daemon.anomalies_dir`, the field every other reader uses, and the
+    `--help` text says so. The one behaviour change: a crash became the
+    documented default). The `_cli` dance: five scripts
+    (`catalog`, `migrate_to_profiles`, `validate_command_pairing`,
+    `inventory_behavior_inputs`, `sustained_validation`) had the ignore on the
+    fallback import, so `import-not-found` fired on the first; moved to the
+    first import as `# type: ignore[import-not-found]` and the fallback has
+    none, the shape the other 32 scripts already use (so R30.8's mechanical
+    change has one form to converge on). One ignore for the third-party stub:
+    `classify_sessions` (`pq.ParquetFile(...).iter_batches` untyped in
+    pyarrow, `[no-untyped-call, unused-ignore]` as everywhere else in `src`).
+    Nothing left out of scope. Guard:
+    `tests/test_source_rules.py::test_every_script_and_tool_is_type_checked`
+    (every `.py` under `scripts/` and `tools/` lies under a `files` entry, no
+    `exclude`, both package settings on) and its negative test
+    `test_the_mypy_scope_check_names_a_file_it_would_miss`. Bare `mypy` wall
+    time, this laptop: cold cache 94 s -> 134 s (+40 s, another agent was
+    running); warm, nothing changed 0.6 s -> 0.8 s; first run after adding
+    the 112 files onto a src/tests-warm cache 2.9 s.
+  - [~] `[tool.ruff] target-version` is `py311`; `requires-python` and mypy
     say 3.12. Set `py312`, run one `ruff check --fix`, commit that alone.
+    **Tried 2026-11-15, not applied.** `py312` turns on UP040, UP046 and
+    UP047: 23 new findings in 18 files (3 `TypeAlias` -> `type`, 10
+    `Generic[T]` classes, 10 generic functions; `src/yaml_load.py`,
+    `src/jsonl_store.py`, `src/models/manager.py`, `src/collection/isotp.py`,
+    `src/collection/reconnect.py`, `tests/waits.py`, ...). Every one is an
+    unsafe fix, so plain `ruff check --fix` changes nothing; they are PEP 695
+    rewrites of generics (`type` aliases evaluate lazily, `Generic[T]`
+    classes change their MRO) across `src` files other sessions edit.
+    Reverted to `py311`. Operator decision: (a) set `py312` and convert the 23
+    by hand in its own reviewed commit, (b) set `py312` and `ignore =
+    ["UP040", "UP046", "UP047"]` until a generics sweep, (c) leave `py311`.
 
 - [~] **R30.7 Dead or one-shot tools.**
   - `tools/decode_uprev_rom_research.py` (116 lines, untyped, untested, no

@@ -54,6 +54,7 @@ import math
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 
@@ -249,7 +250,10 @@ def compare(
 
     retard_cells: list[str] = []
     iat_warn: list[str] = []
-    for (rc, lc), row in joined.iterrows():
+    for cell_key, row in joined.iterrows():
+        # The outer join of two groupbys on (rpm_cell, load_cell): pandas types
+        # the index label as Hashable, but each is a pair of Interval bins.
+        rc, lc = cast("tuple[pd.Interval[float], pd.Interval[float]]", cell_key)
         nb, na = row.get("n_b"), row.get("n_a")
         cell = f"{rc.left:.0f}-{rc.right:.0f}  {lc.left:.0f}-{lc.right:.0f}%"
         if pd.isna(nb) or pd.isna(na) or nb < MIN_CELL_N or na < MIN_CELL_N:

@@ -39,9 +39,9 @@ from dataclasses import replace
 from pathlib import Path
 
 try:
-    from _cli import _REPO_ROOT
+    from _cli import _REPO_ROOT  # type: ignore[import-not-found]
 except ImportError:
-    from scripts._cli import _REPO_ROOT  # type: ignore[no-redef]
+    from scripts._cli import _REPO_ROOT
 
 from src.validation.harness import harness_config, run_scenario_clean
 from src.validation.report import build_report, summarize_markdown, write_report

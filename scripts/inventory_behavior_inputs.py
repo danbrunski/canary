@@ -32,13 +32,13 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from _cli import (
+    from _cli import (  # type: ignore[import-not-found]
         add_bindings_arg,
         add_log_level_arg,
         load_config,
     )
 except ImportError:  # loaded as `scripts.inventory_behavior_inputs`: repo root on path
-    from scripts._cli import (  # type: ignore[no-redef]
+    from scripts._cli import (
         add_bindings_arg,
         add_log_level_arg,
         load_config,

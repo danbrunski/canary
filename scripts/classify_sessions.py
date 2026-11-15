@@ -52,7 +52,10 @@ def classify(session_dir: Path) -> tuple[str, str]:
         if c.stat().st_size == 0:
             continue
         try:
-            for batch in pq.ParquetFile(c).iter_batches(columns=["source"]):
+            # pyarrow ships partial annotations: ParquetFile and iter_batches are untyped.
+            for batch in pq.ParquetFile(c).iter_batches(  # type: ignore[no-untyped-call, unused-ignore]
+                columns=["source"]
+            ):
                 readable += 1
                 sources.update(v for v in batch.column(0).to_pylist() if v is not None)
                 if "obd" in sources:

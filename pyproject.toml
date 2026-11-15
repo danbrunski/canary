@@ -119,11 +119,16 @@ select = ["E", "F", "I", "B", "UP", "N", "W"]
 # *system* interpreter: tests/test_ups_shutdown.py imports it, so it is checked,
 # but against 3.12, not against that interpreter.
 # tests/ is checked too (2026-10-24): while only src/ was, ~2,400 errors had
-# piled up there unseen. The scripts/ and tools/ modules the tests import are
-# checked through them.
+# piled up there unseen. scripts/ and tools/ are checked too (R30.6): they were
+# only reached through the tests that import them, so 31 modules, among them
+# scripts/check_dev_env.py (which gates every push), were never loaded.
+# Neither directory has an __init__.py, hence the two package settings;
+# tests/test_source_rules.py refuses a config that drops either directory.
 python_version = "3.12"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "scripts", "tools"]
+namespace_packages = true
+explicit_package_bases = true
 
 [[tool.mypy.overrides]]
 module = "tests.*"

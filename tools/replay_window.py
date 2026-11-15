@@ -70,7 +70,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--anomalies-dir",
         type=Path,
         default=None,
-        help="Anomaly JSONL directory (default: from canary.yaml alerts.anomalies_dir).",
+        help="Anomaly JSONL directory (default: from canary.yaml daemon.anomalies_dir).",
     )
     parser.add_argument("--max-rows", type=int, default=5_000)
     parser.add_argument("--max-windows", type=int, default=5_000)
@@ -105,7 +105,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     end = _parse_iso(args.end) if args.end else None
     if_model = args.if_model or _default_if_path(config)
     lstm_model = args.lstm_model or _default_lstm_path(config)
-    anomalies_dir = args.anomalies_dir or config.alerts.anomalies_dir
+    anomalies_dir = args.anomalies_dir or config.daemon.anomalies_dir
 
     report = replay_window(
         session_dir=session_dir,

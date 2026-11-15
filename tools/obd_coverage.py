@@ -23,6 +23,7 @@ import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import obd
 
@@ -90,7 +91,7 @@ def _record_default_pids() -> set[str]:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
 
-    kwargs: dict = {"portstr": args.port, "baudrate": args.baud, "fast": False}
+    kwargs: dict[str, Any] = {"portstr": args.port, "baudrate": args.baud, "fast": False}
     if args.protocol is not None:
         kwargs["protocol"] = args.protocol
 

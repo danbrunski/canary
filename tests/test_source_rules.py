@@ -30,10 +30,12 @@ from __future__ import annotations
 import ast
 import os
 import re
+import tomllib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -1062,3 +1064,48 @@ def test_the_scan_is_by_file_and_skips_vendored_trees(tmp_path: Path) -> None:
         (tmp_path / sub).mkdir(parents=True)
         (tmp_path / sub / "m.py").write_text("x = 1\n")
     assert _walk(tmp_path, "src", (".py",)) == ["src/a/m.py"]
+
+
+def _outside_mypy_scope(
+    mypy_config: Mapping[str, Any], root: Path, trees: tuple[str, ...]
+) -> list[str]:
+    """Python files under ``trees`` that bare ``mypy`` would never load (R30.6).
+
+    ``[tool.mypy] files`` names directories; mypy loads everything beneath them
+    except what ``exclude`` removes. So a file is out of scope when no entry of
+    ``files`` is a directory above it, or when ``exclude`` is set at all (an
+    exclusion list is the quiet way a script drops back out).
+    """
+    if mypy_config.get("exclude"):
+        return [f"[tool.mypy] exclude = {mypy_config['exclude']!r}"]
+    raw = mypy_config.get("files", [])
+    entries = [str(raw)] if isinstance(raw, str) else [str(e) for e in raw]
+    roots = tuple(e.rstrip("/") + "/" for e in entries)
+    return [
+        rel for tree in trees for rel in _walk(root, tree, (".py",)) if not rel.startswith(roots)
+    ]
+
+
+def test_every_script_and_tool_is_type_checked() -> None:
+    """R30.6: mypy once loaded only ``src`` and ``tests``, so 31 scripts (among them
+    ``check_dev_env.py``, which gates every push) were never checked unless a test
+    happened to import them. Add the directory to ``[tool.mypy] files`` instead of
+    leaving a script out; ``namespace_packages`` / ``explicit_package_bases`` are
+    what let a directory with no ``__init__.py`` load under its own name.
+    """
+    config = tomllib.loads((REPO / "pyproject.toml").read_text())["tool"]["mypy"]
+    assert not _outside_mypy_scope(config, REPO, ("scripts", "tools"))
+    assert config.get("namespace_packages") is True
+    assert config.get("explicit_package_bases") is True
+
+
+def test_the_mypy_scope_check_names_a_file_it_would_miss(tmp_path: Path) -> None:
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "a.py").write_text("x = 1\n")
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "b.py").write_text("x = 1\n")
+    trees = ("scripts", "tools")
+    assert _outside_mypy_scope({"files": ["src", "scripts"]}, tmp_path, trees) == ["tools/b.py"]
+    assert _outside_mypy_scope({"files": "scripts"}, tmp_path, trees) == ["tools/b.py"]
+    assert _outside_mypy_scope({"files": ["scripts", "tools"]}, tmp_path, trees) == []
+    assert _outside_mypy_scope({"files": ["scripts", "tools"], "exclude": "b"}, tmp_path, trees)
