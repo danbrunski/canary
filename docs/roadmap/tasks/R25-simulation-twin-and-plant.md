@@ -263,28 +263,54 @@ did not change.
       - The `simulate_rom_edit` description and docs/mcp-server.md state the
         trims' [−100, 100] % bound. `tests/fixtures/mcp_tool_snapshot.json`
         was regenerated, and only those two descriptions changed.
-  - [ ] Follow-up (found verifying the above, 2026-11-13). None of these
-    changes a 2008 result today.
-    - **Third slot declaration.** The live overlay's slot is
-      `GET /control/rom/library/{sha}/trace` → `map_slot`, which comes from
-      `rom_targets.yaml` `map_slot`, not from `fuel_comp_fit.yaml`
-      `program.map_slot` (`editor_slot`). `afr_calibration.yaml`
-      `target_maps[].map_slot` is a third copy of the same fact.
-      `romOverlay.ts` places cells where `table.slot === context.map_slot`.
-      Make them one fact: `library_trace_context` refuses
-      `map_slot_mismatch`, or a profile-data test asserts the declarations
-      agree for every profile that has more than one.
-    - **Two axis lookups pin slot 1.** `lib/romSim.ts` `suggestEdges`
-      (~635) and `lib/romSimTiming.ts` `trimTable` (~210) look for
-      `slot === 1`. The 2008's copies share one axis table, so the values
-      are right. Switch both to `isSimulatedSlot`.
-    - **The −100 % LTFT test asserts only exit 0.** Also assert that the
-      `delivered_lambda` cells are all `unsupported` with a non-empty reason.
-      The reason is currently `short_pulse_undecoded`, which names the
-      mechanism, not the cause (the stated trim zeroes the fuel). A later
-      short-pulse decode must not turn the run into a "supported" NaN.
-    - **Docs nit.** `docs/headless-api.md` (~1056) lists `ltft_pct` without
-      the bound.
+  - [x] Follow-up (found verifying the above, 2026-11-13). None of these
+    changes a 2008 result today. Done 2026-11-13:
+    - **Third slot declaration.** Chose (a) plus a profile-data test. Reading
+      `afr_calibration.yaml`: `target_maps[].provenance.map_slot` is not a
+      copy of the live slot but the slot each *revision's* table was decoded
+      from (one per listed revision), and `TargetEditor` already refuses an
+      upload whose provenance slot differs from `rom_targets.yaml`
+      (`Map slot mismatch`). The two declarations of the one fact were
+      `rom_targets.yaml` `map_slot` (the overlay's) and `fuel_comp_fit.yaml`
+      `program.map_slot` (`editor_slot`), joined nowhere. (a) is a dozen lines
+      in `library_trace_context` and one small YAML read per request, so
+      the impossible form is cheap: it raises `ValueError("map_slot_mismatch:
+      rom_targets.yaml says map_slot N but fuel_comp_fit.yaml says the ECM runs
+      slot M ...")`, a 422 at `GET /control/rom/library/{sha}/trace`. A
+      vehicle with no `fuel_comp_fit.yaml` is unchecked. The 2008's response is
+      unchanged (`map_slot: 1`). (b) alone would only cover profiles shipped
+      in `data/`, not a user's own. Tests in `tests/test_rom_library_api.py`:
+      `test_trace_context_refuses_two_declarations_of_the_map_slot`,
+      `test_the_route_answers_422_for_disagreeing_map_slot_declarations`,
+      `test_every_shipped_profile_declares_one_map_slot` (every profile under
+      `data/`: `rom_targets` = `fuel_comp_fit` = every revision's
+      `provenance.map_slot`). Route and MCP snapshots pass. The upload
+      inspector (`inspect_rom`) places traces on `rom_targets`' slot too, so both
+      call one helper, `require_one_map_slot`
+      (`test_inspect_refuses_disagreeing_map_slot_declarations`).
+    - **Two axis lookups pin slot 1.** `suggestEdges` (`lib/romSim.ts`) and
+      `trimTable` (`lib/romSimTiming.ts`) now use `isSimulatedSlot` (both
+      receive `RomTableValues`, which carries `sim_slot`). `suggestEdges`'s
+      empty-case note no longer says "Map 1". vitest: "read the table of the
+      slot the simulator runs, not slot 1" (`romSim.test.ts`) and "reads the
+      trim axes of the slot the simulator runs, not slot 1"
+      (`romSimTiming.test.ts`), each with a slot-2 declaration.
+    - **The −100 % LTFT test.** The first assertion rested on an incidental
+      reason: the fixture's cells are all closed-loop, so they stayed
+      `unsupported` through `closed_loop_trim_authority_undecoded`, and an
+      open-loop cell at −100 % carries only `short_pulse_undecoded`, which a
+      later short-pulse decode lifts. The cause is now named at the source:
+      `paired_scenarios.output_reasons` appends `FUEL_MULTIPLIER_ZERO`
+      (`fuel_multiplier_zero`) to `delivered_lambda` and `fuel_per_event_g`
+      when either side's stated fuel multiplier `k_word` (`trim_k` of
+      STFT + LTFT) is ≤ 0. The test
+      asserts it on every `support` entry of every visited cell (and
+      `supported_share == 0`, no quantiles). Mutations: dropping the
+      `short_pulse_undecoded` append, the test still passes; dropping the
+      `fuel_multiplier_zero` append, it fails.
+    - **Docs nit.** `docs/headless-api.md` states the [−100, 100] % bound on
+      `ltft_pct` and `stft_pct` in the typical-values list and in the request
+      paragraph.
 
 - [ ] **R25.4 Three kit types, three `load_kit`s, and the same YAML parsed
   several times per request.** `paired_scenarios.SimKit` and

@@ -10,6 +10,8 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 from src.analysis.ecu_application import coverage_report, load_application_model
+from src.analysis.fuel_comp_inputs import FUEL_COMP_FILE
+from src.analysis.rom_editor import declared_slot
 from src.analysis.rom_targets import Definition, TargetEditor, sha256
 from src.analysis.rom_trace import (
     load_viewer_definition,
@@ -64,6 +66,7 @@ def inspect_rom(
         raise ValueError("ROM upload is empty or exceeds 2 MiB")
     definition = load_viewer_definition(profile_dir)
     editor = TargetEditor.from_bytes(data, profile_dir / definition.target_definition)
+    require_one_map_slot(profile_dir, editor.definition.map_slot, definition.target_definition)
     target = editor.export()
     tables = []
     for slot in definition.map_slots:
@@ -121,6 +124,26 @@ def live_providers(profile_dir: Path) -> dict[str, Any]:
     return live
 
 
+def require_one_map_slot(profile_dir: Path, targets_slot: int, targets_file: str) -> None:
+    """Refuse a vehicle whose ``targets_file`` (``rom_targets.yaml``) names a
+    ``map_slot`` other than the one the editor edits.
+
+    One fact, declared twice: the overlay places cells where a table's slot is
+    ``rom_targets.yaml``'s ``map_slot``, and the editor
+    (:func:`~src.analysis.rom_editor.editor_slot`) shows and edits the slot
+    ``fuel_comp_fit.yaml`` declares. If they differ the overlay would sit on a
+    copy the editor never touches. Every reader of the overlay's slot calls
+    this (``ValueError``, a 422 at the routes); a vehicle with no
+    ``fuel_comp_fit.yaml`` declares one slot only and passes."""
+    declared = declared_slot(profile_dir)
+    if declared is not None and declared != targets_slot:
+        raise ValueError(
+            f"map_slot_mismatch: {targets_file} says map_slot "
+            f"{targets_slot} but {FUEL_COMP_FILE} says the ECM runs slot {declared}; "
+            "the live overlay and the editor must name the same slot"
+        )
+
+
 def library_trace_context(
     profile_dir: Path,
     dids_path: Path = DIDS_YAML,
@@ -144,6 +167,7 @@ def library_trace_context(
     targets = Definition.model_validate(
         load_yaml((profile_dir / definition.target_definition).read_text())
     )
+    require_one_map_slot(profile_dir, targets.map_slot, definition.target_definition)
     current = revisions.at(datetime.now(UTC)) if revisions else None
     return {
         "sha256": sha,

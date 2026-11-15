@@ -242,6 +242,11 @@ RailSource = Literal["stated", "measured", "working_assumption"]
 BatterySource = Literal["stated", "measured", "unmeasured"]
 #: The reason the absolute pulse carries at a point with no voltage read.
 BATTERY_UNMEASURED = "battery_voltage_unmeasured"
+#: The reason delivered lambda and fuel per event carry when a side's stated
+#: STFT + LTFT leave a fuel multiplier ``k`` of zero or less (a combined
+#: STFT + LTFT of -100 % or less): no fuel is metered, so those outputs are not a number, whatever a later
+#: short-pulse decode makes of the dead-time-only pulse.
+FUEL_MULTIPLIER_ZERO = "fuel_multiplier_zero"
 #: The reason a result run on drawn plant parameters carries in ranking.
 OVERRIDES_NOT_FROZEN = "plant_overrides_not_frozen"
 
@@ -1287,6 +1292,8 @@ def output_reasons(
                 reasons.append(TRIM_AUTHORITY_UNDECODED)
             if name in PLANT_OUTPUTS:
                 reasons.extend(f"regime_not_qualified:{r}" for r in unqualified_regimes)
+                if any(s.get("k_word") is not None and s["k_word"] <= 0 for s in (b, c)):
+                    reasons.append(FUEL_MULTIPLIER_ZERO)
             eff = [s["effective_ms"] for s in (b, c) if s.get("effective_ms") is not None]
             if any(e < kit.plant.steady.min_effective_pulse_ms for e in eff):
                 reasons.append("short_pulse_undecoded")
@@ -2337,6 +2344,7 @@ __all__ = [
     "EnrichmentRetardCals",
     "COOLANT_BYTE_OFFSET",
     "BATTERY_UNMEASURED",
+    "FUEL_MULTIPLIER_ZERO",
     "ECU_RUNNER_OUTPUTS",
     "OUTPUTS",
     "OVERRIDES_NOT_FROZEN",

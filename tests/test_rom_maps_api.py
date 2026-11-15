@@ -111,3 +111,21 @@ def test_profile_driven_slots_and_unverified_tables(tmp_path, monkeypatch):
             assert record is None
     with pytest.raises(ValueError, match="empty"):
         rom_maps.inspect_rom(b"", tmp_path, revisions=None)
+
+
+def test_inspect_refuses_disagreeing_map_slot_declarations(tmp_path, monkeypatch):
+    """The upload inspector places its traces on ``rom_targets.yaml``'s slot, so
+    it refuses the same split the library trace route does."""
+    root = Path("data/nissan-xterra-2008")
+    for name in ["rom_viewer.yaml", "tuning_providers.yaml", "tune_revisions.yaml"]:
+        (tmp_path / name).write_text((root / name).read_text())
+    fit = (root / "fuel_comp_fit.yaml").read_text()
+    (tmp_path / "fuel_comp_fit.yaml").write_text(
+        fit.replace("  map_slot: 1\n", "  map_slot: 2\n", 1)
+    )
+    fake = SimpleNamespace(
+        definition=SimpleNamespace(map_slot=1, afr_numerator=1881.6), export=lambda: {}
+    )
+    monkeypatch.setattr(TargetEditor, "from_bytes", lambda data, path: fake)
+    with pytest.raises(ValueError, match="map_slot_mismatch.*rom_targets.yaml.*fuel_comp_fit.yaml"):
+        rom_maps.inspect_rom(b"synthetic", tmp_path, revisions=None)

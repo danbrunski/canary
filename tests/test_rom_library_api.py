@@ -337,3 +337,83 @@ def test_a_vehicle_without_a_map_still_keeps_lists_describes_and_compares(
         assert "ROM map definition unavailable" in tables.json()["detail"]
         download = client.get(f"/control/rom/library/{a['sha256']}/download", headers=AUTH)
         assert download.content == synthetic_image(k=27089)
+
+
+def _slot_profile(tmp_path: Path, *, fuel_comp_slot: int) -> Path:
+    """The Xterra's viewer, target and fuel-comp declarations, the fuel-comp
+    file restated for ``fuel_comp_slot``."""
+    profile = tmp_path / "profile"
+    profile.mkdir(parents=True)
+    for name in ["rom_viewer.yaml", "rom_targets.yaml", "tuning_providers.yaml"]:
+        (profile / name).write_text((PROFILE / name).read_text())
+    fit = (PROFILE / "fuel_comp_fit.yaml").read_text()
+    assert "  map_slot: 1\n" in fit
+    (profile / "fuel_comp_fit.yaml").write_text(
+        fit.replace("  map_slot: 1\n", f"  map_slot: {fuel_comp_slot}\n", 1)
+    )
+    return profile
+
+
+def test_trace_context_refuses_two_declarations_of_the_map_slot(tmp_path: Path) -> None:
+    """The overlay's ``map_slot`` (``rom_targets.yaml``) and the editor's
+    (``fuel_comp_fit.yaml``) are one fact. A vehicle whose two files disagree
+    gets a refusal naming both files and both values, not an overlay on a copy
+    the editor never edits."""
+    from src.dashboard.routes.rom_maps import library_trace_context
+
+    sha = "c" * 64
+    agreeing = _slot_profile(tmp_path / "agree", fuel_comp_slot=1)
+    assert library_trace_context(agreeing, sha=sha, revisions=None)["map_slot"] == 1
+
+    disagreeing = _slot_profile(tmp_path / "disagree", fuel_comp_slot=2)
+    with pytest.raises(ValueError, match="map_slot_mismatch") as raised:
+        library_trace_context(disagreeing, sha=sha, revisions=None)
+    message = str(raised.value)
+    assert "rom_targets.yaml" in message and "fuel_comp_fit.yaml" in message
+    assert "map_slot 1" in message and "slot 2" in message
+
+
+def test_the_route_answers_422_for_disagreeing_map_slot_declarations(tmp_path: Path) -> None:
+    profile = _slot_profile(tmp_path, fuel_comp_slot=2)
+    for name in ["rom_map.yaml", "afr_calibration.yaml"]:
+        (profile / name).write_text((PROFILE / name).read_text())
+    config = isolated_config(tmp_path, daemon={"afr_calibration": profile / "afr_calibration.yaml"})
+    app = FastAPI()
+    register_rom_library_routes(app, config=config, resolved_control_token="secret")
+    with TestClient(app) as client:
+        sha = _upload(client, synthetic_image(k=27089), "a.bin").json()["sha256"]
+        response = client.get(f"/control/rom/library/{sha}/trace", headers=AUTH)
+        assert response.status_code == 422
+        assert "map_slot_mismatch" in response.json()["detail"]
+
+
+def test_every_shipped_profile_declares_one_map_slot() -> None:
+    """Every profile under ``data/`` that carries the declarations names one
+    slot in all of them. ``afr_calibration.yaml``'s per-revision
+    ``provenance.map_slot`` is not a second copy of the live slot: it is the
+    slot each revision's table was decoded from, so it is checked against
+    ``rom_targets.yaml`` (as ``TargetEditor`` does on upload) for every revision."""
+    from src.analysis.rom_editor import declared_slot
+    from src.analysis.rom_targets import Definition
+    from src.signals.afr import load_afr_calibration
+    from src.yaml_load import load_yaml
+
+    checked = 0
+    for profile in sorted(PROFILE.parent.iterdir()):
+        targets_path = profile / "rom_targets.yaml"
+        if not targets_path.is_file():
+            continue
+        targets = Definition.model_validate(load_yaml(targets_path.read_text()))
+        declared = declared_slot(profile)
+        if declared is not None:
+            assert declared == targets.map_slot, profile.name
+        calibration = profile / targets.calibration_file
+        if calibration.is_file():
+            for target in load_afr_calibration(calibration).target_maps:
+                if target.provenance is not None:
+                    assert target.provenance.map_slot == targets.map_slot, (
+                        profile.name,
+                        target.revision,
+                    )
+        checked += 1
+    assert checked >= 1

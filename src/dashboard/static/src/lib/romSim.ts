@@ -26,6 +26,7 @@
 
 import { HttpError } from "../api/http";
 import { describeError } from "../hooks/useControlResource";
+import { isSimulatedSlot } from "./romEditor";
 import { isFuelTargets } from "./romLibrary";
 import type {
   RomEdit,
@@ -618,7 +619,8 @@ export interface BreakpointSuggestion {
   offCentre: { rpm: number; load: number };
 }
 
-/** The suggested edges from the base image's Fuel Comp (Map 1) breakpoints.
+/** The suggested edges from the base image's Fuel Comp breakpoints, in the map
+ *  slot the simulator runs (`sim_slot`: the vehicle's declared slot).
  *  Each axis is classified by its decode quantity (rpm, throttle-model fill),
  *  never by whether it is the table's rows or columns: UpRev labels them
  *  the other way round. */
@@ -632,12 +634,14 @@ export function suggestEdges(tables: RomTableValues[]): BreakpointSuggestion {
     offCentre: { rpm: 0, load: 0 },
   };
   const table = tables.find(
-    (item) => item.kind === "fuel_compensation" && item.slot === 1 && item.role !== "axis",
+    (item) => item.kind === "fuel_compensation" && isSimulatedSlot(item) && item.role !== "axis",
   );
   if (!table) {
     return {
       ...none,
-      notes: ["this image has no Fuel Compensation (Map 1) table to read breakpoints from"],
+      notes: [
+        "this image has no Fuel Compensation table in the simulated map to read breakpoints from",
+      ],
     };
   }
   const axes = [table.axes.rows, table.axes.cols].filter((axis): axis is RomTableAxis => !!axis);

@@ -191,6 +191,21 @@ describe("timingGrid", () => {
     expect(grid?.cells[0]?.[0]).toBeNull();
   });
 
+  it("reads the trim axes of the slot the simulator runs, not slot 1", () => {
+    // A vehicle whose declared map slot is 2: only a slot-2 copy is read.
+    const slot2 = TABLES.map((table) => ({
+      ...table,
+      sim_slot: 2,
+      slot: table.slot === 1 ? 2 : table.slot,
+    }));
+    const grid = timingGrid(buildTimingBlock("trim_b"), slot2);
+    expect(grid?.labelsFrom).toBe("trim axes");
+    expect(grid?.rowLabels[4]).toBe("2,000");
+    // With the page's slot back at 1 those copies are not the simulated ones.
+    const other = slot2.map((table) => ({ ...table, sim_slot: 1 }));
+    expect(timingGrid(buildTimingBlock("trim_b"), other)?.labelsFrom).toBe("cells");
+  });
+
   it("falls back to the cells' own coordinates when the base has no trim table, and says so", () => {
     const grid = timingGrid(buildTimingBlock("trim_b"), []);
     expect(grid?.labelsFrom).toBe("cells");

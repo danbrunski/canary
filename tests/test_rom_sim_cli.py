@@ -34,7 +34,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from src.analysis import rom_editor
+from src.analysis import paired_scenarios, rom_editor
 from src.analysis.ecu_application import program_sha256
 from src.analysis.fuel_plant import plant_qualification
 from src.analysis.rom_effects import CellEdit, RomEffectRefusalError, compare_roms, make_candidate
@@ -565,6 +565,23 @@ def test_a_run_refuses_a_negative_seed_and_a_trim_outside_the_pid_decode(
     assert code == 0, payload
     edge = json.loads((tmp_path / "edge" / "result.json").read_text())
     assert edge["inputs"]["learned"]["ltft_pct"] == -100.0
+    # Completing is not the claim: the stated trim zeroes the fuel, so delivered
+    # lambda is not a number in any cell the run visited. Each says so
+    # (``unsupported``, every share with a reason), never a "supported" NaN that a later
+    # short-pulse decode could turn it into.
+    visited = [c for c in edge["cell_table"]["cells"] if c["n_points"]]
+    assert visited
+    for cell in visited:
+        lam = cell["outputs"]["delivered_lambda"]
+        assert lam["status"] == "unsupported", (cell["row"], cell["col"], lam)
+        assert lam["supported_share"] == 0.0 and lam["quantiles"] is None, lam
+        assert lam["support"], lam
+        for support in lam["support"]:
+            assert support["status"] == "unsupported", lam
+            # The cause, named at the source: not the closed-loop or short-pulse
+            # reason that happens to accompany it on this fixture. An open-loop
+            # cell carries only the short-pulse one, which a later decode lifts.
+            assert paired_scenarios.FUEL_MULTIPLIER_ZERO in support["reasons"], lam
     # The editor's request refuses the same trims (a 422 at the route).
     for field, trim in (("ltft_pct", 400.0), ("stft_pct", -100.5)):
         with pytest.raises(ValidationError, match=field):

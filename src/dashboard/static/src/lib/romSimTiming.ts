@@ -22,6 +22,7 @@ import type {
   TimingPointRow,
 } from "../types/romEditor";
 import type { RomTableValues } from "../types/romLibrary";
+import { isSimulatedSlot } from "./romEditor";
 import { formatCell } from "./romLibrary";
 
 /** The reason that carries `charge_word_routes`. */
@@ -207,7 +208,7 @@ function trimTable(tables: readonly RomTableValues[]): RomTableValues | null {
   return (
     tables.find(
       (table) =>
-        table.slot === 1 &&
+        isSimulatedSlot(table) &&
         table.role !== "axis" &&
         (table.kind === "timing_trim_a" || table.kind === "timing_trim_b") &&
         (table.raw.length === TRIM_ROWS || table.raw[0]?.length === TRIM_COLS),

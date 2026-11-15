@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { HttpError } from "../api/http";
 import { documentedSimFields } from "../test/romSimDoc";
+import { fuelCompTable } from "../test/romLibraryFixtures";
 import { fuelCompWithAxes, tablesWithAxes } from "../test/romSimFixtures";
 import type { RomTableValues } from "../types/romLibrary";
 import {
@@ -353,6 +354,25 @@ describe("edges from the base image's Fuel Comp breakpoints", () => {
     expect(swapped.loadEdges).toEqual(normal.loadEdges);
   });
 
+  it("read the table of the slot the simulator runs, not slot 1", () => {
+    // A vehicle whose declared map slot is 2: the slot-1 copy has no decoded
+    // axes, the slot-2 copy (the one the simulator reads) has them.
+    const normal = suggestEdges(tablesWithAxes().tables);
+    expect(normal.rpmEdges).toHaveLength(17);
+    const bare = { ...fuelCompTable(1), axes: { rows: null, cols: null } };
+    const tables = (simSlot: number) =>
+      [
+        { ...bare, sim_slot: simSlot },
+        { ...fuelCompWithAxes(), slot: 2, sim_slot: simSlot },
+      ] as RomTableValues[];
+    const suggested = suggestEdges(tables(2));
+    expect(suggested.rpmEdges).toEqual(normal.rpmEdges);
+    expect(suggested.loadEdges).toEqual(normal.loadEdges);
+    expect(suggested.notes).toEqual([]);
+    // Were slot 1 the simulated one, the bare copy is what is read.
+    expect(suggestEdges(tables(1)).rpmEdges).toBeNull();
+  });
+
   it("explain a blank: no decoded load axis, no Fuel Comp table", () => {
     const plain = suggestEdges(
       [fuelCompWithAxes()].map((table) => ({
@@ -365,7 +385,7 @@ describe("edges from the base image's Fuel Comp breakpoints", () => {
     expect(plain.notes.join(" ")).toMatch(/has no decoded values, so no load edges/);
     const none = suggestEdges([]);
     expect(none.rpmEdges).toBeNull();
-    expect(none.notes[0]).toMatch(/no Fuel Compensation \(Map 1\) table/);
+    expect(none.notes[0]).toMatch(/no Fuel Compensation table in the simulated map/);
   });
 
   it("trim the load edges to the model's span only when asked, keeping the bounds", () => {

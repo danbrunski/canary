@@ -199,7 +199,8 @@ def register_rom_library_routes(
         trace definitions per table kind, the live providers, and whether this
         image is the revision recorded as running now. Read-only; the image's
         cells and axes are ``GET .../tables``. 409 when the vehicle has no
-        ``rom_viewer.yaml``."""
+        ``rom_viewer.yaml``; 422 ``map_slot_mismatch`` when ``rom_targets.yaml``
+        and ``fuel_comp_fit.yaml`` declare different slots."""
         _sha(sha)
         await _call(library.entry, sha)  # 404 for an image not in the library
         result: dict[str, Any] = await _call(
