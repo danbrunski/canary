@@ -390,7 +390,7 @@ session-name parser.
   - `can_obd_io`'s send stays separate: its `CanError` has to reach the loop's
     reconnect.
 
-- [ ] **R23.9 The broadcast tap and the parse-error catch exist twice.**
+- [x] **R23.9 The broadcast tap and the parse-error catch exist twice.**
   `can_collector.CanReader.run` and `on_frame` inside
   `can_obd_collector.collect_can_obd_from_config` both do: skip private
   traffic, `note_bus_frame()` unless it is a tester request, hand off
@@ -414,7 +414,7 @@ session-name parser.
     `test_record_skips_index_error_from_truncated_slcan` and
     `test_collect_can_counts_malformed_frames_without_aborting`.
 
-- [ ] **R23.10 The K-line collector writes its session lifecycle twice.**
+- [x] **R23.10 The K-line collector writes its session lifecycle twice.**
   `KlineCollector._session` and `_run_action` each carry about thirty lines of
   claim, open, start, stop (swallowing the same three exception types), close,
   record wakes, release. `_run` and `obd_collector.supervise_obd_capture`
