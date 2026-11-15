@@ -48,3 +48,46 @@ def test_daemon_modules_import_without_dev_packages() -> None:
         [sys.executable, "-c", script], capture_output=True, text=True, timeout=120
     )
     assert result.returncode == 0, result.stderr[-3000:]
+
+
+#: Modules the daemon must never load: the FSM PDF scraper and the PDF library
+#: it needs. ``src.signals.fsm`` (``PHYSICAL_LIMITS``) is reached at serve time;
+#: the scraper lives in ``src.signals.fsm_extract`` (R26.6) so that reaching the
+#: limits cannot reach ``pdfplumber``. Checked on ``sys.modules`` rather than by
+#: blocking the import, so a swallowed ``ImportError`` cannot hide it.
+NEVER_LOADED_AT_SERVE = ("pdfplumber", "src.signals.fsm_extract")
+
+
+def test_serve_time_imports_never_load_the_pdf_extractor() -> None:
+    script = textwrap.dedent(
+        f"""
+        import importlib, sys
+
+        for mod in ("src.signals.fsm", *{RUNTIME_MODULES!r}):
+            importlib.import_module(mod)
+        loaded = [m for m in {NEVER_LOADED_AT_SERVE!r} if m in sys.modules]
+        assert not loaded, f"loaded at serve time: {{loaded}}"
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=120
+    )
+    assert result.returncode == 0, result.stderr[-3000:]
+
+
+def test_fsm_module_imports_neither_pdfplumber_nor_the_extractor() -> None:
+    """The limits module itself, in a process that imports nothing else of the
+    project: its own import statements are the whole of what it can load."""
+    script = textwrap.dedent(
+        f"""
+        import importlib, sys
+
+        importlib.import_module("src.signals.fsm")
+        loaded = [m for m in {NEVER_LOADED_AT_SERVE!r} if m in sys.modules]
+        assert not loaded, f"src.signals.fsm loaded {{loaded}}"
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=120
+    )
+    assert result.returncode == 0, result.stderr[-3000:]

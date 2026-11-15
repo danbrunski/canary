@@ -11,9 +11,8 @@ from typing import Any
 
 import pytest
 
-from src.signals.fsm import (
-    PHYSICAL_LIMITS,
-    PhysicalLimit,
+from src.signals.fsm import PHYSICAL_LIMITS, PhysicalLimit
+from src.signals.fsm_extract import (
     classify_spec,
     clean_param_name,
     extract_physical_limits_from_fsm,

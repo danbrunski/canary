@@ -306,8 +306,27 @@ The cross-cutting copies found here (`_aware`, `_iso`,
   `tools/extract_fsm_signals.py` and `tests/test_fsm.py`.
   `tests/test_runtime_dependencies.py` exists because pdfplumber once
   crash-looped the daemon through this module.
-  - [ ] Move the extraction helpers to `signals/fsm_extract.py` or into the
+  - [x] Move the extraction helpers to `signals/fsm_extract.py` or into the
     tool, so "no pdfplumber at serve time" is structural rather than tested.
+    Done 2026-11-15. `signals/fsm_extract.py` (new, in `src`, not the tool:
+    two users, `tools/extract_fsm_signals.py` and `tests/test_fsm.py`, and
+    tests import from `src`, not `tools`) holds `clean_param_name`,
+    `looks_like_param_name`, `extract_param_names`, `classify_spec`,
+    `parse_ranges`, `extract_physical_limits_from_fsm` (only the tests call
+    it), `extract_pdf_section_with_specs` and their regexes and noise table.
+    `fsm.py` is now `PhysicalLimit` and `PHYSICAL_LIMITS` with a stdlib-only
+    import (`dataclass`); it names neither `pdfplumber` nor `fsm_extract`.
+    `ast.dump` (docstrings stripped) of all 19 top-level definitions of HEAD's
+    `fsm.py` against the two modules: 19 identical, 0 missing, 0 extra.
+    `tests/test_runtime_dependencies.py` gained two fresh-subprocess tests that
+    check `sys.modules` (not a blocked import): `src.signals.fsm` plus the
+    daemon entry modules, and `src.signals.fsm` alone, load neither
+    `pdfplumber` nor `src.signals.fsm_extract`. `test_layering` needed no
+    change (`signals` is already a layer). Gate: ruff, format, mypy src clean;
+    pytest `test_fsm`, `test_runtime_dependencies`, `test_layering`,
+    `test_source_rules`, `test_derived_store`, `test_plausibility`,
+    `test_quality_gate`, `test_cold_start_imports`, `test_rom_editor`: 334
+    passed.
 
 - [x] **R26.7 `analysis/digest.py` (1,056 lines) is a memory-admission gate
   plus digest compute.** About 450 lines (`DigestSkipped`, `DigestBudgets`,

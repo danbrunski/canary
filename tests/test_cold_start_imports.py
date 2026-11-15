@@ -125,9 +125,11 @@ _MOVED_OFF_THE_RECORDING_PATH = {
     "src.features.feature_policy": "runtime.build_live_feature_source",
     "src.features.feature_build": "runtime.build_live_feature_source",
     "src.features.session_resampling": "runtime.build_live_feature_source",
-    # Isolation Forest (and through it the FSM limits and pdfplumber): the
-    # emitter wanted five column names from it.
+    # Isolation Forest: the emitter wanted five column names from it.
     "src.models.isolation_forest": "the model poller's thread",
+    # Since R26.6 nothing at serve time loads pdfplumber at all (the FSM scraper
+    # is src.signals.fsm_extract; test_runtime_dependencies pins it); it stays
+    # listed so a regression is still refused at cold start.
     "pdfplumber": "the model poller's thread",
     "sklearn": "the model poller's thread",
     # The trip-end digest and its analysis modules: imported in a thread

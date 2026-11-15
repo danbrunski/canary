@@ -392,8 +392,8 @@ def _load_isolation_forest(artifact_path: Path, *, config: CanaryConfig | None =
     """:func:`src.models.isolation_forest.load_isolation_forest_model`, imported
     when an artifact is first loaded.
 
-    The module pulls in the feature pipeline, normalization and, through the
-    FSM limits, pdfplumber (192 modules). ``build_components`` runs on the main
+    The module pulls in the feature pipeline and normalization (the FSM limits
+    no longer bring pdfplumber, R26.6). ``build_components`` runs on the main
     thread before any collector (S01.3); with ``load=False`` the first load is
     the model poller's, in a thread, and so is this import.
 
