@@ -10,6 +10,9 @@
  *   The page files keep the old import paths as direct re-exports, so a view
  *   importing its own page would put a cycle back; and the plot-data helpers
  *   in `lib/` stay free of React so they stay testable as numbers.
+ * - R28.4: `test/` holds the shared test support (`controlRoutes` routes the
+ *   mocked `controlJson`), so it may name `controlJson`; nothing that ships
+ *   may import it.
  */
 import { describe, expect, it } from "vitest";
 
@@ -27,7 +30,17 @@ function offenders(pattern: RegExp, allowed: (path: string) => boolean): string[
 
 describe("dashboard layering", () => {
   it("calls controlJson and fetchJson only from api/", () => {
-    expect(offenders(/\b(?:controlJson|fetchJson)\b/, (p) => p.startsWith("./api/"))).toEqual([]);
+    expect(
+      offenders(
+        /\b(?:controlJson|fetchJson)\b/,
+        (p) => p.startsWith("./api/") || p.startsWith("./test/"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("imports test support only from tests and from test support", () => {
+    const support = /["'](?:\.\.?\/)+test\/[^"']*["']/;
+    expect(offenders(support, (p) => p.startsWith("./test/"))).toEqual([]);
   });
 
   it("builds obd:mem: stream keys only in lib/romMaps", () => {

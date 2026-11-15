@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HttpError, controlJson } from "../../api/core";
 import type { ChannelSnapshot } from "../../hooks/useTelemetryStream";
+import { callsTo, routeControl } from "../../test/controlRoutes";
 import { treeTable } from "../../test/romEditorViews";
 import { ENTRY_TUNED, SHA_TUNED, TABLES_ALL_2D } from "../../test/romLibraryFixtures";
 import type { StatusResponse } from "../../types";
@@ -134,22 +135,21 @@ interface Extra {
   trace?: RomTraceContext | Error;
 }
 
-/** Route the mocked control client by path. */
-function routeControl(ctx: RomTraceContext | Error, extra: Extra = {}) {
-  control.mockImplementation(async (path: string) => {
-    if (path === "/control/rom/library") return { entries: [ENTRY_TUNED] };
-    if (path === `/control/rom/library/${SHA_TUNED}/tables`) return TABLES_ALL_2D;
-    if (path === `/control/rom/library/${SHA_TUNED}/trace`) {
-      if (ctx instanceof Error) throw ctx;
-      return ctx;
-    }
-    if (path === "/control/capture/profiles") return extra.profiles ?? { profiles: [] };
-    if (path.includes("/cell-residency")) {
-      if (extra.residency instanceof Error) throw extra.residency;
-      return extra.residency;
-    }
-    throw new Error(`unexpected ${path}`);
-  });
+/** What the overlay reads: the library, its tables, the trace definition, the
+ *  capture profiles and (by prefix: its path carries the table) the residency. */
+function routeTrace(ctx: RomTraceContext | Error, extra: Extra = {}) {
+  routeControl(
+    {
+      "GET /control/rom/library": { entries: [ENTRY_TUNED] },
+      [`GET /control/rom/library/${SHA_TUNED}/tables`]: TABLES_ALL_2D,
+      [`GET /control/rom/library/${SHA_TUNED}/trace`]: ctx,
+      "GET /control/capture/profiles": extra.profiles ?? { profiles: [] },
+    },
+    {
+      fallback: ({ key }) =>
+        key.includes("/cell-residency") ? extra.residency : new Error(`unexpected ${key}`),
+    },
+  );
 }
 
 const snapshot = (channel: string, value: number): ChannelSnapshot => ({
@@ -234,7 +234,7 @@ const coverageBox = () =>
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(now);
-  routeControl(context());
+  routeTrace(context());
 });
 afterEach(() => {
   cleanup();
@@ -248,15 +248,13 @@ describe("ROM Editor: the live overlay is behind a toggle", () => {
   it("fetches nothing and draws nothing until it is switched on", async () => {
     const view = await mount();
     expect(toggle()).not.toBeChecked();
-    expect(control.mock.calls.some(([path]) => String(path).endsWith("/trace"))).toBe(false);
+    expect(callsTo(/\/trace$/)).toHaveLength(0);
     expect(
       view.container.querySelectorAll("[data-trace], [data-ecm], [data-coverage]"),
     ).toHaveLength(0);
     expect(screen.queryByRole("checkbox", { name: /I confirm/ })).not.toBeInTheDocument();
     await overlayOn();
-    expect(
-      control.mock.calls.some(([path]) => path === `/control/rom/library/${SHA_TUNED}/trace`),
-    ).toBe(true);
+    expect(callsTo(`/control/rom/library/${SHA_TUNED}/trace`)).not.toHaveLength(0);
     expect(screen.getByRole("checkbox", { name: /I confirm/ })).toBeInTheDocument();
     expect(screen.getByLabelText("Live map inputs")).toHaveTextContent("RPM: 1200");
     expect(screen.getByText("Inferred lookup only")).toBeInTheDocument();
@@ -283,7 +281,7 @@ describe("ROM Editor: the live overlay is behind a toggle", () => {
   });
 
   it("says so when the vehicle has no viewer definition, and the editor still works", async () => {
-    routeControl(
+    routeTrace(
       new HttpError(
         409,
         JSON.stringify({
@@ -344,12 +342,11 @@ describe("ROM Editor: the live overlay is behind a toggle", () => {
           : table,
       ),
     };
-    control.mockImplementation(async (path: string) => {
-      if (path === `/control/rom/library/${SHA_TUNED}/tables`) return raw;
-      if (path === `/control/rom/library/${SHA_TUNED}/trace`) return context();
-      if (path === "/control/rom/library") return { entries: [ENTRY_TUNED] };
-      if (path === "/control/capture/profiles") return { profiles: [] };
-      throw new Error(`unexpected ${path}`);
+    routeControl({
+      [`GET /control/rom/library/${SHA_TUNED}/tables`]: raw,
+      [`GET /control/rom/library/${SHA_TUNED}/trace`]: context(),
+      "GET /control/rom/library": { entries: [ENTRY_TUNED] },
+      "GET /control/capture/profiles": { profiles: [] },
     });
     const view = await mount(props());
     await overlayOn();
@@ -379,7 +376,7 @@ describe("ROM Editor: slot confirmation and the trace gates (ROM Maps W05.5)", (
   });
 
   it("does not trace an image that is not the recorded running revision", async () => {
-    routeControl(context({ matches_recorded_revision: false }));
+    routeTrace(context({ matches_recorded_revision: false }));
     const view = await mount(props());
     await overlayOn();
     expect(screen.getByRole("checkbox", { name: /I confirm/ })).toBeDisabled();
@@ -417,7 +414,7 @@ describe("ROM Editor: slot confirmation and the trace gates (ROM Maps W05.5)", (
 
 describe("ROM Editor: the ECM's own cell (ROM Maps W05.1-W05.5)", () => {
   it("refuses the ECM cell while the X-trace mapping is unverified, and says why", async () => {
-    routeControl(context({}, trace(false)));
+    routeTrace(context({}, trace(false)));
     const view = await mount(traceProps(11.46, 1200, polling(BOTH)));
     await overlayOn();
     await confirm();
@@ -453,7 +450,7 @@ describe("ROM Editor: the ECM's own cell (ROM Maps W05.1-W05.5)", () => {
   it("draws the ECM cell from the raw X byte on the raw BFS axis (W05.1)", async () => {
     // Stored 17.06 (= 0x44 x 0.250859) is the byte 0x44 = 68: column 1. Compared
     // scaled against the raw bytes it would sit below 52.
-    routeControl(context({}, shippedTrace()));
+    routeTrace(context({}, shippedTrace()));
     const view = await mount(traceProps(68 * X_STORED_SCALE, 1200, polling(BOTH)));
     await overlayOn();
     await confirm();
@@ -468,7 +465,7 @@ describe("ROM Editor: the ECM's own cell (ROM Maps W05.1-W05.5)", () => {
 
   it("outlines the edge cell the ECM reads past the axes, and says so", async () => {
     // Idle: X byte 17 and 750 rpm are below both first breakpoints.
-    routeControl(context({}, shippedTrace()));
+    routeTrace(context({}, shippedTrace()));
     const view = await mount(traceProps(17 * X_STORED_SCALE, 750, polling(BOTH)));
     await overlayOn();
     await confirm();
@@ -526,7 +523,7 @@ describe("ROM Editor: the ECM's own cell (ROM Maps W05.1-W05.5)", () => {
   });
 
   it("names the active profile when it does not poll the trace, and offers no nonexistent profile", async () => {
-    routeControl(context(), {
+    routeTrace(context(), {
       profiles: {
         profiles: [{ name: "tuning", memory: ["ECM_ENGINE_SPEED_RAM"], mode22_enabled: true }],
       },
@@ -546,7 +543,7 @@ describe("ROM Editor: the ECM's own cell (ROM Maps W05.1-W05.5)", () => {
   });
 
   it("offers a catalog profile that carries the trace channels on Logging", async () => {
-    routeControl(context(), {
+    routeTrace(context(), {
       profiles: { profiles: [{ name: "rom-trace", memory: BOTH, mode22_enabled: true }] },
     });
     const onNavigate = vi.fn();
@@ -592,7 +589,7 @@ describe("ROM Editor: coverage (ROM Maps W05.7-W05.9)", () => {
   });
 
   it("shades cells by sample count for the selected log, never-visited distinct from thin", async () => {
-    routeControl(context(), {
+    routeTrace(context(), {
       residency: {
         available: true,
         session_id: "_capture-tuning-x",
@@ -632,7 +629,7 @@ describe("ROM Editor: coverage (ROM Maps W05.7-W05.9)", () => {
   });
 
   it("names the reason a log has no coverage instead of drawing an empty grid", async () => {
-    routeControl(context(), {
+    routeTrace(context(), {
       residency: {
         available: false,
         session_id: "old",
@@ -655,7 +652,7 @@ describe("ROM Editor: coverage (ROM Maps W05.7-W05.9)", () => {
   });
 
   it("refuses to overlay a log binned on another revision's axes", async () => {
-    routeControl(context(), {
+    routeTrace(context(), {
       residency: {
         available: true,
         session_id: "old",

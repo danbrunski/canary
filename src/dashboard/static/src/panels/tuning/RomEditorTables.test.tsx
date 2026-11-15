@@ -10,6 +10,12 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { controlJson } from "../../api/core";
+import {
+  renderRomEditor,
+  resetControlRoutesAfterEach,
+  routeControl,
+} from "../../test/controlRoutes";
+import { RomEditorPage } from "./RomEditorPage";
 import { mapColor } from "../../lib/romMaps";
 import {
   ENTRY_TUNED,
@@ -20,7 +26,6 @@ import {
 } from "../../test/romLibraryFixtures";
 import { treeContents, treeTable } from "../../test/romEditorViews";
 import type { RomTablesResponse } from "../../types/romLibrary";
-import { RomEditorPage } from "./RomEditorPage";
 
 vi.mock("../../api/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../api/core")>()),
@@ -29,24 +34,18 @@ vi.mock("../../api/core", async (importOriginal) => ({
 const control = vi.mocked(controlJson);
 
 function route(tables: RomTablesResponse) {
-  control.mockImplementation(async (path: string) => {
-    if (path === "/control/rom/library") return { entries: [ENTRY_TUNED] };
-    if (path === `/control/rom/library/${SHA_TUNED}/tables`) return tables;
-    throw new Error(`unexpected ${path}`);
+  routeControl({
+    "GET /control/rom/library": { entries: [ENTRY_TUNED] },
+    [`GET /control/rom/library/${SHA_TUNED}/tables`]: tables,
   });
 }
 
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
-  window.history.replaceState(null, "", "/");
-  window.localStorage.clear();
-});
+resetControlRoutesAfterEach();
+afterEach(() => cleanup());
 
 async function open(tables: RomTablesResponse = TABLES_ALL_2D) {
   route(tables);
-  window.history.replaceState(null, "", `/?rom=${SHA_TUNED}`);
-  render(<RomEditorPage token="t" status={null} />);
+  renderRomEditor();
   return screen.findByRole("navigation", { name: "Tables" });
 }
 

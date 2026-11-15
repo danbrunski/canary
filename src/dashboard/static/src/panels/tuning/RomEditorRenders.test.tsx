@@ -7,7 +7,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { controlJson } from "../../api/core";
+import { resetControlRoutesAfterEach, routeControl } from "../../test/controlRoutes";
 import { ENTRY_TUNED, SHA_TUNED, TABLES_ALL_2D } from "../../test/romLibraryFixtures";
 import type { ChannelSnapshot } from "../../hooks/useTelemetryStream";
 import { RomEditorPage } from "./RomEditorPage";
@@ -29,14 +29,9 @@ vi.mock("../../api/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../api/core")>()),
   controlJson: vi.fn(),
 }));
-const control = vi.mocked(controlJson);
 
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
-  window.history.replaceState(null, "", "/");
-  window.localStorage.clear();
-});
+resetControlRoutesAfterEach();
+afterEach(() => cleanup());
 
 const frame = (n: number): Map<string, ChannelSnapshot> =>
   new Map([
@@ -57,10 +52,9 @@ const frame = (n: number): Map<string, ChannelSnapshot> =>
 
 describe("ROM Editor under a telemetry stream", () => {
   it("does not re-render the workspace when the channels change", async () => {
-    control.mockImplementation(async (path: string) => {
-      if (path === "/control/rom/library") return { entries: [ENTRY_TUNED] };
-      if (path === `/control/rom/library/${SHA_TUNED}/tables`) return TABLES_ALL_2D;
-      throw new Error(`unexpected ${path}`);
+    routeControl({
+      "GET /control/rom/library": { entries: [ENTRY_TUNED] },
+      [`GET /control/rom/library/${SHA_TUNED}/tables`]: TABLES_ALL_2D,
     });
     window.history.replaceState(null, "", `/?rom=${SHA_TUNED}`);
     const view = render(<RomEditorPage token="t" status={null} channels={frame(0)} />);

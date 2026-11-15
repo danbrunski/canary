@@ -2,6 +2,13 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HttpError, controlJson } from "../../api/core";
+import {
+  callsTo,
+  resetControlRoutesAfterEach,
+  routeControl,
+  sequence,
+  type RouteTable,
+} from "../../test/controlRoutes";
 import { ENTRY_TUNED, SHA_TUNED, backupState, readyStatus } from "../../test/romLibraryFixtures";
 import type { StatusResponse } from "../../types";
 import type { RomBackupState, RomLibraryEntry } from "../../types/romLibrary";
@@ -13,18 +20,9 @@ vi.mock("../../api/core", async (importOriginal) => ({
 }));
 const control = vi.mocked(controlJson);
 
-/** Route the mocked control client by `METHOD path`; GET /control/rom/backup
- *  answers `polled` unless overridden. */
-function route(polled: RomBackupState, overrides: Record<string, unknown> = {}) {
-  control.mockImplementation((path: string, _token: string, init?: RequestInit) => {
-    const key = `${init?.method ?? "GET"} ${path}`;
-    if (key in overrides) {
-      const value = overrides[key];
-      return value instanceof Error ? Promise.reject(value) : Promise.resolve(value as never);
-    }
-    if (key === "GET /control/rom/backup") return Promise.resolve(polled as never);
-    return Promise.reject(new Error(`unexpected ${key}`));
-  });
+/** GET /control/rom/backup answers `polled` unless overridden. */
+function route(polled: RomBackupState, overrides: RouteTable = {}) {
+  routeControl({ "GET /control/rom/backup": polled, ...overrides });
 }
 
 function renderCard({
@@ -46,10 +44,8 @@ function renderCard({
   return { onOpenEntry, onLibraryChanged };
 }
 
-afterEach(() => {
-  vi.clearAllMocks();
-  vi.restoreAllMocks();
-});
+resetControlRoutesAfterEach();
+afterEach(() => vi.restoreAllMocks());
 
 describe("ECU backup card (W08.8)", () => {
   it("idle: every precondition met, Start enabled", async () => {
@@ -146,16 +142,9 @@ describe("ECU backup card (W08.8)", () => {
   });
 
   it("says so when the read after starting a backup fails (the POST went through)", async () => {
-    let reads = 0;
-    control.mockImplementation((path: string, _token: string, init?: RequestInit) => {
-      const key = `${init?.method ?? "GET"} ${path}`;
-      if (key === "POST /control/rom/backup")
-        return Promise.resolve(backupState({ state: "running", blocks_total: 16645 }) as never);
-      if (key === "GET /control/rom/backup")
-        return ++reads === 1
-          ? Promise.resolve(backupState() as never)
-          : Promise.reject(new Error("pi went away"));
-      return Promise.reject(new Error(`unexpected ${key}`));
+    routeControl({
+      "POST /control/rom/backup": backupState({ state: "running", blocks_total: 16645 }),
+      "GET /control/rom/backup": sequence(backupState(), new Error("pi went away")),
     });
     renderCard();
     fireEvent.click(await screen.findByRole("button", { name: "Back up ECU…" }));
@@ -167,22 +156,16 @@ describe("ECU backup card (W08.8)", () => {
   });
 
   it('a refused start with an unreachable daemon shows the refusal, not "Done, but"', async () => {
-    let reads = 0;
-    control.mockImplementation((path: string, _token: string, init?: RequestInit) => {
-      const key = `${init?.method ?? "GET"} ${path}`;
-      if (key === "POST /control/rom/backup") return Promise.reject(new Error("no route to pi"));
-      if (key === "GET /control/rom/backup")
-        return ++reads === 1
-          ? Promise.resolve(backupState() as never)
-          : Promise.reject(new Error("pi went away"));
-      return Promise.reject(new Error(`unexpected ${key}`));
+    routeControl({
+      "POST /control/rom/backup": new Error("no route to pi"),
+      "GET /control/rom/backup": sequence(backupState(), new Error("pi went away")),
     });
     renderCard();
     fireEvent.click(await screen.findByRole("button", { name: "Back up ECU…" }));
     const dialog = within(screen.getByRole("group", { name: "Confirm ECU backup" }));
     fireEvent.click(dialog.getByRole("button", { name: "Start backup" }));
     expect(await screen.findByText(/Refused: no route to pi/)).toBeInTheDocument();
-    await waitFor(() => expect(reads).toBeGreaterThan(1));
+    await waitFor(() => expect(callsTo("/control/rom/backup", "GET").length).toBeGreaterThan(1));
     expect(screen.queryByText(/Done, but/)).not.toBeInTheDocument();
   });
 

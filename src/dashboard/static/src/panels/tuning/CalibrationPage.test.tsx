@@ -1,7 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { HttpError, NetworkError, controlJson } from "../../api/core";
+import {
+  resetControlRoutesAfterEach,
+  routeControl,
+  sentTo,
+  type RouteTable,
+} from "../../test/controlRoutes";
 import type { StatusResponse } from "../../types";
 import type {
   CalibrationResponse,
@@ -72,27 +78,17 @@ const VERIFY: VerifyMemoryResponse = {
 
 const STATUS = { vehicle_state: { state: "engine_running" } } as StatusResponse;
 
-function route(overrides: Record<string, unknown> = {}) {
-  control.mockImplementation((path: string, _token: string, init?: RequestInit) => {
-    const key = `${init?.method ?? "GET"} ${path}`;
-    if (key in overrides) {
-      const value = overrides[key];
-      return value instanceof Error ? Promise.reject(value) : Promise.resolve(value);
-    }
-    if (key === "GET /control/calibration") return Promise.resolve(CALIBRATION);
-    if (key === "GET /control/memory-channels") return Promise.resolve(MEMORY);
-    if (key === "POST /control/memory-channels/verify") return Promise.resolve(VERIFY);
-    if (key === "POST /control/calibration") return Promise.resolve({});
-    return Promise.reject(new Error(`unexpected ${key}`));
+function route(overrides: RouteTable = {}) {
+  routeControl({
+    "GET /control/calibration": CALIBRATION,
+    "GET /control/memory-channels": MEMORY,
+    "POST /control/memory-channels/verify": VERIFY,
+    "POST /control/calibration": {},
+    ...overrides,
   });
 }
 
-function bodyOf(method: string, path: string): unknown {
-  const call = control.mock.calls.find(([p, , init]) => p === path && init?.method === method);
-  return call ? JSON.parse(call[2]?.body as string) : undefined;
-}
-
-afterEach(() => vi.clearAllMocks());
+resetControlRoutesAfterEach();
 
 describe("CalibrationPage", () => {
   it("asks for the token and fetches nothing without one", () => {
@@ -149,7 +145,7 @@ describe("CalibrationPage", () => {
     await screen.findByText("WOT +3%");
     fireEvent.click(screen.getByRole("button", { name: "Re-verify" }));
     expect(await screen.findByText("PHI_CMD: pass — 1:1")).toBeInTheDocument();
-    expect(bodyOf("POST", "/control/memory-channels/verify")).toEqual({
+    expect(sentTo("/control/memory-channels/verify", "POST")).toEqual({
       record_revision: null,
       carry_reason: null,
     });
@@ -167,7 +163,7 @@ describe("CalibrationPage", () => {
     expect(record).toBeEnabled();
     fireEvent.click(record);
     await waitFor(() =>
-      expect(bodyOf("POST", "/control/memory-channels/verify")).toEqual({
+      expect(sentTo("/control/memory-channels/verify", "POST")).toEqual({
         record_revision: "ZS44A-20260920",
         carry_reason: "same program",
       }),
@@ -198,7 +194,7 @@ describe("CalibrationPage", () => {
     fireEvent.change(screen.getByPlaceholderText("Injector K"), { target: { value: "12.5" } });
     fireEvent.click(screen.getByRole("button", { name: "Record flash" }));
     await waitFor(() =>
-      expect(bodyOf("POST", "/control/calibration")).toEqual({
+      expect(sentTo("/control/calibration", "POST")).toEqual({
         revision: "ZS44A-20260924",
         flashed_at: "2026-09-24T08:00",
         calibration_id: null,

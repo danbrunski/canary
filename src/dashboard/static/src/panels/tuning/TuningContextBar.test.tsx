@@ -1,7 +1,7 @@
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { controlJson } from "../../api/core";
+import { routeControl } from "../../test/controlRoutes";
 import { ENTRY_TUNED, SHA_TUNED, TABLES_WITH_FUEL_COMP } from "../../test/romLibraryFixtures";
 import {
   SELECTED_LOG_STORAGE_KEY,
@@ -18,7 +18,6 @@ vi.mock("../../api/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../api/core")>()),
   controlJson: vi.fn(),
 }));
-const control = vi.mocked(controlJson);
 
 const NOW = new Date("2026-09-21T12:00:00Z");
 
@@ -243,17 +242,21 @@ describe("Workbench renders the bar on Engine Tuning pages", () => {
     // The ROM Editor's library answers (and keeps what is uploaded); every
     // other page's reads never settle.
     let stored = false;
-    control.mockImplementation((path: string, _token: string, init?: RequestInit) => {
-      if (path === "/control/rom/library" && !init?.method)
-        return Promise.resolve({ entries: stored ? [ENTRY_TUNED] : [] } as never);
-      if (path.startsWith("/control/rom/library?") && init?.method === "POST") {
-        stored = true;
-        return Promise.resolve({ ...ENTRY_TUNED, created: true } as never);
-      }
-      if (path === `/control/rom/library/${SHA_TUNED}/tables`)
-        return Promise.resolve(TABLES_WITH_FUEL_COMP as never);
-      return new Promise<never>(() => {});
-    });
+    routeControl(
+      {
+        "GET /control/rom/library": () => ({ entries: stored ? [ENTRY_TUNED] : [] }),
+        [`GET /control/rom/library/${SHA_TUNED}/tables`]: TABLES_WITH_FUEL_COMP,
+      },
+      {
+        fallback: ({ key }) => {
+          if (key.startsWith("POST /control/rom/library?")) {
+            stored = true;
+            return { ...ENTRY_TUNED, created: true };
+          }
+          return new Promise<never>(() => {});
+        },
+      },
+    );
   });
 
   it("shows the bar on every tuning-* route loaded directly, and nowhere else", () => {

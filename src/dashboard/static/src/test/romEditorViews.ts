@@ -69,3 +69,8 @@ export function recentEntry(name: RegExp | string): HTMLElement {
 export function chooseRecent(name: RegExp | string): void {
   fireEvent.click(recentEntry(name));
 }
+
+/** One cell of an editor grid, by its row and column. */
+export function cell(grid: HTMLElement, row: number, col: number): HTMLElement {
+  return within(grid).getByRole("gridcell", { name: new RegExp(`^Row ${row}, column ${col}:`) });
+}

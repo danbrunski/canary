@@ -1,9 +1,14 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { HttpError, controlBlob, controlJson } from "../../api/core";
 import type { ChannelSnapshot } from "../../hooks/useTelemetryStream";
 import { useHashRoute } from "../../hooks/useHashRoute";
+import {
+  resetControlRoutesAfterEach,
+  routeControl,
+  type RouteTable,
+} from "../../test/controlRoutes";
 import {
   DESCRIPTION,
   ENTRY_K106,
@@ -35,27 +40,19 @@ const control = vi.mocked(controlJson);
 const blob = vi.mocked(controlBlob);
 const save = vi.mocked(downloadBlob);
 
-/** Route the mocked control client by `METHOD path` (query included). A
- *  function value is called with the request init. */
-function route(overrides: Record<string, unknown> = {}) {
-  const table: Record<string, unknown> = {
+/** The library page's own reads, then the test's routes. */
+function route(overrides: RouteTable = {}) {
+  routeControl({
     "GET /control/rom/library": { entries: [] },
     "GET /control/rom/backup": backupState(),
     ...overrides,
-  };
-  control.mockImplementation((path: string, _token: string, init?: RequestInit) => {
-    const key = `${init?.method ?? "GET"} ${path}`;
-    if (!(key in table)) return Promise.reject(new Error(`unexpected ${key}`));
-    let value = table[key];
-    if (typeof value === "function") value = (value as (init?: RequestInit) => unknown)(init);
-    return value instanceof Error ? Promise.reject(value) : Promise.resolve(value as never);
   });
 }
 
 function withEntries(
   entries: RomLibraryEntry[],
   description: RomDescription = DESCRIPTION,
-  extra: Record<string, unknown> = {},
+  extra: RouteTable = {},
 ) {
   route({
     "GET /control/rom/library": { entries },
@@ -107,11 +104,7 @@ function RoutedWorkbench({ data }: { data: DashboardData }) {
   return <Workbench active={item} onNavigate={setItem} data={data} />;
 }
 
-afterEach(() => {
-  vi.clearAllMocks();
-  window.history.replaceState(null, "", "/");
-  window.localStorage.clear();
-});
+resetControlRoutesAfterEach();
 
 describe("ROM Library page — direct load and empty state (W08.6)", () => {
   it("loads #wb/rom-library directly with an empty library: names the cause, offers both fixes", async () => {
@@ -160,7 +153,7 @@ describe("ROM Library page — upload", () => {
     let sent: RequestInit | undefined;
     withEntries([], DESCRIPTION, {
       "GET /control/rom/library": () => ({ entries }),
-      "POST /control/rom/library?filename=ecu-read.bin": (init?: RequestInit) => {
+      "POST /control/rom/library?filename=ecu-read.bin": ({ init }) => {
         sent = init;
         entries = [ENTRY_TUNED];
         return ENTRY_TUNED;

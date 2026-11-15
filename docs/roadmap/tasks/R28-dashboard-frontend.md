@@ -289,18 +289,61 @@ neither earlier review covered.
     lint`, `pnpm format` clean; `pnpm test` 138 files / 1474 tests passed;
     `pnpm e2e` 46 passed, 3 skipped.
 
-- [ ] **R28.4 A shared control-route test harness, before R28.5.** The same
+- [x] **R28.4 A shared control-route test harness, before R28.5.** The same
   `route()` mock keyed on `` `${method} ${path}` `` is hand-written in six
   test files (`RomEditorSimulate`, `RomEditorPage`, `RomLibraryPage`,
   `CalibrationPage`, `EcuBackupCard`, `PairedDevicesPanel`), with variants in
   three more; 19 files `vi.mock("…/api/core")`; `cell()`, `bodyOf()`,
   `renderEditor()` and one `afterEach` are each copied two to four times.
   `RomEditorSimulate.test.tsx` is 1,878 lines and 73 tests.
-  - [ ] `src/test/controlRoutes.ts`: `routeControl(table, {fallback})`,
+  Done 2026-11-15.
+  - [x] `src/test/controlRoutes.ts`: `routeControl(table, {fallback})`,
     `bodyOf`, `callsTo(path)`, `click`, `type`, `renderRomEditor(sha)`,
-    following `test/harness.ts` `mockHttp`.
-  - [ ] Split `RomEditorSimulate.test.tsx` along its existing `describe`
-    blocks (presets and cost, cancel, typical values, timing).
+    following `test/harness.ts` `mockHttp`. A value resolves, an `Error` rejects
+    (so "this route fails" is `"GET /control/rom/backup": new Error("pi went
+    away")`), a function is called with `{init, key}` and answers by the same
+    rules; `sequence(first, new Error(…))` is a read that works once and then
+    fails, the follow-up read of an action (R28.3). Also `jsonOf`, `sentTo`,
+    `allCalls`, `select` and `resetControlRoutesAfterEach` (the one `afterEach`:
+    mock calls, fake timers, URL, `localStorage`); `cell()` joined
+    `test/romEditorViews.ts`. An unlisted request rejects `unexpected METHOD
+    path`, so a page that starts asking for something new fails the test that
+    did not expect it. `vi.mock("…/api/core")` itself stays in each file (it is
+    hoisted per file; the same constraint `mockHttp` documents), so the 19
+    mocks remain and the 13 hand-written `control.mockImplementation` routers
+    in nine files are gone: `CalibrationPage` (1), `EcuBackupCard` (3, two of
+    them the failed-follow-up read, now `sequence`), `RomLibraryPage` (1),
+    `RomEditorPage` (1), `RomEditorSimulate` (2), and the variants
+    `TuningContextBar`, `RomEditorTables`, `RomEditorOverlay` (2),
+    `RomEditorRenders`. Left as they are, on purpose: `PairedDevicesPanel` stubs
+    `fetch` with a stateful fake (a different seam, not a route table), and the
+    path-only fixtures of `AnalysisPage`, `LogViewer`, `SessionChooser`,
+    `DynoView`, `TimingView`, `DeliveryView` (no method in the key). The
+    `api/http` named-function tests (`ControlPanel`, `PowerPanel`,
+    `VehicleLedgerPage`, `TreadWearCard.render`) already say "this read rejects"
+    with `mockRejectedValue` and need no route table. Pinned by
+    `test/controlRoutes.test.ts` (11 tests: routing by method, unlisted
+    rejects, Error rejects, falsy values resolve, function and thrown answers,
+    fallback, `sequence`, `callsTo` / `sentTo`). Mutation-checked, each
+    restored byte-identical: `followUpFailureText` returning null fails the
+    `EcuBackupCard` failed-follow-up test; the `CalibrationPage` verify
+    `record_revision` forced to null fails `needs a carry reason before
+    recording`; the simulate path `/simulate` to `/simulat` fails 8 of the
+    `RomEditorSimulate` cancel and timing tests; the trace path `/trace` to
+    `/traces` fails all 26 `RomEditorOverlay` tests; `routeControl` no longer
+    rejecting an `Error` answer fails 8 tests across `EcuBackupCard`,
+    `CalibrationPage` and `controlRoutes.test.ts`. `layering.test.ts` lets
+    `src/test/` name `controlJson` and gains "imports test support only from
+    tests and from test support" (fails on a `lib/` file importing `../test/…`).
+  - [x] Split `RomEditorSimulate.test.tsx` along its existing `describe`
+    blocks (presets and cost, cancel, typical values, timing). Now
+    `RomEditorSimulate.test.tsx` (710 lines: the form, grid edges, WOT column,
+    Run, no-result, remembered values, seed, the view), `.presets` (326),
+    `.cancel` (125), `.typical` (519), `.timing` (182); the shared routes, form
+    helpers and set-up are `test/romSimulateKit.ts`. 78 tests before and after
+    (4 + 15 + 21 + 6 + 32), and the five migrated files keep their counts
+    (`CalibrationPage` 9, `EcuBackupCard` 27, `RomLibraryPage` 28,
+    `RomEditorPage` 44, `RomEditorTables` 11, `TuningContextBar` 12).
 
 - [ ] **R28.5 `SimForm` and `RomEditorPage.Workspace` mix state machines,
   request orchestration and layout.** `SimForm` is one 712-line component
@@ -316,7 +359,7 @@ neither earlier review covered.
   - [ ] `Workspace`: `useEditSession(sha)` (pending edits and persistence),
     `usePreviewExport`, `useSimRun`; the component keeps layout.
   - Must not change: `SIM_REQUEST_FIELDS`, the remember rules, `data-*` and
-    aria names. Pinned by `RomEditorSimulate.test.tsx`,
+    aria names. Pinned by `RomEditorSimulate*.test.tsx` (split by R28.4),
     `RomEditorPage.test.tsx`, `SimResults.test.tsx`, `lib/romSim*.test.ts`,
     `e2e/romEditor.spec.ts`.
 
