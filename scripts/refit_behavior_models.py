@@ -44,6 +44,7 @@ try:
         filter_sessions_by_age,
         load_config,
         resolve_sessions,
+        scoped_config,
     )
 except ImportError:  # loaded as `scripts.refit_behavior_models` — repo root on path, not scripts/
     from scripts._cli import (
@@ -54,6 +55,7 @@ except ImportError:  # loaded as `scripts.refit_behavior_models` — repo root o
         filter_sessions_by_age,
         load_config,
         resolve_sessions,
+        scoped_config,
     )
 
 from src.analysis.behavior_validation_evidence import ValidationContext
@@ -93,7 +95,7 @@ from src.storage.capture_manifest import read_capture_manifest
 from src.storage.session_files import has_telemetry
 from src.storage.session_products import read_classification
 from src.storage.sessions import session_started_at
-from src.vehicle.profiles import active_registry, resolve_profile_for_tooling, scope_config
+from src.vehicle.profiles import active_registry, resolve_profile_for_tooling
 from src.vehicle.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 
 log = logging.getLogger(__name__)
@@ -409,7 +411,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Scope sessions/output to a vehicle profile so a refit reads and writes the
     # right vehicle's tree. Offline tool: no VIN probe — --profile or default.
     profile = resolve_profile_for_tooling(config, args.profile)
-    scoped = scope_config(config, profile) if config.profiles.enabled else config
+    scoped = scoped_config(config, args.profile)
     sessions_root = args.sessions_root or scoped.collection.storage_path
     out: Path = args.out or scoped.daemon.behavior_models
 

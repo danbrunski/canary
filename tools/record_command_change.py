@@ -40,7 +40,11 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+try:
+    from _cli import add_config_profile_args, load_scoped  # type: ignore[import-not-found]
+except ImportError:  # loaded as `tools.record_command_change`: repo root on path
+    from tools._cli import add_config_profile_args, load_scoped
+
 
 if TYPE_CHECKING:
     from src.analysis.target_phi import ResolvedTable
@@ -57,8 +61,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--config", type=Path, required=True, help="canary.yaml to scope by.")
-    parser.add_argument("--profile", default=None, help="Vehicle profile slug.")
+    add_config_profile_args(parser)
     parser.add_argument("--base", required=True, help="Revision, library sha256 or image path.")
     change = parser.add_mutually_exclusive_group(required=True)
     change.add_argument("--target", help="Revision, library sha256 or image path.")
@@ -248,14 +251,10 @@ def _print(rows: list[dict[str, Any]]) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    sys.path.insert(0, str(REPO_ROOT))
     from src.analysis.target_phi import TwinRefusalError
     from src.analysis.twin_command_change import CommandChangeRefusalError
-    from src.config import CanaryConfig
-    from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
-    base = CanaryConfig.from_yaml(args.config)
-    config = scope_config(base, resolve_profile_for_tooling(base, args.profile))
+    config = load_scoped(args)
     try:
         rows = record(
             config,

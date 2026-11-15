@@ -29,10 +29,12 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Literal
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+try:
+    from _cli import add_config_profile_args, load_scoped  # type: ignore[import-not-found]
+except ImportError:  # loaded as `tools.investigate_delivery`: repo root on path
+    from tools._cli import add_config_profile_args, load_scoped
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -41,8 +43,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--config", type=Path, required=True, help="canary.yaml to scope by.")
-    parser.add_argument("--profile", default=None, help="Vehicle profile slug.")
+    add_config_profile_args(parser)
     parser.add_argument("--session", required=True, help="Session id under the storage path.")
     parser.add_argument(
         "--program-id", default=None, help="ECU program identity, when known (else unknown)."
@@ -61,7 +62,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    sys.path.insert(0, str(REPO_ROOT))
     from src.analysis.delivery_evidence import (
         DELIVERY_QUANTITY,
         mint_delivery_error,
@@ -76,13 +76,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     from src.analysis.fault_model import FAULT_MODEL_FILE, load_fault_model
     from src.analysis.tuning_context import TuningContext
-    from src.config import CanaryConfig
     from src.evidence import Prediction, investigation_card, memory_ledger_for, render_text
     from src.storage.sessions import resolve_session
-    from src.vehicle.profiles import profile_dir, resolve_profile_for_tooling, scope_config
+    from src.vehicle.profiles import profile_dir
 
-    base = CanaryConfig.from_yaml(args.config)
-    config = scope_config(base, resolve_profile_for_tooling(base, args.profile))
+    config = load_scoped(args)
     session = resolve_session(config.collection.storage_path, args.session)
     ledger = memory_ledger_for(config)
     context = TuningContext.from_config(config)

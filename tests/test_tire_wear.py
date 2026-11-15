@@ -258,8 +258,7 @@ def test_the_backfill_measures_sessions_without_a_digest_and_copies_old_fields(
             storage_path = storage
 
     monkeypatch.setattr(CanaryConfig, "from_yaml", staticmethod(lambda _p: _Config))
-    monkeypatch.setattr(backfill, "resolve_profile_for_tooling", lambda *_a: None)
-    monkeypatch.setattr(backfill, "scope_config", lambda base, _p: base)
+    monkeypatch.setattr(backfill, "scoped_config_for_tooling", lambda base, _slug: base)
     monkeypatch.setattr(backfill, "measure_session", _measure_session)
 
     assert backfill.main(["--config", "unused.yaml"]) == 0

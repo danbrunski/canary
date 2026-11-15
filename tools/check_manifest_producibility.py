@@ -32,7 +32,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+try:
+    from _cli import add_config_profile_args, load_scoped  # type: ignore[import-not-found]
+except ImportError:  # loaded as `tools.check_manifest_producibility`: repo root on path
+    from tools._cli import add_config_profile_args, load_scoped
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -41,8 +44,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--config", type=Path, required=True, help="canary.yaml to scope by.")
-    parser.add_argument("--profile", default=None, help="Vehicle profile slug.")
+    add_config_profile_args(parser)
     parser.add_argument(
         "--manifest",
         type=Path,
@@ -57,9 +59,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    sys.path.insert(0, str(REPO_ROOT))
     from src.behavior.behavior_models import load_behavior_models
-    from src.config import CanaryConfig
     from src.models.spec_producibility import (
         behavior_feature_conflicts,
         behavior_fingerprint_mismatches,
@@ -70,11 +70,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         summarize,
         unproducible_feature_columns,
     )
-    from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
-    config = CanaryConfig.from_yaml(args.config)
-    if config.profiles.enabled:
-        config = scope_config(config, resolve_profile_for_tooling(config, args.profile))
+    config = load_scoped(args)
     manifests = [p.expanduser() for p in args.manifest] or sorted(
         config.daemon.models_dir.glob("**/model.manifest.json")
     )

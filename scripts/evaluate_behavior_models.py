@@ -67,12 +67,14 @@ try:
         add_bindings_arg,
         add_log_level_arg,
         load_config,
+        scoped_config,
     )
 except ImportError:  # loaded as `scripts.evaluate_behavior_models`: repo root on path
     from scripts._cli import (
         add_bindings_arg,
         add_log_level_arg,
         load_config,
+        scoped_config,
     )
 
 from src.analysis.behavior_validation_criteria import apply_criteria
@@ -120,8 +122,6 @@ from src.signals.derived import DERIVED_CHANNEL_INPUTS, resolved_dependencies
 from src.vehicle.profiles import (
     active_registry,
     active_registry_path,
-    resolve_profile_for_tooling,
-    scope_config,
 )
 from src.vehicle.tune_revisions import TuneRevisionRegistry, load_tune_revisions
 
@@ -702,7 +702,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
     config = load_config(args)
-    scoped = scope_config(config, resolve_profile_for_tooling(config, args.profile))
+    scoped = scoped_config(config, args.profile)
     validation_path: Path = args.validation or validation_document_path(
         scoped.daemon.behavior_models
     )

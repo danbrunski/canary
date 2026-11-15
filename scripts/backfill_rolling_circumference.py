@@ -32,7 +32,7 @@ from src.analysis.rolling_circumference import (
 from src.config import CanaryConfig
 from src.storage.session_products import read_digest, read_rolling_circumference
 from src.storage.sessions import is_session_dir_name
-from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
+from src.vehicle.profiles import scoped_config_for_tooling
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -53,7 +53,7 @@ def _current(block: object) -> bool:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     base = CanaryConfig.from_yaml(args.config)
-    config = scope_config(base, resolve_profile_for_tooling(base, args.profile))
+    config = scoped_config_for_tooling(base, args.profile)
     root = config.collection.storage_path
     counts = {"measured": 0, "unavailable": 0, "current": 0, "from_digest": 0}
     for session_dir in sorted(p for p in root.iterdir() if p.is_dir()):

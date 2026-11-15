@@ -187,7 +187,6 @@ def verify_sources(root: Path) -> list[str]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    sys.path.insert(0, str(REPO_ROOT))
     import yaml
 
     from src.yaml_load import load_yaml

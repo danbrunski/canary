@@ -36,12 +36,14 @@ try:
         add_bindings_arg,
         add_log_level_arg,
         load_config,
+        scoped_config,
     )
 except ImportError:  # loaded as `scripts.inventory_behavior_inputs`: repo root on path
     from scripts._cli import (
         add_bindings_arg,
         add_log_level_arg,
         load_config,
+        scoped_config,
     )
 
 from src.analysis.behavior_input_inventory import (
@@ -63,7 +65,7 @@ from src.behavior.behavior_models import CURRENT_SCHEMA_VERSION, BehaviorModels
 from src.features.feature_paths import DEFAULT_DIDS_PATH
 from src.log import configure_logging
 from src.storage.session_files import has_telemetry
-from src.vehicle.profiles import active_registry, resolve_profile_for_tooling, scope_config
+from src.vehicle.profiles import active_registry, resolve_profile_for_tooling
 
 log = logging.getLogger(__name__)
 
@@ -101,7 +103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(args.log_level)
     config = load_config(args)
     profile = resolve_profile_for_tooling(config, args.profile)
-    scoped = scope_config(config, profile)
+    scoped = scoped_config(config, args.profile)
     recipes = default_recipes(profile.slug)
     if args.recipe:
         unknown = sorted(set(args.recipe) - {r.name for r in recipes})

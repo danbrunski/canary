@@ -419,11 +419,9 @@ def resolve_feature_policy(
             serving_mode01=serving_mode01_channels(starter_only),
             did_map=did_map,
         )
-    scoped = config
-    if config.profiles.enabled:
-        from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
+    from src.vehicle.profiles import scoped_config_for_tooling
 
-        scoped = scope_config(config, resolve_profile_for_tooling(config, profile_slug))
+    scoped = scoped_config_for_tooling(config, profile_slug)
     return FeaturePolicy(
         bindings=catalog,
         serving_dids=serving_mode22_dids(

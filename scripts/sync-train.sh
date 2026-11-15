@@ -122,10 +122,8 @@ resolve_out_dirs() {
 import sys
 from pathlib import Path
 from src.config import CanaryConfig
-from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
-cfg = CanaryConfig.from_yaml(Path(sys.argv[1]))
-if cfg.profiles.enabled:
-    cfg = scope_config(cfg, resolve_profile_for_tooling(cfg, None))
+from src.vehicle.profiles import scoped_config_for_tooling
+cfg = scoped_config_for_tooling(CanaryConfig.from_yaml(Path(sys.argv[1])), None)
 print(cfg.daemon.models_dir)
 print(cfg.daemon.behavior_models)
 PYEOF

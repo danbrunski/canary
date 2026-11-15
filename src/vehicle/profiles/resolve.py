@@ -361,3 +361,28 @@ def resolve_profile_for_tooling(config: CanaryConfig, slug: str | None) -> Vehic
     if not config.profiles.enabled:
         return _default_profile(config)
     return _registered_default(config, {p.slug: p for p in registry})
+
+
+def scoped_config_for_tooling(config: CanaryConfig, slug: str | None) -> CanaryConfig:
+    """``config`` scoped to the vehicle profile the daemon would serve: the one
+    way an offline script or tool scopes a config it loaded itself (R30.3).
+
+    Offline resolution (:func:`resolve_profile_for_tooling`: no VIN probe, no
+    registry write): ``slug``, else the profile ``config`` is already scoped to,
+    else the ``vehicle:`` block's default. With profiles enabled the result is
+    always scoped, so a vehicle-data reader never meets the unscoped path that
+    ``src.config.require_profile_scoped`` refuses (P02.11): the trainers and the
+    evaluation harness once featurized through the unscoped config, without the
+    ``afr_calibration.yaml`` the daemon applied. With profiles disabled the base
+    paths are the vehicle's and ``config`` comes back as it was. Idempotent on a
+    config already scoped to the same profile.
+
+    This is the single spelling: a script that calls ``scope_config`` itself
+    can forget the ``profiles.enabled`` guard (``tuning_report`` did), and
+    scoping a profiles-disabled config nests paths under a slug the daemon never
+    wrote. The daemon scopes in ``src.main`` with the profile the VIN probe
+    resolved, never through this.
+    """
+    if not config.profiles.enabled:
+        return config
+    return scope_config(config, resolve_profile_for_tooling(config, slug))

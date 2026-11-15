@@ -38,6 +38,7 @@ try:
         add_profile_arg,
         load_config,
         resolve_sessions,
+        scoped_config,
     )
 except ImportError:  # loaded as `scripts.disposition_report` — repo root on path, not scripts/
     from scripts._cli import (
@@ -47,6 +48,7 @@ except ImportError:  # loaded as `scripts.disposition_report` — repo root on p
         add_profile_arg,
         load_config,
         resolve_sessions,
+        scoped_config,
     )
 
 from src.analysis.training_disposition import (  # noqa: E402
@@ -60,7 +62,6 @@ from src.features.feature_policy import candidate_feature_columns  # noqa: E402
 from src.log import configure_logging  # noqa: E402
 from src.models.golden_baselines import golden_baselines_path, read_golden_baselines  # noqa: E402
 from src.models.training_ledger import DEFAULT_TRAINING_LEDGER_PATH  # noqa: E402
-from src.vehicle.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -230,11 +231,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(args.log_level)
     config = load_config(args)
 
-    scoped = (
-        scope_config(config, resolve_profile_for_tooling(config, args.profile))
-        if config.profiles.enabled
-        else config
-    )
+    scoped = scoped_config(config, args.profile)
     sessions_root = args.sessions_root or scoped.collection.storage_path
     sessions = resolve_sessions(args, sessions_root)
     if not sessions:

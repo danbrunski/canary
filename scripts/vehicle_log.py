@@ -24,14 +24,15 @@ try:
     from _cli import (  # type: ignore[import-not-found]
         add_common_args,
         load_config,
+        scoped_config,
     )
 except ImportError:  # loaded as `scripts.vehicle_log` — repo root on path, not scripts/
     from scripts._cli import (
         add_common_args,
         load_config,
+        scoped_config,
     )
 
-from src.vehicle.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 from src.vehicle.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore  # noqa: E402
 
 
@@ -80,11 +81,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def _resolve_store(args: argparse.Namespace) -> VehicleLedgerStore:
     config = load_config(args)
-    scoped = (
-        scope_config(config, resolve_profile_for_tooling(config, args.profile))
-        if config.profiles.enabled
-        else config
-    )
+    scoped = scoped_config(config, args.profile)
     path = args.ledger or scoped.daemon.vehicle_ledger
     return VehicleLedgerStore(path)
 

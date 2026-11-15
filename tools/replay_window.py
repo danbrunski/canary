@@ -19,6 +19,11 @@ from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
+try:
+    from _cli import load_scoped  # type: ignore[import-not-found]
+except ImportError:  # loaded as `tools.replay_window`: repo root on path
+    from tools._cli import load_scoped
+
 from src.analysis.replay_window import replay_window
 from src.config import CanaryConfig
 from src.storage.sessions import resolve_session
@@ -90,7 +95,10 @@ def _default_lstm_path(config: CanaryConfig) -> Path:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        config = CanaryConfig.from_yaml(args.config)
+        # Scoped to the vehicle's profile like the daemon's: the models, the
+        # anomaly log and the sessions live under <base>/<slug>/, and
+        # featurization refuses an unscoped config with profiles enabled.
+        config = load_scoped(args)
     except (FileNotFoundError, KeyError, ValueError) as exc:
         print(f"error loading config: {exc}", file=sys.stderr)
         return 1

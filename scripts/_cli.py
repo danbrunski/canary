@@ -32,7 +32,7 @@ from src.preprocessing import discover_sessions  # noqa: E402
 from src.session import LIVE_SESSION_KINDS, iter_sessions  # noqa: E402
 from src.storage.sessions import session_started_at  # noqa: E402
 from src.timefmt import assume_utc  # noqa: E402
-from src.vehicle.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
+from src.vehicle.profiles import scoped_config_for_tooling  # noqa: E402
 from src.vehicle.vehicle_ledger import VehicleLedgerStore  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -110,10 +110,7 @@ def scoped_models_dir(config: CanaryConfig, profile_slug: str | None) -> Path:
     `refit_behavior_models`: no VIN probe — ``--profile`` or the ``vehicle:``
     block's default profile.
     """
-    if not config.profiles.enabled:
-        return config.daemon.models_dir
-    profile = resolve_profile_for_tooling(config, profile_slug)
-    return scope_config(config, profile).daemon.models_dir
+    return scoped_config_for_tooling(config, profile_slug).daemon.models_dir
 
 
 def load_config(args: argparse.Namespace) -> CanaryConfig:
@@ -121,16 +118,13 @@ def load_config(args: argparse.Namespace) -> CanaryConfig:
     return CanaryConfig.from_yaml(args.config)
 
 
-def scoped_config(config: CanaryConfig, profile_slug: str | None) -> CanaryConfig:
-    """``config`` scoped to the vehicle profile the daemon would serve.
-
-    Offline resolution (no VIN probe): ``--profile`` or the ``vehicle:``
-    block's default, the same one :func:`scoped_models_dir` writes under.
-    Unchanged with profiles disabled; idempotent on an already-scoped config.
-    """
-    if not config.profiles.enabled:
-        return config
-    return scope_config(config, resolve_profile_for_tooling(config, profile_slug))
+#: ``config`` scoped to the vehicle profile the daemon would serve: the one
+#: scoping function every script and tool uses
+#: (:func:`src.vehicle.profiles.scoped_config_for_tooling`, R30.3). Offline
+#: resolution (no VIN probe): ``--profile`` or the ``vehicle:`` block's default,
+#: the same one :func:`scoped_models_dir` writes under. Unchanged with profiles
+#: disabled; idempotent on an already-scoped config.
+scoped_config = scoped_config_for_tooling
 
 
 def load_scoped_config(args: argparse.Namespace, profile_slug: str | None) -> CanaryConfig:
@@ -245,11 +239,8 @@ def apply_since_boundary(
     """
     if not getattr(args, "since_boundary", False):
         return sessions
-    ledger = config.daemon.vehicle_ledger
-    if config.profiles.enabled:
-        profile = resolve_profile_for_tooling(config, getattr(args, "profile", None))
-        ledger = scope_config(config, profile).daemon.vehicle_ledger
-    boundary = VehicleLedgerStore(ledger).latest_boundary()
+    scoped = scoped_config_for_tooling(config, getattr(args, "profile", None))
+    boundary = VehicleLedgerStore(scoped.daemon.vehicle_ledger).latest_boundary()
     if boundary is None:
         return sessions
     kept = filter_sessions_by_boundary(sessions, boundary.occurred_at)

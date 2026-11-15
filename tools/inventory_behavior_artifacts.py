@@ -20,11 +20,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+try:
+    from _cli import add_config_profile_args, load_scoped  # type: ignore[import-not-found]
+except ImportError:  # loaded as `tools.inventory_behavior_artifacts`: repo root on path
+    from tools._cli import add_config_profile_args, load_scoped
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -33,8 +35,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--config", type=Path, required=True, help="canary.yaml to scope by.")
-    parser.add_argument("--profile", default=None, help="Vehicle profile slug.")
+    add_config_profile_args(parser)
     parser.add_argument(
         "--deployed-snapshot",
         type=Path,
@@ -47,17 +48,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    sys.path.insert(0, str(REPO_ROOT))
     from src.analysis.behavior_inventory import build_inventory
-    from src.config import CanaryConfig
-    from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
-    config = CanaryConfig.from_yaml(args.config)
-    slug = None
-    if config.profiles.enabled:
-        profile = resolve_profile_for_tooling(config, args.profile)
-        config = scope_config(config, profile)
-        slug = getattr(profile, "slug", None) or args.profile
+    config = load_scoped(args)
+    slug = config.scoped_profile
     snapshot = json.loads(args.deployed_snapshot.read_text()) if args.deployed_snapshot else None
     inventory = build_inventory(
         config, config_path=args.config, profile_slug=slug, deployed_snapshot=snapshot

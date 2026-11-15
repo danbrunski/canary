@@ -291,6 +291,28 @@ _FILE_PARENTS_ONE = re.compile(
 )
 
 
+_SCOPE_CONFIG_CALL = re.compile(r"\bscope_config\(")
+
+
+def _scope_config_call(rel: str, text: str) -> list[Hit]:
+    """A call to ``scope_config(...)``, bare or as ``module.scope_config(...)``.
+
+    Python is read as an AST, so a docstring or comment naming it is not a hit;
+    anything else (a shell script's Python heredoc) is read by line.
+    """
+    if not rel.endswith(".py"):
+        return _regex_finder(_SCOPE_CONFIG_CALL.pattern)(rel, text)
+    tree = _parse(text)
+    hits: list[Hit] = []
+    for node in ast.walk(tree) if tree else ():
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if name == "scope_config":
+                hits.append((node.lineno, "scope_config(...)"))
+    return sorted(hits)
+
+
 # --- the rules ------------------------------------------------------------
 
 RULES: tuple[Rule, ...] = (
@@ -913,6 +935,34 @@ RULES: tuple[Rule, ...] = (
             "    run()\n"
             "except Refused as exc:\n"
             "    raise HTTPException(409, exc.detail) from exc\n"
+        ),
+    ),
+    Rule(
+        name="tooling-scopes-its-own-config",
+        why=(
+            "a script or tool scopes the config it loaded through the one function, "
+            "src.vehicle.profiles.scoped_config_for_tooling (scripts: scripts._cli.scoped_config "
+            "or load_scoped_config; tools: tools._cli.load_scoped), never scope_config itself "
+            "(R30.3): twenty-five call sites each spelled the P02.11 rule (refuse an unscoped "
+            "config while profiles are enabled; leave a profiles-disabled one alone) and "
+            "tuning_report's copy had dropped the profiles.enabled guard. The daemon's own "
+            "scoping (src.main, the MCP tools) is in src/, outside this rule"
+        ),
+        roots=("scripts", "tools"),
+        suffixes=(".py", ".sh"),
+        find=_scope_config_call,
+        allowed={
+            "scripts/migrate_to_profiles.py": (
+                1,
+                "plans the migration to one named profile (`_plan(config, profile)`), the "
+                "primitive scope_config itself, not the tooling default a flag resolves to",
+            ),
+        },
+        bad="scoped = scope_config(config, resolve_profile_for_tooling(config, None))\n",
+        good=(
+            "scoped = scoped_config_for_tooling(config, None)\n"
+            '"""scope_config(config, profile) in a docstring"""\n'
+            "# scope_config(config, profile) in a comment\n"
         ),
     ),
 )

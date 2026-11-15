@@ -59,11 +59,9 @@ def load_benchmark_context(config_path: Path, profile: str | None) -> BenchmarkC
     """Config scoped to ``profile``, the resolved limits catalog, the catalogs
     and the vehicle's realistic-fault channel roles."""
     from src.preprocessing.anomaly_injection import load_fault_channel_roles
-    from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
+    from src.vehicle.profiles import scoped_config_for_tooling
 
-    config = CanaryConfig.from_yaml(config_path)
-    if config.profiles.enabled:
-        config = scope_config(config, resolve_profile_for_tooling(config, profile))
+    config = scoped_config_for_tooling(CanaryConfig.from_yaml(config_path), profile)
     bindings = load_bindings(BINDINGS_YAML)
     did_map = load_did_map(DIDS_YAML)
     catalog = resolve_limits_for_config(config, bindings=bindings, did_map=did_map)

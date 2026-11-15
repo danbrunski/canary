@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from collections.abc import Sequence
 from datetime import datetime
-from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+try:
+    from _cli import add_config_profile_args, load_scoped  # type: ignore[import-not-found]
+except ImportError:  # loaded as `tools.memory`: repo root on path
+    from tools._cli import add_config_profile_args, load_scoped
 
 
 def _instant(text: str) -> datetime:
@@ -36,8 +37,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="memory", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--config", type=Path, required=True, help="canary.yaml to scope by.")
-    parser.add_argument("--profile", default=None, help="Vehicle profile slug.")
+    add_config_profile_args(parser)
     parser.add_argument("--replay-id", default=None, help="Read a replay's isolated ledger.")
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -67,8 +67,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    sys.path.insert(0, str(REPO_ROOT))
-    from src.config import CanaryConfig
     from src.evidence import (
         ANY,
         MemoryQuery,
@@ -77,10 +75,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         record_to_dict,
         render_text,
     )
-    from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
-    base = CanaryConfig.from_yaml(args.config)
-    config = scope_config(base, resolve_profile_for_tooling(base, args.profile))
+    config = load_scoped(args)
     ledger = memory_ledger_for(config, replay_id=args.replay_id)
     if args.command == "card":
         built = investigation_card(ledger, args.investigation, as_of=args.as_of)

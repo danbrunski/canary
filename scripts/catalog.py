@@ -28,20 +28,18 @@ try:
     from _cli import (  # type: ignore[import-not-found]
         add_common_args,
         add_log_level_arg,
-        load_config,
+        load_scoped_config,
     )
 except ImportError:  # loaded as `scripts.catalog` — repo root on path, not scripts/
     from scripts._cli import (
         add_common_args,
         add_log_level_arg,
-        load_config,
+        load_scoped_config,
     )
 
-from src.config import CanaryConfig  # noqa: E402
 from src.log import configure_logging  # noqa: E402
 from src.storage.catalog import SessionCatalog, rebuild_catalog  # noqa: E402
 from src.storage.session_files import has_telemetry  # noqa: E402
-from src.vehicle.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -106,13 +104,6 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _scoped_config(args: argparse.Namespace) -> CanaryConfig:
-    config: CanaryConfig = load_config(args)
-    if not config.profiles.enabled:
-        return config
-    return scope_config(config, resolve_profile_for_tooling(config, args.profile))
-
-
 def _run_rebuild(sessions_root: Path, catalog: SessionCatalog) -> int:
     session_dirs = _discover_catalog_dirs(sessions_root)
     if not session_dirs:
@@ -146,7 +137,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
     configure_logging(args.log_level)
 
-    config = _scoped_config(args)
+    config = load_scoped_config(args, args.profile)
     sessions_root = args.sessions_root or config.collection.storage_path
     catalog_db = args.catalog_db or config.daemon.catalog_db
 

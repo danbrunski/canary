@@ -26,21 +26,14 @@ from collections.abc import Sequence
 from pathlib import Path
 
 try:
-    from _cli import add_common_args, load_config  # type: ignore[import-not-found]
+    from _cli import add_common_args, load_scoped_config  # type: ignore[import-not-found]
 except ImportError:  # loaded as `scripts.tuning_report`
-    from scripts._cli import add_common_args, load_config
+    from scripts._cli import add_common_args, load_scoped_config
 
 from src.analysis.noise_floor import load_noise_floor, record_null_run, save_noise_floor
 from src.analysis.tuning import GateError, compare_sessions, delivery_error
 from src.analysis.tuning_context import TuningContext
 from src.config import CanaryConfig
-from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
-
-
-def _scoped(args: argparse.Namespace) -> CanaryConfig:
-    config = load_config(args)
-    profile = resolve_profile_for_tooling(config, getattr(args, "profile", None))
-    return scope_config(config, profile)
 
 
 def _session_dir(config: CanaryConfig, session: str) -> Path:
@@ -49,7 +42,7 @@ def _session_dir(config: CanaryConfig, session: str) -> Path:
 
 
 def _run_delivery_error(args: argparse.Namespace) -> int:
-    config = _scoped(args)
+    config = load_scoped_config(args, getattr(args, "profile", None))
     context = TuningContext.from_config(config)
     if context.calibration is None:
         raise GateError(f"no afr_calibration.yaml found ({config.daemon.afr_calibration})")
@@ -106,7 +99,7 @@ def _run_delivery_error(args: argparse.Namespace) -> int:
 
 
 def _run_compare(args: argparse.Namespace) -> int:
-    config = _scoped(args)
+    config = load_scoped_config(args, getattr(args, "profile", None))
     # R05.1: the profile's floor, as every other reader resolves it — this CLI
     # used to look beside the session store instead.
     context = TuningContext.from_config(config)
@@ -150,7 +143,7 @@ def _run_compare(args: argparse.Namespace) -> int:
 
 def _run_null_run(args: argparse.Namespace) -> int:
     """Measure a floor from two same-tune captures and persist it."""
-    config = _scoped(args)
+    config = load_scoped_config(args, getattr(args, "profile", None))
     context = TuningContext.from_config(config)
     result = compare_sessions(
         _session_dir(config, args.session),

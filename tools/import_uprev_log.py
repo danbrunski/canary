@@ -60,7 +60,7 @@ from src.session import format_session_timestamp
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.storage.sessions import resolve_session
 from src.telemetry import TelemetryRecord
-from src.vehicle.profiles import active_registry, resolve_profile_for_tooling, scope_config
+from src.vehicle.profiles import active_registry, scoped_config_for_tooling
 
 #: Raw UpRev header (post strip, pre unit-suffix-extraction) -> canonical
 #: channel name, canonical unit, and whether the raw value needs F->C
@@ -309,7 +309,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # R05.1: the live flash registry of the vehicle's profile — the operational
     # copy once a flash was recorded from the dashboard. The unscoped config
     # pointed at ``data/tune_revisions.yaml``, which no profile has.
-    scoped = scope_config(config, resolve_profile_for_tooling(config, None))
+    scoped = scoped_config_for_tooling(config, None)
     registry = active_registry(scoped)
     found = registry.at(started_at) if registry else None
     inferred = found.revision if found else None

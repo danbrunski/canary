@@ -27,11 +27,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from collections.abc import Sequence
-from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+try:
+    from _cli import add_config_profile_args, load_scoped  # type: ignore[import-not-found]
+except ImportError:  # loaded as `tools.mint_comparison`: repo root on path
+    from tools._cli import add_config_profile_args, load_scoped
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -42,8 +43,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("a", help="Reference channel spec, e.g. obd:RPM.")
     parser.add_argument("b", help="Compared channel spec, e.g. can:ECM_RPM.")
-    parser.add_argument("--config", type=Path, required=True, help="canary.yaml to scope by.")
-    parser.add_argument("--profile", default=None, help="Vehicle profile slug.")
+    add_config_profile_args(parser)
     parser.add_argument("--session", required=True, help="Session id under the storage path.")
     parser.add_argument(
         "--tolerance",
@@ -66,16 +66,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    sys.path.insert(0, str(REPO_ROOT))
     from src.analysis.compare import MIN_PAIRS, PairingPolicy
     from src.analysis.compare_evidence import mint_channel_comparison
-    from src.config import CanaryConfig
     from src.evidence import Evidence, memory_ledger_for, record_to_dict
     from src.storage.sessions import resolve_session
-    from src.vehicle.profiles import active_registry, resolve_profile_for_tooling, scope_config
+    from src.vehicle.profiles import active_registry
 
-    base = CanaryConfig.from_yaml(args.config)
-    config = scope_config(base, resolve_profile_for_tooling(base, args.profile))
+    config = load_scoped(args)
     session = resolve_session(config.collection.storage_path, args.session)
     ledger = memory_ledger_for(config)
     evidence_id = mint_channel_comparison(

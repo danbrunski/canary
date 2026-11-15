@@ -40,7 +40,8 @@ The module became a package (R26.4). Each part imports only the ones above it:
 * :mod:`~src.vehicle.profiles.legacy` -- the pre-R05.15 shared calibration
   directory: adoption, migration and ``operational_file``;
 * :mod:`~src.vehicle.profiles.resolve` -- ``resolve_active_profile`` from the VIN
-  probe, and ``resolve_profile_for_tooling``.
+  probe, ``resolve_profile_for_tooling`` and ``scoped_config_for_tooling`` (the one
+  way an offline script or tool scopes its config).
 
 This ``__init__`` re-exports every public name the single module had, so an
 import site does not move. Patch the owner, not the package: a name set on
@@ -114,6 +115,7 @@ from src.vehicle.profiles.resolve import (
     VehicleInfoProber,
     resolve_active_profile,
     resolve_profile_for_tooling,
+    scoped_config_for_tooling,
     seed_machine_owned_files,
 )
 from src.vehicle.profiles.scope import (
@@ -217,6 +219,7 @@ __all__ = [
     "revert_profile",
     "save_registry",
     "scope_config",
+    "scoped_config_for_tooling",
     "seed_machine_owned_files",
     "slugify",
     "source_registry_path",

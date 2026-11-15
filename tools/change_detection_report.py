@@ -32,11 +32,12 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+try:
+    from _cli import load_scoped  # type: ignore[import-not-found]
+except ImportError:  # loaded as `tools.change_detection_report`: repo root on path
+    from tools._cli import load_scoped
 
-from src.analysis.change_evaluation import (  # noqa: E402
+from src.analysis.change_evaluation import (
     CHANGE_RESIDUALS_FILE,
     assemble_drives,
     evaluate,
@@ -49,11 +50,11 @@ from src.analysis.change_evaluation import (  # noqa: E402
     samples_from_frame,
     samples_to_frame,
 )
-from src.evidence.ledger import MemoryLedger  # noqa: E402
-from src.evidence.records import VehicleIdentity  # noqa: E402
-from src.models.change_detection import blocks_of  # noqa: E402
-from src.paths import DATA_DIR  # noqa: E402
-from src.vehicle.tune_revisions import load_tune_revisions  # noqa: E402
+from src.evidence.ledger import MemoryLedger
+from src.evidence.records import VehicleIdentity
+from src.models.change_detection import blocks_of
+from src.paths import DATA_DIR
+from src.vehicle.tune_revisions import load_tune_revisions
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -134,14 +135,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.ledger is not None:
         ledger = MemoryLedger(args.ledger, vehicle=args.profile)
     elif args.config is not None:
-        from src.config import CanaryConfig
         from src.evidence.ledger import memory_ledger_for
-        from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
-        base = CanaryConfig.from_yaml(args.config)
-        ledger = memory_ledger_for(
-            scope_config(base, resolve_profile_for_tooling(base, args.profile))
-        )
+        ledger = memory_ledger_for(load_scoped(args))
     else:
         print(
             json.dumps(

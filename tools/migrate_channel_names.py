@@ -63,6 +63,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+try:
+    from _cli import add_config_profile_args, load_scoped  # type: ignore[import-not-found]
+except ImportError:  # loaded as `tools.migrate_channel_names`: repo root on path
+    from tools._cli import add_config_profile_args, load_scoped
+
 from src.yaml_load import load_yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -505,13 +510,7 @@ def resolve_targets(args: argparse.Namespace) -> Targets:
         files=[p.expanduser() for p in args.file],
     )
     if args.config is not None:
-        sys.path.insert(0, str(REPO_ROOT))
-        from src.config import CanaryConfig
-        from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
-
-        config = CanaryConfig.from_yaml(args.config)
-        if config.profiles.enabled:
-            config = scope_config(config, resolve_profile_for_tooling(config, args.profile))
+        config = load_scoped(args)
         targets.sessions_roots.append(config.collection.storage_path)
         targets.models_dirs.append(config.daemon.models_dir)
         targets.files += [
@@ -539,15 +538,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_DIDS,
         help="DID catalog the map must agree with (targets present, sources gone).",
     )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help="canary.yaml: adds its (profile-scoped) sessions root, models dir, "
+    add_config_profile_args(
+        parser,
+        config_required=False,
+        config_help="canary.yaml: adds its (profile-scoped) sessions root, models dir, "
         "behavior_models, capture_profiles (and this machine's overrides) and the config "
         "file itself.",
+        profile_help="Vehicle profile slug for --config.",
     )
-    parser.add_argument("--profile", default=None, help="Vehicle profile slug for --config.")
     parser.add_argument(
         "--sessions-root", type=Path, action="append", default=[], help="Repeatable."
     )

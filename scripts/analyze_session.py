@@ -33,12 +33,14 @@ try:
         add_common_args,
         add_log_level_arg,
         load_config,
+        scoped_config,
     )
 except ImportError:  # loaded as `scripts.analyze_session` — repo root on path, not scripts/
     from scripts._cli import (
         add_common_args,
         add_log_level_arg,
         load_config,
+        scoped_config,
     )
 
 from src.analysis.session_deviations import (
@@ -50,7 +52,6 @@ from src.analysis.session_deviations import (
 from src.behavior.behavior_models import load_behavior_models
 from src.log import configure_logging
 from src.storage.sessions import resolve_session
-from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -182,9 +183,7 @@ def print_comparison(comparison: SessionComparisonReport, *, mode_filter: str | 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
-    config = load_config(args)
-    profile = resolve_profile_for_tooling(config, args.profile)
-    config = scope_config(config, profile)
+    config = scoped_config(load_config(args), args.profile)
 
     try:
         session_dir = resolve_session(config.collection.storage_path, args.session)

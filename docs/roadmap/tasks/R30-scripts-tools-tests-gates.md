@@ -61,7 +61,7 @@ they started.
     `submit_twin` into `tests/builders.py`, under public names. `LAYERS` gets
     an importable home outside a test module.
 
-- [ ] **R30.3 "Scope the config to the tooling profile" is spelled at about
+- [~] **R30.3 "Scope the config to the tooling profile" is spelled at about
   25 call sites.** `scripts/_cli.py` has `scoped_config` and
   `load_scoped_config`. `scripts/catalog.py`, `fingerprint.py` and
   `trip_report.py` carry identical `_scoped_config` copies;
@@ -73,18 +73,118 @@ they started.
   scripts' preamble because `_cli` imports pandas: eight tools repeat the
   same `--config` / `--profile` pair and eleven do
   `sys.path.insert(0, str(REPO_ROOT))` inside `main()`.
-  - [ ] `scoped_config_for_tooling(config, slug)` in `src/vehicle/profiles.py`
+  - [x] `scoped_config_for_tooling(config, slug)` in `src/vehicle/profiles.py`
     (or wherever R26.4 puts path scoping); `_cli.scoped_config` re-exports it;
     delete the four `_scoped*` functions; migrate the direct callers.
-  - [ ] A pandas-free `tools/_cli.py` with `add_config_profile_args` and
+    **Done 2026-11-15.** `scoped_config_for_tooling` is in
+    `src/vehicle/profiles/resolve.py`, beside `resolve_profile_for_tooling`
+    and re-exported by the package. Not `scope.py`, R26.4's home for path
+    scoping: it calls `resolve_profile_for_tooling`, and `resolve` imports
+    `scope`. It keeps the P02.11 rule: profiles enabled returns a config that
+    always carries `scoped_profile` (so `require_profile_scoped` passes; the
+    unscoped config it replaces raises `UnscopedConfigError`), profiles
+    disabled returns the config untouched, scoping twice is a no-op, and
+    re-scoping to another slug raises. `scripts/_cli.scoped_config` *is* the
+    function (`scoped_config = scoped_config_for_tooling`);
+    `scoped_models_dir` and `apply_since_boundary` go through it too. Deleted:
+    `_scoped_config` in `catalog`, `fingerprint`, `trip_report` and
+    `tuning_report._scoped` (now `load_scoped_config(args, ...)`).
+    **`tuning_report._scoped` had no `profiles.enabled` guard** (it scoped a
+    profiles-disabled config under the default slug, a path the daemon never
+    wrote); the migration adds it, so a normal config is unaffected and a
+    profiles-disabled one keeps its base paths. Same for the other unguarded direct callers, all moved onto
+    the guarded function: scripts `analyze_session`, `evaluate_behavior_models`,
+    `inventory_behavior_inputs`, `backfill_rolling_circumference`; tools
+    `mint_comparison`, `record_command_change`, `memory`,
+    `investigate_delivery`, `change_detection_report`, `import_uprev_log`.
+    Already-guarded callers moved: scripts `refit_behavior_models`,
+    `vehicle_log`, `disposition_report`, `scripts/sync-train.sh`'s heredoc;
+    tools `check_manifest_producibility`, `inventory_behavior_artifacts`,
+    `migrate_channel_names`; `src/plausibility/benchmark.py` and
+    `src/features/feature_policy.py` (training/evaluation tooling, not daemon
+    paths). Left on `scope_config` on purpose: `src/main.py` (the daemon,
+    scoping with the profile the VIN probe resolved),
+    `src/mcp_server/tools/behavior.py` and `tuning_analysis.py` (the MCP
+    service; `tuning_analysis._scoped` is unguarded too),
+    `src/validation/harness.py` (`harness_config` builds the config
+    `run_daemon` runs on, scoped "like the daemon") and
+    `scripts/migrate_to_profiles.py` (plans the move to one named profile, the
+    primitive itself). Consequence for profiles-disabled configs only: the
+    memory-ledger tools (`memory`, `mint_comparison`, `investigate_delivery`,
+    `change_detection_report --config`) now refuse with `UnscopedMemoryError`
+    where they used to scope under the default slug; `memory_ledger_for`
+    refuses an unscoped config. `record_command_change` refuses too, with a
+    bare `AssertionError` ("scope the config to a vehicle profile",
+    `record()`'s `assert config.scoped_profile is not None`). Operator
+    decision owed: keep the refusals (recommended; every real config has
+    profiles on) or give these tools a per-vehicle scope regardless of
+    `profiles.enabled`. Also new: on a profiles-disabled config
+    `scripts/analyze_session.py` reads base paths while its MCP twin
+    (`mcp_server/tools/behavior.py`, and `tuning_analysis._scoped`) still
+    nests under the default slug.
+    Guard:
+    `tests/test_source_rules.py` row `tooling-scopes-its-own-config` (no
+    `scope_config(` in `scripts/` or `tools/`, `.py` by AST and `.sh` by line;
+    one allowlisted: `migrate_to_profiles.py`). Pinned by
+    `tests/test_tooling_config_scope.py::test_a_profiles_enabled_config_comes_back_scoped`,
+    `::test_a_slug_picks_the_profile_and_scoping_twice_is_a_no_op`,
+    `::test_a_profiles_disabled_config_is_left_alone`,
+    `::test_the_scripts_scope_through_the_same_function`;
+    `test_tire_wear.py` now stubs `scoped_config_for_tooling` in the backfill.
+  - [ ] Move the two MCP `_scoped` paths (`mcp_server/tools/behavior.py`,
+    `tuning_analysis.py`) onto `scoped_config_for_tooling` so the MCP tools and
+    their script twins scope alike. Found verifying R30.3, 2026-11-15.
+  - [x] A pandas-free `tools/_cli.py` with `add_config_profile_args` and
     `load_scoped`.
-  - [ ] `tools/replay_window.py` never scopes its config. Found verifying
+    **Done 2026-11-15.** `tools/_cli.py` imports `src.config` and
+    `src.vehicle.profiles` only, and puts the repo root on `sys.path` as
+    `scripts/_cli.py` does; a tool imports it with the scripts' `try: from
+    _cli import ... except ImportError: from tools._cli import ...` (the first
+    form is how `.venv/bin/python tools/x.py`, the way every doc runs them,
+    finds it). Seven tools build `--config` / `--profile` through
+    `add_config_profile_args` (`check_manifest_producibility`,
+    `inventory_behavior_artifacts`, `mint_comparison`, `record_command_change`,
+    `memory`, `investigate_delivery`, `migrate_channel_names`, whose config is
+    optional and whose help is its own); `change_detection_report` keeps its
+    own pair (its `--profile` defaults to the Xterra slug: R30.4's to remove)
+    and scopes through `load_scoped`. The `sys.path.insert(0, str(REPO_ROOT))`
+    in `main()` is gone from nine tools (the seven above plus
+    `make_investigation_cases` and `audit_artifact_lineage`, which import
+    `src` only, installed editable) and from `change_detection_report`'s module
+    level; `replay_behavior_compare` keeps its module-level shim, which it
+    needs for `from tools.replay_event_diff import ...` run as a file. Run as
+    a file from another directory, `--help` of every tool above works.
+    Pinned by `tests/test_tooling_config_scope.py::test_tools_cli_imports_no_pandas`
+    (subprocess: `import tools._cli`, `'pandas' not in sys.modules`),
+    `::test_the_config_and_profile_pair_has_one_shape`,
+    `::test_load_scoped_reads_the_flags_and_scopes_with_profiles_enabled`,
+    `::test_load_scoped_leaves_a_profiles_disabled_config_unscoped`,
+    `::test_a_tool_run_as_a_file_finds_its_cli_preamble` (12 tools, subprocess),
+    `::test_a_tool_never_inserts_the_repo_root_inside_a_function` and
+    `::test_a_bare_cli_import_in_a_tool_falls_back_to_the_package`.
+  - [x] `tools/replay_window.py` never scopes its config. Found verifying
     R30.6, 2026-11-15. On a normal config (profiles enabled) it dies with
     `UnscopedConfigError: featurize_wide_frame needs a profile-scoped
     config`, and it runs only with `profiles.enabled: false`. Migrate it with
     the other tools, and add a test that runs it on a profiles-enabled config.
+    **Done 2026-11-15.** `main` loads through `load_scoped(args)` (flags
+    unchanged: no `--profile`, so the `vehicle:` block's profile), inside the
+    existing `except (FileNotFoundError, KeyError, ValueError)` that prints
+    `error loading config`. The session, the default IF and LSTM artifact
+    paths and the anomaly log it reads are now the vehicle's, under
+    `<base>/<slug>/`. `tests/test_tooling_config_scope.py::
+    test_replay_window_scopes_its_config_when_profiles_are_enabled` runs
+    `tools.replay_window.main` on a profiles-enabled config with the session
+    under `<storage>/<slug>/`, the library stubbed to call
+    `require_profile_scoped(config, reader="featurize_wide_frame")` first;
+    it fails on HEAD's tool (`error: session not found`, exit 1) and passes
+    now. `::test_replay_window_still_runs_on_a_profiles_disabled_config` keeps
+    the other shape. The `JobController` still passes no `--profile`
+    (`src/control/jobs.py::_replay_window_command`), so a second vehicle's
+    replay scopes to the config's default profile.
   - Pinned by `test_script_cli_snapshot.py`, `test_script_imports.py`,
-    `test_bus_tool.py`.
+    `test_bus_tool.py` (all three pass unchanged), and
+    `tests/test_tooling_config_scope.py`.
 
 - [ ] **R30.4 `--profile` means a slug in some tools and a directory in
   others, and ten tools default to the Xterra and one operator's home.**
@@ -161,7 +261,7 @@ they started.
     time, this laptop: cold cache 94 s -> 134 s (+40 s, another agent was
     running); warm, nothing changed 0.6 s -> 0.8 s; first run after adding
     the 112 files onto a src/tests-warm cache 2.9 s.
-  - [~] `[tool.ruff] target-version` is `py311`; `requires-python` and mypy
+  - [x] `[tool.ruff] target-version` is `py311`; `requires-python` and mypy
     say 3.12. Set `py312`, run one `ruff check --fix`, commit that alone.
     **Tried 2026-11-15, not applied.** `py312` turns on UP040, UP046 and
     UP047: 23 new findings in 16 files (3 `TypeAlias` -> `type`, 10
@@ -174,6 +274,12 @@ they started.
     Reverted to `py311`. Operator decision: (a) set `py312` and convert the 23
     by hand in its own reviewed commit, (b) set `py312` and `ignore =
     ["UP040", "UP046", "UP047"]` until a generics sweep, (c) leave `py311`.
+    **Operator chose (b), 2026-11-15. Done:** `target-version = "py312"` and
+    `ignore = ["UP040", "UP046", "UP047"]` in `[tool.ruff.lint]`, with the
+    reason beside it. `ruff check .` under py312 adds no finding beyond the
+    three ignored rules.
+  - [ ] Generics sweep: convert the 23 UP040/UP046/UP047 sites by hand in one
+    reviewed commit, then drop the `ignore`.
 
 - [~] **R30.7 Dead or one-shot tools.**
   - `tools/decode_uprev_rom_research.py` (116 lines, untyped, untested, no

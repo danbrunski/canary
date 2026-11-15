@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
@@ -329,7 +328,6 @@ def set_rechecks(lineages: Sequence[Any], roots: Sequence[Path]) -> dict[str, An
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    sys.path.insert(0, str(REPO_ROOT))
     from src.analysis.artifact_lineage import (
         LineageContext,
         audit_artifact,
