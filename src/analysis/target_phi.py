@@ -38,7 +38,7 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.analysis.channels import ChannelSpecError, read_channels
 from src.analysis.ecu_application import (
@@ -71,6 +71,7 @@ from src.paths import DIDS_YAML
 from src.refusal import ReasonedRefusal
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.signals.time_lookup import MISSING, bracketing_sample_indices
+from src.strict_model import StrictModel
 from src.timefmt import format_epoch
 from src.yaml_load import load_yaml
 
@@ -120,31 +121,27 @@ REASONS: dict[str, State] = {
 }
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
 _SPEC = r"^[a-z]+:[A-Za-z0-9_]+$"
 
 
-class VerifiedImage(_Strict):
+class VerifiedImage(StrictModel):
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     revision: str = Field(min_length=1)
 
 
-class Program(_Strict):
+class Program(StrictModel):
     calibration_id: str = Field(min_length=1)
     verified_images: list[VerifiedImage] = Field(min_length=1)
     evidence: str = Field(min_length=1)
 
 
-class TableAxisRef(_Strict):
+class TableAxisRef(StrictModel):
     rom_map_axis: str = Field(min_length=1)
     input: Literal["rpm", "load"]
     compare_multiplier: int = Field(ge=1)
 
 
-class TableRef(_Strict):
+class TableRef(StrictModel):
     rom_map_kind: str = Field(min_length=1)
     rows: TableAxisRef
     columns: TableAxisRef
@@ -152,7 +149,7 @@ class TableRef(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class RawInput(_Strict):
+class RawInput(StrictModel):
     """A lookup input. ``raw_counts`` is the only unit the kernel accepts: a
     channel stored scaled is returned to whole counts through its own catalog
     decode, never fed at its display scale."""
@@ -168,7 +165,7 @@ class FlagInput(RawInput):
     forces: Literal["last_column"]
 
 
-class Inputs(_Strict):
+class Inputs(StrictModel):
     load: RawInput
     rpm: RawInput
     forced_column_flag: FlagInput
@@ -181,29 +178,29 @@ class Inputs(_Strict):
         }
 
 
-class MagicRule(_Strict):
+class MagicRule(StrictModel):
     channel: str = Field(pattern=_SPEC)
     valid: int
 
 
-class ActiveMapRule(_Strict):
+class ActiveMapRule(StrictModel):
     channel: str = Field(pattern=_SPEC)
     committed_min: int = Field(ge=0)
     committed_max: int = Field(ge=0)
 
 
-class SelectorRule(_Strict):
+class SelectorRule(StrictModel):
     channel: str = Field(pattern=_SPEC)
 
 
-class DefaultSlot(_Strict):
+class DefaultSlot(StrictModel):
     active_map: int
     selector: int
     slot: int = Field(ge=1)
     evidence: str = Field(min_length=1)
 
 
-class MapIdentity(_Strict):
+class MapIdentity(StrictModel):
     magic: MagicRule
     active_map: ActiveMapRule
     selector: SelectorRule
@@ -214,13 +211,13 @@ class MapIdentity(_Strict):
         return [self.magic.channel, self.active_map.channel, self.selector.channel]
 
 
-class Reference(_Strict):
+class Reference(StrictModel):
     channel: str = Field(pattern=_SPEC)
     sentinel_channel: str = Field(pattern=_SPEC)
     q_bits: int = Field(ge=1, le=16)
 
 
-class EnrichmentGate(_Strict):
+class EnrichmentGate(StrictModel):
     floor_cell: int
     threshold_cell: int
     hysteresis_cells: int = Field(ge=0)
@@ -228,13 +225,13 @@ class EnrichmentGate(_Strict):
     rom_release_offset: int = Field(ge=0)
 
 
-class ScaleCurve(_Strict):
+class ScaleCurve(StrictModel):
     rom_offset: int = Field(ge=0)
     entries: int = Field(ge=1)
     identity_value: int
 
 
-class FinalCommand(_Strict):
+class FinalCommand(StrictModel):
     """The decoded constants between the lookup and ``0xFFFF174B`` that the
     twin implements. Whether the path on to the final word is resolved is the
     application model's to say (``ecu_application_model.yaml``), not this
@@ -245,14 +242,14 @@ class FinalCommand(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class CoolantGate(_Strict):
+class CoolantGate(StrictModel):
     sources: list[str] = Field(min_length=1)
     min_c: float
     max_age_s: float = Field(gt=0)
     status: Literal["proposed", "qualified"]
 
 
-class ModeGate(_Strict):
+class ModeGate(StrictModel):
     channel: str = Field(pattern=_SPEC)
     states: dict[int, str] = Field(min_length=1)
     eligible: list[str] = Field(min_length=1)
@@ -267,7 +264,7 @@ class ModeGate(_Strict):
         return self
 
 
-class SteadyChannel(_Strict):
+class SteadyChannel(StrictModel):
     channel: str = Field(pattern=_SPEC)
     max_span: float | None = Field(default=None, gt=0)
     max_relative_span: float | None = Field(default=None, gt=0)
@@ -279,14 +276,14 @@ class SteadyChannel(_Strict):
         return self
 
 
-class SteadinessGate(_Strict):
+class SteadinessGate(StrictModel):
     dwell_s: float = Field(gt=0)
     min_samples: int = Field(ge=2)
     channels: list[SteadyChannel] = Field(min_length=1)
     status: Literal["proposed", "qualified"]
 
 
-class Gates(_Strict):
+class Gates(StrictModel):
     max_acquisition_skew_s: float = Field(gt=0)
     clock: Literal["acquired"]
     coolant: CoolantGate
@@ -294,13 +291,13 @@ class Gates(_Strict):
     steadiness: SteadinessGate
 
 
-class Region(_Strict):
+class Region(StrictModel):
     rpm_raw: tuple[int, int]
     load_raw: tuple[int, int] | None = None
     status: Literal["proposed", "qualified"]
 
 
-class Regions(_Strict):
+class Regions(StrictModel):
     ordinary: Region
     override: Region
 
@@ -311,14 +308,14 @@ class Regions(_Strict):
         return self
 
 
-class XFormula(_Strict):
+class XFormula(StrictModel):
     bfs_channel: str = Field(pattern=_SPEC)
     scaler_rom_map_table: str = Field(min_length=1)
     shift: int = Field(ge=0)
     cap: int = Field(ge=1)
 
 
-class Acquisition(_Strict):
+class Acquisition(StrictModel):
     """Which memory windows the twin needs, and which must be read together.
 
     A tuple is only as simultaneous as its reads: the command and its three
@@ -344,7 +341,7 @@ class Acquisition(_Strict):
         return next((w for w, specs in self.windows.items() if channel in specs), None)
 
 
-class TwinDefinition(_Strict):
+class TwinDefinition(StrictModel):
     schema_version: Literal[1]
     name: Literal["target_equiv_ratio"]
     #: The application-model output this twin predicts (E05.1). Its blockers

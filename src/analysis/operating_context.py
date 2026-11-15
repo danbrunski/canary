@@ -59,7 +59,7 @@ from typing import Annotated, Any, Literal
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.analysis.ecu_application import (
     ApplicationModel,
@@ -91,6 +91,7 @@ from src.decode.slices import SENTINEL_SUFFIX, linear_factors
 from src.paths import DIDS_YAML
 from src.refusal import ReasonedRefusal
 from src.signals.pairing import to_seconds
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 #: Bumped when the evaluator's record shape, reasons or contract change.
@@ -112,10 +113,6 @@ _SPEC = r"^[a-z]+:[A-Za-z0-9_]+$"
 Status = Literal["proposed", "qualified"]
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
 class ContextRefusalError(ReasonedRefusal, ValueError):
     """The context cannot be resolved or evaluated at all; ``reason`` names why."""
 
@@ -123,7 +120,7 @@ class ContextRefusalError(ReasonedRefusal, ValueError):
 # -- the profile declaration -----------------------------------------------------
 
 
-class InputDecl(_Strict):
+class InputDecl(StrictModel):
     """One RAM observation. ``relation`` says how the channel's read relates
     to what the ECM's lookup consumes: the same byte (``identity``), its
     cycle-start copy (``cycle_copy``), or a state decoded from it (``state``,
@@ -149,13 +146,13 @@ class InputDecl(_Strict):
         return self
 
 
-class AxisDecl(_Strict):
+class AxisDecl(StrictModel):
     rom_map_axis: str = Field(min_length=1)
     input: str = Field(min_length=1)
     compare_multiplier: int = Field(ge=1)
 
 
-class LimitDecl(_Strict):
+class LimitDecl(StrictModel):
     """A known gap between what the context observes and what the ECM's
     lookup consumed, carried in the contract's applicability by name."""
 
@@ -164,7 +161,7 @@ class LimitDecl(_Strict):
     closes_with: str = Field(min_length=1)
 
 
-class FuelCompDecl(_Strict):
+class FuelCompDecl(StrictModel):
     application_node: str = Field(min_length=1)
     rom_map_kind: str = Field(min_length=1)
     rows: AxisDecl
@@ -174,7 +171,7 @@ class FuelCompDecl(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class MemoryOnlyTargetDecl(_Strict):
+class MemoryOnlyTargetDecl(StrictModel):
     """A final-timing channel read in the same service-0x23 read as one of the
     timing lookup's coordinate inputs (B08.4, operator decision 2026-10-08,
     option c).
@@ -193,7 +190,7 @@ class MemoryOnlyTargetDecl(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class TimingTrimDecl(_Strict):
+class TimingTrimDecl(StrictModel):
     application_node: str = Field(min_length=1)
     application_output: str = Field(min_length=1)
     select_input: str = Field(min_length=1)
@@ -233,7 +230,7 @@ class TimingTrimDecl(_Strict):
         return self
 
 
-class SaturationDecl(_Strict):
+class SaturationDecl(StrictModel):
     """W08 ids of what the two saturations are computed from."""
 
     fill_curve_low: str
@@ -242,16 +239,16 @@ class SaturationDecl(_Strict):
     reciprocal_numerator: str
 
 
-class FuelCutDecl(_Strict):
+class FuelCutDecl(StrictModel):
     command_input: str
     sentinel_input: str
 
 
-class PedalDecl(_Strict):
+class PedalDecl(StrictModel):
     input: str
 
 
-class RetainedDecl(_Strict):
+class RetainedDecl(StrictModel):
     """Fill-chain state kept when captured. Without ``input`` it is not in the
     memory catalog yet, and ``closes_with`` names what would capture it."""
 
@@ -267,7 +264,7 @@ class RetainedDecl(_Strict):
         return self
 
 
-class ContextDefinition(_Strict):
+class ContextDefinition(StrictModel):
     schema_version: Literal[1]
     name: Literal["firmware_operating_context"]
     context_version: int = Field(ge=1)

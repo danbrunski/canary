@@ -16,7 +16,8 @@ import math
 import numpy as np
 from pydantic import Field, model_validator
 
-from src.analysis.dyno_contract import DynoRefusal, FloatArray, MotionSamples, StrictModel
+from src.analysis.dyno_contract import DynoRefusal, FloatArray, MotionSamples
+from src.strict_model import StrictModel
 
 
 class AltitudeNoise(StrictModel):

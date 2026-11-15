@@ -56,10 +56,11 @@ from typing import Any, Literal
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.artifact_hash import sha256_json
 from src.refusal import ReasonedRefusal
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 PLANT_FILE = "fuel_plant.yaml"
@@ -160,10 +161,6 @@ MAP_OUTSIDE_VE_FIT = "outside_ve_fit"
 AMBIENT_ROUNDING = 1e-9
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
 class FuelPlantRefusalError(ReasonedRefusal, ValueError):
     """The plant cannot evaluate what it was given; ``reason`` names why."""
 
@@ -171,7 +168,7 @@ class FuelPlantRefusalError(ReasonedRefusal, ValueError):
 # -- parameter registry ------------------------------------------------------------
 
 
-class WorkingAssumption(_Strict):
+class WorkingAssumption(StrictModel):
     """The number a ``requires_measurement`` parameter is *run* at, never claimed."""
 
     value: float
@@ -188,7 +185,7 @@ class WorkingAssumption(_Strict):
         return self
 
 
-class PlantParameter(_Strict):
+class PlantParameter(StrictModel):
     """One hardware parameter: its status, where its number comes from, and why."""
 
     id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
@@ -237,7 +234,7 @@ class PlantParameter(_Strict):
         return self
 
 
-class ParameterRegistry(_Strict):
+class ParameterRegistry(StrictModel):
     parameters: list[PlantParameter] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -292,7 +289,7 @@ class ParameterRegistry(_Strict):
         raise KeyError(parameter_id)
 
 
-class VeCurve(_Strict):
+class VeCurve(StrictModel):
     """VE by rpm band, as fitted (``fuel_plant_eval.identify_ve``) and frozen
     in a baseline.
 
@@ -405,7 +402,7 @@ class VeCurve(_Strict):
 MIN_VE_QUANTILE = 0.5
 
 
-class VeFitRule(_Strict):
+class VeFitRule(StrictModel):
     """How a ``speed_density_refusing`` plant fits VE(rpm), declared before the fit.
 
     * ``rpm_quantile``: per band, the ``quantile`` (Hyndman-Fan type 9,
@@ -454,7 +451,7 @@ class VeFitRule(_Strict):
         return self
 
 
-class BaselineParameterSet(_Strict):
+class BaselineParameterSet(StrictModel):
     """The identified hardware values, frozen before evaluation.
 
     ``fitted_on`` names the recordings the values came from; an evaluation on
@@ -498,7 +495,7 @@ class BaselineParameterSet(_Strict):
 # -- profile -----------------------------------------------------------------------
 
 
-class Geometry(_Strict):
+class Geometry(StrictModel):
     cylinders: int = Field(gt=0)
     displacement_l: float = Field(gt=0)
     strokes: Literal[2, 4] = 4
@@ -509,7 +506,7 @@ class Geometry(_Strict):
         return self.displacement_l / self.cylinders
 
 
-class Specs(_Strict):
+class Specs(StrictModel):
     """Channel specs the plant replay reads, and the one it is scored against."""
 
     pulse: str
@@ -533,7 +530,7 @@ class Specs(_Strict):
     fuel_cut_reference: str
 
 
-class SteadyRule(_Strict):
+class SteadyRule(StrictModel):
     """Which pulse reads are steady enough to score a mean-value plant on."""
 
     window_s: float = Field(gt=0)
@@ -558,7 +555,7 @@ class SteadyRule(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class Split(_Strict):
+class Split(StrictModel):
     """Recordings for identification and held-out evaluation, declared first."""
 
     identification: list[str] = Field(min_length=1)
@@ -583,7 +580,7 @@ class Split(_Strict):
         return self
 
 
-class Acceptance(_Strict):
+class Acceptance(StrictModel):
     """Held-out error bounds, declared before the held-out drives were scored."""
 
     declared_on: date
@@ -605,7 +602,7 @@ class Acceptance(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class DelayReference(_Strict):
+class DelayReference(StrictModel):
     """B06's declaration: where the lambda delay was frozen, and the regime
     rules (closed-loop band, post-fuel-cut holdoffs) the plant's steady rule
     takes from it rather than copying them."""
@@ -618,7 +615,7 @@ class DelayReference(_Strict):
 Verdict = Literal["pass", "pass_closed_loop_only", "fail"]
 
 
-class SpentRecord(_Strict):
+class SpentRecord(StrictModel):
     """One held-out recording, scored once, against one frozen baseline, and
     the verdict that scoring returned (what :func:`plant_qualification` reads)."""
 
@@ -630,7 +627,7 @@ class SpentRecord(_Strict):
     verdict: Verdict
 
 
-class CalibrationWord(_Strict):
+class CalibrationWord(StrictModel):
     """A calibration constant at its flash address, with the value the firmware
     analysis published for it (checked against an image when one is given)."""
 
@@ -639,7 +636,7 @@ class CalibrationWord(_Strict):
     value: int
 
 
-class PulseChain(_Strict):
+class PulseChain(StrictModel):
     """Where the pulse chain's calibration lives in the image.
 
     The dead-time words and scalars are published in
@@ -664,7 +661,7 @@ class PulseChain(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class FuelPlantProfile(_Strict):
+class FuelPlantProfile(StrictModel):
     schema_version: Literal[1]
     plant_version: str = Field(min_length=1)
     #: How this version computes MAP (:data:`MANIFOLD_MODELS`).
@@ -849,7 +846,7 @@ def _parsed(text: bytes) -> Any:
     return load_yaml(text)
 
 
-class PlantLimitations(_Strict):
+class PlantLimitations(StrictModel):
     """:data:`LIMITATIONS_FILE`: per fuel plant version, its stated limits."""
 
     schema_version: Literal[1]

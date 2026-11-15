@@ -48,10 +48,11 @@ from typing import Literal
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.analysis.fuel_plant import load_fuel_plant
 from src.analysis.sim_contract import SimContract, SimulationRefusalError
+from src.strict_model import FrozenStrictModel
 from src.yaml_load import load_yaml
 
 PLANT_FILE = "torque_plant_tq0.yaml"
@@ -101,11 +102,7 @@ KnownSource = Literal["profile_fact", "datasheet", "firmware", "physics"]
 BracketSource = Literal["literature_prior", "plant_registry", "declared_range"]
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class TorqueParameter(_Strict):
+class TorqueParameter(FrozenStrictModel):
     id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     units: str = Field(min_length=1)
     status: Status
@@ -159,7 +156,7 @@ class TorqueParameter(_Strict):
         return self
 
 
-class Structure(_Strict):
+class Structure(FrozenStrictModel):
     spark_efficiency: Literal["mbt_relative_quadratic"]
     lambda_efficiency: Literal["peak_quadratic_rich_fuel_limited_lean"]
     friction: Literal["quadratic_in_krpm"]
@@ -168,7 +165,7 @@ class Structure(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class Product(_Strict):
+class Product(FrozenStrictModel):
     """Parameters a measurement sees only multiplied together (a torque pull
     sees LHV x eta_i0 / AFR_stoich, never the parts). The measurement lists the
     product in ``identifies``, never a component, so a standing cannot call a
@@ -180,7 +177,7 @@ class Product(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class Registry(_Strict):
+class Registry(FrozenStrictModel):
     parameters: tuple[TorqueParameter, ...] = Field(min_length=1)
     products: tuple[Product, ...] = ()
 
@@ -214,7 +211,7 @@ class Registry(_Strict):
         return found
 
 
-class TorquePlantProfile(_Strict):
+class TorquePlantProfile(FrozenStrictModel):
     schema_version: Literal[1]
     plant_version: str = Field(min_length=1)
     hardware_configuration: str = Field(min_length=1)

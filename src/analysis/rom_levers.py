@@ -73,7 +73,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
 from src.analysis.ecu_application import ApplicationModel, Output, OverrideRegime
 from src.analysis.engine_dynamics import (
@@ -97,6 +97,7 @@ from src.analysis.paired_steady import (
 from src.analysis.rom_effects import ChangedRange, EffectReport
 from src.analysis.rom_map import RomMap, Table
 from src.analysis.sim_contract import Quantity, SimContract, SimulationRefusalError, Subsystem
+from src.strict_model import FrozenStrictModel
 
 TOOL = "rom_levers"
 #: Bump when a code, a text or the result's shape changes meaning.
@@ -144,11 +145,7 @@ _SLOT = re.compile(r"^(?P<what>.*?)(?: \(slot (?P<slot>\d+)\))?$")
 Regime = OverrideRegime
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class Blocker(_Strict):
+class Blocker(FrozenStrictModel):
     """One reason a number is withheld. ``text`` is what both front ends show."""
 
     code: str
@@ -157,7 +154,7 @@ class Blocker(_Strict):
     detail: str | None = None
 
 
-class LeverEntry(_Strict):
+class LeverEntry(FrozenStrictModel):
     """One lever the edit touches, with the bytes and tables behind it."""
 
     lever: str
@@ -174,7 +171,7 @@ class LeverEntry(_Strict):
     blockers: tuple[Blocker, ...] = ()
 
 
-class OutputBlockers(_Strict):
+class OutputBlockers(FrozenStrictModel):
     """One output: whether the edit reaches it and what blocks a number."""
 
     output: str
@@ -206,7 +203,7 @@ class OutputBlockers(_Strict):
         return self.reached and not self.blockers
 
 
-class LeverClassification(_Strict):
+class LeverClassification(FrozenStrictModel):
     schema_version: Literal[1] = 1
     tool: str = TOOL
     tool_version: str = TOOL_VERSION
@@ -552,7 +549,7 @@ def _actuated_blockers(
 # -- the edit's controls and its claim (E07.5 item 8) ------------------------------------------
 
 
-class EditControls(_Strict):
+class EditControls(FrozenStrictModel):
     """What an edit changes on the plant side: the controls of the actuators
     its reached contract quantities command (closed downstream through ECU
     quantities), and why the set may be incomplete."""

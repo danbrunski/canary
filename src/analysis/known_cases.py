@@ -49,7 +49,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from src.analysis.compare import PairingPolicy
 from src.analysis.compare_evidence import ALL_CONDITIONS, mint_channel_comparison
@@ -69,6 +69,7 @@ from src.evidence.records import (
     VehicleIdentity,
 )
 from src.paths import BINDINGS_YAML, DIDS_YAML, REPO_ROOT
+from src.strict_model import FrozenStrictModel
 from src.vehicle.interventions import intervention_history
 from src.vehicle.tune_revisions import TuneRevisionRegistry, load_tune_revisions
 from src.yaml_load import load_yaml
@@ -119,14 +120,10 @@ class SliceAbsenceError(ValueError):
     full session, so "never captured" would be a statement about the slice."""
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
 # -- the case file ---------------------------------------------------------------
 
 
-class FullSession(_Strict):
+class FullSession(FrozenStrictModel):
     """Facts counted over every chunk of the original session (not the slice).
 
     ``channel_rows`` maps a channel spec to its row count across the whole
@@ -144,12 +141,12 @@ class FullSession(_Strict):
     channel_rows: dict[str, int]
 
 
-class KnownCalibration(_Strict):
+class KnownCalibration(FrozenStrictModel):
     revision: str | None
     basis: str = Field(min_length=1)
 
 
-class Drive(_Strict):
+class Drive(FrozenStrictModel):
     """One recorded drive and the committed slice of it a case reads."""
 
     session: str = Field(min_length=1)
@@ -159,7 +156,7 @@ class Drive(_Strict):
     calibration: KnownCalibration
 
 
-class Incident(_Strict):
+class Incident(FrozenStrictModel):
     """Something that happened once in the project's history.
 
     No disposition field exists: what an incident *means* is established only
@@ -176,13 +173,13 @@ class Incident(_Strict):
     gaps: tuple[str, ...] = ()
 
 
-class Defect(_Strict):
+class Defect(FrozenStrictModel):
     summary: str = Field(min_length=1)
     evidence: tuple[str, ...] = Field(min_length=1)
     remedy: str = Field(min_length=1)
 
 
-class MintStep(_Strict):
+class MintStep(FrozenStrictModel):
     step: Literal["mint"]
     name: str
     drive: str
@@ -194,14 +191,14 @@ class MintStep(_Strict):
     incident: str | None = None
 
 
-class InterventionStep(_Strict):
+class InterventionStep(FrozenStrictModel):
     step: Literal["intervention"]
     name: str
     revision: str
     affects: tuple[str, ...] = Field(min_length=1)
 
 
-class ReferenceStep(_Strict):
+class ReferenceStep(FrozenStrictModel):
     step: Literal["reference"]
     name: str
     reference: str
@@ -211,14 +208,14 @@ class ReferenceStep(_Strict):
     investigation: str | None = None
 
 
-class HypothesisSpec(_Strict):
+class HypothesisSpec(FrozenStrictModel):
     label: str
     status: Literal["open", "supported", "refuted", "unresolvable"]
     supporting: tuple[str, ...] = ()
     refuting: tuple[str, ...] = ()
 
 
-class InvestigationStep(_Strict):
+class InvestigationStep(FrozenStrictModel):
     step: Literal["investigation"]
     name: str
     title: str
@@ -234,7 +231,7 @@ class InvestigationStep(_Strict):
     supersession_reason: str | None = None
 
 
-class RetractStep(_Strict):
+class RetractStep(FrozenStrictModel):
     step: Literal["retract"]
     name: str
     retracts: tuple[str, ...] = Field(min_length=1)
@@ -247,20 +244,20 @@ Step = Annotated[
 ]
 
 
-class CardSpec(_Strict):
+class CardSpec(FrozenStrictModel):
     name: str
     investigation: str
     #: Render as the ledger stood when this step's record was written.
     as_of: str | None = None
 
 
-class ReferenceView(_Strict):
+class ReferenceView(FrozenStrictModel):
     name: str
     reference: str
     as_of: str | None = None
 
 
-class QuerySpec(_Strict):
+class QuerySpec(FrozenStrictModel):
     name: str
     kinds: tuple[str, ...] = ("evidence",)
     incident: str | None = None
@@ -271,7 +268,7 @@ class QuerySpec(_Strict):
     valid_after: str | None = None
 
 
-class Check(_Strict):
+class Check(FrozenStrictModel):
     path: str
     op: Literal["eq", "lt", "gt", "between", "contains", "not_contains"]
     value: Any
@@ -292,7 +289,7 @@ class Check(_Strict):
         return self
 
 
-class Case(_Strict):
+class Case(FrozenStrictModel):
     title: str = Field(min_length=1)
     incident: str
     drives: tuple[str, ...] = Field(min_length=1)
@@ -334,18 +331,18 @@ class Case(_Strict):
         return self
 
 
-class BindingScale(_Strict):
+class BindingScale(FrozenStrictModel):
     kind: Literal["binding_scale"]
     signal: str
     scale: float
 
 
-class DropRevision(_Strict):
+class DropRevision(FrozenStrictModel):
     kind: Literal["drop_revision"]
     revision: str
 
 
-class RedirectDrive(_Strict):
+class RedirectDrive(FrozenStrictModel):
     kind: Literal["redirect_drive"]
     #: Every mint step reading ``from_drive`` reads ``to_drive`` instead.
     from_drive: str
@@ -355,7 +352,7 @@ class RedirectDrive(_Strict):
 Mutation = Annotated[BindingScale | DropRevision | RedirectDrive, Field(discriminator="kind")]
 
 
-class NegativeControl(_Strict):
+class NegativeControl(FrozenStrictModel):
     """A real case with one input mutated: the checks must catch it."""
 
     case: str
@@ -373,7 +370,7 @@ class NegativeControl(_Strict):
         return self
 
 
-class CaseFile(_Strict):
+class CaseFile(FrozenStrictModel):
     schema_: Literal["canary-investigation-cases/1"] = Field(alias="schema")
     vehicle: str = Field(min_length=1)
     tune_revisions: str = Field(min_length=1)

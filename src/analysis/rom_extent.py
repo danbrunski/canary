@@ -34,7 +34,9 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
+
+from src.strict_model import StrictModel
 
 ExtentVerdict = Literal["larger", "no_sign", "unknown"]
 
@@ -46,11 +48,7 @@ SH2_CALL_WINDOW = 3
 LISTED_ADDRESSES = 8
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class VectorTable(_Strict):
+class VectorTable(StrictModel):
     """A table of 32-bit big-endian addresses whose entry 0 is the reset PC."""
 
     offset: int = Field(ge=0)
@@ -58,7 +56,7 @@ class VectorTable(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class ExtentSpec(_Strict):
+class ExtentSpec(StrictModel):
     """What a vehicle's image says about its own size (``rom_backup.yaml``)."""
 
     #: From here up, addresses are RAM and I/O, never flash.

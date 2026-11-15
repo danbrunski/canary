@@ -13,7 +13,7 @@ import math
 import re
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from src.artifact_hash import sha256_json
 from src.collection.bus_budget import (
@@ -22,6 +22,7 @@ from src.collection.bus_budget import (
 )
 from src.decode.dids import memory_channels
 from src.signals.derived import DERIVED_CHANNEL_INPUTS
+from src.strict_model import StrictModel
 
 if TYPE_CHECKING:
     from src.collection.obd_scheduler import DidSessionSpec
@@ -107,11 +108,7 @@ def _memory_window_members() -> dict[str, tuple[str, ...]]:
     return {name: tuple(members) for name, members in windows.items()}
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class CaptureProfile(_Strict):
+class CaptureProfile(StrictModel):
     @model_validator(mode="before")
     @classmethod
     def _drop_retired_keys(cls, data: Any) -> Any:
@@ -664,7 +661,7 @@ class CaptureProfile(_Strict):
         return cycle if cycle is not None else self.did_window_interval(session)
 
 
-class CaptureProfileCatalog(_Strict):
+class CaptureProfileCatalog(StrictModel):
     schema_version: int = SCHEMA_VERSION
     profiles: list[CaptureProfile]
 

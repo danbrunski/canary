@@ -20,7 +20,8 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field, model_validator
 
-from src.analysis.dyno_contract import DynoRefusal, StrictModel
+from src.analysis.dyno_contract import DynoRefusal
+from src.strict_model import StrictModel
 
 if TYPE_CHECKING:
     from src.config import VehicleParameters

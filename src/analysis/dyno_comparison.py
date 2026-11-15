@@ -22,8 +22,9 @@ from typing import Any, Literal
 import numpy as np
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 
-from src.analysis.dyno_contract import DynoRefusal, FloatArray, StrictModel, as_float_array
+from src.analysis.dyno_contract import DynoRefusal, FloatArray, as_float_array
 from src.analysis.noise_floor import SIGMA_THRESHOLD
+from src.strict_model import StrictModel
 
 #: A noise floor needs at least this many pull pairs (H07.8).
 MIN_PULL_PAIRS = 3

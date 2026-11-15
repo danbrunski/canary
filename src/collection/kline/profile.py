@@ -16,17 +16,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from src.collection.kline import protocol as kp
+from src.strict_model import FrozenStrictModel
 from src.yaml_load import load_yaml
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class Wakeup(_Strict):
+class Wakeup(FrozenStrictModel):
     """One wake-up pattern: the line held low, then released, before the
     first StartCommunication byte. ``evidence`` says where it was measured."""
 
@@ -36,7 +33,7 @@ class Wakeup(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class Timing(_Strict):
+class Timing(FrozenStrictModel):
     """ISO 14230 inter-message times, milliseconds."""
 
     #: Longest the ECU may take to start replying.
@@ -50,7 +47,7 @@ class Timing(_Strict):
     p4_ms: float = Field(ge=0.0, le=20.0)
 
 
-class KnownAnswer(_Strict):
+class KnownAnswer(FrozenStrictModel):
     """A read whose reply shape is known, checked before trusting anything new."""
 
     request: str  # hex payload, e.g. "22 11 03 04 01"
@@ -86,7 +83,7 @@ def _check_identifier(value: str, what: str) -> str:
     return value
 
 
-class Flag(_Strict):
+class Flag(FrozenStrictModel):
     """One bit of a flag word, bound by an operator action seen to flip it."""
 
     name: str
@@ -108,7 +105,7 @@ class Flag(_Strict):
         return value
 
 
-class ModuleDid(_Strict):
+class ModuleDid(FrozenStrictModel):
     """A DID one module answers, with its reply width and, when a known answer
     backs it, a binding: a value (``raw * scale + offset``) or named flags.
 
@@ -180,7 +177,7 @@ class ModuleDid(_Strict):
         return {flag.name: bool(raw & flag.mask) for flag in self.flags}
 
 
-class ModuleReader(_Strict):
+class ModuleReader(FrozenStrictModel):
     """How CANary may read a module itself (K01.5). Absent: it never does."""
 
     #: ``common_id``: one ``22 hh ll`` per DID (how the scan tool read ABS).
@@ -203,7 +200,7 @@ class ModuleReader(_Strict):
         return self
 
 
-class ClearCodes(_Strict):
+class ClearCodes(FrozenStrictModel):
     """How a module's stored codes are cleared: the request a scan tool was
     seen to send it. Absent: CANary never clears that module's codes."""
 
@@ -227,7 +224,7 @@ class ClearCodes(_Strict):
 CodeStatus = Literal["current", "past"]
 
 
-class CodeRead(_Strict):
+class CodeRead(FrozenStrictModel):
     """One request of a module's code read and which codes its reply holds."""
 
     #: The whole request, service byte first (``[0xA2, 0x01]``).
@@ -256,7 +253,7 @@ class CodeRead(_Strict):
         return bytes(self.request)
 
 
-class CodeReadKnownAnswer(_Strict):
+class CodeReadKnownAnswer(FrozenStrictModel):
     """A reply seen on the wire and the codes a scan tool displayed for it:
     the decode is checked against it when the profile loads."""
 
@@ -272,7 +269,7 @@ class CodeReadKnownAnswer(_Strict):
         return value
 
 
-class ReadCodes(_Strict):
+class ReadCodes(FrozenStrictModel):
     """How a module's stored codes are read: the requests a scan tool was seen
     to send it, in order. Absent: CANary never reads that module's codes."""
 
@@ -325,7 +322,7 @@ P4_SPACED_MS = 2.0
 P4_AGREEMENT_MS = 2.0
 
 
-class SniffedStart(_Strict):
+class SniffedStart(FrozenStrictModel):
     """Another tester's StartCommunication to this module, as the sniffer
     stamped it: the ``kline:BREAK`` row before it and the ``kline:FRAME`` row
     that carried it (``src.collection.kline_collector``).
@@ -370,7 +367,7 @@ class SniffedStart(_Strict):
         return (self.frame_end_ms - self.span_ms) / (n - 1) - char_ms
 
 
-class ModuleRequestTiming(_Strict):
+class ModuleRequestTiming(FrozenStrictModel):
     """How CANary spaces its own request bytes to one module (ISO 14230 P4).
 
     Absent: the profile's ``timing.p4_ms``. The airbag module ignored the
@@ -384,7 +381,7 @@ class ModuleRequestTiming(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class KlineModule(_Strict):
+class KlineModule(FrozenStrictModel):
     """One module on this vehicle's K-line, by its KWP2000 address."""
 
     name: str
@@ -446,7 +443,7 @@ class KlineModule(_Strict):
         raise LookupError(f"{self.name} has no DID or binding named {token!r}")
 
 
-class KlineProfile(_Strict):
+class KlineProfile(FrozenStrictModel):
     schema_version: Literal[1]
     baud: int = Field(gt=0, le=20_000)  # the TLIN1027 transmits up to 20 kbps
     ecm_address: int = Field(ge=0, le=0xFF)

@@ -38,9 +38,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.refusal import ReasonedRefusal
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 MODEL_FILE = "ecu_application_model.yaml"
@@ -57,10 +58,6 @@ UNRESOLVED: frozenset[str] = frozenset({"assumed", "not_modelled"})
 _SPEC = r"^[a-z]+:[A-Za-z0-9_]+$"
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
 class ApplicationModelRefusalError(ReasonedRefusal, ValueError):
     """An image or artifact the model does not apply to; ``reason`` names why."""
 
@@ -68,7 +65,7 @@ class ApplicationModelRefusalError(ReasonedRefusal, ValueError):
 # -- program identity -----------------------------------------------------------
 
 
-class ProgramHash(_Strict):
+class ProgramHash(StrictModel):
     #: ``[start, end)`` spans hashed in order.
     regions: list[tuple[int, int]] = Field(min_length=1)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -86,19 +83,19 @@ class ProgramHash(_Strict):
         return self
 
 
-class PatchMarker(_Strict):
+class PatchMarker(StrictModel):
     offset: int = Field(ge=0)
     bytes: str = Field(pattern=r"^([0-9a-f]{2})+$")
     meaning: str = Field(min_length=1)
 
 
-class Patch(_Strict):
+class Patch(StrictModel):
     name: str = Field(min_length=1)
     markers: list[PatchMarker] = Field(min_length=1)
     evidence: str = Field(min_length=1)
 
 
-class KnownImage(_Strict):
+class KnownImage(StrictModel):
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     revision: str = Field(min_length=1)
     #: ``decoded``: the listing was read from this image. ``program_checked``:
@@ -107,7 +104,7 @@ class KnownImage(_Strict):
     role: Literal["decoded", "program_checked"]
 
 
-class Program(_Strict):
+class Program(StrictModel):
     id: str = Field(min_length=1)
     calibration_id: str = Field(min_length=1)
     identity: ProgramHash
@@ -127,7 +124,7 @@ class Program(_Strict):
 # -- RAM, nodes, outputs ----------------------------------------------------------
 
 
-class RamVar(_Strict):
+class RamVar(StrictModel):
     address: int = Field(ge=0xFFFF0000, le=0xFFFFFFFF)
     width: Literal[8, 16, 32]
     signed: bool
@@ -138,7 +135,7 @@ class RamVar(_Strict):
     meaning: str = Field(min_length=1)
 
 
-class Observation(_Strict):
+class Observation(StrictModel):
     spec: str = Field(pattern=_SPEC)
     address: int
     relation: Literal["identity", "alias", "high_byte", "bit_0"]
@@ -146,7 +143,7 @@ class Observation(_Strict):
     note: str | None = None
 
 
-class RomRef(_Strict):
+class RomRef(StrictModel):
     """A ROM table by its ``rom_map.yaml`` id, or a constant by offset."""
 
     rom_map: str | None = None
@@ -164,7 +161,7 @@ class RomRef(_Strict):
         return self
 
 
-class CalibrationCondition(_Strict):
+class CalibrationCondition(StrictModel):
     """Bytes that must hold for the node's modelled behaviour (masked compare;
     ``count`` consecutive bytes)."""
 
@@ -188,12 +185,12 @@ class CalibrationCondition(_Strict):
         ]
 
 
-class Branch(_Strict):
+class Branch(StrictModel):
     when: str = Field(min_length=1)
     then: str = Field(min_length=1)
 
 
-class Node(_Strict):
+class Node(StrictModel):
     id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     function: int = Field(ge=0)
     span: tuple[int, int] | None = None
@@ -250,12 +247,12 @@ class Node(_Strict):
         return self.twin in UNRESOLVED
 
 
-class ScheduleCall(_Strict):
+class ScheduleCall(StrictModel):
     function: int = Field(ge=0)
     nodes: list[str]
 
 
-class Schedule(_Strict):
+class Schedule(StrictModel):
     function: int = Field(ge=0)
     cycle_start: int = Field(ge=0)
     calls: list[ScheduleCall] = Field(min_length=1)
@@ -264,24 +261,24 @@ class Schedule(_Strict):
         return [n for call in self.calls for n in call.nodes]
 
 
-class OutputTwin(_Strict):
+class OutputTwin(StrictModel):
     definition: str = Field(min_length=1)
     predicts: str = Field(min_length=1)
 
 
-class OutputCondition(_Strict):
+class OutputCondition(StrictModel):
     id: str = Field(min_length=1)
     statement: str = Field(min_length=1)
     settled_by: str = Field(min_length=1)
 
 
-class Blocker(_Strict):
+class Blocker(StrictModel):
     name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     nodes: list[str] = Field(min_length=1)
     closes_with: str = Field(min_length=1)
 
 
-class Region(_Strict):
+class Region(StrictModel):
     id: str = Field(min_length=1)
     status: Literal["conditional", "unevaluable"]
     when: str = Field(min_length=1)
@@ -292,7 +289,7 @@ class Region(_Strict):
     overrides: list[str] = Field(default_factory=list)
 
 
-class Output(_Strict):
+class Output(StrictModel):
     id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     ram: int
     written_by: str
@@ -326,7 +323,7 @@ class Output(_Strict):
         return "qualified" if self.observed_as else "unobserved"
 
 
-class Uncovered(_Strict):
+class Uncovered(StrictModel):
     id: str = Field(min_length=1)
     where: str = Field(min_length=1)
     blocks: str = Field(min_length=1)
@@ -347,7 +344,7 @@ OverrideQualification = Literal["traced", "fixture", "vehicle"]
 _ADDRESS = re.compile(r"0xFFFF[0-9A-Fa-f]{4}\b")
 
 
-class Override(_Strict):
+class Override(StrictModel):
     """One identified condition under which the firmware replaces or reshapes
     a command (E05.3): where it is, what it reads and writes, how the trace
     was made, and how far it has been checked. A traced override is
@@ -417,7 +414,7 @@ class Override(_Strict):
         return {int(m, 16) for m in _ADDRESS.findall(f"{self.condition} {self.effect}")}
 
 
-class ApplicationModel(_Strict):
+class ApplicationModel(StrictModel):
     schema_version: Literal[1]
     model_version: int = Field(ge=1)
     name: Literal["ecm_application_model"]

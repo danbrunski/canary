@@ -66,7 +66,7 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.analysis.channels import read_channels
 from src.analysis.ecu_application import ApplicationModel, load_application_model
@@ -105,6 +105,7 @@ from src.session import SessionKind, is_synthetic_session, iter_sessions
 from src.signals.afr import load_afr_calibration
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.storage.sessions import session_started_at
+from src.strict_model import StrictModel
 from src.timefmt import format_epoch
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry, session_dated_at
 from src.yaml_load import load_yaml
@@ -137,10 +138,6 @@ REPLAY_NEEDS: tuple[str, ...] = (
 MISSING_STATES: tuple[str, ...] = ("missing_input", "not_co_observed")
 
 TestOutcome = Literal["pass", "fail", "insufficient_evidence", "not_run"]
-
-
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
 
 # -- inventory ---------------------------------------------------------------------
@@ -229,7 +226,7 @@ def recorded_sessions(root: Path) -> list[Path]:
 # -- the intervention case -----------------------------------------------------------
 
 
-class PredictedBand(_Strict):
+class PredictedBand(StrictModel):
     """One row of a preserved prediction: its operating band and change, as written."""
 
     #: Raw load-input counts, ``[lo, hi)``.
@@ -250,7 +247,7 @@ class PredictedBand(_Strict):
         return self
 
 
-class LedgerStatus(_Strict):
+class LedgerStatus(StrictModel):
     status: Literal["recorded", "not_recorded"]
     record_id: str | None = None
     reason: str = Field(min_length=1)
@@ -262,7 +259,7 @@ class LedgerStatus(_Strict):
         return self
 
 
-class PredictionOfRecord(_Strict):
+class PredictionOfRecord(StrictModel):
     """A prediction preserved as first recorded: never edited, never re-dated."""
 
     document: str = Field(min_length=1)
@@ -275,7 +272,7 @@ class PredictionOfRecord(_Strict):
     ledger: LedgerStatus
 
 
-class LearnedStatePolicy(_Strict):
+class LearnedStatePolicy(StrictModel):
     """How the flash leaves a learned trim, and when that declaration stops holding."""
 
     quantity: str = Field(min_length=1)
@@ -289,7 +286,7 @@ class LearnedStatePolicy(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class Matching(_Strict):
+class Matching(StrictModel):
     """Which pre-change read stands for a post-change one (same conditions)."""
 
     rpm_rel: float = Field(gt=0)
@@ -299,7 +296,7 @@ class Matching(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class EffectAcceptance(_Strict):
+class EffectAcceptance(StrictModel):
     """Predeclared: when a direction/magnitude test has enough to say anything,
     and what it must meet."""
 
@@ -313,7 +310,7 @@ class EffectAcceptance(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class CaseSplit(_Strict):
+class CaseSplit(StrictModel):
     declared_on: date
     #: Pre-change recordings scored with the frozen plant (never fitted on here).
     pre: list[str] = Field(default_factory=list)
@@ -367,7 +364,7 @@ class InterventionVerdict:
         return hmac.compare_digest(self.seal, self._digest(fields))
 
 
-class FloorRule(_Strict):
+class FloorRule(StrictModel):
     """Which pre-vs-pre pairs make the condition-matched noise floor.
 
     A pair may come from two recordings, or from one recording when its reads
@@ -381,7 +378,7 @@ class FloorRule(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class FrozenRules(_Strict):
+class FrozenRules(StrictModel):
     """The scoring rules as declared before the first post-change recording.
 
     ``sha256`` is :meth:`InterventionCase.rules_sha256` at ``frozen_at``. Once
@@ -397,7 +394,7 @@ class FrozenRules(_Strict):
 _SHA256 = r"^[0-9a-f]{64}$"
 
 
-class EcuOutputSpec(_Strict):
+class EcuOutputSpec(StrictModel):
     """One ECU-side output scored against the truck (E09.12): the decoded
     integer logic's value, which the plant does not touch."""
 
@@ -411,7 +408,7 @@ class EcuOutputSpec(_Strict):
     model_output: str = Field(min_length=1)
 
 
-class PredictionArtifact(_Strict):
+class PredictionArtifact(StrictModel):
     """A simulator prediction written before the drives it is scored on.
 
     ``files`` are the sha256 values recorded with the prediction (E08.7 item
@@ -446,7 +443,7 @@ class PredictionArtifact(_Strict):
         return self
 
 
-class EcuOutputRules(_Strict):
+class EcuOutputRules(StrictModel):
     """E09.12: effect tests on the ECU-side outputs, per matched pair, with the
     case's matching, floor and acceptance. The pre-change side is the
     prediction's own design points; the post-change side is each output's own
@@ -489,7 +486,7 @@ class EcuOutputRules(_Strict):
 EcuQuantity = Literal["raw", "air_normalised"]
 
 
-class EcuAmendment(_Strict):
+class EcuAmendment(StrictModel):
     """A versioned amendment to the ECU-output rules: never an edit of the
     block it amends, which stays frozen with its own verdict.
 
@@ -530,7 +527,7 @@ class EcuAmendment(_Strict):
         return sha256_json(rules, compact=False)
 
 
-class PostAppend(_Strict):
+class PostAppend(StrictModel):
     """One post-change recording declared after the ECU-output rules froze.
 
     The post list is append-only and outside every frozen hash, as E07.4's
@@ -555,7 +552,7 @@ def post_chain_sha256(previous: str, recording: str, appended_on: date) -> str:
     return hashlib.sha256(f"{previous}:{recording}:{appended_on.isoformat()}".encode()).hexdigest()
 
 
-class EcuPredictionBlock(_Strict):
+class EcuPredictionBlock(StrictModel):
     """A further prediction of the same intervention scored on the ECU-side
     outputs (E09.12), frozen on its own: never an edit of ``ecu_outputs``,
     whose artifact stays frozen inside its own sha.
@@ -629,7 +626,7 @@ class EcuPredictionBlock(_Strict):
         return sha256_json(rules, compact=False)
 
 
-class InterventionCase(_Strict):
+class InterventionCase(StrictModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.-]*$")
     synthetic: bool = False
     base_revision: str
@@ -839,7 +836,7 @@ class InterventionCase(_Strict):
             previous = amendment.frozen_rules
 
 
-class InterventionFile(_Strict):
+class InterventionFile(StrictModel):
     schema_version: Literal[1]
     cases: list[InterventionCase] = Field(min_length=1)
 

@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.behavior.behavior_models import DeviationConfig
 from src.evidence import (
@@ -51,6 +51,7 @@ from src.evidence import (
 )
 from src.evidence import Provenance as MemoryProvenance
 from src.paths import DATA_DIR
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 #: Default (unscoped) location — always resolve the real path through
@@ -62,11 +63,7 @@ DEFAULT_ACCEPTED_BASELINES_PATH = DATA_DIR / "accepted_baselines.yaml"
 CURRENT_SCHEMA_VERSION = 1
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class DirectionalBand(_Strict):
+class DirectionalBand(StrictModel):
     """One-sided deviation band around ``accepted_center``.
 
     ``tolerance`` is the wander allowed either side of center with no alert
@@ -93,7 +90,7 @@ class DirectionalBand(_Strict):
         return self
 
 
-class Provenance(_Strict):
+class Provenance(StrictModel):
     """Who declared this override, when, why, and when it needs re-confirming.
 
     ``review_by`` is non-negotiable (see the doc's "Durability, provenance,
@@ -113,7 +110,7 @@ class Provenance(_Strict):
         return self
 
 
-class AcceptedBaselineOverride(_Strict):
+class AcceptedBaselineOverride(StrictModel):
     """One directional, provenanced override.
 
     Targets either a raw ``channel`` (e.g. ``obd:SHORT_FUEL_TRIM_1``) or a
@@ -192,7 +189,7 @@ class AcceptedBaselineOverride(_Strict):
         )
 
 
-class AcceptedBaselines(_Strict):
+class AcceptedBaselines(StrictModel):
     """Top-level ``accepted_baselines.yaml`` document."""
 
     schema_version: int

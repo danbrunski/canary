@@ -56,7 +56,7 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 import src.models.adaptive_candidate as candidate_module
 import src.models.change_detection as change_module
@@ -106,6 +106,7 @@ from src.signals.pairing import (
 )
 from src.storage.corpus_eligibility import default_profile_exclusion
 from src.storage.session_files import session_footer_span
+from src.strict_model import FrozenStrictModel
 from src.timefmt import utc_datetime
 from src.vehicle.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 from src.yaml_load import load_yaml
@@ -150,11 +151,7 @@ TOOL_VERSION = "2"
 DataOrigin = Literal["observed", "synthetic"]
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class Gate(_Strict):
+class Gate(FrozenStrictModel):
     spec: str = Field(min_length=1)
     reason: str = Field(min_length=1)
     equals: float | None = None
@@ -183,7 +180,7 @@ class Gate(_Strict):
 _UNTUNABLE = ("calibration.n_", "shifts", "schema", "residual", "unit", "features")
 
 
-class TuningCandidate(_Strict):
+class TuningCandidate(FrozenStrictModel):
     """One policy variant: dotted paths into the base policy and new values."""
 
     name: str = Field(min_length=1)
@@ -197,7 +194,7 @@ class TuningCandidate(_Strict):
         return self
 
 
-class Tuning(_Strict):
+class Tuning(FrozenStrictModel):
     """How the policy is chosen without the test drives: an inner split of
     train + calibration, and the declared candidates."""
 
@@ -206,7 +203,7 @@ class Tuning(_Strict):
     candidates: tuple[TuningCandidate, ...] = Field(min_length=1)
 
 
-class ResidualDefinition(_Strict):
+class ResidualDefinition(FrozenStrictModel):
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
     evidence_class: Literal["engine_response"]
@@ -281,7 +278,7 @@ def _feature_fn(feature: str, condition: str) -> Callable[[np.ndarray], np.ndarr
     )
 
 
-class ChangeResiduals(_Strict):
+class ChangeResiduals(FrozenStrictModel):
     schema_: Literal["canary-change-residuals/2"] = Field(alias="schema")
     residuals: tuple[ResidualDefinition, ...] = Field(min_length=1)
 

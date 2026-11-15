@@ -31,9 +31,10 @@ import hashlib
 from pathlib import Path
 from typing import Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.analysis.rom_targets import Checksums, Definition
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 #: File name of the map definition in a vehicle profile directory.
@@ -57,11 +58,7 @@ TREE_LABEL_MAX = 36
 DTYPE_BYTES: dict[str, int] = {"u8": 1, "be16": 2, "be32": 4}
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class CalibrationIdLocation(_Strict):
+class CalibrationIdLocation(StrictModel):
     """Where the image stores its calibration ID, as ASCII."""
 
     offset: int = Field(ge=0)
@@ -69,7 +66,7 @@ class CalibrationIdLocation(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class EraseSector(_Strict):
+class EraseSector(StrictModel):
     """One unit the flash erases, as the loader that wrote this image saw it."""
 
     index: int = Field(ge=0)
@@ -80,7 +77,7 @@ class EraseSector(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class Region(_Strict):
+class Region(StrictModel):
     """An absolute span of the image and what it is."""
 
     name: str = Field(min_length=1)
@@ -95,7 +92,7 @@ class Region(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class SlotRegion(_Strict):
+class SlotRegion(StrictModel):
     """A span inside every map slot, addressed from the slot's base.
 
     For a table whose bounds or dimensions are not known yet: the changed
@@ -113,7 +110,7 @@ class SlotRegion(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class MapSlots(_Strict):
+class MapSlots(StrictModel):
     """``count`` copies of the tuner's map, ``stride`` bytes apart from ``base``.
 
     Slot numbers are 1-based, as the tuner names them ("Map 1").
@@ -137,7 +134,7 @@ class MapSlots(_Strict):
         return self.base + self.count * self.stride - 1
 
 
-class Decode(_Strict):
+class Decode(StrictModel):
     """How a raw cell becomes an engineering value.
 
     ``linear``: ``value = raw × scale + offset``. ``reciprocal``:
@@ -189,14 +186,14 @@ class Decode(_Strict):
         return f"{self.quantity} = {self.numerator:g} / {cell}"
 
 
-class TableAxes(_Strict):
+class TableAxes(StrictModel):
     """References to the axis tables, by table ``id``."""
 
     rows: str | None = None
     cols: str | None = None
 
 
-class EditorDisagreement(_Strict):
+class EditorDisagreement(StrictModel):
     """How a tuning editor shows a 2-D table's axes, where that disagrees
     with the ECM's code.
 
@@ -226,7 +223,7 @@ class EditorDisagreement(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class EditorLabels(_Strict):
+class EditorLabels(StrictModel):
     """The labels a tuning editor puts on an axis the code compares as raw
     counts.
 
@@ -259,7 +256,7 @@ class EditorLabels(_Strict):
         return f"{self.quantity} = raw / {self.full_scale} × {self.relative_to}"
 
 
-class Table(_Strict):
+class Table(StrictModel):
     """A table at one absolute offset, or at one offset inside each map slot."""
 
     #: Unique within the file; axes reference tables by it.
@@ -353,7 +350,7 @@ class Table(_Strict):
         return self.rows == 1 or self.cols == 1
 
 
-class ProgramConstant(_Strict):
+class ProgramConstant(StrictModel):
     """A literal the ECU's code loads, at one absolute offset (N02.1).
 
     Not a table: nothing edits it and no editor shows it. It is here so a
@@ -387,7 +384,7 @@ class ProgramConstant(_Strict):
         return DTYPE_BYTES[self.dtype]
 
 
-class RomMap(_Strict):
+class RomMap(StrictModel):
     """One vehicle's map of its flash image."""
 
     schema_version: Literal[1]
@@ -582,7 +579,7 @@ class RomMap(_Strict):
         return self.map_slots.slot_base(slot) + table.slot_offset
 
 
-class RefusedFormat(_Strict):
+class RefusedFormat(StrictModel):
     """A file shape that is recognised and refused by name."""
 
     name: str = Field(min_length=1)

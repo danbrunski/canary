@@ -27,8 +27,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 #: Recorded unit <- transfer unit, multiply by. A pair missing here is refused
@@ -41,11 +42,7 @@ UNIT_CONVERSIONS: dict[tuple[str, str], float] = {
 FaultKind = Literal["below_window", "above_window"]
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class AdcModule(_Strict):
+class AdcModule(StrictModel):
     """The ADC itself: what one count is worth."""
 
     #: The hardware, for the record.
@@ -58,7 +55,7 @@ class AdcModule(_Strict):
     full_scale_counts: int = Field(gt=0)
 
 
-class Divider(_Strict):
+class Divider(StrictModel):
     """A resistor divider ahead of the ADC pin, as measured."""
 
     #: Sensor signal side to the ADC node.
@@ -71,7 +68,7 @@ class Divider(_Strict):
         return (self.r_top_ohms + self.r_bottom_ohms) / self.r_bottom_ohms
 
 
-class Transfer(_Strict):
+class Transfer(StrictModel):
     """``value = slope * sensor_volts + intercept``, in ``unit``."""
 
     slope: float
@@ -79,12 +76,12 @@ class Transfer(_Strict):
     unit: str = Field(min_length=1)
 
 
-class VoltWindow(_Strict):
+class VoltWindow(StrictModel):
     min: float = Field(ge=0.0)
     max: float = Field(gt=0.0)
 
 
-class AnalogChannel(_Strict):
+class AnalogChannel(StrictModel):
     #: Channel name, recorded as ``sensor:<name>``; faults as ``sensor:<name>_FAULT``.
     name: str = Field(min_length=1, pattern=r"^[A-Z0-9_]+$")
     #: ADC input number.
@@ -130,7 +127,7 @@ class AnalogChannel(_Strict):
         return self
 
 
-class AnalogSensorCatalog(_Strict):
+class AnalogSensorCatalog(StrictModel):
     module: AdcModule
     channels: list[AnalogChannel]
 

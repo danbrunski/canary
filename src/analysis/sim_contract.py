@@ -58,11 +58,12 @@ import re
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.analysis.ecu_application import ApplicationModel
 from src.artifact_hash import sha256_json
 from src.refusal import ReasonedRefusal
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 CONTRACT_FILE = "engine_sim_contract.yaml"
@@ -111,10 +112,6 @@ _ID = r"^[a-z][a-z0-9_]*$"
 _CHANNEL = r"^[a-z]+:[A-Za-z0-9_]+$"
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
 class SimulationRefusalError(ReasonedRefusal, ValueError):
     """A scenario or contract the simulator cannot evaluate; ``reason`` names why."""
 
@@ -122,13 +119,13 @@ class SimulationRefusalError(ReasonedRefusal, ValueError):
 # -- units and clocks ---------------------------------------------------------------
 
 
-class Unit(_Strict):
+class Unit(StrictModel):
     id: str = Field(pattern=r"^[A-Za-z0-9_]+$")
     dimension: str = Field(min_length=1)
     meaning: str = Field(min_length=1)
 
 
-class Clock(_Strict):
+class Clock(StrictModel):
     id: str = Field(pattern=_ID)
     kind: ClockKind
     #: Fixed period; ``None`` for an event clock or an irregular acquisition.
@@ -155,14 +152,14 @@ class Clock(_Strict):
         return self
 
 
-class EcuTask(_Strict):
+class EcuTask(StrictModel):
     #: Index in ``EcuSchedule.task_table``.
     entry: int = Field(ge=0)
     function: int = Field(ge=0)
     name: str = Field(min_length=1)
 
 
-class EcuSchedule(_Strict):
+class EcuSchedule(StrictModel):
     """The order the ECU runs its fuel chain each tick, from the firmware."""
 
     clock: str
@@ -187,7 +184,7 @@ class EcuSchedule(_Strict):
         return self
 
 
-class Solver(_Strict):
+class Solver(StrictModel):
     clock: str
     method: Literal["fixed_step_euler", "rk4"]
     #: Values cross between the twin and the plant only at ECU task boundaries.
@@ -198,7 +195,7 @@ class Solver(_Strict):
 # -- quantities ---------------------------------------------------------------------
 
 
-class IntegerRepresentation(_Strict):
+class IntegerRepresentation(StrictModel):
     width: Literal[8, 16, 32]
     signed: bool
     #: RAM address, when the value lives at a known one.
@@ -214,12 +211,12 @@ class IntegerRepresentation(_Strict):
     note: str | None = None
 
 
-class Dependency(_Strict):
+class Dependency(StrictModel):
     quantity: str
     timing: Timing
 
 
-class SensorSpec(_Strict):
+class SensorSpec(StrictModel):
     """How a physical quantity becomes the ECU's integer."""
 
     measures: str
@@ -232,7 +229,7 @@ class SensorSpec(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class ActuatorSpec(_Strict):
+class ActuatorSpec(StrictModel):
     """How an ECU command becomes a physical actuation, and its limits."""
 
     commanded_by: str
@@ -253,7 +250,7 @@ class ActuatorSpec(_Strict):
         return self
 
 
-class Quantity(_Strict):
+class Quantity(StrictModel):
     id: str = Field(pattern=_ID)
     kind: Kind
     units: str
@@ -309,13 +306,13 @@ class Quantity(_Strict):
         return any(d.quantity == self.id for d in self.depends_on)
 
 
-class Event(_Strict):
+class Event(StrictModel):
     id: str = Field(pattern=_ID)
     meaning: str = Field(min_length=1)
     evidence: str = Field(min_length=1)
 
 
-class HardwareParameter(_Strict):
+class HardwareParameter(StrictModel):
     id: str = Field(pattern=_ID)
     units: str
     #: ``known``: a hardware fact with evidence; ``identifiable``: fittable from
@@ -324,7 +321,7 @@ class HardwareParameter(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class HardwareConfiguration(_Strict):
+class HardwareConfiguration(StrictModel):
     id: str = Field(pattern=_ID)
     meaning: str = Field(min_length=1)
     parameters: list[HardwareParameter] = Field(min_length=1)
@@ -341,7 +338,7 @@ Invariant = Literal["manifold_at_or_below_ambient"]
 TimeResolution = Literal["engine_cycle", "solver_step"]
 
 
-class ApplicabilityBound(_Strict):
+class ApplicabilityBound(StrictModel):
     """A boundary quantity's range inside which the subsystem's equations are
     claimed to hold. Outside it a result is refused by name, never clipped."""
 
@@ -357,7 +354,7 @@ class ApplicabilityBound(_Strict):
         return self
 
 
-class Applicability(_Strict):
+class Applicability(StrictModel):
     hardware_configurations: list[str] = Field(min_length=1)
     bounds: list[ApplicabilityBound] = Field(min_length=1)
     invariants: list[Invariant] = Field(default_factory=list)
@@ -365,7 +362,7 @@ class Applicability(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class NumericalCheck(_Strict):
+class NumericalCheck(StrictModel):
     """How a built subsystem shows its numbers are converged and conserving.
 
     ``refinement`` divides the contract's solver step (1 = the step itself);
@@ -391,7 +388,7 @@ class NumericalCheck(_Strict):
         return self
 
 
-class MeasurementPlan(_Strict):
+class MeasurementPlan(StrictModel):
     """When a missing measurement is expected, as an operator decided it. Not
     an availability: the measurement stays unusable until it is logged."""
 
@@ -405,7 +402,7 @@ class MeasurementPlan(_Strict):
     consequence: str = Field(min_length=1)
 
 
-class RequiredMeasurement(_Strict):
+class RequiredMeasurement(StrictModel):
     """A measurement a subsystem needs before a parameter is identifiable or a
     result can be validated, named before anything is claimed."""
 
@@ -439,7 +436,7 @@ class RequiredMeasurement(_Strict):
 ReferenceKind = Literal["instrument", "derived", "ecu_computed", "external"]
 
 
-class ValidationReference(_Strict):
+class ValidationReference(StrictModel):
     """A channel a subsystem's output could be checked against.
 
     Its lineage -- what it is computed from -- is not stated alone: the
@@ -473,7 +470,7 @@ class ValidationReference(_Strict):
         return self
 
 
-class SharedInput(_Strict):
+class SharedInput(StrictModel):
     """An input a reference may share with the subsystem, and why sharing it
     does not make the comparison circular (rpm as the operating-point index)."""
 
@@ -481,7 +478,7 @@ class SharedInput(_Strict):
     justification: str = Field(min_length=1)
 
 
-class ValidationRecord(_Strict):
+class ValidationRecord(StrictModel):
     """One scoring of a subsystem against a reference, as the scoring wrote it."""
 
     reference: str
@@ -491,7 +488,7 @@ class ValidationRecord(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class ParameterFit(_Strict):
+class ParameterFit(StrictModel):
     """A parameter an internal model identifies from logs: where the fit holds
     and which unresolved errors it carries. Never a measurement of the
     parameter (``kind`` is ``log_fit`` only): a fit from MAF inherits MAF's
@@ -513,7 +510,7 @@ class ParameterFit(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class InternalModel(_Strict):
+class InternalModel(StrictModel):
     """A quantity another stage owns that this stage's implementation computes
     for itself instead of reading from the owner. Declared, never silent: the
     two can disagree, so where they differ and who reconciles them is stated.
@@ -553,7 +550,7 @@ class InternalModel(_Strict):
         return self
 
 
-class SubsystemImplementation(_Strict):
+class SubsystemImplementation(StrictModel):
     module: str = Field(pattern=r"^src\.analysis\.[a-z_]+$")
     profile_file: str = Field(pattern=r"^[a-z][a-z0-9_]*\.yaml$")
     #: The version scenarios run (the contract's ``plant_version`` for the fuel stage).
@@ -567,7 +564,7 @@ class SubsystemImplementation(_Strict):
         return [self.plant_version, *self.other_plant_versions]
 
 
-class Subsystem(_Strict):
+class Subsystem(StrictModel):
     """One stage of the plant: what it computes, where its equations hold, how
     its numerics are checked, and what independent measurement could validate
     it. Every plant and actuator quantity belongs to exactly one subsystem, so a
@@ -632,7 +629,7 @@ class Subsystem(_Strict):
 # -- modes ----------------------------------------------------------------------------
 
 
-class StateInit(_Strict):
+class StateInit(StrictModel):
     method: InitMethod
     #: Events that reset the state (each declared under ``events``).
     reset_on: list[str] = Field(default_factory=list)
@@ -655,7 +652,7 @@ class StateInit(_Strict):
         return self
 
 
-class Assignment(_Strict):
+class Assignment(StrictModel):
     role: Role
     #: Where a supplied value comes from: a channel spec, or ``scenario``.
     source: str | None = None
@@ -693,7 +690,7 @@ class Assignment(_Strict):
         return self
 
 
-class Assimilation(_Strict):
+class Assimilation(StrictModel):
     """A state-estimation mode's use of an observation of a computed quantity."""
 
     quantity: str
@@ -701,7 +698,7 @@ class Assimilation(_Strict):
     corrects: str
 
 
-class Mode(_Strict):
+class Mode(StrictModel):
     id: str = Field(pattern=_ID)
     kind: ModeKind
     claim: str = Field(min_length=1)
@@ -733,7 +730,7 @@ class Mode(_Strict):
 # -- the contract ---------------------------------------------------------------------
 
 
-class SimContract(_Strict):
+class SimContract(StrictModel):
     schema_version: Literal[1]
     contract_version: int = Field(ge=1)
     name: Literal["engine_sim_contract"]
@@ -1267,7 +1264,7 @@ def _check_absorbed(contract: SimContract, nodes: dict[str, Any]) -> list[str]:
 # -- scenarios and provenance ---------------------------------------------------------
 
 
-class EcuIdentity(_Strict):
+class EcuIdentity(StrictModel):
     """The exact controller a run uses."""
 
     program_id: str = Field(min_length=1)
@@ -1283,14 +1280,14 @@ class EcuIdentity(_Strict):
         return self
 
 
-class PlantIdentity(_Strict):
+class PlantIdentity(StrictModel):
     version: str = Field(min_length=1)
     hardware_configuration: str = Field(min_length=1)
     #: Parameter id -> evidence id (or ``unmeasured``) for this run's values.
     parameter_evidence: dict[str, str] = Field(default_factory=dict)
 
 
-class SuppliedValue(_Strict):
+class SuppliedValue(StrictModel):
     """A boundary or initial value: a number in the quantity's units, or a
     channel it is read from, with where it came from."""
 
@@ -1305,7 +1302,7 @@ class SuppliedValue(_Strict):
         return self
 
 
-class Scenario(_Strict):
+class Scenario(StrictModel):
     contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     mode: str
     #: One controller, or two (baseline then candidate) for a ROM comparison.

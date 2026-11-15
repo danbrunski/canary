@@ -20,16 +20,13 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import Field, ValidationError
 
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class TestEvent(_Strict):
+class TestEvent(StrictModel):
     """One tappable event in a profile.
 
     ``tag`` is what lands in ``tags.jsonl`` (reuse the established drive
@@ -46,7 +43,7 @@ class TestEvent(_Strict):
     advisory_duration_s: int | None = Field(default=None, ge=0)
 
 
-class TestProfile(_Strict):
+class TestProfile(StrictModel):
     """One profile = capture defaults + an unordered event palette."""
 
     id: str
@@ -63,14 +60,14 @@ class TestProfile(_Strict):
     events: list[TestEvent] = Field(min_length=1)
 
 
-class TestProfileError(_Strict):
+class TestProfileError(StrictModel):
     """A profile file that failed to load — surfaced, not swallowed."""
 
     file: str
     error: str
 
 
-class TestProfileCatalog(_Strict):
+class TestProfileCatalog(StrictModel):
     """Everything ``GET /test-profiles`` returns."""
 
     profiles: list[TestProfile] = Field(default_factory=list)

@@ -58,12 +58,13 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
+from pydantic import ConfigDict, Field, ValidationInfo, model_validator
 
 from src.artifact_hash import sha256_json
 from src.evidence.ledger import MemoryLedger, MemoryQuery
 from src.evidence.records import Evidence, Intervention, Investigation
 from src.models.change_detection import Block, BlockVerdict, ChangeMonitor, FrozenReference
+from src.strict_model import FrozenStrictModel
 
 __all__ = [
     "CANDIDATE_SCHEMA",
@@ -106,11 +107,7 @@ class CalibrationBoundaryError(InterventionBoundaryError):
     """Learning was asked to use data recorded on another calibration."""
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class CandidateSpec(_Strict):
+class CandidateSpec(FrozenStrictModel):
     """The candidate's parameters, priors, drift, gates — declared."""
 
     schema_: Literal["canary-adaptive-candidate/2"] = Field(alias="schema")
@@ -169,7 +166,7 @@ def _hash(payload: dict[str, Any]) -> str:
     return sha256_json(body, default=str)
 
 
-class CandidateCheckpoint(_Strict):
+class CandidateCheckpoint(FrozenStrictModel):
     """The candidate's state at one instant, with its lineage. Self-hashed."""
 
     kind: Literal["candidate_checkpoint"] = "candidate_checkpoint"

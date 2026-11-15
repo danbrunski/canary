@@ -37,7 +37,7 @@ from typing import Any, Literal, NamedTuple
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from src.analysis.channels import ChannelSpecError, as_of_refusal, read_channels
 from src.analysis.rom_map import EditorDisagreement
@@ -45,6 +45,7 @@ from src.decode.dids import MEMORY_SOURCE, DidMap, load_did_map
 from src.decode.ecm_lookup import AxisEdge, search_axis
 from src.decode.slices import linear_factors
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 TableKind = Literal["fuel_targets", "fuel_compensation"]
@@ -71,11 +72,7 @@ PAIR_MAX_SEPARATION = pd.Timedelta("250ms")
 MAX_DWELL_S = 1.0
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class AxisTrace(_Strict):
+class AxisTrace(StrictModel):
     """One axis of a table: which channel is the ECM's coordinate, and whether
     it is known how that coordinate lands on the axis breakpoints."""
 
@@ -120,7 +117,7 @@ class AxisTrace(_Strict):
         return value * self.scale + self.offset
 
 
-class EdgeBehaviour(_Strict):
+class EdgeBehaviour(StrictModel):
     """What the ECM's lookup does with a coordinate past an end of an axis."""
 
     #: ``clamp``: it reads the first or last row/column.
@@ -128,7 +125,7 @@ class EdgeBehaviour(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class TableTrace(_Strict):
+class TableTrace(StrictModel):
     """The ECM's coordinates into one table (W05.1)."""
 
     x: AxisTrace
@@ -155,7 +152,7 @@ class TableTrace(_Strict):
         ]
 
 
-class TableInfo(_Strict):
+class TableInfo(StrictModel):
     kind: TableKind
     title: str
     x_label: str
@@ -171,7 +168,7 @@ class TableInfo(_Strict):
     editor_disagreement: EditorDisagreement | None = None
 
 
-class ViewerDefinition(_Strict):
+class ViewerDefinition(StrictModel):
     schema_version: Literal[1]
     map_slots: list[int] = Field(min_length=1)
     target_definition: str

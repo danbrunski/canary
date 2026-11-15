@@ -464,9 +464,10 @@ def test_the_learning_kernels_cannot_reach_the_twin():
             for alias in node.names
         }
         src = {name for name in imported if name.startswith("src.")}
-        # ``src.artifact_hash`` is a stdlib-only leaf (R24.5): it cannot reach the twin.
+        # ``src.artifact_hash`` is a stdlib-only leaf (R24.5) and ``src.strict_model``
+        # a pydantic-only one (R24.2): neither can reach the twin.
         assert all(
-            name in ("src.models.change_detection", "src.artifact_hash")
+            name in ("src.models.change_detection", "src.artifact_hash", "src.strict_model")
             or name.startswith("src.evidence.")
             for name in src
         ), src

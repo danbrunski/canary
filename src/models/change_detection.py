@@ -70,9 +70,10 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
+from pydantic import ConfigDict, Field, ValidationInfo, model_validator
 
 from src.artifact_hash import sha256_json
+from src.strict_model import FrozenStrictModel
 
 __all__ = [
     "CHANGE_POLICY_SCHEMA",
@@ -111,15 +112,11 @@ Direction = Literal["+", "-"]
 DetectorName = Literal["cusum", "glr", "drive_cusum", "drive_glr"]
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
 # ---------------------------------------------------------------------------
 # Declared policy
 
 
-class ConditionCell(_Strict):
+class ConditionCell(FrozenStrictModel):
     """One operating cell ``[lower, upper)`` on the excitation condition."""
 
     name: str = Field(min_length=1)
@@ -133,7 +130,7 @@ class ConditionCell(_Strict):
         return self
 
 
-class Excitation(_Strict):
+class Excitation(FrozenStrictModel):
     """Where the residual is meaningful, and the cells intervals are kept per."""
 
     condition: str = Field(min_length=1)
@@ -162,7 +159,7 @@ class Excitation(_Strict):
         return None
 
 
-class Dependence(_Strict):
+class Dependence(FrozenStrictModel):
     """Blocks, then a measured within-drive correction (between-drive
     variance is the drive level's, see :class:`DriveLevel`)."""
 
@@ -176,7 +173,7 @@ class Dependence(_Strict):
     max_within_drive_lag1: float = Field(ge=0.0, le=0.9)
 
 
-class IntervalCalibration(_Strict):
+class IntervalCalibration(FrozenStrictModel):
     """Out-of-sample calibration: a fixed held-out set, never leave-one-out.
 
     In-sample threshold calibration once drove a sequence detector's false
@@ -198,7 +195,7 @@ class IntervalCalibration(_Strict):
     max_bias_fraction: float = Field(gt=0.0, le=1.0)
 
 
-class Detectors(_Strict):
+class Detectors(FrozenStrictModel):
     """CUSUM for the declared shift size; windowed GLR for unknown size/time."""
 
     #: The shift worth detecting, in the residual's unit. CUSUM's reference
@@ -209,7 +206,7 @@ class Detectors(_Strict):
     glr_h: float = Field(gt=0.0)
 
 
-class DriveLevel(_Strict):
+class DriveLevel(FrozenStrictModel):
     """Change between drives: one standardized unit per drive."""
 
     cusum_h: float = Field(gt=0.0)
@@ -223,19 +220,19 @@ class DriveLevel(_Strict):
     min_drive_blocks: int = Field(ge=1)
 
 
-class Persistence(_Strict):
+class Persistence(FrozenStrictModel):
     """How much evidence one alarm needs (see the module docstring)."""
 
     min_consecutive_blocks: int = Field(ge=1)
     clip_sigma: float = Field(gt=0.0)
 
 
-class Deduplication(_Strict):
+class Deduplication(FrozenStrictModel):
     merge_seconds: float = Field(ge=0.0)
     reset_at_drive_boundary: Literal[True]
 
 
-class DeclaredShift(_Strict):
+class DeclaredShift(FrozenStrictModel):
     """A synthetic fault injected for sensitivity evaluation — never real.
 
     ``step``/``ramp`` start ``start_after_seconds`` into each drive;
@@ -273,7 +270,7 @@ class DeclaredShift(_Strict):
         return self.magnitude * min(1.0, elapsed_since_onset / self.ramp_seconds)
 
 
-class ChangePolicy(_Strict):
+class ChangePolicy(FrozenStrictModel):
     """Everything a change detector's verdicts depend on, declared."""
 
     schema_: Literal["canary-change-detection/2"] = Field(alias="schema")
@@ -444,7 +441,7 @@ class NotAFrozenReferenceError(TypeError):
     """Change detection was handed something other than a frozen reference."""
 
 
-class CellLimits(_Strict):
+class CellLimits(FrozenStrictModel):
     cell: str
     #: RMS of calibration block residuals about zero (bias included).
     scale: float = Field(gt=0.0)
@@ -464,7 +461,7 @@ class CellLimits(_Strict):
     bias: float
 
 
-class AlarmLimits(_Strict):
+class AlarmLimits(FrozenStrictModel):
     """Detector limits, copied from the policy when the reference is frozen."""
 
     shift_of_interest: float = Field(gt=0.0)
@@ -499,7 +496,7 @@ def reference_fingerprint(payload: dict[str, Any]) -> str:
     return sha256_json(body, default=str)
 
 
-class FrozenReference(_Strict):
+class FrozenReference(FrozenStrictModel):
     """A validated reference and its alarm limits, immutable and self-hashed."""
 
     kind: Literal["frozen_reference"] = "frozen_reference"

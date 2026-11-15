@@ -32,9 +32,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
 from src.decode import ecm_lookup
+from src.strict_model import StrictModel
 from tests import ecu_twin_vectors as vectors
 
 REPO = Path(__file__).resolve().parents[1]
@@ -52,11 +53,7 @@ KERNEL_MODULES = (
 STATE_OPS = {"uprev_power_on", "uprev_step", "loaded_slot"}
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class Operation(_Strict):
+class Operation(StrictModel):
     id: str = Field(pattern=r"^[a-z0-9_]+$")
     firmware: list[str] = Field(min_length=1)
     python: str = Field(pattern=r"^src(\.[a-z0-9_]+)+:[A-Za-z_][A-Za-z0-9_]*$")
@@ -71,7 +68,7 @@ class Operation(_Strict):
     open: list[str] = []
 
 
-class StateSpec(_Strict):
+class StateSpec(StrictModel):
     snapshot_version: int = Field(ge=1)
     fields: dict[str, str] = Field(min_length=1)
     init: str
@@ -79,14 +76,14 @@ class StateSpec(_Strict):
     snapshot: str
 
 
-class Blocker(_Strict):
+class Blocker(StrictModel):
     id: str
     affects: list[str] = Field(min_length=1)
     what: str
     needs: str
 
 
-class InventoryEntry(_Strict):
+class InventoryEntry(StrictModel):
     """A kernel of E02/E05 that is not (yet) an operation, and why."""
 
     python: str = Field(pattern=r"^src(\.[a-z0-9_]+)+(:[A-Za-z_][A-Za-z0-9_]*)?$")
@@ -95,7 +92,7 @@ class InventoryEntry(_Strict):
     why_not_yet: str = Field(min_length=1)
 
 
-class Contract(_Strict):
+class Contract(StrictModel):
     contract_version: int = Field(ge=1)
     kernel_version: int = Field(ge=1)
     state_model_version: int = Field(ge=1)

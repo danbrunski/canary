@@ -50,7 +50,7 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.analysis.channels import refuse_as_of
 from src.analysis.compare import align_pairs
@@ -64,6 +64,7 @@ from src.signals.afr import (
     voltage_to_afr,
 )
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 Quantity = Literal["phi", "lambda", "afr"]
@@ -111,11 +112,7 @@ class LambdaDeliveryError(ValueError):
     """A lambda-delivery question this contract refuses to answer."""
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class ResidualDefinition(_Strict):
+class ResidualDefinition(StrictModel):
     """The residual's definition, pinned so data and code cannot disagree."""
 
     definition: Literal["100 * (lambda_measured / lambda_target - 1)"]
@@ -145,7 +142,7 @@ def _check_afr_scale(
         )
 
 
-class CommandedSource(_Strict):
+class CommandedSource(StrictModel):
     """One channel that can carry the ECU's commanded mixture."""
 
     name: str
@@ -188,14 +185,14 @@ class CommandedSource(_Strict):
         return self
 
 
-class RefusedSource(_Strict):
+class RefusedSource(StrictModel):
     """A channel that looks like a target but must not be used as one."""
 
     spec: str
     reason: str = Field(min_length=1)
 
 
-class MeasuredSource(_Strict):
+class MeasuredSource(StrictModel):
     """One measured-mixture route."""
 
     name: str
@@ -251,7 +248,7 @@ class MeasuredSource(_Strict):
 EXPLAINED_REMAINDER_PCT = 1.0
 
 
-class DisagreementExplanation(_Strict):
+class DisagreementExplanation(StrictModel):
     """Why a disagreement between two routes has the direction and size it has."""
 
     mechanism: str = Field(min_length=1)
@@ -265,7 +262,7 @@ class DisagreementExplanation(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class SourceDisagreement(_Strict):
+class SourceDisagreement(StrictModel):
     """A measured disagreement between two routes, kept visible.
 
     ``relation`` states whether the two read one sensor or two; the
@@ -304,7 +301,7 @@ class SourceDisagreement(_Strict):
         return self
 
 
-class RegimeDelay(_Strict):
+class RegimeDelay(StrictModel):
     """Exhaust transport + sensor response delay for one regime (R05.16).
 
     Transport delay falls as exhaust flow rises, so a value measured on WOT
@@ -355,7 +352,7 @@ class RegimeDelay(_Strict):
         return self
 
 
-class RegimeEligibility(_Strict):
+class RegimeEligibility(StrictModel):
     """The steady-target / steady-operation rule for one target regime.
 
     Every number is a measured constraint of the regime it was measured in,
@@ -400,7 +397,7 @@ class RegimeEligibility(_Strict):
         return self
 
 
-class RegimeRules(_Strict):
+class RegimeRules(StrictModel):
     """One rule per regime a delivery residual may be computed in. Both required."""
 
     closed_loop: RegimeEligibility
@@ -415,7 +412,7 @@ class RegimeRules(_Strict):
         return self.enrichment if regime == "enrichment" else self.closed_loop
 
 
-class Eligibility(_Strict):
+class Eligibility(StrictModel):
     """Regime boundaries, target gap limit, and each regime's own rule."""
 
     #: ``|lambda_target - 1| <= closed_loop_band`` is the closed-loop regime.
@@ -431,7 +428,7 @@ class Eligibility(_Strict):
         return list(dict.fromkeys(seen))
 
 
-class Acquisition(_Strict):
+class Acquisition(StrictModel):
     """Largest separation two reads may have and still be one observation.
 
     This is acquisition mismatch, a property of the polling schedule. It is
@@ -442,7 +439,7 @@ class Acquisition(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class RegimeFloor(_Strict):
+class RegimeFloor(StrictModel):
     """Which measured noise floor a regime may quote, and under what conditions."""
 
     channel: str
@@ -451,7 +448,7 @@ class RegimeFloor(_Strict):
     conditions: str
 
 
-class LambdaDeliveryDeclaration(_Strict):
+class LambdaDeliveryDeclaration(StrictModel):
     schema_version: Literal[1] = 1
     residual: ResidualDefinition
     commanded_sources: list[CommandedSource] = Field(min_length=1)

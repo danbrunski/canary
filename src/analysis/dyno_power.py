@@ -36,7 +36,6 @@ from src.analysis.dyno_contract import (
     MotionSamples,
     RoadLoadLike,
     SquatLike,
-    StrictModel,
     as_float_array,
     speed_scale_power_band,
 )
@@ -49,6 +48,7 @@ from src.analysis.dyno_road_load import (
 )
 from src.signals.bins import cell_codes
 from src.signals.committees import STANDARD_GRAVITY
+from src.strict_model import StrictModel
 
 #: A pull's engine speed must stay within this fraction of what the stated
 #: gear and the road speed give (``rpm = v·N/r``). Adjacent gears are 25-30 %

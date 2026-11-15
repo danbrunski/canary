@@ -36,9 +36,10 @@ import math
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.decode.analog_sensors import AdcModule, AnalogChannel, AnalogSensorCatalog
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 INPUTS = 8
@@ -74,11 +75,7 @@ def port_resistance_channel(port: str) -> str:
     return f"PORT_{port}_RESISTANCE"
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class SupplySense(_Strict):
+class SupplySense(StrictModel):
     """The protected ``+12V`` rail through a divider: ``sensor:SUPPLY_VOLTAGE``."""
 
     input: int = Field(ge=0, lt=INPUTS)
@@ -108,7 +105,7 @@ class SupplySense(_Strict):
         return self.r_top_ohms * self.r_bottom_ohms / (self.r_top_ohms + self.r_bottom_ohms)
 
 
-class SensorSupply(_Strict):
+class SensorSupply(StrictModel):
     """The 5 V rail the sensor ports are pulled to and powered from (U9)."""
 
     input: int = Field(ge=0, lt=INPUTS)
@@ -120,7 +117,7 @@ class SensorSupply(_Strict):
     notes: str = ""
 
 
-class VoltagePort(_Strict):
+class VoltagePort(StrictModel):
     """A port for a driven voltage output."""
 
     name: str = Field(pattern=r"^[A-Z][A-Z0-9]*$")
@@ -134,7 +131,7 @@ class VoltagePort(_Strict):
     notes: str = ""
 
 
-class ResistivePort(_Strict):
+class ResistivePort(StrictModel):
     """A port for a two-wire resistive sensor, pulled up to the sensor supply."""
 
     name: str = Field(pattern=r"^[A-Z][A-Z0-9]*$")
@@ -147,7 +144,7 @@ class ResistivePort(_Strict):
     notes: str = ""
 
 
-class HatAdcBoard(_Strict):
+class HatAdcBoard(StrictModel):
     device: str = Field(min_length=1)
     #: Every mapped input's range.
     range: RangeName

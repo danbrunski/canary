@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.decode import slices
 from src.decode.memory_relations import (
@@ -34,6 +34,7 @@ from src.decode.memory_relations import (
 )
 from src.decode.slices import ByteSlice, LinearScale, PlausibleRange
 from src.paths import DIDS_YAML
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml_model
 
 log = logging.getLogger(__name__)
@@ -58,17 +59,13 @@ MEMORY_SOURCE = "mem"
 _RAW_DID_CHANNEL_PREFIX = "DID_"
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
 #: One evidence record for every catalog (R05.9): the DID catalog's refusal
 #: (a ``constant`` never without its ``conditions`` and unit) now lives in
 #: :class:`src.decode.slices.Evidence`, which bindings share.
 Evidence = slices.Evidence
 
 
-class CalibrationIdAccess(_Strict):
+class CalibrationIdAccess(StrictModel):
     """How to read the ECU's own calibration id (service ``0x21``).
 
     ``session`` is a measured vehicle fact, and deliberately has an
@@ -91,7 +88,7 @@ class CalibrationIdAccess(_Strict):
         return self.session != "default"
 
 
-class DidAccess(_Strict):
+class DidAccess(StrictModel):
     """How to reach Mode 22 on this vehicle's ECU.
 
     The 2008 Nissan ECM refuses service 0x22 in the default session
@@ -139,7 +136,7 @@ class DidAccess(_Strict):
         return self
 
 
-class DidEntry(ByteSlice, LinearScale, PlausibleRange, _Strict):
+class DidEntry(ByteSlice, LinearScale, PlausibleRange, StrictModel):
     """An identified Mode 22 DID: where its value sits in the response
     payload + how to decode it.
 
@@ -236,7 +233,7 @@ class DidEntry(ByteSlice, LinearScale, PlausibleRange, _Strict):
         return self
 
 
-class MemoryKnownAnswer(_Strict):
+class MemoryKnownAnswer(StrictModel):
     """A cross-check that proves a RAM address still holds what it claims.
 
     An address survives a reflash only by luck, and the failure is silent:
@@ -317,7 +314,7 @@ class MemoryKnownAnswer(_Strict):
         return self
 
 
-class MemoryChannel(ByteSlice, LinearScale, PlausibleRange, _Strict):
+class MemoryChannel(ByteSlice, LinearScale, PlausibleRange, StrictModel):
     """A recurring ReadMemoryByAddress (service ``0x23``) channel.
 
     A DID is an identifier the ECU defines; a RAM address is a location in
@@ -615,7 +612,7 @@ def neighbour_span(subject: MemoryChannel) -> tuple[int, int]:
     return start, end - start
 
 
-class DidMap(_Strict):
+class DidMap(StrictModel):
     """Top-level dids.yaml document."""
 
     schema_version: int

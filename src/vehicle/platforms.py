@@ -22,10 +22,11 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import Field, ValidationError, model_validator
 
 from src.config import CanaryConfig
 from src.paths import PLATFORMS_DIR, REPO_ROOT
+from src.strict_model import StrictModel
 from src.vehicle.profiles import profile_dir
 from src.yaml_load import load_yaml
 
@@ -33,11 +34,7 @@ from src.yaml_load import load_yaml
 PLATFORM_FILE = "platform.yaml"
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class PlatformVehicles(_Strict):
+class PlatformVehicles(StrictModel):
     """One make and model, over a span of model years."""
 
     make: str = Field(min_length=1)
@@ -60,7 +57,7 @@ class PlatformVehicles(_Strict):
         )
 
 
-class Platform(_Strict):
+class Platform(StrictModel):
     schema_version: Literal[1]
     name: str = Field(min_length=1)
     vehicles: list[PlatformVehicles] = Field(min_length=1)

@@ -76,7 +76,7 @@ from typing import Any, Final, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.analysis.air_charge_twin import AirChargeCalibration, AirChargeRefusalError
 from src.analysis.ecu_application import ApplicationModelRefusalError, check_image
@@ -114,6 +114,7 @@ from src.analysis.target_phi import (
 )
 from src.analysis.target_phi import predict as predict_phi
 from src.decode.ecm_lookup import AxisHit, search_axis
+from src.strict_model import FrozenStrictModel
 
 #: Bump when the table's shape or meaning changes.
 SCHEMA_VERSION: Final = 1
@@ -409,17 +410,13 @@ def cell_ranges(breakpoints: Sequence[int]) -> list[tuple[int | None, int | None
 # -- the table's schema -------------------------------------------------------------------
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class Quantiles(_Strict):
+class Quantiles(FrozenStrictModel):
     p05: float
     p50: float
     p95: float
 
 
-class QuantileBlock(_Strict):
+class QuantileBlock(FrozenStrictModel):
     """Weighted quantiles over the pairs ``over`` names."""
 
     over: Literal["all_pairs", "supported_pairs", "computed_unsupported_pairs"]
@@ -433,14 +430,14 @@ class QuantileBlock(_Strict):
     relative_undefined_pairs: int = Field(ge=0)
 
 
-class SupportEntry(_Strict):
+class SupportEntry(FrozenStrictModel):
     status: Literal["supported", "unsupported"]
     reasons: list[str]
     pairs: int = Field(ge=1)
     weight_share: float = Field(ge=0, le=1)
 
 
-class OutputCell(_Strict):
+class OutputCell(FrozenStrictModel):
     """One output in one cell (or one loop kind of a cell)."""
 
     status: CellStatus
@@ -456,7 +453,7 @@ class OutputCell(_Strict):
     supported_effect: Literal["changed", "unchanged"] | None = None
 
 
-class LoopBlock(_Strict):
+class LoopBlock(FrozenStrictModel):
     """One loop kind's pairs in a cell, and its headline output."""
 
     loop: str
@@ -466,12 +463,12 @@ class LoopBlock(_Strict):
     cell: OutputCell
 
 
-class EditMark(_Strict):
+class EditMark(FrozenStrictModel):
     old: int
     new: int
 
 
-class Cell(_Strict):
+class Cell(FrozenStrictModel):
     row: int = Field(ge=0)
     col: int = Field(ge=0)
     row_breakpoint: int
@@ -495,7 +492,7 @@ class Cell(_Strict):
     col_axis_moved: bool
 
 
-class AxisInfo(_Strict):
+class AxisInfo(FrozenStrictModel):
     table: str
     coordinate: Coordinate
     raw: list[int]
@@ -507,7 +504,7 @@ class AxisInfo(_Strict):
     cell_ranges: list[tuple[int | None, int | None]]
 
 
-class Reach(_Strict):
+class Reach(FrozenStrictModel):
     """Whether the change can reach an output: ``reached``; ``not_reached``
     (every ROM dependency ``unchanged``, no learned reset it reads);
     ``no_change`` (identical images and learned state)."""
@@ -516,14 +513,14 @@ class Reach(_Strict):
     basis: list[str]
 
 
-class EditedCell(_Strict):
+class EditedCell(FrozenStrictModel):
     row: int
     col: int
     old: int
     new: int
 
 
-class AxisEdit(_Strict):
+class AxisEdit(FrozenStrictModel):
     axis: Literal["rows", "cols"]
     table: str
     index: int
@@ -531,20 +528,20 @@ class AxisEdit(_Strict):
     new: int
 
 
-class OtherEdit(_Strict):
+class OtherEdit(FrozenStrictModel):
     table: str
     slot: int | None
     cells: int = Field(ge=1)
 
 
-class MovedLookup(_Strict):
+class MovedLookup(FrozenStrictModel):
     node: str
     tables: list[str]
     #: One of its tables is this grid's table or one of its axes.
     on_this_grid: bool
 
 
-class Overlay(_Strict):
+class Overlay(FrozenStrictModel):
     """Where the edit is, on the same grid as where its effect shows."""
 
     edited_cells: list[EditedCell]
@@ -553,12 +550,12 @@ class Overlay(_Strict):
     moved_lookups: list[MovedLookup]
 
 
-class Unplaced(_Strict):
+class Unplaced(FrozenStrictModel):
     pairs: int = Field(ge=1)
     weight: float = Field(gt=0)
 
 
-class CellTable(_Strict):
+class CellTable(FrozenStrictModel):
     """The per-cell table: E08.5 writes it, E08.6 renders it."""
 
     schema_version: Literal[1]

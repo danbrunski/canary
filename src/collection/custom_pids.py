@@ -39,11 +39,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 
 from src.atomic_write import atomic_write_text
 from src.coerce import finite_float
 from src.paths import DATA_DIR
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 __all__ = [
@@ -236,11 +237,7 @@ def evaluate_formula(formula: str, payload: bytes) -> float | None:
 # ---------------------------------------------------------------------------
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class CustomPid(_Strict):
+class CustomPid(StrictModel):
     """One user-defined data request plus decode formula."""
 
     name: str  # canonical channel name (telemetry key)
@@ -289,7 +286,7 @@ class CustomPid(_Strict):
         return evaluate_formula(self.formula, payload)
 
 
-class CustomPidSet(_Strict):
+class CustomPidSet(StrictModel):
     """Top-level versioned ``custom_pids.yaml`` document."""
 
     schema_version: int = 1

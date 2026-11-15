@@ -43,11 +43,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from src.artifact_hash import sha256_json
 from src.config import DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS
 from src.storage.broadcast_storage import is_broadcast_channel
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 if TYPE_CHECKING:
@@ -111,11 +112,7 @@ def channel_group(channel: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class TierSpec(_Strict):
+class TierSpec(StrictModel):
     """Expected arrival interval of one poll tier on this vehicle."""
 
     interval_seconds: float = Field(gt=0)
@@ -124,7 +121,7 @@ class TierSpec(_Strict):
     reason: str = Field(min_length=1)
 
 
-class GroupSpec(_Strict):
+class GroupSpec(StrictModel):
     """How long an answer group may go quiet before it has *stopped*.
 
     Gaps between any two arrivals in the group shorter than this are routine
@@ -138,7 +135,7 @@ class GroupSpec(_Strict):
     reason: str = Field(min_length=1)
 
 
-class ConfirmSpec(_Strict):
+class ConfirmSpec(StrictModel):
     """When a repeated detection confirms (A05.6).
 
     ``repeats`` detections of the same check on the same channel, the later
@@ -160,7 +157,7 @@ class ConfirmSpec(_Strict):
         return self
 
 
-class RangeRule(_Strict):
+class RangeRule(StrictModel):
     """A vehicle limit tighter than any catalog bound, and/or the modes the
     range check runs in, with its reason. ``modes`` alone gates the catalog's
     own bound (e.g. a key-on sentinel the ECM broadcasts before its first
@@ -181,7 +178,7 @@ class RangeRule(_Strict):
         return self
 
 
-class SlewRule(_Strict):
+class SlewRule(StrictModel):
     """Largest physically possible change per second: a step is flagged when
     ``|delta| > per_second * max(dt, update_interval_seconds) + allowance``.
 
@@ -199,7 +196,7 @@ class SlewRule(_Strict):
     modes: list[str] | None = None
 
 
-class StuckRule(_Strict):
+class StuckRule(StrictModel):
     """``samples`` consecutive identical arrived samples spanning at least
     ``min_seconds``, in a mode where the channel is expected to move.
 
@@ -215,7 +212,7 @@ class StuckRule(_Strict):
     reason: str = Field(min_length=1)
 
 
-class FreshnessRule(_Strict):
+class FreshnessRule(StrictModel):
     """Per-channel freshness overrides: its tier, or opting it out."""
 
     tier: str | None = None
@@ -224,7 +221,7 @@ class FreshnessRule(_Strict):
     modes: list[str] | None = None
 
 
-class ChannelRules(_Strict):
+class ChannelRules(StrictModel):
     range: RangeRule | None = None
     slew: SlewRule | None = None
     stuck: StuckRule | None = None
@@ -233,7 +230,7 @@ class ChannelRules(_Strict):
     confirm: dict[CheckName, ConfirmSpec] = Field(default_factory=dict)
 
 
-class PlausibilityProfile(_Strict):
+class PlausibilityProfile(StrictModel):
     """A vehicle's ``plausibility.yaml``."""
 
     schema_version: Literal[1]

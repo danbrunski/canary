@@ -55,7 +55,7 @@ import numpy as np
 import pandas as pd
 from numpy.random import PCG64, Generator
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import Field, ValidationError, model_validator
 
 from src.analysis.fuel_plant import (
     DELAY_PARAMETER,
@@ -112,6 +112,7 @@ from src.analysis.twin_runner import (
     stated_pulse,
 )
 from src.session import SYNTHETIC_SESSION_PREFIX
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 #: Bump when what a result means changes. 2: per-output blanking under a
@@ -140,11 +141,7 @@ IntArray = NDArray[np.int64]
 # -- the uncertainty declaration ----------------------------------------------------------
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class ParameterUncertainty(_Strict):
+class ParameterUncertainty(StrictModel):
     """How one plant parameter is drawn, and why that form."""
 
     distribution: Literal["uniform", "triangular", "truncated_normal"]
@@ -184,16 +181,16 @@ class ParameterUncertainty(_Strict):
         return self
 
 
-class FillByteUncertainty(_Strict):
+class FillByteUncertainty(StrictModel):
     distribution: Literal["uniform_integer"]
     evidence: str = Field(min_length=1)
 
 
-class InputUncertainty(_Strict):
+class InputUncertainty(StrictModel):
     fill_byte: FillByteUncertainty
 
 
-class UncertaintyDeclaration(_Strict):
+class UncertaintyDeclaration(StrictModel):
     """``data/<vehicle>/sim_uncertainty.yaml``: one plant version's draws."""
 
     schema_version: Literal[1]

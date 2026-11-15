@@ -70,7 +70,7 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike, NDArray
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.analysis.channels import read_channels
 from src.analysis.fuel_plant import (
@@ -94,6 +94,7 @@ from src.analysis.sim_contract import (
 from src.signals.derived import DERIVED_CHANNEL_INPUTS, DERIVED_CHANNEL_OPTIONAL_INPUTS
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.signals.time_lookup import nearest_sample_indices, values_or_nan
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 MANIFOLD_FILE = "manifold_plant.yaml"
@@ -123,14 +124,10 @@ ROUNDING_FLOOR = 1e-9
 FloatArray = NDArray[np.float64]
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
 # -- the manifold profile -----------------------------------------------------------
 
 
-class Study(_Strict):
+class Study(StrictModel):
     """The step-size refinement test case (see ``manifold_plant.yaml``)."""
 
     from_fraction_of_ambient_flow: float = Field(gt=0, lt=1)
@@ -141,7 +138,7 @@ class Study(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class ManifoldPlantProfile(_Strict):
+class ManifoldPlantProfile(StrictModel):
     schema_version: Literal[1]
     plant_version: str = Field(min_length=1)
     hardware_configuration: str = Field(min_length=1)

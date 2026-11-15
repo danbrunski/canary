@@ -25,12 +25,12 @@ from src.analysis.dyno_contract import (
     DynoRefusal,
     FloatArray,
     SquatLike,
-    StrictModel,
     lstsq,
 )
 from src.analysis.dyno_driveline import Driveline, InertiaFlag
 from src.analysis.dyno_motion import Leg, estimate_pitch_offset, group_legs, remove_sensor_tilt
 from src.signals.committees import STANDARD_GRAVITY
+from src.strict_model import StrictModel
 
 #: A coast-down direction must span this much speed. ``B·v`` and ``C·v²`` are
 #: collinear over a narrow band, so a short coast yields confident nonsense;

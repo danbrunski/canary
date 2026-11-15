@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
 from src.analysis.rom_image import (
     ImageFormatError,
@@ -49,6 +49,7 @@ from src.analysis.rom_image import (
 from src.analysis.rom_map import RomMap, check_program_constants, read_program_constant
 from src.decode.fuel_comp_load import LoadInputCurves, NonMonotoneCurvesError
 from src.refusal import ReasonedRefusal
+from src.strict_model import StrictModel
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 
 #: Environment variable naming the directories ROM files are searched in,
@@ -61,11 +62,7 @@ class FuelCompRomRefusalError(ReasonedRefusal, ValueError):
     """The revision's Fuel Comp bytes cannot be read; ``reason`` names why."""
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class FuelCompRomTables(_Strict):
+class FuelCompRomTables(StrictModel):
     """Which ``rom_map.yaml`` entries hold what the reconstruction reads.
 
     Vehicle profile data (``fuel_comp_fit.yaml`` ``rom:``): the ids name

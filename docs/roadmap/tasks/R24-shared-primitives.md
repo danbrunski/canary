@@ -71,13 +71,52 @@ a fixture per caller proves it.
   - R29.3's `StatusError` (the four `(status, detail)` classes and the app
     exception handler) is the HTTP face of this. Design them together.
 
-- [ ] **R24.2 `StrictModel`.** `class _Strict(BaseModel)` with
+- [~] **R24.2 `StrictModel`.** `class _Strict(BaseModel)` with
   `extra="forbid"` is defined 51 times, 28 of them in `src/analysis/`.
   `analysis/dyno_contract.py` has the only named `StrictModel`. Not every copy
   has the same config (frozen or not, `populate_by_name`).
-  - [ ] `StrictModel` and `FrozenStrictModel` at layer 0. Migrate the copies
+  - [~] `StrictModel` and `FrozenStrictModel` at layer 0. Migrate the copies
     whose config is identical first; list the ones that differ and keep them
     until each difference is shown to be unused.
+    Evidence: `src/strict_model.py` (new; `tests/test_layering.py` `LAYERS`
+    `"strict_model": 0`): `StrictModel` = `extra="forbid"`,
+    `FrozenStrictModel(StrictModel)` = `extra="forbid", frozen=True` (merged
+    config checked: `{'extra': 'forbid'}` / `{'extra': 'forbid', 'frozen':
+    True}`). 46 module-local `_Strict` copies deleted and their subclasses
+    rebased: 31 on `StrictModel`, 15 on `FrozenStrictModel` (every one had
+    exactly the config of its replacement: no `populate_by_name`,
+    `protected_namespaces` or `strict` on the base; subclasses that add
+    `populate_by_name` keep their own `model_config`, which pydantic merges),
+    plus `analysis/dyno_contract.StrictModel` (now the shared class; its seven
+    `dyno_*` importers import it from `src.strict_model`) and the test copy in
+    `tests/test_ecu_twin_contract.py`. `analysis/llm_assist/cards.py` keeps a
+    local `_Strict(StrictModel)` for its `to_dict`; `collection/
+    capture_profile_files.py` imported `_Strict` from
+    `capture_profile_model` and now uses `StrictModel`. Equivalence: a dump of
+    `model_config`, field names and the sha256 of `model_json_schema()` for
+    every `BaseModel` defined under `src/` (662 before) is identical for all
+    615 classes that remain, and the only 47 that disappear are the
+    `_Strict`/`StrictModel` bases themselves; no module fails to import.
+    `tests/test_route_table_snapshot.py`, `tests/test_mcp_tool_snapshot.py`,
+    `tests/test_config_golden.py`, `tests/test_layering.py`: unchanged, green.
+    `tests/test_adaptive_candidate.py::test_the_learning_kernels_cannot_reach_the_twin`
+    allowlists `src.strict_model` beside `src.artifact_hash`.
+    Kept, each a difference not yet shown unused: `src/config/base.py` `_Strict`
+    (`tests/test_config_golden.py` pins its MRO and `import src.config`'s
+    module set; nine `src/config/*.py` import it), `alerts/tuning.py`,
+    `analysis/behavior_validation_schema.py` (re-exported by
+    `behavior_validation.py`) and `behavior/behavior_models.py`
+    (`protected_namespaces=()`), `analysis/rom_targets.py` `Strict`
+    (`strict=True`). Not `_Strict` copies, still direct
+    `ConfigDict(extra="forbid"...)` on a plain `BaseModel`: the request and
+    record models in `dashboard/schemas.py`, `dashboard/routes/*`
+    (`dashboard/routes/rom_library.py` and `rom_maps.py` were held by the
+    R25.3 follow-up), `alerts/events.py`, `models/feedback.py`,
+    `models/manifest.py`, `models/training_ledger.py`,
+    `analysis/rom_editor.py`, `tuning_frame.py`, `sim_kit.py`,
+    `decode/sensor_can.py`, `decode/slices.py`, `vehicle/vehicle_ledger.py`,
+    `evidence/cards.py` and the `populate_by_name` subclasses (their own key
+    is redundant with the base now but left as written).
   - Must not change: any schema's accepted input. The YAML fixtures under
     `data/` loading unchanged is the test.
 

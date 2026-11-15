@@ -59,8 +59,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
+from src.strict_model import StrictModel
 from src.timefmt import format_epoch
 from src.yaml_load import load_yaml
 
@@ -575,11 +576,7 @@ def non_trainable_committee_outputs(
 # ---------------------------------------------------------------------------
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class RelationSpec(_Strict):
+class RelationSpec(StrictModel):
     """``member ≈ ratio × reference + offset`` on this vehicle, with evidence."""
 
     member: str
@@ -589,7 +586,7 @@ class RelationSpec(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class ConditionSpec(_Strict):
+class ConditionSpec(StrictModel):
     """A condition the tolerance was measured under. Outside it: no verdict."""
 
     channel: str
@@ -610,7 +607,7 @@ class ConditionSpec(_Strict):
         )
 
 
-class ToleranceSpec(_Strict):
+class ToleranceSpec(StrictModel):
     """How far a member may depart from its relation, and for how long.
 
     ``conditions`` is required (an explicit empty list is allowed): a
@@ -637,13 +634,13 @@ class ToleranceSpec(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class CommitteeSpec(_Strict):
+class CommitteeSpec(StrictModel):
     reference: str
     relations: list[RelationSpec] = Field(min_length=1)
     tolerance: ToleranceSpec
 
 
-class CommitteeProfile(_Strict):
+class CommitteeProfile(StrictModel):
     """A vehicle's ``committees.yaml``."""
 
     schema_version: Literal[1]

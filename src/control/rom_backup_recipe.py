@@ -14,11 +14,12 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.analysis.rom_extent import ExtentSpec
 from src.analysis.rom_map import RomMap
 from src.collection.isotp import DEFAULT_REQUEST_ID
+from src.strict_model import StrictModel
 from src.vehicle.platforms import VehicleDataFile
 from src.yaml_load import load_yaml
 
@@ -26,11 +27,7 @@ from src.yaml_load import load_yaml
 ROM_BACKUP_FILE = "rom_backup.yaml"
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class RecipeSession(_Strict):
+class RecipeSession(StrictModel):
     """DiagnosticSessionControl sub-functions, in order."""
 
     enter_once: list[int] = Field(default_factory=list)
@@ -47,7 +44,7 @@ class RecipeSession(_Strict):
         return self
 
 
-class RecipeRead(_Strict):
+class RecipeRead(StrictModel):
     start: int = Field(ge=0)
     #: Inclusive.
     end: int = Field(ge=0)
@@ -75,22 +72,22 @@ class RecipeRead(_Strict):
         ]
 
 
-class RecipePacing(_Strict):
+class RecipePacing(StrictModel):
     min_cycle_seconds: float = Field(ge=0)
     request_timeout_seconds: float = Field(gt=0, le=10)
     retries_per_block: int = Field(ge=0, le=10)
 
 
-class RecipeVerify(_Strict):
+class RecipeVerify(StrictModel):
     reread_blocks: int = Field(ge=0)
 
 
-class RecipeProvenance(_Strict):
+class RecipeProvenance(StrictModel):
     capture: str = Field(min_length=1)
     evidence: str = Field(min_length=1)
 
 
-class BackupRecipe(_Strict):
+class BackupRecipe(StrictModel):
     schema_version: Literal[1]
     request_id: int = Field(ge=0, le=0x7FF)
     response_id: int = Field(ge=0, le=0x7FF)

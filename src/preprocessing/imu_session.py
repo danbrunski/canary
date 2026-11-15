@@ -64,7 +64,7 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import model_validator
 
 from src.atomic_write import atomic_write_text
 from src.decode.bindings import Bindings
@@ -92,6 +92,7 @@ from src.preprocessing.imu_frame import (
 from src.preprocessing.session_reader import read_session
 from src.storage.broadcast_storage import session_can_storage
 from src.storage.sidecar import read_json_object
+from src.strict_model import FrozenStrictModel
 from src.telemetry import CAN_SOURCE, IMU_SOURCE, SOURCE_SEP, channel_key
 
 IMU_FRAME_FILENAME = "imu_frame.json"
@@ -166,14 +167,10 @@ class ImuFrameOfRecordError(ValueError):
     """
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
 Vector3 = tuple[float, float, float]
 
 
-class QuiescentWindow(_Strict):
+class QuiescentWindow(FrozenStrictModel):
     """One contiguous quiescent run that fed the specific-force reference."""
 
     start: str
@@ -187,7 +184,7 @@ class QuiescentWindow(_Strict):
     angle_from_reference_deg: float
 
 
-class PitchReference(_Strict):
+class PitchReference(FrozenStrictModel):
     """The orientation ``SF_*`` are resolved against, and what it leaves in."""
 
     method: Literal["mean_quiescent_specific_force"] = "mean_quiescent_specific_force"
@@ -207,7 +204,7 @@ class PitchReference(_Strict):
     residual_pitch_offset: str = RESIDUAL_PITCH_OFFSET
 
 
-class SpecificForceFrame(_Strict):
+class SpecificForceFrame(FrozenStrictModel):
     channels: tuple[str, str, str] = SPECIFIC_FORCE_COLUMNS
     #: Hash of the rotation: the identity a dyno pitch offset is valid for.
     reference_id: str
@@ -220,7 +217,7 @@ class SpecificForceFrame(_Strict):
     pitch_reference: PitchReference
 
 
-class LinearAccelFrame(_Strict):
+class LinearAccelFrame(FrozenStrictModel):
     channels: tuple[str, str] = LINEAR_ACCEL_COLUMNS
     method: Literal["quiescent_low_pass"] = "quiescent_low_pass"
     yaw_offset_rad: float
@@ -237,7 +234,7 @@ class LinearAccelFrame(_Strict):
     initial_gravity_body_g: Vector3 | None = None
 
 
-class ImuFrameInputs(_Strict):
+class ImuFrameInputs(FrozenStrictModel):
     imu_samples: int
     imu_rate_hz: float
     first_sample: str
@@ -276,12 +273,12 @@ class ImuFrameInputs(_Strict):
         return self.speed_max_age_seconds
 
 
-class RefusalRecord(_Strict):
+class RefusalRecord(FrozenStrictModel):
     kind: RefusalKind
     reason: str
 
 
-class ImuFrameSidecar(_Strict):
+class ImuFrameSidecar(FrozenStrictModel):
     """``imu_frame.json``: one session's frame of record, or why there is none."""
 
     schema_version: Literal[1] = 1

@@ -50,11 +50,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from src.analysis.fault_model import FaultModel, Feature
 from src.collection.capture_profiles import CaptureProfile, CaptureProfileCatalog
 from src.evidence.text import no_numerals
+from src.strict_model import FrozenStrictModel
 from src.yaml_load import load_yaml
 
 __all__ = [
@@ -84,11 +85,7 @@ class MeasurementPlanError(ValueError):
     """A plan, or a proposal, this module refuses."""
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class Predicate(_Strict):
+class Predicate(FrozenStrictModel):
     channel: str = Field(min_length=1)
     op: Literal["eq", "ge", "gt", "le", "lt"]
     value: float
@@ -105,14 +102,14 @@ class Predicate(_Strict):
         return value < self.value
 
 
-class RegionEntry(_Strict):
+class RegionEntry(FrozenStrictModel):
     #: Every predicate must hold on a fresh value for the region to be entered.
     all: tuple[Predicate, ...] = Field(min_length=1)
     #: Where the thresholds come from (checked at load where a source exists).
     source: str = Field(min_length=1)
 
 
-class Acquisition(_Strict):
+class Acquisition(FrozenStrictModel):
     kind: Literal["capture", "default", "analysis", "instrument"]
     #: ``capture``: the capture profile that polls it.
     profile: str | None = None
@@ -137,14 +134,14 @@ class Acquisition(_Strict):
         return self
 
 
-class MeasurementEntry(_Strict):
+class MeasurementEntry(FrozenStrictModel):
     residual: str = Field(min_length=1)
     cost: float = Field(gt=0.0)
     cost_basis: str = Field(min_length=1)
     acquisition: Acquisition
 
 
-class MeasurementPlan(_Strict):
+class MeasurementPlan(FrozenStrictModel):
     schema_: Literal["canary-measurement-plan/1"] = Field(alias="schema")
     version: int = Field(ge=1)
     #: The fault-model version this plan was written for; a mismatch refuses.

@@ -21,10 +21,10 @@ from src.collection.capture_profile_model import (
     SCHEMA_VERSION,
     CaptureProfile,
     CaptureProfileCatalog,
-    _Strict,
     profile_digest,
 )
 from src.config import CollectionConfig, DaemonConfig
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 # Named, not ``__name__``: see ``capture_profile_model``.
@@ -106,7 +106,7 @@ class CaptureProfileSources:
         return cls(daemon.capture_profiles, daemon.capture_profile_overrides)
 
 
-class CaptureProfileOverrides(_Strict):
+class CaptureProfileOverrides(StrictModel):
     """This machine's layer over the tracked catalog (S03.4)."""
 
     schema_version: int = SCHEMA_VERSION

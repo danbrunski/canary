@@ -56,6 +56,7 @@ LAYERS: dict[str, int] = {
     "refusal": 0,
     "session": 0,
     "signals": 0,
+    "strict_model": 0,
     "telemetry": 0,
     "timefmt": 0,
     "trainability": 0,

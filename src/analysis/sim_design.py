@@ -64,7 +64,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.analysis.channels import ChannelSpecError, read_channels
 from src.analysis.fuel_comp_inputs import (
@@ -112,6 +112,7 @@ from src.paths import BINDINGS_YAML, DIDS_YAML, REPO_ROOT
 from src.refusal import ReasonedRefusal
 from src.signals.afr import load_afr_calibration
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
+from src.strict_model import FrozenStrictModel
 from src.vehicle.tune_revisions import (
     TuneRevision,
     TuneRevisionRegistry,
@@ -178,11 +179,7 @@ class SimDesignRefusalError(ReasonedRefusal, ValueError):
     """A design cannot be built, written, loaded or used; ``reason`` names why."""
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class DesignPoint(_Strict):
+class DesignPoint(FrozenStrictModel):
     """One steady operating point. Values only; no recording is named as a source.
 
     ``session`` and ``t`` say which read a drive point was taken from (design
@@ -256,7 +253,7 @@ class DesignPoint(_Strict):
         return self
 
 
-class SessionCheck(_Strict):
+class SessionCheck(FrozenStrictModel):
     """One drive's revision check and its counts."""
 
     session: str
@@ -276,7 +273,7 @@ class SessionCheck(_Strict):
     throttle_closed_position: dict[str, Any] | None = None
 
 
-class GridEnvironment(_Strict):
+class GridEnvironment(FrozenStrictModel):
     baro_kpa: float
     iat_c: float
     coolant_c: float
@@ -287,7 +284,7 @@ class GridEnvironment(_Strict):
     pedal_flag: int
 
 
-class GridSpec(_Strict):
+class GridSpec(FrozenStrictModel):
     rpm_edges: list[float]
     #: In ``load_unit``, Fuel Comp's column axis's own decode.
     load_edges: list[float]
@@ -297,7 +294,7 @@ class GridSpec(_Strict):
     environment: GridEnvironment
 
 
-class SimDesign(_Strict):
+class SimDesign(FrozenStrictModel):
     """A frozen point design. :meth:`sha256` is computed, never stored here."""
 
     schema_version: Literal[1]

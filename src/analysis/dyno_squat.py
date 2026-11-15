@@ -28,11 +28,11 @@ from src.analysis.dyno_contract import (
     DynoRefusal,
     FloatArray,
     MotionSamples,
-    StrictModel,
     lstsq,
 )
 from src.analysis.dyno_motion import distance_m
 from src.signals.committees import STANDARD_GRAVITY
+from src.strict_model import StrictModel
 
 #: Flat-ground gate for the squat fit, as a fraction (0.005 = 0.5 % grade,
 #: 0.29 deg). A *constant* grade is absorbed by the fit's offset; what the fit

@@ -27,17 +27,13 @@ from typing import Any, Literal
 
 import pandas as pd
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
 from src.atomic_write import atomic_write_text
 from src.evidence.floors import floor_source_ref
 from src.evidence.records import DETECTABLE_SIGMA, NoiseFloorRef, Quantity
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
-
-
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
 
 #: Below this many sigma a delta is "not distinguishable from changing
 #: nothing" — the phrasing the retracted 2026-08 claims were missing.
@@ -86,7 +82,7 @@ class FloorRefusal:
         }
 
 
-class ChannelFloor(_Strict):
+class ChannelFloor(StrictModel):
     """Per-cell spread for one quantity, measured from a null-run pair."""
 
     #: What the sd is in — ``percent`` for delivery error, else the channel's unit.
@@ -114,7 +110,7 @@ class ChannelFloor(_Strict):
     max: float | None = None
 
 
-class NoiseFloor(_Strict):
+class NoiseFloor(StrictModel):
     schema_version: int = 1
     #: Which sessions produced this, so it can be recomputed or challenged.
     provenance: dict[str, Any] = Field(default_factory=dict)

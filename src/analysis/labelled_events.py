@@ -26,8 +26,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
+from src.strict_model import StrictModel
 from src.timefmt import as_utc
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 from src.yaml_load import load_yaml
@@ -44,11 +45,7 @@ EndBasis = Literal["measured", "last_observation", "approximate"]
 LABELLED_EVENTS_FILENAME = "labelled_events.yaml"
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class LabelledEvent(_Strict):
+class LabelledEvent(StrictModel):
     """One real event as a closed interval ``[start, end]`` in UTC."""
 
     id: str = Field(min_length=1)
@@ -77,7 +74,7 @@ class LabelledEvent(_Strict):
         return self
 
 
-class LabelledEventRegistry(_Strict):
+class LabelledEventRegistry(StrictModel):
     schema_version: Literal[1] = 1
     events: list[LabelledEvent] = Field(default_factory=list)
 

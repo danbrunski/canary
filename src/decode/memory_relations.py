@@ -28,11 +28,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
-
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+from src.strict_model import StrictModel
 
 
 def trunc_div(numerator: int, divisor: int) -> int:
@@ -48,7 +46,7 @@ def trunc_div(numerator: int, divisor: int) -> int:
     return quotient if (numerator >= 0) == (divisor > 0) else -quotient
 
 
-class RawCondition(_Strict):
+class RawCondition(StrictModel):
     """A test on one raw (two's-complement when the channel is signed) value.
 
     Either a bit test (``mask`` and/or ``equals``) or a range (``min`` and/or
@@ -109,7 +107,7 @@ class RawTest(RawCondition):
     channel: str = Field(min_length=1)
 
 
-class MemoryArithmeticRelation(_Strict):
+class MemoryArithmeticRelation(StrictModel):
     """The declaring channel's raw value against other memory channels.
 
     * ``sum_of_halves`` — ``raw == trunc(a / 2) + trunc(b / 2)`` over two
@@ -197,7 +195,7 @@ class MemoryArithmeticRelation(_Strict):
         return own >= bound if self.compare == "ge" else own <= bound
 
 
-class FlagEquivalenceRelation(_Strict):
+class FlagEquivalenceRelation(StrictModel):
     """A flag state across reads: ``when`` (all hold) ⇔ / ⇒ ``then``.
 
     ``then`` combines with ``then_combine`` (``any``: an OR over item bits;
@@ -260,7 +258,7 @@ class InvariantRelation(RawCondition):
         return ()
 
 
-class Mode01PidRelation(_Strict):
+class Mode01PidRelation(StrictModel):
     """The declaring channel against a Mode 01 PID, read across a session exit.
 
     Mode 01 is silent inside the session that unlocks service 0x23, so the

@@ -12,7 +12,7 @@ from typing import Any, Literal, Protocol, cast
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.columns import SESSION_COLUMN, arrived_column
 from src.config import VehicleParameters
@@ -28,6 +28,7 @@ from src.signals.vehicle_signals import (
     load_axis_channels,
     wideband_lambda_columns,
 )
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 log = logging.getLogger(__name__)
@@ -42,11 +43,7 @@ TARGET_AFR_CHANNELS: tuple[str, ...] = (TARGET_AFR, *AFR_ERROR_CHANNELS)
 LOAD_AXIS_UNVERIFIED = "load_axis_unverified"
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class VoltageAfrPoint(_Strict):
+class VoltageAfrPoint(StrictModel):
     voltage: float
     afr: float = Field(gt=0)
 
@@ -61,7 +58,7 @@ BARO_GAIN_TERM = "baro_gain"
 _HEX_ADDRESS = r"^0x[0-9A-Fa-f]+$"
 
 
-class EcmTable1D(_Strict):
+class EcmTable1D(StrictModel):
     """A 1-D ECM lookup as read from the image: raw breakpoints and values."""
 
     address: str = Field(pattern=_HEX_ADDRESS)
@@ -82,7 +79,7 @@ class EcmTable1D(_Strict):
         return self
 
 
-class VoltageTransferProvenance(_Strict):
+class VoltageTransferProvenance(StrictModel):
     """Where a vehicle's voltage transfer came from, and what it leaves out.
 
     Optional and per vehicle. A ``rom_table`` transfer *is* an ECM table: its
@@ -118,7 +115,7 @@ class VoltageTransferProvenance(_Strict):
         return self
 
 
-class VoltageAfrTransfer(_Strict):
+class VoltageAfrTransfer(StrictModel):
     points: list[VoltageAfrPoint] = Field(min_length=2)
     censored_floor_afr: float = Field(default=10.0, gt=0)
     #: Decel fuel cut stops injection entirely, so the sensor reports nearly
@@ -182,7 +179,7 @@ class VoltageAfrTransfer(_Strict):
         return None if self.provenance is None else self.provenance.volts_per_count
 
 
-class BaroWordScale(_Strict):
+class BaroWordScale(StrictModel):
     """``kPa = word * scale + offset`` for the ECM's raw baro word ``0xFFFF4C30``.
 
     The arithmetic Mode 01 PID 0x33 reports (``(word * 58 / 128 + 27724) /
@@ -197,7 +194,7 @@ class BaroWordScale(_Strict):
         return word * self.scale + self.offset
 
 
-class BaroGainSkip(_Strict):
+class BaroGainSkip(StrictModel):
     """The raw baro window inside which the ECM leaves the word uncorrected."""
 
     word_min: int = Field(ge=0, le=0xFFFF)
@@ -211,7 +208,7 @@ class BaroGainSkip(_Strict):
         return self
 
 
-class BaroGainProvenance(_Strict):
+class BaroGainProvenance(StrictModel):
     method: Literal["rom_decompile", "datasheet", "measured"]
     revision: str = Field(min_length=1)
     image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
@@ -223,7 +220,7 @@ class BaroGainProvenance(_Strict):
     checked_on_data: str = Field(min_length=1)
 
 
-class AfSensorBaroGain(_Strict):
+class AfSensorBaroGain(StrictModel):
     """The ECM's barometric gain on the A/F sensor word (B06.7).
 
     Before its AFR table the ECM rescales the doubled voltage word about
@@ -324,7 +321,7 @@ class AfSensorBaroGain(_Strict):
         return np.where((kpa >= low) & (kpa <= high), 1.0, self.k_unity / self.k_at(reported_kpa))
 
 
-class VoltageResidualSource(_Strict):
+class VoltageResidualSource(StrictModel):
     """A term PID 0x24/0x28 carry and the voltage route does not (B06.7).
 
     Neither is modelled: one needs a memory read, the other the ECM's rpm and
@@ -371,7 +368,7 @@ class VoltageResidualSource(_Strict):
         return self
 
 
-class TargetMapProvenance(_Strict):
+class TargetMapProvenance(StrictModel):
     method: Literal["uprev_rom_editor_transcription", "verified_rom_decode"]
     rom_file: str
     rom_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -393,7 +390,7 @@ DEFAULT_TARGET_LOAD_AXIS: TargetLoadAxis = "base_fuel_schedule"
 DEFAULT_TARGET_LOAD_AXIS_UNIT: TargetLoadAxisUnit = "ms"
 
 
-class AxisEdgeClamp(_Strict):
+class AxisEdgeClamp(StrictModel):
     """Evidence that the ECM reads a point beyond one edge of the map's axis as
     that edge's row or column (P02.15).
 
@@ -435,7 +432,7 @@ class AxisEdgeClamp(_Strict):
         return self
 
 
-class AxisOutOfRange(_Strict):
+class AxisOutOfRange(StrictModel):
     """What the ECM does with a point beyond each edge of one of the map's axes.
 
     An edge with no evidence record is ``None``, and rows past it get no
@@ -446,7 +443,7 @@ class AxisOutOfRange(_Strict):
     above_last: AxisEdgeClamp | None = None
 
 
-class TargetAfrMap(_Strict):
+class TargetAfrMap(StrictModel):
     revision: str
     load_axis_name: TargetLoadAxis = DEFAULT_TARGET_LOAD_AXIS
     load_axis_unit: TargetLoadAxisUnit = DEFAULT_TARGET_LOAD_AXIS_UNIT
@@ -547,7 +544,7 @@ LAMBDA_BANK_BALANCE_AF_VOLTAGE = "derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE_BARO"
 LAMBDA_BANK_BALANCE_WIDEBAND = "derived:LAMBDA_BANK_BALANCE_WIDEBAND"
 
 
-class WidebandPairVerification(_Strict):
+class WidebandPairVerification(StrictModel):
     """Known-answer evidence that the wide-range lambda PIDs may be paired (D03.34).
 
     The bank-2 PID (0x28 on the Xterra) is new and its scale is only known
@@ -569,7 +566,7 @@ class WidebandPairVerification(_Strict):
     basis: str = Field(min_length=1)
 
 
-class AfrCalibration(_Strict):
+class AfrCalibration(StrictModel):
     schema_version: int = 1
     provenance: dict[str, str] = Field(default_factory=dict)
     active_revision: str | None = None

@@ -22,17 +22,14 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
+from src.strict_model import StrictModel
 from src.timefmt import assume_utc
 from src.yaml_load import load_yaml_model
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class TuneRevision(_Strict):
+class TuneRevision(StrictModel):
     """One flashed calibration."""
 
     revision: str
@@ -62,7 +59,7 @@ class TuneRevision(_Strict):
     notes: str = ""
 
 
-class ReferenceImage(_Strict):
+class ReferenceImage(StrictModel):
     """A known image that was never flashed as-is, e.g. a tuner's base ROM.
 
     Kept out of :attr:`TuneRevisionRegistry.revisions` on purpose: a revision
@@ -78,7 +75,7 @@ class ReferenceImage(_Strict):
     notes: str = ""
 
 
-class TuneRevisionRegistry(_Strict):
+class TuneRevisionRegistry(StrictModel):
     schema_version: int = 1
     revisions: list[TuneRevision] = Field(default_factory=list)
     reference_images: list[ReferenceImage] = Field(default_factory=list)

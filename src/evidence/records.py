@@ -64,7 +64,6 @@ from datetime import UTC, datetime, time
 from typing import Annotated, Any, Literal
 
 from pydantic import (
-    BaseModel,
     ConfigDict,
     Field,
     TypeAdapter,
@@ -74,6 +73,7 @@ from pydantic import (
 
 from src.artifact_hash import sha256_json
 from src.evidence.text import no_numerals
+from src.strict_model import FrozenStrictModel
 
 __all__ = [
     "AFFECTS_ALL",
@@ -183,16 +183,12 @@ Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 RecordId = Annotated[str, Field(min_length=1)]
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
 def _require_aware(value: datetime | None, name: str) -> None:
     if value is not None and (value.tzinfo is None or value.utcoffset() is None):
         raise ValueError(f"{name} must be timezone-aware (UTC); a naive time has no instant")
 
 
-class VehicleIdentity(_Strict):
+class VehicleIdentity(FrozenStrictModel):
     """Whose record this is, and which ECU program and calibration applied.
 
     ``profile`` is the vehicle-profile slug that partitions all learned state
@@ -209,7 +205,7 @@ class VehicleIdentity(_Strict):
     calibration: str | None
 
 
-class Conditions(_Strict):
+class Conditions(FrozenStrictModel):
     """The regime a record applies to.
 
     ``regime`` follows ``noise_floor.yaml``'s rule: a free-form but
@@ -233,7 +229,7 @@ class Conditions(_Strict):
         return value
 
 
-class Quantity(_Strict):
+class Quantity(FrozenStrictModel):
     """A number with its unit. Dimensionless quantities say ``"1"``; a unit
     the source did not declare says ``"unspecified"`` — never empty."""
 
@@ -250,7 +246,7 @@ class Quantity(_Strict):
         return value
 
 
-class Quality(_Strict):
+class Quality(FrozenStrictModel):
     """How much measurement a result rests on."""
 
     #: Observations (pairs, samples, cells) the values were computed from.
@@ -261,7 +257,7 @@ class Quality(_Strict):
     flags: tuple[str, ...] = ()
 
 
-class Result(_Strict):
+class Result(FrozenStrictModel):
     """The shared result status: evaluated, or unevaluable for a named reason.
 
     ``residual`` is the qualified residual (measured minus expected, in its
@@ -292,7 +288,7 @@ class Result(_Strict):
         return self
 
 
-class Provenance(_Strict):
+class Provenance(FrozenStrictModel):
     """Who produced a record, and from which other records.
 
     A ``tool`` producer states its version and a ``code_version`` (a hash of
@@ -315,7 +311,7 @@ class Provenance(_Strict):
         return self
 
 
-class SourceRef(_Strict):
+class SourceRef(FrozenStrictModel):
     """The stored data a record rests on: session, window, channels, samples."""
 
     session: str = Field(min_length=1)
@@ -339,7 +335,7 @@ class SourceRef(_Strict):
         return self
 
 
-class _RecordBase(_Strict):
+class _RecordBase(FrozenStrictModel):
     """Fields every record carries: identity, provenance, both times, links."""
 
     schema_: Literal["canary-memory/1"] = Field(default=MEMORY_SCHEMA, alias="schema")
@@ -430,7 +426,7 @@ class Evidence(_ConditionedRecord):
         return self
 
 
-class Hypothesis(_Strict):
+class Hypothesis(FrozenStrictModel):
     label: str = Field(min_length=1)
     status: Literal["open", "supported", "refuted", "unresolvable"] = "open"
     supporting: tuple[RecordId, ...] = ()
@@ -494,7 +490,7 @@ class Investigation(_ConditionedRecord):
 DETECTABLE_SIGMA = 2.0
 
 
-class NoiseFloorRef(_Strict):
+class NoiseFloorRef(FrozenStrictModel):
     """The detectable-effect bound a prediction states (E01.4).
 
     Copied from a measured floor (``noise_floor.yaml`` through
@@ -531,7 +527,7 @@ class NoiseFloorRef(_Strict):
 WHAT_IF_PREFIX = "what_if:"
 
 
-class WhatIfPoint(_Strict):
+class WhatIfPoint(FrozenStrictModel):
     """One stated operating point of a what-if: its inputs and the value the
     reproduced logic computes there under each calibration.
 
@@ -566,7 +562,7 @@ class WhatIfPoint(_Strict):
         return self.after.value - self.before.value
 
 
-class WhatIf(_Strict):
+class WhatIf(FrozenStrictModel):
     """What the reproduced ECU logic computes under a proposed calibration
     change (E02.6): the exact base image, the exact target image or the cell
     edit set that would make it, and each stated point before and after.

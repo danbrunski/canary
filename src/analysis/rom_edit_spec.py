@@ -66,8 +66,6 @@ from typing import Any, Literal
 
 import yaml
 from pydantic import (
-    BaseModel,
-    ConfigDict,
     Field,
     StrictInt,
     ValidationError,
@@ -88,6 +86,7 @@ from src.analysis.rom_effects import (
 from src.analysis.rom_image import ImageFormatError, compare_images, load_image, sha256_hex
 from src.analysis.rom_map import DTYPE_BYTES, RomMap, Table
 from src.artifact_hash import sha256_json
+from src.strict_model import FrozenStrictModel
 from src.yaml_load import load_yaml
 
 #: Bump when resolution or the provenance changes meaning.
@@ -129,11 +128,7 @@ def _refuse(reason: str, message: str) -> PydanticCustomError:
     return PydanticCustomError(reason, message)
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class BaseRef(_Strict):
+class BaseRef(FrozenStrictModel):
     """Exactly one of a ``tune_revisions.yaml`` revision (resolved by plain
     sha256 through the registry) or a file with its plain-image sha256."""
 
@@ -160,7 +155,7 @@ class BaseRef(_Strict):
         return self
 
 
-class Region(_Strict):
+class Region(FrozenStrictModel):
     """Cells whose breakpoints lie inside ``[lo, hi]`` (inclusive) on each
     bounded axis, in that axis's own units, which ``units`` restates."""
 
@@ -197,7 +192,7 @@ class Region(_Strict):
         return out
 
 
-class Edit(_Strict):
+class Edit(FrozenStrictModel):
     """One table, one selector, one operation."""
 
     #: A ``rom_map.yaml`` table id.
@@ -245,7 +240,7 @@ class Edit(_Strict):
         return next(o for o in ("set_raw", "add_raw", "scale") if getattr(self, o) is not None)
 
 
-class EditSpec(_Strict):
+class EditSpec(FrozenStrictModel):
     schema_version: Literal[1]
     base: BaseRef
     label: str = Field(min_length=1)

@@ -39,7 +39,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from src.evidence import (
     Evidence,
@@ -48,6 +48,7 @@ from src.evidence import (
 )
 from src.evidence.cards import evidence_payload
 from src.evidence.text import IDENTIFIER, numeral_in
+from src.strict_model import StrictModel
 
 __all__ = [
     "CARD_SCHEMA",
@@ -103,9 +104,7 @@ def _no_numerals(value: str, *, what: str) -> str:
     return value
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class _Strict(StrictModel):
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json", by_alias=True)
 

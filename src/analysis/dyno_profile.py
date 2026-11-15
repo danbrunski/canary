@@ -21,11 +21,12 @@ import yaml
 from pydantic import Field, model_validator
 
 from src.analysis.dyno_comparison import FLOOR_MATCH_FIELDS, DynoNoiseFloor, Quantity, RunConditions
-from src.analysis.dyno_contract import DynoRefusal, MotionSources, StrictModel
+from src.analysis.dyno_contract import DynoRefusal, MotionSources
 from src.analysis.dyno_driveline import InertiaData
 from src.analysis.dyno_road_load import RoadLoadCoefficients
 from src.analysis.dyno_squat import SquatCoefficient
 from src.atomic_write import atomic_write_text
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 if TYPE_CHECKING:

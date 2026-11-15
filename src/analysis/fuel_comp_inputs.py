@@ -38,7 +38,7 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.analysis.channels import parse_spec, read_channels
 from src.analysis.fuel_comp_rom import FuelCompCalibration, FuelCompRomTables
@@ -56,6 +56,7 @@ from src.decode.fuel_comp_load import (
 from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.signals.pairing import to_seconds
 from src.signals.time_lookup import previous_sample_indices, values_or_nan
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml
 
 #: File name of the declaration in a vehicle profile directory.
@@ -66,23 +67,19 @@ class FuelCompInputError(ValueError):
     """A logged input cannot be turned into the chain's raw word."""
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class Program(_Strict):
+class Program(StrictModel):
     calibration_id: str = Field(min_length=1)
     map_slot: int = Field(ge=1)
     map_slot_evidence: str = Field(min_length=1)
 
 
-class RpmInput(_Strict):
+class RpmInput(StrictModel):
     channel: str
     rpm_per_count: float = Field(gt=0)
     evidence: str = Field(min_length=1)
 
 
-class ThrottlePidInput(_Strict):
+class ThrottlePidInput(StrictModel):
     channel: str
     numerator: int = Field(ge=1)
     denominator: int = Field(ge=1)
@@ -91,7 +88,7 @@ class ThrottlePidInput(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class ClosedPositionMethod(_Strict):
+class ClosedPositionMethod(StrictModel):
     """How a DID-only session's learned closed position is estimated."""
 
     method: Literal["warm_idle_mode_minus_idle_opening"]
@@ -116,7 +113,7 @@ class ClosedPositionMethod(_Strict):
         return self
 
 
-class ThrottleDidInput(_Strict):
+class ThrottleDidInput(StrictModel):
     channel: str
     counts_max: int = Field(ge=1)
     raw_counts_evidence: str = Field(min_length=1)
@@ -134,7 +131,7 @@ class ThrottleDidInput(_Strict):
         return self
 
 
-class PurgeInput(_Strict):
+class PurgeInput(StrictModel):
     sources: list[str] = Field(min_length=1)
     pid_numerator: int = Field(ge=1)
     pid_denominator: int = Field(ge=1)
@@ -142,7 +139,7 @@ class PurgeInput(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class IdleAir(_Strict):
+class IdleAir(StrictModel):
     """The declared idle-air interval: a measured constraint, with its conditions."""
 
     low: int
@@ -164,7 +161,7 @@ class IdleAir(_Strict):
         return Interval(self.low, self.high)
 
 
-class Inputs(_Strict):
+class Inputs(StrictModel):
     rpm: RpmInput
     throttle_pid: ThrottlePidInput
     throttle_did: ThrottleDidInput
@@ -172,14 +169,14 @@ class Inputs(_Strict):
     idle_air: IdleAir
 
 
-class RoutePairing(_Strict):
+class RoutePairing(StrictModel):
     """How far apart two reads may be and still be one sample, on one route."""
 
     max_separation_s: float = Field(gt=0)
     evidence: str = Field(min_length=1)
 
 
-class Pairing(_Strict):
+class Pairing(StrictModel):
     """Per route: the separation is a property of how that route's inputs are
     polled, so each states its own with its evidence."""
 
@@ -187,7 +184,7 @@ class Pairing(_Strict):
     open_loop: RoutePairing
 
 
-class KnownAnswerRule(_Strict):
+class KnownAnswerRule(StrictModel):
     session: str
     byte_channel: str
     max_gap_s: float = Field(gt=0)
@@ -201,7 +198,7 @@ class KnownAnswerRule(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class SteadyGate(_Strict):
+class SteadyGate(StrictModel):
     """rpm and throttle reads in ``[t - dwell_s, t]``: at least ``min_samples``
     of each, spans within the limits (throttle in corrected counts)."""
 
@@ -211,7 +208,7 @@ class SteadyGate(_Strict):
     throttle_max_span_counts: int = Field(ge=0)
 
 
-class ClosedLoopRoute(_Strict):
+class ClosedLoopRoute(StrictModel):
     trims: dict[Literal["stft_b1", "ltft_b1", "stft_b2", "ltft_b2"], str]
     closed_loop_codes: list[int] = Field(min_length=1)
     fuel_status_max_age_s: float = Field(gt=0)
@@ -228,7 +225,7 @@ class ClosedLoopRoute(_Strict):
         return self
 
 
-class DelayBracket(_Strict):
+class DelayBracket(StrictModel):
     """Where an open-loop sample sits on Fuel Comp, as an interval (N02.5).
 
     The lambda read at ``t`` measures fuel set at some instant in ``[t - hi,
@@ -256,7 +253,7 @@ class DelayBracket(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class OpenLoopRoute(_Strict):
+class OpenLoopRoute(StrictModel):
     #: A session uses the first of these it captured.
     commanded_preference: list[str] = Field(min_length=1)
     #: Per preferred source that is not the commanded phi word itself, what
@@ -283,14 +280,14 @@ class OpenLoopRoute(_Strict):
         return self
 
 
-class CoolantGate(_Strict):
+class CoolantGate(StrictModel):
     sources: list[str] = Field(min_length=1)
     min_c: float
     max_age_s: float = Field(gt=0)
     status: Literal["proposed", "frozen"]
 
 
-class BaroGate(_Strict):
+class BaroGate(StrictModel):
     channel: str
     min_kpa: float
     max_kpa: float
@@ -304,12 +301,12 @@ class BaroGate(_Strict):
         return self
 
 
-class Gates(_Strict):
+class Gates(StrictModel):
     coolant: CoolantGate
     baro: BaroGate
 
 
-class SampleContext(_Strict):
+class SampleContext(StrictModel):
     """Reads carried per sample for later stages, never gated on: paired like
     rpm (one-to-one, the route's separation), NaN when unpaired."""
 
@@ -320,7 +317,7 @@ class SampleContext(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class SampleRules(_Strict):
+class SampleRules(StrictModel):
     closed_loop: ClosedLoopRoute
     open_loop: OpenLoopRoute
     gates: Gates
@@ -330,7 +327,7 @@ class SampleRules(_Strict):
 # -- N02.4: fuel-supply droop ------------------------------------------------------
 
 
-class DroopReference(_Strict):
+class DroopReference(StrictModel):
     """Each drive's own low-flow rail pressure, that droop is measured from."""
 
     method: Literal["drive_low_flow_median"]
@@ -341,7 +338,7 @@ class DroopReference(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class DroopModelRule(_Strict):
+class DroopModelRule(StrictModel):
     """The droop-versus-MAF relation fitted on drives that logged pressure."""
 
     #: ``droop_psi = a x maf + b x maf^2``: zero at zero flow, as a pressure
@@ -352,7 +349,7 @@ class DroopModelRule(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class DroopKnownAnswer(_Strict):
+class DroopKnownAnswer(StrictModel):
     """A recorded droop figure the measured path must reproduce."""
 
     sessions: list[str] = Field(min_length=1)
@@ -371,7 +368,7 @@ class DroopKnownAnswer(_Strict):
         return self
 
 
-class DroopRules(_Strict):
+class DroopRules(StrictModel):
     """N02.4: injector flow follows the square root of rail gauge pressure,
     relative to the drive's own low-flow reference.
 
@@ -406,7 +403,7 @@ class DroopRules(_Strict):
 # -- N02.5: the per-cell fit ---------------------------------------------------------
 
 
-class BootstrapRule(_Strict):
+class BootstrapRule(StrictModel):
     resamples: int = Field(ge=10)
     seed: int
     #: Percentiles of the resampled cell values.
@@ -420,7 +417,7 @@ class BootstrapRule(_Strict):
         return self
 
 
-class DriveUnit(_Strict):
+class DriveUnit(StrictModel):
     """What one independent drive is. Sessions split an outing (a Pi reboot,
     a capture starting or stopping), so sessions whose spans are closer than
     ``max_gap_minutes`` are one drive."""
@@ -430,7 +427,7 @@ class DriveUnit(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class ModelComparison(_Strict):
+class ModelComparison(StrictModel):
     """How two held-out models are told apart: a paired bootstrap over the
     held-out drives of the difference in their per-drive mean squared
     residual. One model beats another only when that difference is below
@@ -464,7 +461,7 @@ def assign_drives(spans: Mapping[str, tuple[float, float]], unit: DriveUnit) -> 
     return out
 
 
-class FitRules(_Strict):
+class FitRules(StrictModel):
     """N02.5: the 20261004 table's cells from every placed sample.
 
     Each refusal is a declared constant, never one chosen from the size of a
@@ -509,7 +506,7 @@ class FitRules(_Strict):
 # -- N02.6: knock-on ------------------------------------------------------------------
 
 
-class BfsModelRule(_Strict):
+class BfsModelRule(StrictModel):
     """BFS where it was not read at the sample: ``BFS = c x K x FC/128 x
     MAF/rpm`` (Tp = K Qa / Ne, steady state), ``c`` the median per-sample
     ratio on samples where it was read."""
@@ -523,7 +520,7 @@ class BfsModelRule(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class KnockOnRules(_Strict):
+class KnockOnRules(StrictModel):
     """N02.6: what a proposed Fuel Comp change moves besides fuel."""
 
     #: ``rom_map.yaml`` ids of the timing-trim axes (BFS-X columns, rpm rows).
@@ -537,7 +534,7 @@ class KnockOnRules(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class FuelCompDeclaration(_Strict):
+class FuelCompDeclaration(StrictModel):
     """``fuel_comp_fit.yaml``: every N02 constant, with its evidence."""
 
     schema_version: Literal[1]

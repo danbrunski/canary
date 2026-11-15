@@ -58,7 +58,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import Field, ValidationError
 
 from src.analysis.paired_scenarios import PLANT_ASSUMPTION_PREFIX
 from src.analysis.sim_cells import (
@@ -71,6 +71,7 @@ from src.analysis.sim_cells import (
 )
 from src.analysis.sim_contract import SimulationRefusalError
 from src.analysis.sim_montecarlo import DESIGN_ASSUMPTION_PREFIX
+from src.strict_model import FrozenStrictModel
 
 #: Bump when the page's content or layout changes meaning. 2: working- and
 #: design-assumption lists in the caveat block (E08.10). 3: an ECU-side
@@ -154,18 +155,14 @@ _MIN_WIDTH = 600
 # -- the run facts the table does not carry -------------------------------------------------
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class ImageRef(_Strict):
+class ImageRef(FrozenStrictModel):
     """A ROM image's human name and its plain-image sha256 (checked against the table)."""
 
     label: str
     sha256: str
 
 
-class EditRow(_Strict):
+class EditRow(FrozenStrictModel):
     """One edit as the operator wrote it (E08.1 ``spec_edits``) or one table a
     candidate file changed (E08.1 ``cells``, grouped): every key stated."""
 
@@ -179,12 +176,12 @@ class EditRow(_Strict):
     unchanged: int = Field(ge=0)
 
 
-class FillByteWidth(_Strict):
+class FillByteWidth(FrozenStrictModel):
     max: int
     median: float
 
 
-class DesignSummary(_Strict):
+class DesignSummary(FrozenStrictModel):
     """:func:`src.analysis.sim_design.summary`, key for key."""
 
     sha256: str
@@ -206,7 +203,7 @@ class DesignSummary(_Strict):
     fill_byte_width: FillByteWidth | None
 
 
-class ReportRun(_Strict):
+class ReportRun(FrozenStrictModel):
     """What the run knows that the cell table does not. Every key is optional;
     a missing one is printed as not stated, never guessed."""
 

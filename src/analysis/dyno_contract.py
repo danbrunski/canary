@@ -19,7 +19,9 @@ from typing import Any, Literal, Protocol
 
 import numpy as np
 import numpy.typing as npt
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
+
+from src.strict_model import StrictModel
 
 FloatArray = npt.NDArray[np.float64]
 
@@ -27,10 +29,6 @@ FloatArray = npt.NDArray[np.float64]
 #: Fewest samples any fit accepts. At the 10 Hz GNSS / smoothed-derivative
 #: rate H07.3 delivers, five seconds.
 MIN_SAMPLES = 50
-
-
-class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
 
 RefusalKind = Literal[

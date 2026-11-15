@@ -58,10 +58,11 @@ from itertools import combinations
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from src.evidence.ledger import MemoryLedger, MemoryReferenceError
 from src.evidence.text import no_numerals
+from src.strict_model import FrozenStrictModel
 from src.yaml_load import load_yaml
 
 __all__ = [
@@ -115,16 +116,12 @@ class FaultModelError(ValueError):
     """A fault model, observation or score request this module refuses."""
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class Region(_Strict):
+class Region(FrozenStrictModel):
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
 
 
-class Residual(_Strict):
+class Residual(FrozenStrictModel):
     """One residual: a relation that is zero when the engine behaves as modelled.
 
     ``channel_sets``: the residual is available on a session holding every
@@ -181,7 +178,7 @@ class Residual(_Strict):
         return any(set(group) <= channels for group in self.channel_sets)
 
 
-class Likelihood(_Strict):
+class Likelihood(FrozenStrictModel):
     """A numerical likelihood and the evidence it was computed from."""
 
     value: float = Field(gt=0.0, le=1.0)
@@ -189,7 +186,7 @@ class Likelihood(_Strict):
     method: str = Field(min_length=1)
 
 
-class FaultHypothesis(_Strict):
+class FaultHypothesis(FrozenStrictModel):
     name: str = Field(min_length=1)
     label: str = Field(min_length=1)
     origin: Literal["modelled", "language"]
@@ -218,7 +215,7 @@ class FaultHypothesis(_Strict):
         return SIGN_SETS[self.signature[residual][region]]
 
 
-class FaultModel(_Strict):
+class FaultModel(FrozenStrictModel):
     schema_: Literal["canary-fault-hypotheses/1"] = Field(alias="schema")
     version: int = Field(ge=1)
     assumptions: tuple[str, ...] = ()

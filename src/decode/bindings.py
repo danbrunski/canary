@@ -25,7 +25,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.decode.slices import (
     ByteSlice,
@@ -35,12 +35,8 @@ from src.decode.slices import (
     SentinelState,
     check_sentinel,
 )
+from src.strict_model import StrictModel
 from src.yaml_load import load_yaml_model
-
-
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
 
 #: Engineering unit each declarable :attr:`Signal.quantity` is read in.
 QUANTITY_UNITS: dict[str, str] = {"road_speed": "km/h"}
@@ -50,7 +46,7 @@ QUANTITY_UNITS: dict[str, str] = {"road_speed": "km/h"}
 UNKNOWN_UNIT = "unknown"
 
 
-class Signal(ByteSlice, LinearScale, PlausibleRange, SentinelState, _Strict):
+class Signal(ByteSlice, LinearScale, PlausibleRange, SentinelState, StrictModel):
     """A signal binding: where in a CAN frame the value lives + how to decode it.
 
     `byte_order` is "big" for MSB-first (the OBD-II/UDS convention used across
@@ -217,7 +213,7 @@ class Signal(ByteSlice, LinearScale, PlausibleRange, SentinelState, _Strict):
         return self
 
 
-class Bindings(_Strict):
+class Bindings(StrictModel):
     """Top-level bindings.yaml document."""
 
     schema_version: int
