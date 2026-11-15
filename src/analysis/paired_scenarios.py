@@ -244,8 +244,9 @@ BatterySource = Literal["stated", "measured", "unmeasured"]
 BATTERY_UNMEASURED = "battery_voltage_unmeasured"
 #: The reason delivered lambda and fuel per event carry when a side's stated
 #: STFT + LTFT leave a fuel multiplier ``k`` of zero or less (a combined
-#: STFT + LTFT of -100 % or less): no fuel is metered, so those outputs are not a number, whatever a later
-#: short-pulse decode makes of the dead-time-only pulse.
+#: STFT + LTFT of -100 % or less): no fuel is metered, so those outputs are
+#: not a number, whatever a later short-pulse decode makes of the
+#: dead-time-only pulse.
 FUEL_MULTIPLIER_ZERO = "fuel_multiplier_zero"
 #: The reason a result run on drawn plant parameters carries in ranking.
 OVERRIDES_NOT_FROZEN = "plant_overrides_not_frozen"
