@@ -1,3 +1,6 @@
+import { Suspense } from "react";
+
+import { PageLoading } from "./components/PageLoading";
 import { PairingApprovalPrompt } from "./components/PairingApprovalPrompt";
 import { PairingCard } from "./components/PairingCard";
 import { PanelErrorBoundary } from "./components/PanelErrorBoundary";
@@ -17,8 +20,27 @@ import { useTelemetryStream } from "./hooks/useTelemetryStream";
 import { useTheme } from "./hooks/useTheme";
 import { DashboardShell } from "./panels/DashboardShell";
 import { DriveScreen } from "./panels/DriveScreen";
-import { Workbench, type DashboardData } from "./panels/Workbench";
+import type { DashboardData } from "./panels/Workbench";
+import { lazyChunk } from "./lib/lazyChunk";
 import type { WorkbenchItem } from "./types";
+
+// The Drive screen is the in-vehicle landing page and must come up on a phone
+// over the Pi's Wi-Fi without the other forty pages: the whole Workbench is its
+// own chunk, fetched when the operator first leaves Drive (R28.6). The build
+// fails if the entry chunk outgrows its budget (`vite.config.ts`).
+const loadWorkbench = () => import("./panels/Workbench");
+const Workbench = lazyChunk(loadWorkbench, "Workbench");
+
+// Once Drive is up and the browser is idle, fetch the Workbench chunk so the
+// service worker has it cached: the dashboard has to keep opening its pages
+// when the Pi is rebooting mid-drive, and a chunk nobody opened would not be.
+if (import.meta.env.PROD && typeof window !== "undefined") {
+  const prefetch = () => void loadWorkbench().catch(() => undefined);
+  window.addEventListener("load", () => {
+    if ("requestIdleCallback" in window) window.requestIdleCallback(prefetch, { timeout: 10_000 });
+    else setTimeout(prefetch, 3_000);
+  });
+}
 
 /** Top-level app: owns the Drive↔Workbench context and the active Workbench
  *  view (mirrored to the URL hash for kiosk reload), wires hooks into the
@@ -101,7 +123,11 @@ export default function App() {
           />
         </PanelErrorBoundary>
       ) : (
-        <Workbench active={item} onNavigate={setItem} data={data} phone={phone} />
+        <PanelErrorBoundary resetKey="workbench">
+          <Suspense fallback={<PageLoading />}>
+            <Workbench active={item} onNavigate={setItem} data={data} phone={phone} />
+          </Suspense>
+        </PanelErrorBoundary>
       )}
     </DashboardShell>
   );

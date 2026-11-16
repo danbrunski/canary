@@ -1,6 +1,7 @@
 import { AreaBar } from "../components/AreaBar";
+import { PageLoading } from "../components/PageLoading";
 import { PanelErrorBoundary } from "../components/PanelErrorBoundary";
-import { memo, useEffect, useRef } from "react";
+import { memo, Suspense, useEffect, useRef } from "react";
 
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
@@ -8,6 +9,7 @@ import type { ScoresBySource } from "../hooks/useScoreStream";
 import { useTuningContext, type TuningContext } from "../hooks/useTuningContext";
 import { useAreaMemory, useSidebarCollapsed } from "../hooks/useAreaMemory";
 import { useIsNarrow } from "../hooks/useMediaQuery";
+import { lazyChunk } from "../lib/lazyChunk";
 import {
   DEFAULT_ITEM,
   NAV,
@@ -75,13 +77,25 @@ import { TpmsPanel } from "./TpmsPanel";
 import { TreadWearCard } from "./TreadWearCard";
 import { UpdateCard } from "./UpdateCard";
 import { VehicleLedgerPage } from "./VehicleLedgerPage";
-import { AnalysisPage } from "./tuning/AnalysisPage";
-import { LoggingPage } from "./tuning/LoggingPage";
-import { LogsPage } from "./tuning/LogsPage";
-import { CalibrationPage } from "./tuning/CalibrationPage";
-import { RomEditorPage } from "./tuning/RomEditorPage";
-import { RomLibraryPage } from "./tuning/RomLibraryPage";
 import { TuningContextBar } from "./tuning/TuningContextBar";
+
+// Engine Tuning's pages (with the ROM and log code only they use) are about a
+// third of the dashboard and are opened only from that area, so they load on
+// first visit instead of with the Drive screen (R28.6). Each is its own chunk
+// behind the Suspense in `Workbench`; the memoised ones are memoised once, at
+// load. Page facades stay importable from this file only (`layering.test.ts`).
+const LoggingPage = lazyChunk(() => import("./tuning/LoggingPage"), "LoggingPage");
+const RomEditorPage = lazyChunk(() => import("./tuning/RomEditorPage"), "RomEditorPage");
+const LogsPage = lazyChunk(() => import("./tuning/LogsPage"), "LogsPage", { memoised: true });
+const AnalysisPage = lazyChunk(() => import("./tuning/AnalysisPage"), "AnalysisPage", {
+  memoised: true,
+});
+const RomLibraryPage = lazyChunk(() => import("./tuning/RomLibraryPage"), "RomLibraryPage", {
+  memoised: true,
+});
+const CalibrationPage = lazyChunk(() => import("./tuning/CalibrationPage"), "CalibrationPage", {
+  memoised: true,
+});
 
 export interface DashboardData {
   mode: AppMode;
@@ -142,10 +156,6 @@ const Pure = {
   DatasetHealthPanel: memo(DatasetHealthPanel),
   CustomPidsPanel: memo(CustomPidsPanel),
   ExportPanel: memo(ExportPanel),
-  LogsPage: memo(LogsPage),
-  AnalysisPage: memo(AnalysisPage),
-  RomLibraryPage: memo(RomLibraryPage),
-  CalibrationPage: memo(CalibrationPage),
   PlaceholderPanel: memo(PlaceholderPanel),
 };
 
@@ -179,7 +189,9 @@ export function Workbench({ active, onNavigate, data, phone = false }: Workbench
       )}
       <div className={cn(responsiveGridClass, "grid-cols-1")}>
         <PanelErrorBoundary resetKey={active}>
-          {renderItem(active, data, onNavigate, tuning)}
+          <Suspense fallback={<PageLoading />}>
+            {renderItem(active, data, onNavigate, tuning)}
+          </Suspense>
         </PanelErrorBoundary>
       </div>
     </>
@@ -356,13 +368,13 @@ function renderItem(
         />
       );
     case "tuning-logs":
-      return <Pure.LogsPage token={d.token} context={tuning} />;
+      return <LogsPage token={d.token} context={tuning} />;
     case "tuning-analysis":
-      return <Pure.AnalysisPage token={d.token} status={d.status} context={tuning} />;
+      return <AnalysisPage token={d.token} status={d.status} context={tuning} />;
     case "tuning-rom-library":
-      return <Pure.RomLibraryPage token={d.token} status={d.status} />;
+      return <RomLibraryPage token={d.token} status={d.status} />;
     case "tuning-calibration":
-      return <Pure.CalibrationPage token={d.token} status={d.status} />;
+      return <CalibrationPage token={d.token} status={d.status} />;
     case "tuning-rom-editor":
       return (
         <RomEditorPage

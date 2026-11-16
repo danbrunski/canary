@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
+import { ChunkLoadError } from "../lib/lazyChunk";
 import { buttonClass, cn, noticeClass } from "../styles";
 
 interface PanelErrorBoundaryProps {
@@ -41,6 +42,26 @@ export class PanelErrorBoundary extends Component<
   render(): ReactNode {
     const { error } = this.state;
     if (error === null) return this.props.children;
+    if (error instanceof ChunkLoadError) {
+      // A rejected lazy load is remembered, so "Try again" could not succeed;
+      // a reload fetches the current build.
+      return (
+        <div role="alert" className={cn(noticeClass("error"), "m-3")}>
+          <p className="m-0">{error.message}</p>
+          <p className="mt-1 mb-0 text-[0.8rem]">
+            The dashboard was probably updated since this tab was opened, or the Pi is not
+            reachable. Reload to fetch the current version.
+          </p>
+          <button
+            type="button"
+            className={cn(buttonClass, "mt-2")}
+            onClick={() => window.location.reload()}
+          >
+            Reload
+          </button>
+        </div>
+      );
+    }
     return (
       <div role="alert" className={cn(noticeClass("error"), "m-3")}>
         <p className="m-0">This page hit an error and was stopped: {error.message}</p>

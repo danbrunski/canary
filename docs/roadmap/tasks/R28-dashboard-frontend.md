@@ -413,17 +413,65 @@ neither earlier review covered.
     lint` (no suppression change), `pnpm format:check` clean; `pnpm test` 152
     files / 1563 tests passed.
 
-- [ ] **R28.6 One 782 KB chunk (232 KB gzip), loaded eagerly.**
+- [~] **R28.6 One 782 KB chunk (232 KB gzip), loaded eagerly.**
   `vite.config.ts` says to revisit the single chunk "past a few hundred KB".
   There is no `React.lazy` or dynamic `import()`. React is the only runtime
   dependency, so it is all app code; `panels/tuning/**` and `lib/rom*` are
   about a third of it and are used only after opening Engine Tuning, while the
   in-vehicle landing screen is `DriveScreen`.
-  - [ ] Measure first load and parse time on a phone over the Pi's Wi-Fi.
-  - [ ] If it matters: `React.lazy` at `Workbench.tsx`'s `renderItem` switch
-    for the tuning group, inside the existing `PanelErrorBoundary`. Check
-    `public/sw.js` still precaches every chunk (the dashboard must work with
-    no network beyond the Pi) and `e2e/phone.spec.ts`.
+  - [~] Measure first load and parse time on a phone over the Pi's Wi-Fi.
+    Sizes measured offline 2026-11-15 (`pnpm build`); the on-phone load and
+    parse time still needs the truck/Pi and a phone, not run.
+  - [x] `React.lazy` for the tuning group and the Workbench. Done 2026-11-15.
+    `lib/lazyChunk.ts` (`lazyChunk(() => import(..), "Name", {memoised})`
+    wraps `React.lazy`; a failed fetch becomes a `ChunkLoadError`).
+    `App.tsx` loads the whole `Workbench` lazily (the Drive screen is the
+    landing page), and `Workbench.tsx` loads `LoggingPage`, `LogsPage`,
+    `AnalysisPage`, `RomLibraryPage`, `CalibrationPage` and `RomEditorPage`
+    lazily, each inside the existing `PanelErrorBoundary` plus a `Suspense`
+    whose fallback is the new `components/PageLoading` (a quiet
+    "Loading…" status line). Idle-time prefetch of the Workbench chunk after
+    `load` (production only) so the service worker has it cached.
+    Measured, vite build raw / gzip (vite's kB = 1000 B):
+    before, one chunk `index` 789.37 / 235.37 kB plus css 66.55 / 11.71 kB;
+    after, the default (Drive) route loads `index` 228.02 / 72.81 kB plus the
+    same css (first-load JS gzip 235 -> 73 kB, -69 %). Lazy chunks:
+    `Workbench` 288.13 / 81.01, `RomEditorPage` 155.36 / 49.46,
+    `RomLibraryPage` 37.32 / 11.47, `AnalysisPage` 26.25 / 8.77,
+    `cellOverlay` 22.01 / 8.47 (shared by the ROM pages), `LoggingPage`
+    13.13 / 4.58, `LogsPage` 12.33 / 4.65, `CalibrationPage` 6.55 / 2.52,
+    `csv` 6.03 / 2.48, `workbench` 3.45 / 1.17, `workbenchApi` 1.63 / 0.84.
+    `index.html` modulepreloads nothing else. Gates: `pnpm typecheck`,
+    `format:check`, `lint` (no new suppressions), `pnpm test` (153 files),
+    `pnpm build`, `pnpm e2e` (47 passed, 3 skipped, incl. `offlineChunks.spec.ts`) all green.
+  - [x] A failed chunk load is recoverable, not a blank page. Done 2026-11-15.
+    `PanelErrorBoundary` shows a `ChunkLoadError` ("A part of the dashboard
+    could not be loaded ..., probably updated since this tab was opened")
+    with a Reload button instead of "Try again" (React caches a rejected
+    lazy load, so a retry in place can never succeed). The Workbench chunk
+    itself sits in its own `PanelErrorBoundary`. Tests:
+    `lib/lazyChunk.test.tsx` (loading line, memoised once, failed fetch ->
+    alert + Reload calls `location.reload`).
+  - [x] A size budget so it stays fixed. Done 2026-11-15. `vite.config.ts`
+    plugin `entryBudget` fails `pnpm build` when the entry chunk plus its
+    static imports exceed `ENTRY_GZIP_BUDGET_BYTES` (90,000 B gzip; now
+    72.8 kB); checked by temporarily setting 50,000 and watching the build
+    fail. `layering.test.ts` "reaches the Workbench and the Engine Tuning
+    pages only through import()" refuses a static import of the Workbench
+    from `App.tsx` or of a tuning page from `Workbench.tsx`.
+  - [x] `public/sw.js` still serves the lazy chunks offline. Done 2026-11-15.
+    `sw.js` never precached hashed assets (its shell list is the HTML, manifest
+    and icons); hashed JS/CSS are cache-first on first fetch and `sw.js` is
+    unchanged. `e2e/offlineChunks.spec.ts` runs the production bundle
+    (`vite preview`) with the real worker registered: it waits for the worker
+    to control the page and for the idle Workbench prefetch to appear in the
+    Cache Storage, then `context.setOffline(true)`. Offline, the Workbench
+    opens (served from the worker's cache) and an Engine Tuning page never
+    opened online (`#wb/tuning-calibration`) shows the "could not be loaded"
+    alert with a Reload button inside the intact shell, not a blank page.
+    Passed (chromium). The six tuning chunks stay on-demand: prefetching them
+    at idle (~100 kB gzip of background Wi-Fi) so they open offline too is an
+    open operator choice, deferred to the operator, not an unfinished task.
 
 - [x] **R28.7 Formatters and range math outside `util/` and `lib/`.**
   - Two exported `formatDuration` with different output (`util/time.ts`,

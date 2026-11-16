@@ -107,7 +107,7 @@ describe("Workbench navigation", () => {
     expect(onNavigate).toHaveBeenCalledWith("diag-dtc");
   });
 
-  it("separates profile editing from the Logging run controls", () => {
+  it("separates profile editing from the Logging run controls", async () => {
     const editor = renderAt("system-capture-profiles");
     expect(
       screen.getByText(/Define the default collection and temporary logging schemas/),
@@ -117,7 +117,8 @@ describe("Workbench navigation", () => {
     editor.unmount();
 
     renderAt("tuning-logging");
-    expect(screen.getByText(/records default telemetry continuously/)).toBeInTheDocument();
+    // The tuning pages are lazy chunks (R28.6): the first query waits for the load.
+    expect(await screen.findByText(/records default telemetry continuously/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View logs" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
@@ -163,19 +164,19 @@ describe("Workbench navigation", () => {
     expect(screen.getByText(/waits on the server-side flash interlocks/)).toBeInTheDocument();
   });
 
-  it("tuning-logs loads directly with empty group state: the browser, no viewer (W04)", () => {
+  it("tuning-logs loads directly with empty group state: the browser, no viewer (W04)", async () => {
     window.localStorage.clear();
     renderAt("tuning-logs");
-    expect(screen.getByRole("heading", { name: "Captures" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Captures" })).toBeInTheDocument();
     expect(
       screen.getByText("Locked — needs the control token to browse logs."),
     ).toBeInTheDocument();
     expect(screen.queryByText(/W04/)).not.toBeInTheDocument();
   });
 
-  it("tuning-analysis loads directly and asks for sessions (W04)", () => {
+  it("tuning-analysis loads directly and asks for sessions (W04)", async () => {
     renderAt("tuning-analysis");
-    expect(screen.getByText(/Choose sessions or a revision/)).toBeInTheDocument();
+    expect(await screen.findByText(/Choose sessions or a revision/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delivery error" })).toBeInTheDocument();
   });
 

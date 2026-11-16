@@ -15,6 +15,10 @@
  *   range math goes through `lib/framePlot` (`extent`, `fraction`, `rangeSpan`,
  *   `coverageMax`), not a spread into `Math.max` (a RangeError past ~100k
  *   values) or a hand-written "hi - lo || 1".
+ * - R28.6: the Drive screen's chunk stays small because the Workbench and the
+ *   Engine Tuning pages are reached only through a dynamic `import()`; one static
+ *   import puts them back into the entry (the build also fails on its gzip
+ *   budget, `vite.config.ts`).
  * - R28.4: `test/` holds the shared test support (`controlRoutes` routes the
  *   mocked `controlJson`), so it may name `controlJson`; nothing that ships
  *   may import it.
@@ -61,6 +65,28 @@ describe("dashboard layering", () => {
         (p) => p === "./panels/Workbench.tsx" || /\/(?:LogsPage|AnalysisPage)\.tsx$/.test(p),
       ),
     ).toEqual([]);
+  });
+
+  it("reaches the Workbench and the Engine Tuning pages only through import()", () => {
+    const staticImport = (name: string) =>
+      new RegExp(`^\\s*import\\s+(?!type\\b)[^;]*?from\\s*["'][^"']*/${name}["']`, "m");
+    const lazy = [
+      ["./App.tsx", "Workbench"],
+      ...[
+        "LoggingPage",
+        "LogsPage",
+        "AnalysisPage",
+        "RomLibraryPage",
+        "CalibrationPage",
+        "RomEditorPage",
+      ].map((page) => ["./panels/Workbench.tsx", page]),
+    ] as const;
+    const eager = lazy.filter(([path, name]) => staticImport(name).test(sources[path] ?? ""));
+    expect(eager).toEqual([]);
+    // The pattern has to be able to match, or the check above proves nothing.
+    expect(staticImport("Workbench").test('import { Workbench } from "./panels/Workbench";')).toBe(
+      true,
+    );
   });
 
   it("keeps the log and analysis plot-data helpers free of React and of the UI layers", () => {
