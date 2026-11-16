@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { MAX_DRAWS, formatEdges, suggestEdges } from "./romSim";
+import { EMPTY_FORM, MAX_DRAWS, formatEdges, suggestEdges, type SimFormValues } from "./romSim";
 import {
   COST_FIT,
   LAPTOP_TIMINGS,
@@ -22,6 +22,7 @@ import {
   nearestTiming,
   presetFill,
   recordTiming,
+  simFormReadout,
   referenceLine,
 } from "./romSimSize";
 import { tablesWithAxes } from "../test/romSimFixtures";
@@ -293,4 +294,74 @@ describe("cancel", () => {
 it("formats edges the way the form does", () => {
   const fill = presetFill("coarse", suggestion());
   expect(formatEdges(fill?.rpmEdges ?? []).split(", ")).toHaveLength(9);
+});
+
+describe("simFormReadout (R28.5)", () => {
+  const tables = () => tablesWithAxes().tables;
+  const readoutOf = (
+    patch: Partial<SimFormValues>,
+    applied = null as ReturnType<typeof presetFill>,
+  ) => {
+    const s = suggestEdges(tables());
+    return simFormReadout({
+      values: { ...EMPTY_FORM, ...patch },
+      label: "",
+      edits: [],
+      tables: tables(),
+      suggestion: s,
+      fine: fineReference(s),
+      applied,
+      timings: [],
+    });
+  };
+  const edges = (n: number) => formatEdges(Array.from({ length: n }, (_, i) => i * 10));
+
+  it("says nothing is stated on an empty form, and names what is missing", () => {
+    const readout = readoutOf({});
+    expect(readout.sized).toBeNull();
+    expect(readout.cost).toBeNull();
+    expect(readout.sizeVerdict).toBeNull();
+    expect(readout.cells).toBe(0);
+    expect(readout.gridSizeText).toBe("grid size: not stated (at most 1,024 cells)");
+    expect(readout.drawsStated).toBe("not stated");
+    expect(readout.mode).toBeNull();
+    expect(readout.check.request).toBeNull();
+    expect(readout.missing.map((item) => item.field)).toContain("draws");
+  });
+
+  it("sizes the run once the edges and the draws are stated", () => {
+    const readout = readoutOf({ rpmEdges: edges(5), loadEdges: edges(4), draws: "200" });
+    expect(readout.cells).toBe(12);
+    expect(readout.gridSizeText).toBe("4 × 3 = 12 of at most 1,024 cells");
+    expect(readout.sized).toEqual({ points: 12, draws: 200 });
+    expect(readout.drawsStated).toBe("200");
+    expect(readout.cost?.headline).toContain("12 points × 200 draws");
+    expect(readout.sizeVerdict?.coarse).toBe(true);
+  });
+
+  it("sizes nothing from an unreadable edge list, and says so", () => {
+    const readout = readoutOf({ rpmEdges: "1 two 3", loadEdges: edges(4), draws: "200" });
+    expect(readout.sized).toBeNull();
+    expect(readout.cells).toBe(0);
+    expect(readout.invalid.map((item) => item.field)).toContain("rpmEdges");
+  });
+
+  it("offers a trim only for load edges that reach outside the fill model", () => {
+    expect(readoutOf({ loadEdges: "10 50 90" }).loadOutside).toBe(false);
+    expect(readoutOf({ loadEdges: "0 50 120" }).loadOutside).toBe(true);
+    expect(readoutOf({ loadEdges: "x" }).loadOutside).toBe(false);
+  });
+
+  it("reads as the preset until a field it filled is edited, then as custom", () => {
+    const fill = presetFill("fine", suggestEdges(tables()));
+    if (!fill) throw new Error("fixture has breakpoints");
+    const filled = {
+      rpmEdges: formatEdges(fill.rpmEdges),
+      loadEdges: formatEdges(fill.loadEdges),
+      draws: String(fill.draws),
+    };
+    expect(readoutOf(filled, fill).mode).toBe("fine");
+    expect(readoutOf({ ...filled, draws: "999" }, fill).mode).toBe("custom");
+    expect(readoutOf(filled, fill).sizeVerdict?.coarse).toBe(false);
+  });
 });

@@ -15,13 +15,26 @@
 //   measured fit scaled by what THIS server's earlier runs took, and without
 //   such runs the page says "not yet measured" next to a labelled reference.
 
+import type { RomEdit } from "../types/romEditor";
+import type { RomTableValues } from "../types/romLibrary";
 import {
   MAX_DRAWS,
+  MAX_GRID_POINTS,
+  checkSimForm,
   edgesFromBreakpoints,
+  editsTouchWotColumn,
   formatEdges,
   gridPoints,
+  loadEdgesError,
+  parseEdges,
+  parseNumber,
+  pedalFlagBit0Clear,
   trimLoadEdges,
+  wotColumnWarning,
   type BreakpointSuggestion,
+  type ParsedEdges,
+  type SimCheck,
+  type SimFormValues,
 } from "./romSim";
 
 // -- the presets ----------------------------------------------------------------------------
@@ -424,4 +437,91 @@ export function cancelWording(expected: { seconds: number; measured: boolean }):
     ? "from your earlier runs here"
     : "the dev-laptop fit; not yet measured on this server";
   return `Cancel only stops waiting: the server finishes this run (about ${formatDuration(expected.seconds)}, ${basis}) before another can start. No route stops it sooner, and it is bounded at ${SERVER_JOB_LIMIT_S} s.`;
+}
+
+// -- what the form says about itself --------------------------------------------------------
+
+/** Everything the Simulate form reads off its values for display, as one pure
+ *  function (R28.5; it was thirty lines of locals in `SimForm`): the checked
+ *  request and its problems, the grid size, the draws as stated, the cost
+ *  estimate and the coarse verdict, whether a preset still reads as it filled
+ *  the form, and the WOT-column note. The view says nothing about the form
+ *  that is not here. */
+export interface SimFormReadout {
+  check: SimCheck;
+  missing: SimCheck["problems"];
+  invalid: SimCheck["problems"];
+  rpm: ParsedEdges;
+  load: ParsedEdges;
+  /** Grid cells: 0 while either edge list is empty or unreadable. */
+  cells: number;
+  /** "RPM × load = cells of at most N", or "not stated". */
+  gridSizeText: string;
+  /** Load edges that parse but reach outside the fill model (offer a trim). */
+  loadOutside: boolean;
+  /** The draws as the hint states them, "not stated" until they parse. */
+  drawsStated: string;
+  /** The suggested axes are uniform: a cell centre is on its breakpoint. */
+  uniform: boolean;
+  /** The preset the fields still read as, "custom" once one was edited after a
+   *  preset filled them, null while none was pressed. */
+  mode: SimPreset | "custom" | null;
+  /** The size of the run the fields state, once they state one. */
+  sized: { points: number; draws: number } | null;
+  cost: { headline: string; detail: string } | null;
+  sizeVerdict: CoarseVerdict | null;
+  /** The pre-Run note: the edit touches the WOT column and the pedal flag
+   *  never reads it. */
+  wotWarning: string | null;
+}
+
+export function simFormReadout(input: {
+  values: SimFormValues;
+  label: string;
+  edits: RomEdit[];
+  /** The base image's tables, for the WOT column. */
+  tables: RomTableValues[];
+  suggestion: BreakpointSuggestion;
+  fine: FineReference;
+  applied: PresetFill | null;
+  /** This server's earlier runs, the cost estimate's basis. */
+  timings: readonly TimedRun[];
+}): SimFormReadout {
+  const { values, label, edits, tables, suggestion, fine, applied, timings } = input;
+  const check = checkSimForm(values, label, edits);
+  const rpm = parseEdges(values.rpmEdges);
+  const load = parseEdges(values.loadEdges);
+  const readable = !rpm.error && !load.error && !rpm.empty && !load.empty;
+  const cells = gridPoints(rpm.error ? [] : rpm.edges, load.error ? [] : load.edges);
+  const drawsParsed = parseNumber(values.draws, { integer: true, min: 1, max: null });
+  const wotFlag = pedalFlagBit0Clear(values.pedalFlag);
+  // Custom: a preset filled these fields and they no longer read as it filled them.
+  const unchanged =
+    applied !== null &&
+    values.rpmEdges === formatEdges(applied.rpmEdges) &&
+    values.loadEdges === formatEdges(applied.loadEdges) &&
+    values.draws === String(applied.draws);
+  const sized =
+    readable && drawsParsed.kind === "ok" ? { points: cells, draws: drawsParsed.value } : null;
+  const maxCells = MAX_GRID_POINTS.toLocaleString("en-US");
+  return {
+    check,
+    missing: check.problems.filter((item) => item.kind === "missing"),
+    invalid: check.problems.filter((item) => item.kind === "invalid"),
+    rpm,
+    load,
+    cells,
+    gridSizeText: readable
+      ? `${rpm.edges.length - 1} × ${load.edges.length - 1} = ${cells} of at most ${maxCells} cells`
+      : `grid size: not stated (at most ${maxCells} cells)`,
+    loadOutside: !load.error && load.edges.length > 1 && loadEdgesError(load.edges) !== null,
+    drawsStated: drawsParsed.kind === "ok" ? String(drawsParsed.value) : "not stated",
+    uniform: suggestion.offCentre.rpm <= 0.05 && suggestion.offCentre.load <= 0.05,
+    mode: applied ? (unchanged ? applied.preset : "custom") : null,
+    sized,
+    cost: sized ? costText(estimateCost(sized.points, sized.draws, timings)) : null,
+    sizeVerdict: sized ? coarseVerdict(sized.draws, sized.points, fine) : null,
+    wotWarning:
+      wotFlag !== null && editsTouchWotColumn(edits, tables) ? wotColumnWarning(wotFlag) : null,
+  };
 }

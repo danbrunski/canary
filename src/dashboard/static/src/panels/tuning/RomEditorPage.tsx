@@ -1,22 +1,18 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 
-import {
-  downloadRomImage,
-  exportRomEdits,
-  getRomLibrary,
-  getRomTables,
-  previewRomEdits,
-  simulateRomEdits,
-  uploadRomImage,
-} from "../../api/workbench";
+import { getRomLibrary, getRomTables, uploadRomImage } from "../../api/workbench";
 import { Notice } from "../../components/Notice";
 import { Panel } from "../../components/Panel";
 import { SegmentedControl, type SegmentOption } from "../../components/SegmentedControl";
 import { reloaded } from "../../hooks/followUpRead";
 import { TelemetryChannelsContext } from "../../hooks/telemetryChannels";
-import { describeError, useControlResource } from "../../hooks/useControlResource";
+import { useControlResource } from "../../hooks/useControlResource";
+import { useEditSession } from "../../hooks/useEditSession";
+import { useGeneration } from "../../hooks/useGeneration";
 import { useIsNarrow } from "../../hooks/useMediaQuery";
 import type { ChannelSnapshot } from "../../hooks/useTelemetryStream";
+import { usePreviewExport } from "../../hooks/usePreviewExport";
+import { useSimRun } from "../../hooks/useSimRun";
 import type { LoadedRom } from "../../hooks/useTuningContext";
 import {
   SIMULATE_REASON_TEXT,
@@ -26,10 +22,7 @@ import {
   isEditableTable,
   isSimulatedSlot,
   isViewableTable,
-  loadEditorState,
   pendingCellSet,
-  previewRefusal,
-  saveEditorState,
   simulateReason,
   specFileName,
   tableChoice,
@@ -39,33 +32,14 @@ import {
   ROM_UPLOAD_LIMIT,
   axisBreakpoints,
   describeEditorDisagreement,
-  downloadName,
   entryTitle,
   refusalText,
 } from "../../lib/romLibrary";
-import {
-  SIM_BLOCK_TEXT,
-  gridPoints,
-  resultFileName,
-  simFailure,
-  suggestEdges,
-} from "../../lib/romSim";
-import { editsTouchWotColumn } from "../../lib/romSim";
-import { expectedRun, fineReference, loadTimings, recordTiming } from "../../lib/romSimSize";
+import { SIM_BLOCK_TEXT, resultFileName } from "../../lib/romSim";
 import type { StatusResponse, WorkbenchItem } from "../../types";
-import type {
-  CellSelection,
-  PendingEdit,
-  RomEditOperation,
-  RomEditPreview,
-  RomEditRefusal,
-  RomSimRequest,
-  RomSimResult,
-  SimFailure,
-  SimRunContext,
-} from "../../types/romEditor";
+import type { CellSelection, RomEditOperation } from "../../types/romEditor";
 import type { RomLibraryEntry, RomTableValues } from "../../types/romLibrary";
-import { downloadBlob, downloadText } from "../../util/browser";
+import { downloadText } from "../../util/browser";
 import { BasePicker, SimulateChip } from "./romEditor/BasePicker";
 import type { GridOverlay } from "../cellOverlay";
 import { CellGrid } from "./romEditor/CellGrid";
@@ -73,9 +47,10 @@ import { LiveOverlay } from "./romEditor/LiveOverlay";
 import { OpenRom } from "./romEditor/OpenRom";
 import { OperationPanel } from "./romEditor/OperationPanel";
 import { PendingEdits } from "./romEditor/PendingEdits";
-import { type ExportState, PreviewResult } from "./romEditor/PreviewResult";
+import { PreviewResult } from "./romEditor/PreviewResult";
 import { RecentMenu } from "./romEditor/RecentMenu";
-import { SimCancelled, SimFailureAlert, SimForm, SimRunning } from "./romEditor/SimForm";
+import { SimForm } from "./romEditor/SimForm";
+import { SimCancelled, SimFailureAlert, SimRunning } from "./romEditor/SimRunStatus";
 import { SimResults } from "./romEditor/SimResults";
 import { TableTree } from "./romEditor/TableTree";
 import { RevisionChip } from "./romLibraryParts";
@@ -198,7 +173,7 @@ export function RomEditorPage({
   const [busy, setBusy] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const load = useRef(0);
+  const load = useGeneration();
 
   /** Load a file into the editor in one step: upload it (the library keeps it
    *  by sha256, idempotently), make the answered entry the base. A refusal
@@ -214,20 +189,19 @@ export function RomEditorPage({
       setRefusal(`${file.name} is larger than the 2 MiB upload limit.`);
       return;
     }
-    const mine = load.current + 1;
-    load.current = mine;
+    const mine = load.next();
     setBusy(`Opening ${file.name}`);
     try {
       const entry = await uploadRomImage(token, file);
-      if (load.current !== mine) return;
+      if (!load.isCurrent(mine)) return;
       setOpened({ entry, name: file.name, existed: entry.created === false });
       setChosen(entry.sha256);
       writeShaToUrl(entry.sha256);
       await reloaded(library.refresh());
     } catch (err) {
-      if (load.current === mine) setRefusal(`${file.name}: ${refusalText(err)}`);
+      if (load.isCurrent(mine)) setRefusal(`${file.name}: ${refusalText(err)}`);
     } finally {
-      if (load.current === mine) setBusy(null);
+      if (load.isCurrent(mine)) setBusy(null);
     }
   }
 
@@ -348,27 +322,6 @@ interface OpenedRom {
   existed: boolean;
 }
 
-type PreviewState =
-  | { kind: "idle" }
-  | { kind: "busy" }
-  | { kind: "ok"; data: RomEditPreview }
-  | { kind: "refused"; refusal: RomEditRefusal }
-  | { kind: "error"; text: string };
-
-/** What a run in flight is expected to take (the Cancel wording). */
-interface Expected {
-  seconds: number;
-  measured: boolean;
-}
-
-type SimState =
-  | { kind: "idle" }
-  | { kind: "running"; startedAt: number; expected: Expected }
-  /** The page stopped waiting; the daemon did not stop. */
-  | { kind: "cancelled"; startedAt: number; cancelledAt: number; expected: Expected }
-  | { kind: "ok"; result: RomSimResult; run: SimRunContext }
-  | { kind: "failed"; failure: SimFailure };
-
 // Memoised: telemetry replaces `channels` up to once a frame, and the page
 // above hands them down through context, so this 500-line tree renders only
 // when something it shows changes. Only the live overlay reads the channels.
@@ -409,43 +362,16 @@ const Workspace = memo(function Workspace({
   const narrow = useIsNarrow();
 
   const [selection, setSelection] = useState<CellSelection | null>(null);
-  const [saved] = useState(() => loadEditorState(sha));
-  const [pending, setPending] = useState<PendingEdit[]>(saved.pending);
-  const [label, setLabel] = useState(saved.label);
   const [opRefusal, setOpRefusal] = useState<{ reason: string; message: string } | null>(null);
-  const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
-  const [exported, setExported] = useState<ExportState>({ kind: "idle" });
-  const request = useRef(0);
-  const counter = useRef(0);
   const baseTables = tables.data?.tables ?? [];
-  const [sim, setSim] = useState<SimState>({ kind: "idle" });
-  // This server's earlier runs, kept by the browser: the cost estimate's basis.
-  const [timings, setTimings] = useState(loadTimings);
-  const simRun = useRef(0);
-  const simAbort = useRef<AbortController | null>(null);
-  // A run this page stopped waiting for, so a later `analysis_busy` can be
-  // explained as that run. Cleared by the next run that returns.
-  const [abandoned, setAbandoned] = useState<{ startedAt: number; expectedS: number } | null>(null);
-  const edits = useMemo(() => pending.map((item) => item.edit), [pending]);
-
-  // Leaving the image (or the page) drops the wait; the daemon's job is its own.
-  useEffect(
-    () => () => {
-      simRun.current += 1;
-      simAbort.current?.abort();
-    },
-    [],
+  const { preview, exported, invalidate, runPreview, runExport, downloadExport } = usePreviewExport(
+    token,
+    sha,
   );
-
-  useEffect(() => {
-    saveEditorState(sha, { label, pending });
-  }, [sha, label, pending]);
-
-  function invalidate() {
-    request.current += 1;
-    setPreview({ kind: "idle" });
-    setExported({ kind: "idle" });
-  }
+  const session = useEditSession(sha, invalidate);
+  const { pending, edits, label } = session;
+  const simRun = useSimRun({ token, sha, entry, baseTables, pending, edits });
+  const { sim } = simRun;
 
   function apply(op: RomEditOperation) {
     if (!table) return;
@@ -469,120 +395,11 @@ const Workspace = memo(function Workspace({
       return;
     }
     setOpRefusal(null);
-    counter.current += 1;
-    setPending((items) => [
-      ...items,
-      {
-        id: `${Date.now()}-${counter.current}`,
-        summary: describeOperation(op, built.cells.length, table.decode?.unit ?? null),
-        edit,
-        tableName: table.name,
-        chain: built.chain,
-      },
-    ]);
-    invalidate();
-  }
-
-  async function runPreview() {
-    const mine = request.current + 1;
-    request.current = mine;
-    setPreview({ kind: "busy" });
-    try {
-      const data = await previewRomEdits(token, sha, {
-        label: label.trim(),
-        edits: pending.map((item) => item.edit),
-      });
-      if (request.current === mine) setPreview({ kind: "ok", data });
-    } catch (err) {
-      if (request.current !== mine) return;
-      const refusal = previewRefusal(err);
-      setPreview(
-        refusal ? { kind: "refused", refusal } : { kind: "error", text: describeError(err) },
-      );
-    }
-  }
-
-  /** The previewed edits as a checksummed library entry. The button only
-   *  shows under a preview, and any new edit clears both, so what is exported
-   *  is what was previewed. */
-  async function runExport() {
-    const mine = request.current;
-    setExported({ kind: "busy" });
-    try {
-      const data = await exportRomEdits(token, sha, {
-        label: label.trim(),
-        edits: pending.map((item) => item.edit),
-      });
-      if (request.current === mine) setExported({ kind: "ok", data });
-    } catch (err) {
-      if (request.current !== mine) return;
-      const refusal = previewRefusal(err);
-      setExported(
-        refusal ? { kind: "refused", refusal } : { kind: "error", text: describeError(err) },
-      );
-    }
-  }
-
-  async function downloadExport(exportSha: string) {
-    if (exported.kind !== "ok") return;
-    downloadBlob(await downloadRomImage(token, exportSha), downloadName(exported.data.entry));
-  }
-
-  async function runSimulation(simRequest: RomSimRequest) {
-    const mine = simRun.current + 1;
-    simRun.current = mine;
-    simAbort.current?.abort();
-    const controller = new AbortController();
-    simAbort.current = controller;
-    const startedAt = Date.now();
-    const points = gridPoints(simRequest.rpm_edges, simRequest.load_edges);
-    const expected = expectedRun(points, simRequest.draws, timings);
-    setSim({ kind: "running", startedAt, expected });
-    try {
-      const result = await simulateRomEdits(token, sha, simRequest, controller.signal);
-      if (simRun.current !== mine) return;
-      // This server's own wall time for this size: the next estimate's basis.
-      recordTiming({ points, draws: simRequest.draws, seconds: (Date.now() - startedAt) / 1000 });
-      setTimings(loadTimings());
-      setAbandoned(null);
-      setSim({
-        kind: "ok",
-        result,
-        run: {
-          request: simRequest,
-          edits: pending.map((item) => ({
-            tableName: item.tableName,
-            summary: item.summary,
-            chain: item.chain,
-          })),
-          base: {
-            sha256: sha,
-            label: entry.label ?? entry.filename ?? sha.slice(0, 12),
-            revision: entry.revision_match.revision,
-          },
-          wotColumnEdited: editsTouchWotColumn(simRequest.edits, baseTables),
-          elapsedS: Math.round((Date.now() - startedAt) / 1000),
-          fineReference: fineReference(suggestEdges(baseTables)),
-        },
-      });
-    } catch (err) {
-      if (simRun.current !== mine) return;
-      setSim({ kind: "failed", failure: simFailure(err) });
-    }
-  }
-
-  function cancelSimulation() {
-    if (sim.kind !== "running") return;
-    // Drop the wait (the result, if it ever comes, is not shown); the daemon's
-    // job is its own and no route stops it.
-    simRun.current += 1;
-    simAbort.current?.abort();
-    setAbandoned({ startedAt: sim.startedAt, expectedS: sim.expected.seconds });
-    setSim({
-      kind: "cancelled",
-      startedAt: sim.startedAt,
-      cancelledAt: Date.now(),
-      expected: sim.expected,
+    session.add({
+      summary: describeOperation(op, built.cells.length, table.decode?.unit ?? null),
+      edit,
+      tableName: table.name,
+      chain: built.chain,
     });
   }
 
@@ -622,8 +439,7 @@ const Workspace = memo(function Workspace({
       }
     : null;
 
-  const simStale =
-    sim.kind === "ok" && JSON.stringify(sim.run.request.edits) !== JSON.stringify(edits);
+  const simStale = simRun.stale;
   const simState =
     sim.kind === "running"
       ? " · running"
@@ -769,15 +585,9 @@ const Workspace = memo(function Workspace({
             pending={pending}
             label={label}
             busy={preview.kind === "busy"}
-            onLabel={(value) => {
-              setLabel(value);
-              invalidate();
-            }}
-            onRemove={(id) => {
-              setPending((items) => items.filter((item) => item.id !== id));
-              invalidate();
-            }}
-            onPreview={() => void runPreview()}
+            onLabel={session.setLabel}
+            onRemove={session.remove}
+            onPreview={() => void runPreview(label, edits)}
           />
         </Panel>
 
@@ -806,7 +616,7 @@ const Workspace = memo(function Workspace({
                   downloadText(preview.data.spec_yaml, specFileName(label), "application/x-yaml");
                 }}
                 exportState={exported}
-                onExport={() => void runExport()}
+                onExport={() => void runExport(label, edits)}
                 onDownloadImage={(exportSha) => void downloadExport(exportSha)}
               />
             )}
@@ -830,14 +640,14 @@ const Workspace = memo(function Workspace({
               edits={edits}
               blocked={simBlocked}
               startedAt={sim.kind === "running" ? sim.startedAt : null}
-              timings={timings}
-              onRun={(simRequest) => void runSimulation(simRequest)}
+              timings={simRun.timings}
+              onRun={(simRequest) => void simRun.run(simRequest)}
             />
             {sim.kind === "running" && (
               <SimRunning
                 startedAt={sim.startedAt}
                 expected={sim.expected}
-                onCancel={cancelSimulation}
+                onCancel={simRun.cancel}
               />
             )}
             {sim.kind === "cancelled" && (
@@ -848,7 +658,7 @@ const Workspace = memo(function Workspace({
               />
             )}
             {sim.kind === "failed" && (
-              <SimFailureAlert failure={sim.failure} cancelled={abandoned} />
+              <SimFailureAlert failure={sim.failure} cancelled={simRun.abandoned} />
             )}
           </div>
         </Panel>

@@ -1,12 +1,8 @@
 import { TableScroll } from "../../../components/TableScroll";
+import type { ExportState } from "../../../hooks/usePreviewExport";
 import { formatDecoded } from "../../../lib/romEditor";
 import { buttonClass } from "../../../styles";
-import type {
-  RomEditExportResponse,
-  RomEditPreview,
-  RomEditRefusal,
-  RomLevers,
-} from "../../../types/romEditor";
+import type { RomEditPreview, RomLevers } from "../../../types/romEditor";
 import type { RomTableValues } from "../../../types/romLibrary";
 import { CellGrid } from "./CellGrid";
 
@@ -52,13 +48,7 @@ function LeverMessages({ levers }: { levers: RomLevers }) {
  *  new cell list in raw and decoded, what the change reaches, and the spec
  *  download. No candidate image is offered or linked anywhere: only its hash,
  *  and the spec that reproduces it. */
-/** The export's state, held by the page so a new edit resets it. */
-export type ExportState =
-  | { kind: "idle" }
-  | { kind: "busy" }
-  | { kind: "ok"; data: RomEditExportResponse }
-  | { kind: "refused"; refusal: RomEditRefusal }
-  | { kind: "error"; text: string };
+export type { ExportState };
 
 function ExportControls({
   exportState,

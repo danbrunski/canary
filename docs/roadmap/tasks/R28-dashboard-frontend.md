@@ -345,23 +345,73 @@ neither earlier review covered.
     (`CalibrationPage` 9, `EcuBackupCard` 27, `RomLibraryPage` 28,
     `RomEditorPage` 44, `RomEditorTables` 11, `TuningContextBar` 12).
 
-- [ ] **R28.5 `SimForm` and `RomEditorPage.Workspace` mix state machines,
+- [x] **R28.5 `SimForm` and `RomEditorPage.Workspace` mix state machines,
   request orchestration and layout.** `SimForm` is one 712-line component
   (five state cells, three effects, about 450 lines of JSX); `Workspace` is
   504 lines. Four hand-rolled request-generation counters (`request`,
-  `counter`, `simRun`, `load`) are one idea.
-  - [ ] `SimForm`: `useSimFormState(tables, label, edits)` for the values,
+  `counter`, `simRun`, `load`) are one idea. Done 2026-11-15.
+  - [x] `SimForm`: `useSimFormState(tables, label, edits)` for the values,
     remembered set, presets and typical-value fill; the typical-values fetch
     onto the existing async hooks; the derived read-out (`mode`, `sized`,
     `cost`, `sizeVerdict`, …) into `lib/romSimView` / `lib/romSimSize`;
     sections as components (`SimPresets`, `SimEdges`,
     `SimRememberedBanner`).
-  - [ ] `Workspace`: `useEditSession(sha)` (pending edits and persistence),
+    `lib/romSimForm.ts` is the form's reducer (`initSimForm`, `simFormReducer`:
+    change, preset, resetEdges, clearRemembered, typicalLoading / Failed /
+    Filled; values, remembered set, saved-at, typed edges, applied preset,
+    typical marks and typical state in one state, the remember rules in the
+    one `change` action; storage stays with the caller). `hooks/useSimFormState`
+    wraps it with `loadRemembered` / `forgetRemembered`, the preset fills, and
+    the typical fetch. `simFormReadout` (in `lib/romSimSize`, which already
+    held the cost model and imports `romSim`; `romSimView` is the result
+    view's) is the whole derived read-out: check, missing / invalid, grid size
+    text, `loadOutside`, `drawsStated`, `mode`, `sized`, `cost`, `sizeVerdict`,
+    `wotWarning`. `SimForm.tsx` 1,048 to 351 lines; `SimFields.tsx` (the field
+    primitives), `SimFormSections.tsx` (`SimRememberedBanner`, `SimPresets`,
+    `SimTypicalValues`, `SimEdges`) and `SimRunStatus.tsx` (`SimRunning`,
+    `SimCancelled`, `SimFailureAlert`, moved with their text unchanged).
+    Deviation: the typical-values fetch is not on `usePolling` /
+    `useAsyncAction`: the first re-fetches by effect and clears on disable, the
+    second has no abort or cache and a notice-shaped error, and the click is an
+    event whose answer is applied to the form as it is when the values
+    arrive. It is on `useLatestRequest` (below), the same token and abort the
+    simulate run uses, which is what made it one idea.
+  - [x] `Workspace`: `useEditSession(sha)` (pending edits and persistence),
     `usePreviewExport`, `useSimRun`; the component keeps layout.
+    `hooks/useEditSession(sha, onEdited)` (pending, label, add / remove /
+    setLabel, storage; every change calls `onEdited`, which is the preview
+    hook's `invalidate`, so a mutation that forgets to drop the preview cannot
+    be written), `hooks/usePreviewExport(token, sha)` (preview, export,
+    download, one generation; the label and edits are arguments, so the hooks
+    have no cycle), `hooks/useSimRun` (sim state, timings, abandoned run,
+    `stale`, run / cancel). `Workspace` is layout plus the table choice,
+    selection and `apply`. The four counters are `hooks/useGeneration`:
+    `useGeneration()` (`next` / `bump` / `isCurrent` / `current`: `request`,
+    `load`, and the edit-id `counter`) and `useLatestRequest()` (a generation
+    plus its `AbortController`, cancelled on unmount: `simRun` + `simAbort` and
+    the typical fetch's controller). A pending edit's id is now claimed before
+    the state update, not inside it (two adds in one batch could have read the
+    same counter).
   - Must not change: `SIM_REQUEST_FIELDS`, the remember rules, `data-*` and
     aria names. Pinned by `RomEditorSimulate*.test.tsx` (split by R28.4),
     `RomEditorPage.test.tsx`, `SimResults.test.tsx`, `lib/romSim*.test.ts`,
     `e2e/romEditor.spec.ts`.
+    Held: none of those files was edited (the 374 tests of the RomEditor,
+    romEditor and romSim files passed before and after; `PreviewResult.tsx`
+    re-exports `ExportState`, now defined in `usePreviewExport`, so its test's
+    import is unchanged); `e2e/romEditor.spec.ts` 11 passed. New unit tests:
+    `lib/romSimForm.test.ts` (16), `simFormReadout` in `romSimSize.test.ts`
+    (+5), `hooks/useGeneration.test.ts` (5), `useEditSession` (4),
+    `usePreviewExport` (6), `useSimRun` (7), `useSimFormState` (7).
+    Mutation-checked, each restored byte-identical: `change` not dropping the
+    remembered mark fails `takes the remembered mark off the edited field only`;
+    `isCurrent` always true fails 9 tests across `useGeneration`,
+    `usePreviewExport` and `useSimRun` (the stale-answer and Cancel ones);
+    `invalidate` not bumping the generation fails the two
+    `usePreviewExport` drop-after-edit tests; `mode` ignoring `unchanged`
+    fails the preset-then-edit readout test. Gate: `pnpm typecheck`, `pnpm
+    lint` (no suppression change), `pnpm format:check` clean; `pnpm test` 152
+    files / 1563 tests passed.
 
 - [ ] **R28.6 One 782 KB chunk (232 KB gzip), loaded eagerly.**
   `vite.config.ts` says to revisit the single chunk "past a few hundred KB".
