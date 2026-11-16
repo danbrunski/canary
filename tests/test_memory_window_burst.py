@@ -19,88 +19,41 @@ import threading
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
 
 import can
 import pytest
 
 from src.collection import bus_budget, can_obd_loop, tuning_profile, tx_gate
 from src.collection.can_obd_loop import run_can_obd_loop
-from src.collection.capture_profiles import CaptureProfile, CaptureProfileCatalog
+from src.collection.capture_profiles import CaptureProfileCatalog
 from src.collection.obd_collector import ObdReading
 from src.collection.obd_registry import MODE01_REGISTRY
 from src.collection.obd_scheduler import (
     CanObdSpec,
-    DidSessionSpec,
     did_alias_table,
     preview_polling_plan,
     profile_did_union,
 )
 from src.config import CanBusConfig, CollectionConfig
-from src.decode.dids import MEMORY_SOURCE, select_memory_channels
+from src.decode.dids import MEMORY_SOURCE
 from src.yaml_load import load_yaml
-from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock, support_bits
-
-#: ``poll_rate_hz`` 1 derives the 8 req/s the Pi serves at.
-BUDGET_RPS = 8.0
-SLOT = 1.0 / BUDGET_RPS
-LATENCY = 0.010
-#: The coordinate tuple plus final timing: the spark window (timing + rpm
-#: word), the fuel_axis window (BFS-X) and flags_2841 (HI DET): three reads.
-MEMORY = (
-    "ECM_IGNITION_TIMING_RAM",
-    "ECM_ENGINE_SPEED_RAM",
-    "ECM_FUEL_TARGET_MAP_X_TRACE",
-    "ECM_HIGH_DET_FLAGS",
+from tests.capture_builders import (
+    CYCLE_S,
+    DIDS,
+    LATENCY,
+    MODE01,
+    RUNS,
+    SLOT,
+    XTERRA_CATALOG,
+    XTERRA_MODE06,
+    window_profile,
+    window_run,
 )
-DIDS = ("ECM_RPM", "ECM_AIR_CHARGE", "ECM_IGNITION_TIMING")
-MODE01 = ("RPM", "ENGINE_LOAD", "TIMING_ADVANCE")
+from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock
+
 LOOKUP_SKEW_S = 0.25
-CYCLE_S = 4.0
 ENTRY = bytes.fromhex("0210c0")
 EXIT = bytes.fromhex("021081")
-
-
-def _profile(**update: object) -> CaptureProfile:
-    fields: dict[str, object] = {
-        "name": "burst",
-        "mode01": dict.fromkeys(MODE01, 1.0),
-        "mode22": DIDS,
-        "memory": MEMORY,
-        "did_cycle_seconds": CYCLE_S,
-        "storage_prefix": "_capture-burst",
-    }
-    fields.update(update)
-    return CaptureProfile.model_validate(fields)
-
-
-def _spec(*, window_max_seconds: float = 10.0, keepalive_seconds: float = 2.0) -> CanObdSpec:
-    return CanObdSpec(
-        can=CanBusConfig(interface="virtual", channel="burst", bitrate=500000),
-        poll_rate_hz=1.0,
-        pids=MODE01,
-        dids=DIDS,
-        batch_max_pids=6,
-        priority_channels=(),
-        dtc_poll_interval_seconds=0.0,
-        service_poll_interval_seconds=0.0,
-        request_timeout_seconds=1.0,
-        capture_profiles_enabled=True,
-        memory=select_memory_channels(MEMORY),
-        did_session=DidSessionSpec(
-            session=0xC0,
-            exit_session=0x81,
-            exit_grace_seconds=0.05,
-            keepalive_seconds=keepalive_seconds,
-            window_interval_seconds=CYCLE_S,
-            window_max_seconds=window_max_seconds,
-            lapse_seconds=5.0,
-        ),
-    )
-
-
-#: Every ScriptedEcu a test built, newest last (for its lapse count).
-_RUNS: list[ScriptedEcu] = []
 
 
 @pytest.fixture
@@ -117,47 +70,6 @@ def runtime_reset() -> Iterable[None]:
     tuning_profile.configure_did_aliases({})
     tx_gate.set_passive(False, source="test")
     tuning_profile.set_active(False, source="test")
-
-
-def _run(
-    clock: FakeClock,
-    profile: CaptureProfile,
-    seconds: float,
-    *,
-    ecu: dict[str, Any] | None = None,
-    unseen_memory: bool = False,
-    **spec: float,
-) -> tuple[list[tuple[float, bytes]], list[ObdReading]]:
-    """Requests sent (flow control left out) and readings, on the fake clock.
-
-    ``unseen_memory``: every 0x23 request is lost before the ECM: no answer,
-    and the session's S3 timer is not refreshed by it."""
-    tuning_profile.configure_did_aliases(did_alias_table(DIDS))
-    tuning_profile.activate(profile, source="test")
-    bus = ScriptedEcu(clock, latency=LATENCY, session_gated=True, **(ecu or {}))
-    if unseen_memory:
-        deliver = bus.send
-
-        def send(msg: can.Message, timeout: float | None = None) -> None:
-            if len(msg.data) >= 2 and msg.data[1] == 0x23:
-                bus.sent.append((clock.monotonic(), msg))
-                return
-            deliver(msg, timeout)
-
-        bus.send = send  # type: ignore[method-assign]
-    _RUNS.append(bus)
-    readings: list[ObdReading] = []
-    run_can_obd_loop(
-        bus,  # type: ignore[arg-type]
-        _spec(**spec),
-        on_frame=lambda _m: None,
-        on_reading=readings.append,
-        stop_event=threading.Event(),
-        deadline_monotonic=clock.monotonic() + seconds,
-    )
-    # Requests only: a flow-control frame is the tail of the read before it.
-    requests = [(at, bytes(msg.data)) for at, msg in bus.sent if msg.data[0] >> 4 != 0x3]
-    return requests, readings
 
 
 def _nearest(times: list[float], anchor: float) -> float:
@@ -186,7 +98,7 @@ def _windows(
 
 
 def test_memory_reads_go_last_back_to_back_and_the_exit_follows(clock: FakeClock) -> None:
-    requests, _readings = _run(clock, _profile(), seconds=30.0)
+    requests, _readings = window_run(clock, window_profile(), seconds=30.0)
     windows = _windows(requests)
     assert len(windows) >= 5
     for window, mode01_after in windows:
@@ -214,7 +126,7 @@ def test_the_coordinate_and_its_mode01_leg_meet_the_lookup_skew_at_the_serving_b
 ) -> None:
     """Acquisition times, paired per window: the three coordinate reads, and
     the nearest RPM / ENGINE_LOAD / TIMING_ADVANCE reads joined to them."""
-    _requests, readings = _run(clock, _profile(), seconds=30.0)
+    _requests, readings = window_run(clock, window_profile(), seconds=30.0)
     stamps: dict[str, list[float]] = {}
     for reading in readings:
         at = reading.acquired_at if reading.acquired_at is not None else reading.timestamp
@@ -239,7 +151,7 @@ def test_the_coordinate_and_its_mode01_leg_meet_the_lookup_skew_at_the_serving_b
 
 
 def test_a_profile_without_memory_reads_is_paced_as_before(clock: FakeClock) -> None:
-    requests, _readings = _run(clock, _profile(memory=()), seconds=30.0)
+    requests, _readings = window_run(clock, window_profile(memory=()), seconds=30.0)
     dids = [at for at, d in requests if _service(d) == 0x22]
     assert len(dids) >= 5 * len(DIDS)
     gaps = [b - a for a, b in zip(dids, dids[1:], strict=False)]
@@ -248,8 +160,10 @@ def test_a_profile_without_memory_reads_is_paced_as_before(clock: FakeClock) -> 
 
 def test_a_continuous_window_paces_its_memory_reads_as_before(clock: FakeClock) -> None:
     """A continuous window never closes, so it has no exit to sit against."""
-    profile = _profile(mode01={}, mode01_enabled=False, did_continuous=True, did_cycle_seconds=None)
-    requests, _readings = _run(clock, profile, seconds=10.0)
+    profile = window_profile(
+        mode01={}, mode01_enabled=False, did_continuous=True, did_cycle_seconds=None
+    )
+    requests, _readings = window_run(clock, profile, seconds=10.0)
     memory = [at for at, d in requests if _service(d) == 0x23]
     assert len(memory) >= 6
     gaps = [b - a for a, b in zip(memory, memory[1:], strict=False)]
@@ -262,7 +176,7 @@ def test_a_window_whose_deadline_falls_in_the_wait_reads_its_memory_at_once(
     """Three DIDs and three prepaid slots need 0.75 s past the entry; a
     0.6 s window would close first and lose every memory read. It reads them
     at once instead, back to back, and is charged per read as before."""
-    requests, _readings = _run(clock, _profile(), seconds=30.0, window_max_seconds=0.6)
+    requests, _readings = window_run(clock, window_profile(), seconds=30.0, window_max_seconds=0.6)
     windows = _windows(requests)
     assert len(windows) >= 5
     for window, _mode01_after in windows:
@@ -277,7 +191,7 @@ def test_a_keepalive_due_inside_the_burst_waits_for_it(clock: FakeClock) -> None
     burst ran: sent there, it split the reads and spent a slot nothing had
     paid for, delaying the exit by one. Due after pacing's last read slot,
     it is not sent at all, as pacing did not send it: the exit comes first."""
-    requests, _readings = _run(clock, _profile(), seconds=6.0)
+    requests, _readings = window_run(clock, window_profile(), seconds=6.0)
     window, _after = _windows(requests)[0]
     entry = window[0][0]
     first_read = min(at for at, d in window if _service(d) == 0x23)
@@ -289,7 +203,9 @@ def test_a_keepalive_due_inside_the_burst_waits_for_it(clock: FakeClock) -> None
         fresh = FakeClock(monotonic=1000.0)
         install_clock(patch, fresh)
         due_inside = first_read - entry + 0.005
-        requests, _readings = _run(fresh, _profile(), seconds=30.0, keepalive_seconds=due_inside)
+        requests, _readings = window_run(
+            fresh, window_profile(), seconds=30.0, keepalive_seconds=due_inside
+        )
     windows = _windows(requests)
     assert len(windows) >= 5
     for window, _mode01_after in windows:
@@ -307,7 +223,7 @@ def test_moving_the_reads_to_the_end_does_not_move_the_next_window(clock: FakeCl
     with it (0.18 s per 60 s window for the B08 additions to ``default``).
     It is scheduled from the paced close instead, which is at least one
     slot's wait before the exit."""
-    requests, _readings = _run(clock, _profile(did_cycle_seconds=None), seconds=30.0)
+    requests, _readings = window_run(clock, window_profile(did_cycle_seconds=None), seconds=30.0)
     entries = [at for at, d in requests if d.startswith(ENTRY)]
     exits = [at for at, d in requests if d.startswith(EXIT)][1:]  # the first is the reconnect exit
     assert len(entries) >= 5
@@ -334,14 +250,16 @@ def test_a_keepalive_in_the_wait_is_charged_once(clock: FakeClock) -> None:
     second time. Charged from the clock the keep-alive had advanced, the
     window grew by the whole wait (`tuning` at 8 req/s: 1.875-2.375 s spans
     became 3.145 s and 294 windows 210 in 900 s)."""
-    requests, _readings = _run(clock, _profile(), seconds=30.0)
+    requests, _readings = window_run(clock, window_profile(), seconds=30.0)
     reference = _windows(requests)
     tuning_profile.set_active(False, source="test")
     with pytest.MonkeyPatch.context() as patch:
         fresh = FakeClock(monotonic=1000.0)
         install_clock(patch, fresh)
         # Due 0.5 s after the entry: after the DIDs, before the last read slot.
-        requests, _readings = _run(fresh, _profile(), seconds=30.0, keepalive_seconds=0.5)
+        requests, _readings = window_run(
+            fresh, window_profile(), seconds=30.0, keepalive_seconds=0.5
+        )
     windows = _windows(requests)
     assert len(windows) == len(reference) >= 5
     for (window, after), (paced, paced_after) in zip(windows, reference, strict=True):
@@ -359,15 +277,15 @@ def test_unanswered_memory_reads_never_hold_the_keepalive_past_s3(clock: FakeClo
     established), so a keep-alive held for the burst let the session lapse
     and Mode 01 fell into the 30 s blackout. It goes as soon as the burst has
     run past its paced end instead."""
-    profile = _profile()
-    requests, _readings = _run(
+    profile = window_profile()
+    requests, _readings = window_run(
         clock,
         profile,
         seconds=40.0,
         ecu={"s3_seconds": 3.0, "lapse_blackout_seconds": 30.0},
         unseen_memory=True,
     )
-    bus = _RUNS[-1]
+    bus = RUNS[-1]
     assert bus.lapses == 0
     windows = _windows(requests)
     assert len(windows) >= 4
@@ -384,34 +302,6 @@ def test_unanswered_memory_reads_never_hold_the_keepalive_past_s3(clock: FakeClo
 # ---------------------------------------------------------------------------
 # The Xterra `tuning` profile at its own 90 req/s: rates are pacing's
 # ---------------------------------------------------------------------------
-
-XTERRA_CATALOG = (
-    Path(__file__).resolve().parents[1] / "data" / "nissan-xterra-2008" / ("capture_profiles.yaml")
-)
-
-
-#: The 23 Mode 06 MIDs the Xterra ECM answers, from walking its support
-#: groups 0x00-0xA0 (data/analyses/2026-07-28T0330-ecu-address-space.md
-#: "Mode 06"; the C06.12 hardware walk found the same 23 in 6 probes,
-#: docs/diagnostic-discovery.md). Each answers one test record (TID, UAS,
-#: value, min, max), the shape `test_default_profile_core_rate` uses.
-XTERRA_MODE06_MIDS = (
-    0x01, 0x02, 0x05, 0x06, 0x21, 0x22, 0x39, 0x3B, 0x3C, 0x3D, 0x41, 0x42,
-    0x45, 0x46, 0x81, 0x82, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7,
-)  # fmt: skip
-XTERRA_MODE06: dict[str, Any] = {
-    "mode06_support": {
-        group: support_bits(
-            *(mid for mid in XTERRA_MODE06_MIDS if group < mid <= group + 0x20),
-            base=group,
-            more=group < 0xA0,
-        )
-        for group in (0x00, 0x20, 0x40, 0x60, 0x80, 0xA0)
-    },
-    "mode06_values": {
-        mid: bytes([0x01, 0x0A, 0, 0, 0, 0, 0xFF, 0xFF]) for mid in XTERRA_MODE06_MIDS
-    },
-}
 
 
 def _tuning_counts(monkeypatch: pytest.MonkeyPatch, seconds: float, *, paced: bool) -> Counter[str]:

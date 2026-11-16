@@ -13,11 +13,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
 import threading
 import time
-from collections.abc import Callable, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -32,54 +30,11 @@ from src.control.brain_jobs import (
     canonical_params,
     collection_activity,
     job_id_for,
-    run_brain_job,
 )
 from src.evidence import memory_ledger_for
 from src.evidence.records import Evidence
-from src.vehicle.profiles import VehicleProfile, scope_config
-from tests.configs import isolated_config
-from tests.test_target_phi import EXPECT, REPO
-
-SLUG = "nissan-xterra-2008"
-SESSION = EXPECT["source_session"]
-
-
-def scoped_config(tmp_path: Path) -> CanaryConfig:
-    """The real vehicle profile's tracked files; every writable path under tmp."""
-    base = isolated_config(tmp_path, keep=("afr_calibration",))
-    return scope_config(base, VehicleProfile(slug=SLUG, vin="", name="Xterra"))
-
-
-def write_session(config: CanaryConfig, *, finished: bool = True) -> Path:
-    """The two committed October 4 slices as one stored capture session."""
-    session: Path = config.collection.storage_path / SESSION
-    session.mkdir(parents=True)
-    for i, part in enumerate(EXPECT["telemetry"]):
-        shutil.copyfile(REPO / part["path"], session / f"telemetry-{i:05d}.parquet")
-    if finished:
-        (session / "digest_skipped.json").write_text(json.dumps({"reason": "test"}))
-    return session
-
-
-def in_thread(kind: str, params: dict[str, Any], config: CanaryConfig, **kw: Any) -> Any:
-    kw["address_space_bytes"] = None  # never cap the test process itself
-    return run_brain_job(kind, params, config, **kw)
-
-
-def scheduler(
-    config: CanaryConfig,
-    activity: Callable[[], str | None] = lambda: None,
-    runner: Callable[..., Any] = in_thread,
-    **kw: Any,
-) -> BrainScheduler:
-    return BrainScheduler(
-        config,
-        activity=activity,
-        runner=runner,
-        executor_factory=lambda: ThreadPoolExecutor(max_workers=1),
-        poll_seconds=0.02,
-        **kw,
-    )
+from tests.builders import SESSION, in_thread, scheduler, scoped_config, submit_twin, write_session
+from tests.target_phi_builders import EXPECT
 
 
 @pytest.fixture
@@ -90,13 +45,6 @@ def config(tmp_path: Path) -> Iterator[CanaryConfig]:
     from src.control import child_pool
 
     assert asyncio.run(child_pool.wait_for_child_exit(child_pool.BRAIN_CHILD, 15))
-
-
-def submit_twin(config: CanaryConfig) -> str:
-    params = canonical_params(config, "twin_session_evaluation", {"session": SESSION})
-    job, created = BrainJobStore.for_config(config).submit("twin_session_evaluation", params)
-    assert created
-    return job.job_id
 
 
 def test_a_twin_job_completes_on_the_pi_without_a_remote_host(config: CanaryConfig) -> None:

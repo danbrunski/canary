@@ -30,6 +30,7 @@ from src.decode.dids import (
 from src.decode.memory_relations import check_known_answer
 from src.paths import DIDS_YAML
 from src.yaml_load import load_yaml
+from tests.capture_builders import LIVE_READ_METHODS
 
 REPO = Path(__file__).resolve().parents[1]
 CATALOG = load_did_map(DIDS_YAML)
@@ -194,30 +195,6 @@ def test_the_2842_byte_is_named_for_the_knock_gate_and_the_old_name_is_refused()
     with pytest.raises(ValueError, match=rf"'ram-study'.*{old}"):
         profile_memory_union([ram_study])
 
-
-#: Evidence methods that are reads of the address on the running ECM, as
-#: opposed to firmware analysis. ``live_read`` is the method from 2026-10-08
-#: on; the rest are the earlier, differently named live reads that the
-#: channels already in profiles carry (each checked against its finding:
-#: every one reads the RAM address through service 0x23 on the truck).
-LIVE_READ_METHODS = frozenset(
-    {
-        "live_read",
-        "live_drive_check",
-        "ram_sweep_against_confirmed_did",
-        "independent_reproduction",
-        "duplicate_register_survey",
-        "same_reply_transform_vs_did_1201",
-        "same_reply_piecewise_identity_vs_did_0x1134",
-        "can_transport_parity",
-        "fuel_cut_coincidence",
-        # A chain reproduction on a live capture is a read too: the address
-        # was read through service 0x23 on the truck, and its value checked
-        # against an independent computation from other channels (and wrong
-        # variants of that computation shown to miss), which is a known answer.
-        "chain_reproduction",
-    }
-)
 
 #: Profile catalogs something loads. The archive is a verbatim record of
 #: retired profiles that nothing may load (test_capture_profiles.py), so it

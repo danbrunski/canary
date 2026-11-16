@@ -33,8 +33,8 @@ from src.daemon.twin_live import _InlineExecutor
 from src.telemetry import TelemetryRecord
 from src.vehicle.profiles import VehicleProfile, scope_config
 from tests.configs import isolated_config
-from tests.test_hypothesis_tracking import BUDGET, PRESSURE, World, _rows
-from tests.test_hypothesis_tracking import world as world  # noqa: F401 - fixture
+from tests.hypothesis_builders import BUDGET, PRESSURE, World, tracking_rows
+from tests.hypothesis_builders import world as world  # noqa: F401 - fixture
 
 NO_CAPTURE = CaptureState(active=False, profile="default")
 
@@ -131,7 +131,7 @@ def _pressure(block: dict[str, Any]) -> list[dict[str, Any]]:
 
 def test_the_tick_proposes_the_tuning_capture_only_inside_enrichment(world: World) -> None:
     live, clock = _live(world)
-    blocks = _drive(live, clock, _rows(world.session_b))
+    blocks = _drive(live, clock, tracking_rows(world.session_b))
     assert {b["result"] for b in blocks} == {"proposing"}
     kinds = [p["kind"] for b in blocks for p in _pressure(b)]
     assert "open_capture" in kinds
@@ -155,7 +155,7 @@ def test_the_tick_proposes_the_tuning_capture_only_inside_enrichment(world: Worl
 def test_the_tick_never_displaces_an_operator_capture(world: World) -> None:
     live, clock = _live(world)
     operator = CaptureState(active=True, profile="fuel-pulsation", source="control")
-    blocks = _drive(live, clock, _rows(world.session_b), capture=operator)
+    blocks = _drive(live, clock, tracking_rows(world.session_b), capture=operator)
     proposals = [p for b in blocks for p in b["proposals"]]
     assert not [p for p in proposals if p["kind"] == "open_capture"]
     assert "operator_capture_active" in {
@@ -172,7 +172,7 @@ def test_the_tick_never_displaces_an_operator_capture(world: World) -> None:
 def test_no_capture_is_proposed_unless_the_engine_runs(world: World) -> None:
     live, clock = _live(world)
     for state in ("replay", "passive", "None"):
-        blocks = _drive(live, clock, _rows(world.session_b), vehicle_state=state)
+        blocks = _drive(live, clock, tracking_rows(world.session_b), vehicle_state=state)
         pressure = [p for b in blocks for p in _pressure(b) if p["kind"] != "review"]
         assert pressure and {p["reason"] for p in pressure} == {f"vehicle_state:{state}"}
         assert not [p for b in blocks for p in b["proposals"] if p["kind"] == "open_capture"]
@@ -182,7 +182,7 @@ def test_stale_readings_defer_by_name(world: World) -> None:
     """The wall clock runs on past the last read: values age out, never stand
     for now."""
     live, clock = _live(world)
-    rows = _rows(world.session_b)
+    rows = tracking_rows(world.session_b)
     _drive(live, clock, rows)
     clock.now = rows[-1][0] + 30.0
     live.tick(vehicle_state="engine_running", capture=NO_CAPTURE)
@@ -262,11 +262,11 @@ def test_status_and_the_brain_route_carry_the_published_block(world: World, tmp_
 
     from src.dashboard.api import create_app
     from src.mcp_server.tools import brain as brain_tool
-    from tests.test_brain_routes import AUTH, TOKEN, _mcp_client
+    from tests.builders import AUTH, TOKEN, brain_mcp_client
 
     recorder = InferenceTimingRecorder()
     live, clock = _live(world, recorder=recorder)
-    _drive(live, clock, _rows(world.session_b)[:4000])
+    _drive(live, clock, tracking_rows(world.session_b)[:4000])
     timing = recorder.snapshot().to_dict()
     assert {STAGE_TICK, STAGE_REFRESH} <= set(timing["stages"])
     block = timing["proposals"]
@@ -282,7 +282,7 @@ def test_status_and_the_brain_route_carry_the_published_block(world: World, tmp_
     assert response.status_code == 200, response.text
     served = response.json()["live_proposals"]
     assert served == block
-    via_mcp = asyncio.run(brain_tool.get_brain_status(_mcp_client(app)))
+    via_mcp = asyncio.run(brain_tool.get_brain_status(brain_mcp_client(app)))
     assert via_mcp["live_proposals"] == served
 
 
@@ -290,7 +290,7 @@ def test_without_a_pipeline_the_route_says_so(tmp_path: Path) -> None:
     from fastapi.testclient import TestClient
 
     from src.dashboard.api import create_app
-    from tests.test_brain_routes import AUTH, TOKEN
+    from tests.builders import AUTH, TOKEN
 
     config = scope_config(
         isolated_config(tmp_path, keep=("afr_calibration",)),

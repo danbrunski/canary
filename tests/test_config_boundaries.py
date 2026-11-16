@@ -39,7 +39,7 @@ from types import ModuleType
 
 import pytest
 
-from tests.test_layering import LAYERS
+from tests.layers import LAYERS
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 PACKAGE = SRC / "config"

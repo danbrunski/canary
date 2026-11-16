@@ -61,8 +61,8 @@ from src.config import CanaryConfig, CanBusConfig, CollectionConfig
 from src.decode.dids import DidMap, MemoryChannel, load_did_map
 from src.paths import DIDS_YAML
 from src.yaml_load import load_yaml
+from tests.capture_builders import LIVE_READ_METHODS
 from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock
-from tests.test_memory_catalog_knock_lambda import LIVE_READ_METHODS
 
 REPO = Path(__file__).resolve().parents[1]
 PROFILE_DIR = REPO / "data" / "nissan-xterra-2008"

@@ -32,10 +32,10 @@ from src.evidence import memory_ledger_for
 from src.vehicle.profiles import VehicleProfile, scope_config
 from src.vehicle.tune_revisions import load_tune_revisions
 from src.yaml_load import load_yaml
+from tests.builders import SESSION, scheduler, scoped_config, submit_twin, write_session
 from tests.configs import isolated_config
 from tests.rom_fixtures import synthetic_image
-from tests.test_brain_jobs import SESSION, scheduler, scoped_config, submit_twin, write_session
-from tests.test_target_phi import PROFILE
+from tests.target_phi_builders import PROFILE
 
 BEFORE_FLASH = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)  # ZS44A-20260920 in force
 AFTER_FLASH = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)  # ZS44A-20261004 in force
@@ -52,10 +52,11 @@ def copied_profile_config(tmp_path: Path) -> tuple[CanaryConfig, Path]:
 
 
 def test_the_brain_directory_is_per_vehicle_state_under_state_dir(tmp_path: Path) -> None:
-    from tests.test_state_dir import _config
+    from tests.builders import state_dir_config
 
     config = scope_config(
-        _config(state_dir=str(tmp_path)), VehicleProfile(slug="truck", vin="", name="Truck")
+        state_dir_config(state_dir=str(tmp_path)),
+        VehicleProfile(slug="truck", vin="", name="Truck"),
     )
     assert brain_dir(config) == tmp_path / "control/truck/brain"
     assert BrainJobStore.for_config(config).path.is_relative_to(tmp_path)

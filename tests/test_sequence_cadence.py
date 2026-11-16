@@ -568,17 +568,23 @@ async def test_the_live_pipeline_scores_every_third_window_and_counts_the_rest(
     import threading
 
     from src.daemon import inference as inference_mod
-    from tests import test_live_sequence_ordering as ordering
+    from tests.sequence_builders import SEQUENCE_LENGTH as ORDERING_SEQUENCE_LENGTH
+    from tests.sequence_builders import TICKS as ORDERING_TICKS
+    from tests.sequence_builders import child_worker as ordering_child_worker
+    from tests.sequence_builders import drive as ordering_drive
+    from tests.sequence_builders import ordering_config as ordering_config
+    from tests.sequence_builders import ordering_pipeline as ordering_pipeline
+    from tests.sequence_builders import ordering_trained as ordering_trained
 
-    config = ordering._config(tmp_path)
+    config = ordering_config(tmp_path)
     config = config.model_copy(
         update={"models": config.models.model_copy(update={"sequence_forward_every_n_ticks": 3})}
     )
-    trained = ordering._trained()
+    trained = ordering_trained()
     release = threading.Semaphore(0)
     worker = None
     if child:
-        worker, _pipe = ordering._child_worker(config, trained, release)
+        worker, _pipe = ordering_child_worker(config, trained, release)
     else:
         compute = inference_mod._compute_tick
 
@@ -587,15 +593,15 @@ async def test_the_live_pipeline_scores_every_third_window_and_counts_the_rest(
             return compute(request)
 
         monkeypatch.setattr(inference_mod, "_compute_tick", held_compute)
-    pipeline, source, recorder = ordering._pipeline(config, trained, worker)
+    pipeline, source, recorder = ordering_pipeline(config, trained, worker)
     try:
-        await ordering._drive(pipeline, source, release)
+        await ordering_drive(pipeline, source, release)
     finally:
-        release.release(ordering.TICKS)
+        release.release(ORDERING_TICKS)
         await pipeline.close(timeout_seconds=1.0)
 
     snapshot = recorder.snapshot().to_dict()
-    windows = ordering.TICKS - ordering.SEQUENCE_LENGTH + 1  # 10
+    windows = ORDERING_TICKS - ORDERING_SEQUENCE_LENGTH + 1  # 10
     scored = int(served_windows([True] * windows, 3).sum())  # 4
     assert snapshot["sequence_cadence"] == {
         "forward_every_n_ticks": 3,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +14,6 @@ from src.evidence import (
     Conditions,
     CorruptRecordError,
     CrossVehicleReferenceError,
-    Evidence,
     ForeignSupersessionError,
     Hypothesis,
     Intervention,
@@ -25,11 +24,9 @@ from src.evidence import (
     Outcome,
     Prediction,
     Provenance,
-    Quality,
     Quantity,
     Result,
     Retraction,
-    SourceRef,
     UnknownRecordError,
     UnscopedMemoryError,
     VehicleIdentity,
@@ -38,54 +35,14 @@ from src.evidence import (
     record_to_dict,
 )
 from tests.configs import isolated_config, scoped_test_config
-
-T0 = datetime(2026, 9, 20, 18, 0, tzinfo=UTC)
-HASH = "a" * 64
-
-
-def _vehicle(profile: str = "truck") -> VehicleIdentity:
-    return VehicleIdentity(profile=profile, vin=None, program_id=None, calibration="ZS44A")
-
-
-def _conditions(regime: str = "WOT: throttle>=85, 3000-5000 rpm") -> Conditions:
-    return Conditions(regime=regime, vehicle_state="engine_running")
-
-
-def _tool() -> Provenance:
-    return Provenance(
-        producer="compare_channels", producer_kind="tool", version="1", code_version="c"
-    )
-
-
-def _operator() -> Provenance:
-    return Provenance(producer="operator", producer_kind="operator", version="n/a")
-
-
-def _evidence(**overrides: Any) -> Evidence:
-    fields: dict[str, Any] = {
-        "vehicle": _vehicle(),
-        "provenance": _tool(),
-        "conditions": _conditions(),
-        "valid_from": T0,
-        "valid_to": T0 + timedelta(minutes=5),
-        "subject": "compare_channels:2026-09-20T180000:obd:RPM:can:ECM_RPM:WOT",
-        "sources": (
-            SourceRef(
-                session="2026-09-20T180000",
-                window_start=T0,
-                window_end=T0 + timedelta(minutes=5),
-                channels=("obd:RPM", "can:ECM_RPM"),
-                n_samples=300,
-            ),
-        ),
-        "input_hashes": {"pairs": HASH},
-        "policy": {"pairing": {"max_separation_s": 0.05}},
-        "values": {"difference_bias": Quantity(value=0.4, unit="rpm")},
-        "quality": Quality(n_observations=300, timestamp_basis="acquired"),
-        "result": Result(status="evaluated", residual=Quantity(value=0.4, unit="rpm")),
-    }
-    fields.update(overrides)
-    return Evidence(**fields)
+from tests.evidence_builders import (
+    HASH,
+    T0,
+    memory_conditions,
+    memory_evidence,
+    memory_operator,
+    memory_vehicle,
+)
 
 
 def _ledger(tmp_path: Path, vehicle: str = "truck") -> MemoryLedger:
@@ -99,7 +56,7 @@ def _ledger(tmp_path: Path, vehicle: str = "truck") -> MemoryLedger:
 def test_a_record_without_conditions_provenance_identity_or_valid_time_is_refused(
     missing: str,
 ) -> None:
-    payload = record_to_dict(_evidence())
+    payload = record_to_dict(memory_evidence())
     payload.pop(missing)
     with pytest.raises(ValidationError):
         record_from_dict(payload)
@@ -114,15 +71,15 @@ def test_unknown_identity_must_be_stated_not_omitted() -> None:
 
 def test_evidence_must_carry_sources_inputs_policy_and_a_tool() -> None:
     with pytest.raises(ValidationError):
-        _evidence(sources=())
+        memory_evidence(sources=())
     with pytest.raises(ValidationError):
-        _evidence(input_hashes={})
+        memory_evidence(input_hashes={})
     with pytest.raises(ValidationError):
-        _evidence(input_hashes={"pairs": "not-a-hash"})
+        memory_evidence(input_hashes={"pairs": "not-a-hash"})
     with pytest.raises(ValidationError):
-        _evidence(policy={})
+        memory_evidence(policy={})
     with pytest.raises(ValidationError, match="minted by tools"):
-        _evidence(provenance=_operator())
+        memory_evidence(provenance=memory_operator())
     with pytest.raises(ValidationError, match="code_version"):
         Provenance(producer="t", producer_kind="tool", version="1")
 
@@ -145,9 +102,9 @@ def test_an_unevaluable_result_cannot_carry_a_qualified_residual() -> None:
 
 def test_an_unevaluable_outcome_is_unresolvable_and_a_change_has_a_residual() -> None:
     common: dict[str, Any] = {
-        "vehicle": _vehicle(),
-        "provenance": _operator(),
-        "conditions": _conditions(),
+        "vehicle": memory_vehicle(),
+        "provenance": memory_operator(),
+        "conditions": memory_conditions(),
         "valid_from": T0,
         "prediction": "pred-x",
         "intervention": None,
@@ -165,9 +122,9 @@ def test_an_unevaluable_outcome_is_unresolvable_and_a_change_has_a_residual() ->
 
 def test_times_must_be_aware_and_ordered() -> None:
     with pytest.raises(ValidationError, match="timezone-aware"):
-        _evidence(valid_from=datetime(2026, 9, 20, 18, 0))
+        memory_evidence(valid_from=datetime(2026, 9, 20, 18, 0))
     with pytest.raises(ValidationError, match="valid_to precedes"):
-        _evidence(valid_to=T0 - timedelta(seconds=1))
+        memory_evidence(valid_to=T0 - timedelta(seconds=1))
 
 
 def test_quantities_have_units_and_finite_values() -> None:
@@ -180,9 +137,9 @@ def test_quantities_have_units_and_finite_values() -> None:
 def test_prediction_states_magnitude_and_floor_in_one_unit() -> None:
     with pytest.raises(ValidationError, match="like with like"):
         Prediction(
-            vehicle=_vehicle(),
-            provenance=_operator(),
-            conditions=_conditions(),
+            vehicle=memory_vehicle(),
+            provenance=memory_operator(),
+            conditions=memory_conditions(),
             valid_from=T0,
             investigation=None,
             intervention=None,
@@ -192,7 +149,7 @@ def test_prediction_states_magnitude_and_floor_in_one_unit() -> None:
             noise_floor=NoiseFloorRef(
                 quantity="delivery_error_pct",
                 sd=Quantity(value=1.25, unit="percent"),
-                conditions=_conditions().regime,
+                conditions=memory_conditions().regime,
                 sigma_threshold=2.0,
                 source="noise_floor.yaml",
                 source_sha256=HASH,
@@ -203,9 +160,9 @@ def test_prediction_states_magnitude_and_floor_in_one_unit() -> None:
 def test_an_intervention_points_at_the_existing_record() -> None:
     with pytest.raises(ValidationError, match="calibration"):
         Intervention(
-            vehicle=_vehicle(),
-            provenance=_operator(),
-            conditions=_conditions("all conditions"),
+            vehicle=memory_vehicle(),
+            provenance=memory_operator(),
+            conditions=memory_conditions("all conditions"),
             valid_from=T0,
             intervention_kind="hardware",
             title="flash",
@@ -217,9 +174,9 @@ def test_an_intervention_points_at_the_existing_record() -> None:
         )
     with pytest.raises(ValidationError, match="source_ref"):
         Intervention(
-            vehicle=_vehicle(),
-            provenance=_operator(),
-            conditions=_conditions("all conditions"),
+            vehicle=memory_vehicle(),
+            provenance=memory_operator(),
+            conditions=memory_conditions("all conditions"),
             valid_from=T0,
             intervention_kind="hardware",
             title="pump",
@@ -237,19 +194,19 @@ def test_the_ledger_mints_id_and_record_time_and_refuses_producer_supplied_ones(
     tmp_path: Path,
 ) -> None:
     ledger = _ledger(tmp_path)
-    stored = ledger.append(_evidence())
+    stored = ledger.append(memory_evidence())
     assert stored.id.startswith("ev-")
     assert stored.recorded_at is not None
     with pytest.raises(ValueError, match="minted by the ledger"):
-        ledger.append(_evidence(id="ev-invented"))
+        ledger.append(memory_evidence(id="ev-invented"))
     with pytest.raises(ValueError, match="minted by the ledger"):
-        ledger.append(_evidence(recorded_at=T0))
+        ledger.append(memory_evidence(recorded_at=T0))
 
 
 def test_identical_content_is_one_record(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
-    first = ledger.append(_evidence())
-    again = ledger.append(_evidence())
+    first = ledger.append(memory_evidence())
+    again = ledger.append(memory_evidence())
     assert again.id == first.id
     assert len(ledger.entries()) == 1
 
@@ -259,18 +216,18 @@ def test_invented_and_cross_vehicle_references_are_refused(tmp_path: Path) -> No
     with pytest.raises(UnknownRecordError):
         ledger.resolve_evidence("ev-000000000000000000000000")
     with pytest.raises(CrossVehicleReferenceError):
-        ledger.append(_evidence(vehicle=_vehicle("other")))
+        ledger.append(memory_evidence(vehicle=memory_vehicle("other")))
 
     # A file shared by two vehicles (an unscoped laptop path): an id that
     # exists but belongs to the other vehicle is named as such.
     other = _ledger(tmp_path, vehicle="other")
-    foreign = other.append(_evidence(vehicle=_vehicle("other")))
+    foreign = other.append(memory_evidence(vehicle=memory_vehicle("other")))
     with pytest.raises(CrossVehicleReferenceError, match="belongs to vehicle 'other'"):
         ledger.resolve_evidence(foreign.id)
     investigation = Investigation(
-        vehicle=_vehicle(),
-        provenance=_operator(),
-        conditions=_conditions(),
+        vehicle=memory_vehicle(),
+        provenance=memory_operator(),
+        conditions=memory_conditions(),
         valid_from=T0,
         title="lean at WOT",
         question="why lean",
@@ -282,11 +239,11 @@ def test_invented_and_cross_vehicle_references_are_refused(tmp_path: Path) -> No
 
 def test_a_reference_must_have_the_kind_it_names(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
-    evidence = ledger.append(_evidence())
+    evidence = ledger.append(memory_evidence())
     outcome = Outcome(
-        vehicle=_vehicle(),
-        provenance=_operator(),
-        conditions=_conditions(),
+        vehicle=memory_vehicle(),
+        provenance=memory_operator(),
+        conditions=memory_conditions(),
         valid_from=T0,
         prediction=evidence.id,  # an evidence id where a prediction belongs
         intervention=None,
@@ -300,9 +257,9 @@ def test_a_reference_must_have_the_kind_it_names(tmp_path: Path) -> None:
 
 def test_recompute_supersedes_and_keeps_the_old_record(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
-    old = ledger.append(_evidence(), now=T0 + timedelta(hours=1))
+    old = ledger.append(memory_evidence(), now=T0 + timedelta(hours=1))
     new = ledger.append(
-        _evidence(
+        memory_evidence(
             values={"difference_bias": Quantity(value=0.6, unit="rpm")},
             result=Result(status="evaluated", residual=Quantity(value=0.6, unit="rpm")),
             input_hashes={"pairs": "b" * 64},
@@ -321,11 +278,11 @@ def test_recompute_supersedes_and_keeps_the_old_record(tmp_path: Path) -> None:
 
 def test_a_retraction_withdraws_without_deleting(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
-    finding = ledger.append(_evidence(), now=T0)
+    finding = ledger.append(memory_evidence(), now=T0)
     retraction = ledger.append(
         Retraction(
-            vehicle=_vehicle(),
-            provenance=_operator(),
+            vehicle=memory_vehicle(),
+            provenance=memory_operator(),
             valid_from=T0 + timedelta(days=1),
             retracts=(finding.id,),
             reason="byte was the low byte of a 16-bit counter; means matched by accident",
@@ -345,7 +302,7 @@ def test_only_the_producer_supersedes_its_evidence_and_only_the_operator_retract
     residual. A tool may supersede only its own evidence (by subject or by
     name) and retract only its own; the operator may retract anything."""
     ledger = _ledger(tmp_path)
-    finding = ledger.append(_evidence(), now=T0)
+    finding = ledger.append(memory_evidence(), now=T0)
     learner = Provenance(producer="learner", producer_kind="tool", version="1", code_version="c")
     zeroed = {
         "values": {"difference_bias": Quantity(value=0.0, unit="rpm")},
@@ -353,11 +310,11 @@ def test_only_the_producer_supersedes_its_evidence_and_only_the_operator_retract
     }
     # A cross-producer re-mint of the same subject over the same data.
     with pytest.raises(ForeignSupersessionError, match="'learner' cannot supersede"):
-        ledger.append(_evidence(provenance=learner, **zeroed), now=T0 + timedelta(hours=1))
+        ledger.append(memory_evidence(provenance=learner, **zeroed), now=T0 + timedelta(hours=1))
     # An explicit supersedes under another subject.
     with pytest.raises(ForeignSupersessionError, match="compare_channels"):
         ledger.append(
-            _evidence(
+            memory_evidence(
                 provenance=learner,
                 subject="learner:offset",
                 supersedes=(finding.id,),
@@ -370,7 +327,7 @@ def test_only_the_producer_supersedes_its_evidence_and_only_the_operator_retract
     with pytest.raises(ForeignSupersessionError, match="retract"):
         ledger.append(
             Retraction(
-                vehicle=_vehicle(),
+                vehicle=memory_vehicle(),
                 provenance=learner,
                 valid_from=T0,
                 retracts=(finding.id,),
@@ -381,14 +338,14 @@ def test_only_the_producer_supersedes_its_evidence_and_only_the_operator_retract
     assert ledger.entry(finding.id).current and len(ledger.entries()) == 1
     # The same producer's recompute supersedes, as before.
     recompute = ledger.append(
-        _evidence(input_hashes={"pairs": "b" * 64}, **zeroed), now=T0 + timedelta(hours=2)
+        memory_evidence(input_hashes={"pairs": "b" * 64}, **zeroed), now=T0 + timedelta(hours=2)
     )
     assert recompute.supersedes == (finding.id,)
     # The operator may retract any producer's evidence.
     retraction = ledger.append(
         Retraction(
-            vehicle=_vehicle(),
-            provenance=_operator(),
+            vehicle=memory_vehicle(),
+            provenance=memory_operator(),
             valid_from=T0,
             retracts=(recompute.id,),
             reason="window included a fuel cut",
@@ -400,9 +357,9 @@ def test_only_the_producer_supersedes_its_evidence_and_only_the_operator_retract
 
 def test_record_time_never_moves_backwards(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
-    ledger.append(_evidence(), now=T0 + timedelta(hours=1))
+    ledger.append(memory_evidence(), now=T0 + timedelta(hours=1))
     with pytest.raises(ValueError, match="backwards"):
-        ledger.append(_evidence(subject="other"), now=T0)
+        ledger.append(memory_evidence(subject="other"), now=T0)
 
 
 def test_a_wall_clock_stepped_back_does_not_refuse_an_append(
@@ -415,16 +372,16 @@ def test_a_wall_clock_stepped_back_does_not_refuse_an_append(
     import src.evidence.ledger as ledger_module
 
     ledger = _ledger(tmp_path)
-    first = ledger.append(_evidence(), now=T0 + timedelta(hours=1))
+    first = ledger.append(memory_evidence(), now=T0 + timedelta(hours=1))
     monkeypatch.setattr(ledger_module, "_now", lambda: T0)  # clock stepped back an hour
-    second = ledger.append(_evidence(subject="other"))
+    second = ledger.append(memory_evidence(subject="other"))
     assert second.recorded_at == first.recorded_at
     assert second.id != first.id
     reopened = _ledger(tmp_path)
     assert reopened.get(second.id).recorded_at == first.recorded_at
     # an explicit earlier time is still the caller's error, not the clock's
     with pytest.raises(ValueError, match="backwards"):
-        ledger.append(_evidence(subject="third"), now=T0)
+        ledger.append(memory_evidence(subject="third"), now=T0)
 
 
 def test_replaying_the_log_preserves_both_times_and_supersession_history(
@@ -432,13 +389,15 @@ def test_replaying_the_log_preserves_both_times_and_supersession_history(
 ) -> None:
     """Restart / replay: a fresh ledger on the same file reconstructs it all."""
     ledger = _ledger(tmp_path)
-    first = ledger.append(_evidence(), now=T0 + timedelta(hours=1))
-    second = ledger.append(_evidence(input_hashes={"pairs": "c" * 64}), now=T0 + timedelta(hours=2))
+    first = ledger.append(memory_evidence(), now=T0 + timedelta(hours=1))
+    second = ledger.append(
+        memory_evidence(input_hashes={"pairs": "c" * 64}), now=T0 + timedelta(hours=2)
+    )
     investigation = ledger.append(
         Investigation(
-            vehicle=_vehicle(),
-            provenance=_operator(),
-            conditions=_conditions(),
+            vehicle=memory_vehicle(),
+            provenance=memory_operator(),
+            conditions=memory_conditions(),
             valid_from=T0,
             valid_to=T0 + timedelta(days=3),
             title="WOT lean",
@@ -477,32 +436,32 @@ def test_a_to_b_to_a_appends_a_new_current_record_not_the_superseded_one(
     ledger = _ledger(tmp_path)
     a_values = {"input_hashes": {"pairs": "a" * 64}}
     b_values = {"input_hashes": {"pairs": "b" * 64}}
-    first = ledger.append(_evidence(**a_values), now=T0 + timedelta(hours=1))
-    second = ledger.append(_evidence(**b_values), now=T0 + timedelta(hours=2))
-    third = ledger.append(_evidence(**a_values), now=T0 + timedelta(hours=3))
+    first = ledger.append(memory_evidence(**a_values), now=T0 + timedelta(hours=1))
+    second = ledger.append(memory_evidence(**b_values), now=T0 + timedelta(hours=2))
+    third = ledger.append(memory_evidence(**a_values), now=T0 + timedelta(hours=3))
     assert third.id not in {first.id, second.id}
     assert third.supersedes == (second.id,)
     assert ledger.entry(third.id).current
     assert not ledger.entry(first.id).current
     assert ledger.entry(second.id).superseded_by == (third.id,)
     # And re-stating the now-current content is still idempotent.
-    assert ledger.append(_evidence(**a_values), now=T0 + timedelta(hours=4)).id == third.id
+    assert ledger.append(memory_evidence(**a_values), now=T0 + timedelta(hours=4)).id == third.id
 
 
 def test_re_minting_after_a_retraction_is_a_new_record(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
-    finding = ledger.append(_evidence(), now=T0)
+    finding = ledger.append(memory_evidence(), now=T0)
     ledger.append(
         Retraction(
-            vehicle=_vehicle(),
-            provenance=_operator(),
+            vehicle=memory_vehicle(),
+            provenance=memory_operator(),
             valid_from=T0,
             retracts=(finding.id,),
             reason="window included a fuel cut",
         ),
         now=T0 + timedelta(hours=1),
     )
-    again = ledger.append(_evidence(), now=T0 + timedelta(hours=2))
+    again = ledger.append(memory_evidence(), now=T0 + timedelta(hours=2))
     assert again.id != finding.id
     assert ledger.entry(again.id).current
     assert ledger.entry(finding.id).retracted_by is not None
@@ -510,7 +469,7 @@ def test_re_minting_after_a_retraction_is_a_new_record(tmp_path: Path) -> None:
 
 def test_a_schema_invalid_line_is_a_corrupt_record_not_an_unminted_id(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
-    stored = ledger.append(_evidence())
+    stored = ledger.append(memory_evidence())
     line = record_to_dict(stored)
     line["id"] = "ev-corruptcorruptcorrupt0"
     line.pop("conditions")

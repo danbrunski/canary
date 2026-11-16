@@ -46,7 +46,7 @@ from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
 from tests.app_context import bare_context
-from tests.test_dyno_power import (
+from tests.dyno_builders import (
     MOUNT_OFFSET_DEG,
     PAIR,
     PARAMS,

@@ -19,13 +19,12 @@ import hashlib
 from dataclasses import replace
 from pathlib import Path
 
-import duckdb
-import pandas as pd
 import pytest
 
 from src.analysis import air_charge_twin as twin
 from src.analysis.ecu_application import ApplicationModelRefusalError, load_application_model
 from src.analysis.rom_map import load_rom_map
+from tests.twin_builders import private_rom_read
 
 REPO = Path(__file__).resolve().parents[1]
 PROFILE = REPO / "data" / "nissan-xterra-2008"
@@ -69,15 +68,6 @@ def calibration(image: bytes) -> twin.AirChargeCalibration:
     )
 
 
-def _read(paths: list[str]) -> pd.DataFrame:
-    glob = ", ".join(f"'{p}'" for p in paths)
-    return duckdb.sql(
-        f"select * from read_parquet([{glob}], union_by_name=true) where channel in "
-        "('DID_1208', 'DID_1209', 'RPM', 'MAF', 'mem:ECM_AIR_CHARGE_SLOT_103A', "
-        "'mem:ECM_FUEL_COMP_X_INPUT')"
-    ).df()
-
-
 def test_the_calibration_is_read_after_the_programs_checks(
     image: bytes, calibration: twin.AirChargeCalibration
 ) -> None:
@@ -107,7 +97,7 @@ def drives(calibration: twin.AirChargeCalibration) -> twin.SteadyBfsReport:
     records: list[twin.BfsRecord] = []
     excluded: dict[str, int] = {}
     for drive in DRIVES:
-        rows = _read([str(SESSIONS / drive / "telemetry-*.parquet")])
+        rows = private_rom_read([str(SESSIONS / drive / "telemetry-*.parquet")])
         report = twin.evaluate_steady_bfs(rows, calibration)
         records.extend(report.records)
         for reason, count in report.excluded.items():
@@ -177,7 +167,7 @@ def test_the_october_4_fixture_cannot_be_scored_and_says_why(
     the 194 reads is unpaired. An empty result about the inputs, not about
     the chain (capture recipe: E05.2)."""
     report = twin.evaluate_steady_bfs(
-        _read([str(p) for p in FIXTURES]),
+        private_rom_read([str(p) for p in FIXTURES]),
         calibration,
         bfs_channel="mem:ECM_AIR_CHARGE_SLOT_103A",
         maf_channel="MAF",

@@ -55,7 +55,7 @@ from tests.rom_fixtures import (
     osiris_container,
     xterra_map,
 )
-from tests.test_rom_effects import modelled_image
+from tests.sim_builders import modelled_image
 
 FIXTURES = Path(__file__).parent / "fixtures" / "rom_edit_spec"
 RPM_AXIS_RAW = [12, 16, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80, 96, 112, 128]

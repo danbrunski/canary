@@ -24,6 +24,7 @@ from src.preprocessing.imu_live import LiveImuFrame
 from src.signals.committees import STANDARD_GRAVITY
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config
+from tests.imu_builders import imu_live_profile
 
 T0 = datetime(2026, 9, 26, 12, 0, tzinfo=UTC)
 IMU_HZ = 50
@@ -43,21 +44,6 @@ def _rot(axis: str, deg: float) -> np.ndarray:
 MOUNT = _rot("z", 140.0) @ _rot("y", 6.0) @ _rot("x", -4.0)
 
 
-def _profile(t: float) -> tuple[float, float, float, float]:
-    """(kph, heading, a_g, lat_g) at ``t``: rest, a 0.39 g straight pull,
-    cruise, then a 0.3 g left turn at constant speed."""
-    pull_g = 55.0 / 3.6 / 4.0 / STANDARD_GRAVITY
-    if t < 10.0:
-        return 0.0, 90.0, 0.0, 0.0
-    if t < 14.0:
-        return 55.0 * (t - 10.0) / 4.0, 90.0, pull_g, 0.0
-    if t < 20.0:
-        return 55.0, 90.0, 0.0, 0.0
-    if t < 26.0:
-        return 55.0, 90.0 - 15.0 * (t - 20.0), 0.0, 0.30
-    return 55.0, 0.0, 0.0, 0.0
-
-
 def _records(
     start: float, stop: float, *, speed_channel: str = "SPEED"
 ) -> Iterator[TelemetryRecord]:
@@ -65,7 +51,7 @@ def _records(
     for i in range(round(start * IMU_HZ), round(stop * IMU_HZ)):
         t = i / IMU_HZ
         stamp = (T0 + timedelta(seconds=t)).timestamp()
-        kph, heading, a_g, lat_g = _profile(t)
+        kph, heading, a_g, lat_g = imu_live_profile(t)
         if i % IMU_HZ == 0:
             if speed_channel == "SPEED":
                 yield TelemetryRecord.obd(stamp, "SPEED", round(kph), "km/h")

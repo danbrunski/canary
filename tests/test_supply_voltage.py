@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-from src.collection import ads1015
 from src.collection.ads1015 import Ads1015, Ads1015Error, code_to_volts, config_word
 from src.collection.collectors import _hat_adc_collectors, _supply_voltage_collectors
 from src.collection.reconnect import ReconnectPolicy
@@ -21,37 +20,10 @@ from src.collection.supply_voltage_collector import (
 )
 from src.config import CanaryConfig, SupplyVoltageConfig
 from src.telemetry import TelemetryRecord
+from tests.fakes import FakeAdc
 
 REPO = Path(__file__).resolve().parents[1]
 HAT = SupplyVoltageConfig(enabled=True, rate_hz=100.0)
-
-
-class FakeAdc:
-    """Config/conversion registers; the conversion finishes after ``busy_reads``."""
-
-    def __init__(self, code: int, *, busy_reads: int = 1) -> None:
-        self.code = code
-        self.busy_reads = busy_reads
-        self.config_writes: list[int] = []
-        self.closed = False
-
-    def read(self, register: int, length: int) -> bytes:
-        if register == ads1015.REG_CONFIG:
-            if self.busy_reads > 0:
-                self.busy_reads -= 1
-                return (0).to_bytes(2, "big")
-            return ads1015.CONFIG_OS_START.to_bytes(2, "big")
-        return ((self.code << 4) & 0xFFFF).to_bytes(2, "big")
-
-    def write(self, register: int, value: int) -> None:
-        raise AssertionError("the ADS1015 has only 16-bit registers")
-
-    def write_block(self, register: int, data: bytes) -> None:
-        assert register == ads1015.REG_CONFIG
-        self.config_writes.append(int.from_bytes(data, "big"))
-
-    def close(self) -> None:
-        self.closed = True
 
 
 def test_config_word_matches_the_one_measured_on_the_hat() -> None:

@@ -53,8 +53,8 @@ from src.decode.dids import (
     select_memory_channels,
 )
 from src.yaml_load import load_yaml
+from tests.capture_builders import XTERRA_MODE06
 from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock
-from tests.test_memory_window_burst import XTERRA_MODE06
 
 CATALOG_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "nissan-xterra-2008" / "capture_profiles.yaml"

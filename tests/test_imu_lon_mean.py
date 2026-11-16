@@ -47,8 +47,8 @@ from src.signals.committees import (
 )
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
-from tests.test_imu_stream import DRIVE, NOW, T0, Segment, records, write_session
-from tests.test_imu_stream import config as config  # noqa: F401 - fixture
+from tests.imu_builders import DRIVE, NOW, T0, Segment, records, write_session
+from tests.imu_builders import config as config  # noqa: F401 - fixture
 
 HZ = 50
 START = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)

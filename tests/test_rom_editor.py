@@ -44,20 +44,18 @@ from src.analysis.sim_montecarlo import DESIGN_ASSUMPTION_PREFIX, MonteCarloResu
 from src.vehicle.tune_revisions import ReferenceImage, TuneRevision, TuneRevisionRegistry
 from src.yaml_load import load_yaml
 from tests.rom_fixtures import PROFILE
-from tests.test_sim_montecarlo import build_kit_and_image
+from tests.sim_builders import (
+    FC_EDIT,
+    K_EDIT,
+    REVISION,
+    build_kit_and_image,
+    editor_params,
+    editor_timing_points_per_pair,
+    request,
+)
+from tests.sim_builders import matched as matched  # noqa: F401 - fixture
+from tests.sim_builders import registry as registry  # noqa: F401 - fixture
 
-#: The synthetic image's registry entry, stated here: a flashed revision whose
-#: plain-image hash is the synthetic image's.
-REVISION = "synthetic-w09"
-
-#: E08.1's light-load Fuel Comp edit, as the page sends it.
-FC_EDIT: dict[str, Any] = {
-    "table": "fuel_compensation",
-    "slot": 1,
-    "region": {"rpm": [1500, 3000], "load": [20, 50], "units": {"rpm": "rpm", "load": "%"}},
-    "scale": 1.02,
-    "rounding": "nearest",
-}
 FC_YAML = """\
 schema_version: 1
 base: {{revision: {revision}}}
@@ -72,75 +70,11 @@ edits:
     scale: 1.02
     rounding: nearest
 """
-K_EDIT: dict[str, Any] = {
-    "table": "k_constant",
-    "slot": 1,
-    "all": True,
-    "scale": 1.05,
-    "rounding": "nearest",
-}
 
 
 @pytest.fixture(scope="module")
 def kit_and_image() -> tuple[SimKit, bytes]:
     return build_kit_and_image()
-
-
-@pytest.fixture(scope="module")
-def registry(kit_and_image: tuple[SimKit, bytes]) -> TuneRevisionRegistry:
-    _, image = kit_and_image
-    return TuneRevisionRegistry(
-        revisions=[
-            TuneRevision(
-                revision=REVISION,
-                flashed_at=datetime(2026, 10, 1, tzinfo=UTC),
-                image_sha256=sha256_hex(image),
-            )
-        ]
-    )
-
-
-@pytest.fixture(scope="module")
-def matched(kit_and_image: tuple[SimKit, bytes], registry: TuneRevisionRegistry) -> dict[str, Any]:
-    _, image = kit_and_image
-    found = revision_match(sha256_hex(image), registry)
-    assert found["status"] == "matched" and found["revision"] == REVISION
-    return found
-
-
-def request(**over: Any) -> dict[str, Any]:
-    """A complete simulate request: every field stated."""
-    body: dict[str, Any] = dict(
-        label="K +5 %",
-        edits=[K_EDIT],
-        grid="fuel_comp",
-        # Two rpm rows near the enrichment threshold on this image (4,400 and
-        # 5,200 rpm centres) at three loads: five points open loop, one closed.
-        rpm_edges=[4000.0, 4800.0, 5600.0],
-        load_edges=[30.0, 60.0, 80.0, 100.0],
-        load_basis="fill_fraction_as_manifold_ratio",
-        baro_kpa=80.0,
-        iat_c=25.0,
-        coolant_c=88.0,
-        battery_v=14.0,
-        rail_kpa="working_assumption",
-        throttle_pct=20.0,
-        pedal_flag=0,
-        stft_pct=0.0,
-        ltft_pct=0.0,
-        throttle_closed_learned=0.0,
-        idle_air_learned=0.0,
-        evap_purge_area=0.0,
-        # The truck's state on 2026-10-08 (RAM read): HI DET set, knock control in
-        # fallback. A scenario here, never a default: the request has none.
-        high_det="set",
-        knock_control="fallback",
-        candidate_events="none",
-        draws=6,
-        seed=20261015,
-    )
-    body.update(over)
-    return body
 
 
 def _reason(fn: Any, *args: Any, **kw: Any) -> str:
@@ -289,7 +223,7 @@ def test_an_edit_across_two_tables_names_both_levers_and_travels_through_the_job
     kit_and_image: tuple[SimKit, bytes], matched: dict[str, Any], tmp_path: Path
 ) -> None:
     kit, image = kit_and_image
-    params = _params(image, tmp_path, matched, label="two", edits=[FC_EDIT, K_EDIT])
+    params = editor_params(image, tmp_path, matched, label="two", edits=[FC_EDIT, K_EDIT])
     job = rom_editor.run_job("rom_preview", params, kit=kit)
     assert [e["lever"] for e in job["levers"]["levers"]] == ["fuel_compensation", "k_constant"]
     # The child's answer crosses the process boundary: it pickles, and the strings survive.
@@ -311,7 +245,9 @@ def test_a_vehicle_with_no_declared_simulator_previews_from_its_map_and_says_so(
     profile = tmp_path / "no_sim_kit"
     shutil.copytree(PROFILE, profile, ignore=shutil.ignore_patterns("_candidates", "_prior"))
     (profile / "sim_kit.yaml").unlink()
-    params = _params(image, tmp_path, matched, profile_dir=str(profile), label="x", edits=[FC_EDIT])
+    params = editor_params(
+        image, tmp_path, matched, profile_dir=str(profile), label="x", edits=[FC_EDIT]
+    )
     preview = rom_editor.run_job("rom_preview", params)
     assert "refused" not in preview, preview
     assert preview["levers"] is None
@@ -861,21 +797,6 @@ def test_the_timing_state_takes_the_two_words_the_cli_does_and_nothing_else(
 # -- the child entry ----------------------------------------------------------------------------
 
 
-def _params(image: bytes, tmp_path: Path, status: dict[str, Any], **over: Any) -> dict[str, Any]:
-    sha = sha256_hex(image)
-    path = tmp_path / f"{sha}.bin"
-    path.write_bytes(image)
-    params: dict[str, Any] = {
-        "image_path": str(path),
-        "sha256": sha,
-        "revision_match": status,
-        "profile_dir": str(PROFILE),
-        "request": request(),
-    }
-    params.update(over)
-    return params
-
-
 @pytest.mark.parametrize(
     ("over", "kind", "reason"),
     [
@@ -904,7 +825,7 @@ def test_run_job_returns_each_refusal_class_as_data_that_pickles(
     reason: str,
 ) -> None:
     kit, image = kit_and_image
-    params = _params(image, tmp_path, matched, request=request(**over))
+    params = editor_params(image, tmp_path, matched, request=request(**over))
     out = rom_editor.run_job("rom_sim", params, kit=kit, registry=registry)
     assert set(out) == {"refused"}
     assert out["refused"]["kind"] == kind and out["refused"]["reason"] == reason
@@ -956,7 +877,7 @@ def test_run_job_checks_the_image_and_runs_both_kinds(
     tmp_path: Path,
 ) -> None:
     kit, image = kit_and_image
-    params = _params(image, tmp_path, matched, request=request(draws=2))
+    params = editor_params(image, tmp_path, matched, request=request(draws=2))
     wrong = rom_editor.run_job("rom_sim", {**params, "sha256": "0" * 64}, kit=kit)
     assert wrong["refused"]["reason"] == "image_hash_mismatch"
     missing = rom_editor.run_job("rom_sim", {**params, "image_path": str(tmp_path / "x.bin")})
@@ -995,8 +916,7 @@ def test_the_rom_editor_imports_nothing_that_talks_to_the_ecu() -> None:
         from src.analysis.rom_image import revision_match, sha256_hex
         from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
         from tests.rom_fixtures import PROFILE
-        from tests.test_rom_editor import FC_EDIT, request
-        from tests.test_sim_montecarlo import build_kit_and_image
+        from tests.sim_builders import FC_EDIT, build_kit_and_image, request
         kit, image = build_kit_and_image()
         sha = sha256_hex(image)
         registry = TuneRevisionRegistry(revisions=[TuneRevision(
@@ -1178,7 +1098,7 @@ def test_each_typical_value_equals_the_constant_its_source_names() -> None:
     body = rom_editor.typical_values(PROFILE)
     values = {name: declared["value"] for name, declared in body["values"].items()}
 
-    from tests.test_paired_scenarios import LEARNED, WOT
+    from tests.sim_builders import LEARNED, WOT
 
     for field in ("baro_kpa", "iat_c", "coolant_c", "battery_v", "rail_kpa"):
         assert values[field] == getattr(WOT, field), f"E07.6's WOT point states {field}"
@@ -1579,113 +1499,6 @@ def test_the_kinds_the_loader_accepts_are_the_two_the_page_draws() -> None:
 # -- W09.13: the timing points are the per-pair path, memoized ------------------------------
 
 
-def _timing_points_per_pair(
-    kit: SimKit,
-    result: Any,
-    design: Any,
-    base_image: bytes,
-    candidate_image: bytes,
-    state: Any,
-    *,
-    slot: int,
-) -> list[dict[str, Any]]:
-    """The reference: ``sim_cells.ignition_timing_points`` as it was before W09.13, one
-    ``ignition_timing_at`` call per (point, draw) pair and nothing shared between pairs. The
-    memoized function must return exactly these rows."""
-    import math as _math
-
-    from src.analysis import sim_cells
-    from src.analysis.paired_scenarios import ignition_timing_at, rpm_word, timing_tables
-    from src.analysis.target_phi import x_from_bfs
-
-    reach = [
-        r
-        for r in sim_cells.timing_reach_reasons(kit, base_image, candidate_image, slot=slot)
-        if not (
-            r.startswith(f"{sim_cells.TIMING_INPUT_CHANGED}:")
-            and sim_cells._carried_by_points(kit, r.split(":", 1)[1])
-        )
-    ]
-    tb = timing_tables(base_image, kit.rom_map, slot=slot)
-    tc = timing_tables(candidate_image, kit.rom_map, slot=slot)
-    lps = (
-        sim_cells._load_point_scaler(kit, base_image, slot=slot),
-        sim_cells._load_point_scaler(kit, candidate_image, slot=slot),
-    )
-    bit = kit.twin.inputs.forced_column_flag.bit
-    bfs = (result.base["base_fuel_schedule"], result.candidate["base_fuel_schedule"])
-    phi = (result.base["target_phi"], result.candidate["target_phi"])
-    rows: list[dict[str, Any]] = []
-    for i, p in enumerate(design.points):
-        word = rpm_word(p.rpm, kit.contract)
-        pedal = bool((p.pedal_flag >> bit) & 1)
-        outcomes: Counter[str] = Counter()
-        detail: dict[str, dict[str, Any]] = {}
-        for k in range(result.draws):
-            words = (bfs[0][i, k], bfs[1][i, k])
-            if not all(_math.isfinite(w) for w in words):
-                at: dict[str, Any] = {
-                    "status": "unevaluable",
-                    "delta": None,
-                    "delta_min": None,
-                    "delta_max": None,
-                    "trim_term_delta": None,
-                    "term_27c6_delta": None,
-                    "term_279a": None,
-                    "charge_word_routes": None,
-                    "reasons": [sim_cells.X_NOT_COMPUTED],
-                    "x_base": None,
-                    "x_candidate": None,
-                }
-            else:
-                xb = x_from_bfs(int(words[0]), lps[0], kit.twin)
-                xc = x_from_bfs(int(words[1]), lps[1], kit.twin)
-                pb, pc = float(phi[0][i, k]), float(phi[1][i, k])
-                moved = _math.isfinite(pb) != _math.isfinite(pc) or (
-                    _math.isfinite(pb) and pb != pc
-                )
-                full = ignition_timing_at(
-                    tb,
-                    tc,
-                    state,
-                    rpm_word=word,
-                    x_base=xb,
-                    x_candidate=xc,
-                    coolant_c=p.coolant_c,
-                    pedal_flag=pedal,
-                    phi_moved=moved,
-                    bfs_moved=int(words[0]) != int(words[1]),
-                    lookup_bytes=(
-                        sim_cells._lookup_byte(kit, pb),
-                        sim_cells._lookup_byte(kit, pc),
-                    ),
-                )
-                at = {key: full[key] for key in sim_cells._POINT_KEYS}
-                at.update(x_base=xb, x_candidate=xc)
-                if reach:
-                    at.update(
-                        status="unevaluable",
-                        delta=None,
-                        delta_min=None,
-                        delta_max=None,
-                        reasons=list(dict.fromkeys([*at["reasons"], *reach])),
-                    )
-            key = json.dumps(at, sort_keys=True)
-            outcomes[key] += 1
-            detail[key] = at
-        rows.append(
-            {
-                "point": i,
-                "rpm": p.rpm,
-                "rpm_word": word,
-                "coolant_c": p.coolant_c,
-                "pedal_flag": pedal,
-                "outcomes": [{**detail[key], "draws": n} for key, n in sorted(outcomes.items())],
-            }
-        )
-    return rows
-
-
 def _timing_points_case(
     monkeypatch: pytest.MonkeyPatch,
     kit: SimKit,
@@ -1721,7 +1534,7 @@ def _timing_points_case(
     monkeypatch.setattr(rom_editor, "ignition_timing_points", spy_points)
     req = rom_editor.SimRequest.model_validate(request(**over))
     rom_editor.simulate_edits(image, match, req, PROFILE, kit=kit, registry=registry)
-    reference = _timing_points_per_pair(kit, *seen["args"][1:], **seen["kw"])
+    reference = editor_timing_points_per_pair(kit, *seen["args"][1:], **seen["kw"])
     result = seen["args"][1]
     return seen["rows"], reference, calls[0], len(seen["args"][2].points) * result.draws
 
@@ -1900,7 +1713,7 @@ def test_the_timing_points_share_only_pairs_that_give_the_same_inputs(
     )
     assert hand.draws == len(pairs) == 56
     rows = ignition_timing_points(kit, hand, design, base_image, candidate_image, state, slot=1)
-    reference = _timing_points_per_pair(
+    reference = editor_timing_points_per_pair(
         kit, hand, design, base_image, candidate_image, state, slot=1
     )
     assert rows == reference

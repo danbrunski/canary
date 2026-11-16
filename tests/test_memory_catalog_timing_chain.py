@@ -31,7 +31,7 @@ from src.decode.memory_relations import (
     check_known_answer,
 )
 from src.paths import DIDS_YAML
-from tests.test_memory_catalog_knock_lambda import LIVE_READ_METHODS
+from tests.capture_builders import LIVE_READ_METHODS
 
 REPO = Path(__file__).resolve().parents[1]
 PROFILE_DIR = REPO / "data" / "nissan-xterra-2008"

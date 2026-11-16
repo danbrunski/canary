@@ -46,7 +46,7 @@ from src.storage.broadcast_storage import CanChangeFilter, CanStorage, session_c
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config
-from tests.test_imu_stream import DRIVE, MOUNT, NOW, T0, records
+from tests.imu_builders import DRIVE, MOUNT, NOW, T0, records
 
 TIMEOUT_S = 10.0
 SPEED = "decoded:VEHICLE_SPEED_2D1"
@@ -315,13 +315,13 @@ def test_live_holds_no_longer_than_the_timeout(bindings: Bindings) -> None:
 def _dense_drive(frame: LiveImuFrame) -> list[tuple[dict[str, float], datetime | None]]:
     """``test_imu_live``'s drive with a 10 Hz decoded speed carrying a count of
     jitter (never more than 0.1 s between readings), ticked every second."""
-    from tests.test_imu_live import _profile
+    from tests.imu_builders import imu_live_profile
 
     ticks = []
     for i in range(30 * IMU_HZ):
         t = i / IMU_HZ
         stamp = T0 + timedelta(seconds=t)
-        kph, heading, a_g, lat_g = _profile(t)
+        kph, heading, a_g, lat_g = imu_live_profile(t)
         if i % 5 == 0:
             frame.observe_input(SPEED, round(kph * 10.0) + (i // 5) % 2, stamp)
         if i % IMU_HZ == 0:

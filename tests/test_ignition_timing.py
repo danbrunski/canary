@@ -25,7 +25,7 @@ from typing import Any
 import pytest
 import yaml
 
-from src.analysis.ecu_state_models import Term279aTables, timing_term_27c6_steady
+from src.analysis.ecu_state_models import timing_term_27c6_steady
 from src.analysis.paired_scenarios import (
     CHARGE_WORD_INPUTS_MOVED,
     CHARGE_WORD_UNRESOLVED,
@@ -50,25 +50,13 @@ from src.analysis.sim_cells import ignition_timing_block
 from src.analysis.sim_contract import SimulationRefusalError
 from src.analysis.sim_montecarlo import load_sim_kit
 from tests.rom_fixtures import OPERATOR_ROMS, PROFILE, operator_image
-from tests.test_timing_rate_term import CALS, CURVE_CC1B, CURVE_CC2B, CURVE_CC33, TABLES
+from tests.sim_builders import CALS, RETARD, TABLES
 from tools import rom_sim
 
 RPM_AXIS = tuple(8 * (i + 1) for i in range(16))
 LOAD_AXIS = tuple(8 * (i + 1) for i in range(16))
 WARM_C = 90.0  # coolant byte 140, above cal 0x8CCC (110); rescaled byte 208
 
-#: The 0xFFFF279A input tables as on every listed image (rom_map.yaml): map
-#: 0x9B09 all zero, 0xCC33 zero but entries 6..9.
-RETARD = Term279aTables(
-    map_9b09=((0,) * 8,) * 8,
-    rpm_axis_c8fc=(0x30, 0x38, 0x40, 0x48, 0x60, 0x80, 0x90, 0xA4),
-    coolant_axis_c904=(0x40, 0x48, 0x50, 0x58, 0x60, 0x68, 0x70, 0x80),
-    curve_cc1b=CURVE_CC1B,
-    curve_cc2b=CURVE_CC2B,
-    curve_cc33=CURVE_CC33,
-    curve_d335=(0x00, 0x20, 0x20, 0x20, 0x20, 0x20, 0x00, 0x00),
-    curve_d33d=(0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x00, 0x00),
-)
 #: The listed images' 0xFFFF27C6 chain (tests/test_timing_rate_term.py).
 #: Cals 0x8792 / 0x8793 = 0x82 and 0x8797 / 0x8798 = 0 on every listed image.
 ENRICH = EnrichmentRetardCals(

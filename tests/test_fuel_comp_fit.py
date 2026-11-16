@@ -64,7 +64,7 @@ from src.decode.ecm_lookup import lookup_2d
 from src.decode.fuel_comp_load import Interval
 from src.signals.afr import load_afr_calibration
 from tests.rom_fixtures import PROFILE
-from tests.test_fuel_comp_samples import _calibration
+from tests.twin_builders import fuel_comp_calibration
 
 REPO = Path(__file__).resolve().parents[1]
 T0 = pd.Timestamp("2026-09-01T12:00:00Z")
@@ -83,7 +83,7 @@ def rules(declaration: FuelCompDeclaration) -> FitRules:
 def _target(cells: np.ndarray | None = None) -> FuelCompCalibration:
     table = np.full((SIDE, SIDE), 128) if cells is None else cells.reshape(SIDE, SIDE)
     return dataclasses.replace(
-        _calibration("target"),
+        fuel_comp_calibration("target"),
         fuel_comp=tuple(tuple(int(v) for v in row) for row in table),
         k=28715,
         image_sha256="t" * 64,
@@ -94,7 +94,7 @@ def _logged() -> FuelCompCalibration:
     """The k106 shape: load axis compressed to 16..144, a different K."""
     load_axis = (16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 144)
     return dataclasses.replace(
-        _calibration("logged"), load_axis_raw=load_axis, k=28000, image_sha256="l" * 64
+        fuel_comp_calibration("logged"), load_axis_raw=load_axis, k=28000, image_sha256="l" * 64
     )
 
 

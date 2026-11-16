@@ -18,9 +18,7 @@ profile files (``ecu_application_model.yaml``'s ``program.identity.sha256`` and
 from __future__ import annotations
 
 import argparse
-import contextlib
 import hashlib
-import io
 import json
 import shutil
 import subprocess
@@ -35,7 +33,6 @@ import yaml
 from pydantic import ValidationError
 
 from src.analysis import paired_scenarios, rom_editor
-from src.analysis.ecu_application import program_sha256
 from src.analysis.fuel_plant import plant_qualification
 from src.analysis.rom_effects import CellEdit, RomEffectRefusalError, compare_roms, make_candidate
 from src.analysis.rom_image import revision_match
@@ -46,102 +43,25 @@ from src.analysis.sim_montecarlo import load_sim_kit
 from src.analysis.sim_report import render_report
 from src.session import is_synthetic_session
 from src.vehicle.tune_revisions import load_tune_revisions
-from src.yaml_load import load_yaml
 from tests.rom_fixtures import PROFILE, encrypted_backup_lookalike
-from tests.test_sim_montecarlo import build_kit_and_image
+from tests.sim_builders import (
+    CLI_BASE,
+    CLI_LEARNED,
+    GRID_ARGS,
+    cli_profile_args,
+    cli_run_args,
+)
+from tests.sim_builders import grid_design as grid_design  # noqa: F401 - fixture
+from tests.sim_builders import spec_run as spec_run  # noqa: F401 - fixture
+from tests.sim_builders import world as world  # noqa: F401 - fixture
 from tools import rom_sim
 
 REPO = Path(__file__).resolve().parents[1]
 FIXTURE_SLICE = REPO / "tests" / "fixtures" / "fuel_plant" / "_capture-tuning-2026-09-23T142926"
-BASE = "SYNTH-base"
-#: Cell centres: rpm 2000, 2500, 3000 x load 28.5, 46, 65 %. The synthetic Fuel
-#: Comp axes are rpm 400..6400 x 400 and fill 0..240 x 16 (x 100/224 %), so the
-#: edit at (4, 4) is rpm 2000 at fill byte 64 = 28.57 %: the first cell centre
-#: reads it (bytes 63..64), the other eight read other cells.
-GRID_ARGS = [
-    "--rpm-edges", "1900", "2100", "2900", "3100",
-    "--load-edges", "25", "32", "60", "70",
-    "--load-basis", "fill_fraction_as_manifold_ratio",
-    "--baro-kpa", "80",
-    "--iat-c", "25",
-    "--coolant-c", "88",
-    "--battery-v", "14",
-    "--rail-kpa", "working_assumption",
-    "--throttle-pct", "20",
-    "--pedal-flag", "0",
-]  # fmt: skip
-LEARNED = ["--stft-pct", "0", "--ltft-pct", "2.34", "--candidate-events", "none"]
 
 
 #: A stated timing state (E09.7): HI DET clear, knock control active, warm.
 TIMING_ARGS = ("--high-det", "clear", "--knock-control", "active", "--timing-coolant-c", "90")
-
-
-def _yaml(path: Path) -> Any:
-    return load_yaml(path.read_text())
-
-
-@pytest.fixture(scope="module")
-def world(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
-    kit, image = build_kit_and_image()
-    root = tmp_path_factory.mktemp("rom_sim")
-    profile = root / "profile"
-    shutil.copytree(PROFILE, profile, ignore=shutil.ignore_patterns("_candidates", "_prior"))
-    # The application model describes this image's program, not the real one.
-    model_path = profile / "ecu_application_model.yaml"
-    model = _yaml(model_path)
-    model["program"]["identity"]["sha256"] = program_sha256(image, kit.model)
-    model_path.write_text(yaml.safe_dump(model, sort_keys=False))
-    sha = hashlib.sha256(image).hexdigest()
-    registry_path = profile / "tune_revisions.yaml"
-    # Dated in 2099 so a synthetic revision sorts after every real flash: the
-    # registry refuses an out-of-order list, and a date just past the newest real
-    # flash broke these fixtures when ZS44A-20261110 was recorded.
-    registry = _yaml(registry_path)
-    registry["revisions"].append(
-        {
-            "revision": BASE,
-            "calibration_id": "1ZS44A00000",
-            "flashed_at": "2099-10-10T00:00:00Z",
-            "flashed_at_precision": "exact",
-            "image_sha256": sha,
-            "notes": "synthetic: the CLI test's base image",
-        }
-    )
-    registry_path.write_text(yaml.safe_dump(registry, sort_keys=False))
-    (root / "base.bin").write_bytes(image)
-    # (4, 4) +20 counts: 128 -> 148, hand-worked +15.625 %.
-    candidate = make_candidate(
-        image, kit.rom_map, [CellEdit("fuel_compensation", 4, 4, 148, slot=1)], base_label="x"
-    ).image
-    (root / "candidate.bin").write_bytes(candidate)
-
-    def spec(name: str, edits: list[dict[str, Any]], base_sha: str = sha) -> Path:
-        path = root / name
-        path.write_text(
-            yaml.safe_dump(
-                {
-                    "schema_version": 1,
-                    "base": {"file": "base.bin", "sha256": base_sha},
-                    "label": f"cli test {name}",
-                    "edits": edits,
-                }
-            )
-        )
-        return path
-
-    cell = {"table": "fuel_compensation", "slot": 1, "cells": [[4, 4]], "set_raw": 148}
-    return {
-        "root": root,
-        "profile": profile,
-        "image": image,
-        "sha": sha,
-        "candidate_sha": hashlib.sha256(candidate).hexdigest(),
-        "spec": spec("spec.yaml", [cell]),
-        "spec_other_base": spec("other.yaml", [cell], base_sha="0" * 64),
-        "spec_no_op": spec("noop.yaml", [{**cell, "set_raw": 128}]),
-        "kit": kit,
-    }
 
 
 def _cli(capsys: pytest.CaptureFixture[str], *argv: str | Path) -> tuple[int, dict[str, Any], str]:
@@ -149,64 +69,6 @@ def _cli(capsys: pytest.CaptureFixture[str], *argv: str | Path) -> tuple[int, di
     code = rom_sim.main([str(a) for a in argv])
     out, err = capsys.readouterr()
     return code, json.loads(out), err
-
-
-def _profile_args(world: dict[str, Any]) -> list[str]:
-    return ["--profile", str(world["profile"])]
-
-
-@pytest.fixture(scope="module")
-def grid_design(world: dict[str, Any], tmp_path_factory: pytest.TempPathFactory) -> Path:
-    out = tmp_path_factory.mktemp("designs")
-    with contextlib.redirect_stdout(io.StringIO()):
-        code = rom_sim.main(
-            [
-                "design",
-                "grid",
-                *_profile_args(world),
-                "--base-revision",
-                BASE,
-                *GRID_ARGS,
-                "--out",
-                str(out),
-            ]
-        )
-    assert code == 0
-    (directory,) = out.iterdir()
-    return directory
-
-
-def _run_args(world: dict[str, Any], design: Path, out: Path, *extra: str | Path) -> list[str]:
-    return [
-        "run",
-        *_profile_args(world),
-        "--base",
-        "--rom",
-        str(world["root"] / "base.bin"),
-        "--sha256",
-        world["sha"],
-        "--design",
-        str(design),
-        "--draws",
-        "6",
-        "--seed",
-        "7",
-        *LEARNED,
-        "--out",
-        str(out),
-        *(str(e) for e in extra),
-    ]
-
-
-@pytest.fixture(scope="module")
-def spec_run(
-    world: dict[str, Any], grid_design: Path, tmp_path_factory: pytest.TempPathFactory
-) -> dict[str, Any]:
-    out = tmp_path_factory.mktemp("run_spec")
-    with contextlib.redirect_stdout(io.StringIO()):
-        code = rom_sim.main(_run_args(world, grid_design, out, "--edits", str(world["spec"])))
-    assert code == 0
-    return {"out": out, "result": json.loads((out / "result.json").read_text())}
 
 
 # -- the end-to-end run ---------------------------------------------------------------------
@@ -297,7 +159,7 @@ def test_the_rom_file_route_makes_the_same_cell_table_as_the_spec_route(
 ) -> None:
     code, payload, _ = _cli(
         capsys,
-        *_run_args(
+        *cli_run_args(
             world, grid_design, tmp_path, "--candidate-rom", str(world["root"] / "candidate.bin")
         ),
     )
@@ -328,12 +190,13 @@ def test_the_same_seed_writes_byte_identical_results_and_another_seed_does_not(
 ) -> None:
     again = tmp_path / "again"
     assert (
-        _cli(capsys, *_run_args(world, grid_design, again, "--edits", str(world["spec"])))[0] == 0
+        _cli(capsys, *cli_run_args(world, grid_design, again, "--edits", str(world["spec"])))[0]
+        == 0
     )
     assert (again / "result.json").read_bytes() == (spec_run["out"] / "result.json").read_bytes()
     assert (again / "report.html").read_bytes() == (spec_run["out"] / "report.html").read_bytes()
     other = tmp_path / "other"
-    args = _run_args(world, grid_design, other, "--edits", str(world["spec"]))
+    args = cli_run_args(world, grid_design, other, "--edits", str(world["spec"]))
     args[args.index("--seed") + 1] = "8"
     assert _cli(capsys, *args)[0] == 0
     assert (other / "result.json").read_bytes() != (spec_run["out"] / "result.json").read_bytes()
@@ -380,7 +243,7 @@ def test_one_edit_through_the_rom_editor_and_the_cli_gives_the_same_cells(
     whatever document each caller wraps them in (``cells`` vs ``cell_table``)."""
     registry = load_tune_revisions(world["profile"] / "tune_revisions.yaml")
     match = revision_match(world["sha"], registry)
-    assert match["status"] == "matched" and match["revision"] == BASE
+    assert match["status"] == "matched" and match["revision"] == CLI_BASE
     editor = rom_editor.simulate_edits(world["image"], match, _editor_request(), world["profile"])
     cli = spec_run["result"]
     # The CLI's design came from ``design grid`` with GRID_ARGS, the editor's
@@ -464,7 +327,7 @@ def test_a_declared_map_slot_2_is_the_slot_both_drivers_run(
     rather than simulating a slot the CLI would not."""
     profile = slot_2["profile"]
     assert rom_editor.declared_slot(profile) == rom_editor.editor_slot(profile) == 2
-    args = _run_args(world, grid_design, tmp_path, "--edits", str(slot_2["spec"]))
+    args = cli_run_args(world, grid_design, tmp_path, "--edits", str(slot_2["spec"]))
     args[args.index("--profile") + 1] = str(profile)
     code, payload, _ = _cli(capsys, *args)
     assert code == 0, payload
@@ -548,7 +411,7 @@ def test_a_run_refuses_a_negative_seed_and_a_trim_outside_the_pid_decode(
         ("--ltft-pct", "400", "--ltft-pct must be within [-100, 100] %"),
         ("--stft-pct", "-100.5", "--stft-pct must be within [-100, 100] %"),
     ):
-        args = _run_args(world, grid_design, tmp_path / "out", "--edits", str(world["spec"]))
+        args = cli_run_args(world, grid_design, tmp_path / "out", "--edits", str(world["spec"]))
         args[args.index(flag) + 1] = value
         code, payload, _ = _cli(capsys, *args)
         assert code == 2 and payload["refused"] == "argument_invalid", payload
@@ -558,7 +421,7 @@ def test_a_run_refuses_a_negative_seed_and_a_trim_outside_the_pid_decode(
     # multiplier, so delivered lambda is NaN on both sides: that run completes
     # (it was refused fast_path_diverged by a NaN != NaN comparison).
     rom_sim._run_bounds(argparse.Namespace(seed=0, stft_pct=-100.0, ltft_pct=100.0))
-    args = _run_args(world, grid_design, tmp_path / "edge", "--edits", str(world["spec"]))
+    args = cli_run_args(world, grid_design, tmp_path / "edge", "--edits", str(world["spec"]))
     args[args.index("--seed") + 1] = "0"
     args[args.index("--ltft-pct") + 1] = "-100"
     code, payload, _ = _cli(capsys, *args)
@@ -591,7 +454,7 @@ def test_a_run_refuses_a_negative_seed_and_a_trim_outside_the_pid_decode(
 def test_a_spec_that_names_its_own_base_needs_no_base_flags(
     world: dict[str, Any], grid_design: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    args = _run_args(world, grid_design, tmp_path, "--edits", str(world["spec"]))
+    args = cli_run_args(world, grid_design, tmp_path, "--edits", str(world["spec"]))
     i = args.index("--base")
     del args[i : i + 5]  # --base --rom X --sha256 H
     assert "--rom" not in args
@@ -607,7 +470,7 @@ def test_inspect_lists_the_resolved_cells_and_what_they_reach_and_runs_nothing(
 ) -> None:
     before = sorted(p.name for p in tmp_path.iterdir())
     code, payload, _ = _cli(
-        capsys, "inspect", *_profile_args(world), "--edits", world["spec"], "--base",
+        capsys, "inspect", *cli_profile_args(world), "--edits", world["spec"], "--base",
         "--rom", world["root"] / "base.bin", "--sha256", world["sha"],
     )  # fmt: skip
     assert code == 0 and payload["command"] == "inspect"
@@ -666,7 +529,9 @@ def test_an_edit_that_reaches_timing_outside_the_trims_is_not_zero_on_the_trim_g
             }
         )
     )
-    code, payload, _ = _cli(capsys, "inspect", *_profile_args(world), "--edits", spec, *TIMING_ARGS)
+    code, payload, _ = _cli(
+        capsys, "inspect", *cli_profile_args(world), "--edits", spec, *TIMING_ARGS
+    )
     assert code == 0, payload
     timing = payload["ignition_timing"]
     assert timing["trims_changed"] is False
@@ -675,7 +540,7 @@ def test_an_edit_that_reaches_timing_outside_the_trims_is_not_zero_on_the_trim_g
     assert timing["reasons"] and all(r.startswith(reason) for r in timing["reasons"])
     assert timing["other_inputs_changed"] == timing["reasons"]
     # Without a stated state the block still names the reach after the state.
-    code, payload, _ = _cli(capsys, "inspect", *_profile_args(world), "--edits", spec)
+    code, payload, _ = _cli(capsys, "inspect", *cli_profile_args(world), "--edits", spec)
     assert code == 0, payload
     assert payload["ignition_timing"]["reasons"] == ["timing_state_unstated", *timing["reasons"]]
 
@@ -685,8 +550,7 @@ def _with_listed_timing_tables(world: dict[str, Any]) -> bytes:
     trims a flat 50 and the 0xFFFF27C6 / 0xFFFF279A tables and calibration
     bytes at the listed images' values (tests/test_timing_rate_term.py,
     tests/test_ignition_timing.py RETARD), each placed by its rom_map id."""
-    from tests.test_ignition_timing import RETARD
-    from tests.test_timing_rate_term import CALS, TABLES
+    from tests.sim_builders import CALS, RETARD, TABLES
 
     rom_map = world["kit"].rom_map
     image = bytearray(world["image"])
@@ -754,7 +618,9 @@ def test_a_base_timing_table_edit_is_computed_on_the_trim_grid(
             }
         )
     )
-    code, payload, _ = _cli(capsys, "inspect", *_profile_args(world), "--edits", spec, *TIMING_ARGS)
+    code, payload, _ = _cli(
+        capsys, "inspect", *cli_profile_args(world), "--edits", spec, *TIMING_ARGS
+    )
     assert code == 0, payload
     timing = payload["ignition_timing"]
     assert (timing["trims_changed"], timing["base_timing_tables_changed"]) == (False, True)
@@ -767,7 +633,7 @@ def test_a_base_timing_table_edit_is_computed_on_the_trim_grid(
     assert reached["ignition_timing"] == "changed"
     assert reached["base_fuel_schedule_word"] == "unchanged"
     # Without a stated state the edit is refused, as a trim edit is.
-    code, payload, _ = _cli(capsys, "inspect", *_profile_args(world), "--edits", spec)
+    code, payload, _ = _cli(capsys, "inspect", *cli_profile_args(world), "--edits", spec)
     assert (code, payload["refused"]) == (2, "timing_state_unstated")
 
 
@@ -785,10 +651,12 @@ def test_inspect_judges_a_masked_trim_on_the_bits_the_ecm_reads(
             }
         )
     )
-    code, payload, _ = _cli(capsys, "inspect", *_profile_args(world), "--edits", spec)
+    code, payload, _ = _cli(capsys, "inspect", *cli_profile_args(world), "--edits", spec)
     # A trim edit names the HI DET latch and knock control: there is no default.
     assert (code, payload["refused"]) == (2, "timing_state_unstated")
-    code, payload, _ = _cli(capsys, "inspect", *_profile_args(world), "--edits", spec, *TIMING_ARGS)
+    code, payload, _ = _cli(
+        capsys, "inspect", *cli_profile_args(world), "--edits", spec, *TIMING_ARGS
+    )
     assert code == 0
     timing = payload["ignition_timing"]
     assert timing["trims_changed"] and timing["summary"]["cells"] == 256
@@ -860,7 +728,7 @@ def test_inspect_names_the_lever_and_the_strings_equal_the_librarys(
     base = ["--rom", world["root"] / "base.bin", "--sha256", world["sha"]]
     # A Fuel Comp edit: closed loop, trim authority undecoded.
     code, payload, _ = _cli(
-        capsys, "inspect", *_profile_args(world), "--edits", world["spec"], *base
+        capsys, "inspect", *cli_profile_args(world), "--edits", world["spec"], *base
     )
     assert code == 0
     levers = payload["levers"]
@@ -873,7 +741,13 @@ def test_inspect_names_the_lever_and_the_strings_equal_the_librarys(
     assert {"cells", "reached", "in_run_mode", "ranges"} <= set(payload)
     # A timing trim: the torque stage, built and not validated (E07.5 stage 4).
     code, payload, _ = _cli(
-        capsys, "inspect", *_profile_args(world), "--edits", _trim_spec(world), *base, *TIMING_ARGS
+        capsys,
+        "inspect",
+        *cli_profile_args(world),
+        "--edits",
+        _trim_spec(world),
+        *base,
+        *TIMING_ARGS,
     )
     assert code == 0
     said = "\n".join(payload["levers"]["messages"])
@@ -898,7 +772,7 @@ def test_inspect_says_a_changed_byte_outside_the_map_is_not_mapped(
     saved = world["root"] / "maf.bin"
     saved.write_bytes(bytes(image))
     code, payload, _ = _cli(
-        capsys, "inspect", *_profile_args(world), "--candidate-rom", saved,
+        capsys, "inspect", *cli_profile_args(world), "--candidate-rom", saved,
         "--rom", world["root"] / "base.bin", "--sha256", world["sha"],
     )  # fmt: skip
     assert code == 0
@@ -914,7 +788,7 @@ def test_inspect_regime_selects_whether_the_closed_loop_blocker_applies(
     candidate = (world["root"] / "candidate.bin").read_bytes()
     base = ["--rom", world["root"] / "base.bin", "--sha256", world["sha"]]
     code, payload, _ = _cli(
-        capsys, "inspect", *_profile_args(world), "--edits", world["spec"], *base,
+        capsys, "inspect", *cli_profile_args(world), "--edits", world["spec"], *base,
         "--regime", "fuel_cut",
     )  # fmt: skip
     assert code == 0 and payload["levers"]["regime"] == "fuel_cut"
@@ -936,7 +810,7 @@ def _refused(capsys: pytest.CaptureFixture[str], reason: str, *argv: str | Path)
 def test_a_run_refuses_every_argument_the_result_depends_on(
     world: dict[str, Any], grid_design: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    full = _run_args(world, grid_design, tmp_path, "--edits", str(world["spec"]))
+    full = cli_run_args(world, grid_design, tmp_path, "--edits", str(world["spec"]))
 
     def without(*flags: str) -> list[str]:
         out = list(full)
@@ -964,9 +838,9 @@ def test_a_run_refuses_every_argument_the_result_depends_on(
 def test_a_design_refuses_what_it_was_not_told(
     world: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    prof = _profile_args(world)
+    prof = cli_profile_args(world)
     payload = _refused(
-        capsys, "argument_missing", "design", "drives", *prof, "--base-revision", BASE,
+        capsys, "argument_missing", "design", "drives", *prof, "--base-revision", CLI_BASE,
         "--out", tmp_path,
     )  # fmt: skip
     assert "--sessions" in payload["message"]
@@ -987,7 +861,7 @@ def test_a_design_refuses_what_it_was_not_told(
         assert flag not in keep
         del args[i : i + 2]
         payload = _refused(
-            capsys, reason, "design", "grid", *prof, "--base-revision", BASE, *args,
+            capsys, reason, "design", "grid", *prof, "--base-revision", CLI_BASE, *args,
             "--out", tmp_path,
         )  # fmt: skip
         if reason == "environment_unstated":
@@ -1043,11 +917,11 @@ def test_every_writing_subcommand_checks_out_before_it_does_any_work(
     monkeypatch.setattr(rom_sim, "REPO_ROOT", fake_repo)
     out = fake_repo / "scratch"
     _refused(
-        capsys, "inside_checkout", *_run_args(world, grid_design, out, "--edits", world["spec"])
+        capsys, "inside_checkout", *cli_run_args(world, grid_design, out, "--edits", world["spec"])
     )
     _refused(
-        capsys, "inside_checkout", "design", "grid", *_profile_args(world),
-        "--base-revision", BASE, *GRID_ARGS, "--out", out,
+        capsys, "inside_checkout", "design", "grid", *cli_profile_args(world),
+        "--base-revision", CLI_BASE, *GRID_ARGS, "--out", out,
     )  # fmt: skip
     _refused(
         capsys, "inside_checkout", "design", "drives", "--base-revision", "ZS44A-20260920",
@@ -1057,7 +931,7 @@ def test_every_writing_subcommand_checks_out_before_it_does_any_work(
     _refused(
         capsys,
         "inside_checkout",
-        *_run_args(world, grid_design, tmp_path, "--edits", world["spec"]),
+        *cli_run_args(world, grid_design, tmp_path, "--edits", world["spec"]),
     )
     assert not out.exists() and sorted(p.name for p in fake_repo.iterdir()) == []
 
@@ -1076,7 +950,7 @@ def test_a_run_refuses_a_design_built_on_another_image(
     (real_base_design,) = other.iterdir()
     payload = _refused(
         capsys, "design_revision_mismatch",
-        *_run_args(world, real_base_design, tmp_path / "out", "--edits", world["spec"]),
+        *cli_run_args(world, real_base_design, tmp_path / "out", "--edits", world["spec"]),
     )  # fmt: skip
     assert not (tmp_path / "out").exists()
     assert "design" in payload["message"]
@@ -1087,7 +961,7 @@ def test_a_run_refuses_a_missing_or_tampered_design(
 ) -> None:
     _refused(
         capsys, "design_missing",
-        *_run_args(world, tmp_path / "nowhere", tmp_path / "o1", "--edits", world["spec"]),
+        *cli_run_args(world, tmp_path / "nowhere", tmp_path / "o1", "--edits", world["spec"]),
     )  # fmt: skip
     copy = tmp_path / "copy" / grid_design.name
     shutil.copytree(grid_design, copy)
@@ -1096,7 +970,7 @@ def test_a_run_refuses_a_missing_or_tampered_design(
     (copy / "design.json").write_text(json.dumps(record))
     _refused(
         capsys, "design_hash_mismatch",
-        *_run_args(world, copy, tmp_path / "o2", "--edits", world["spec"]),
+        *cli_run_args(world, copy, tmp_path / "o2", "--edits", world["spec"]),
     )  # fmt: skip
 
 
@@ -1104,25 +978,25 @@ def test_a_candidate_and_a_base_are_each_stated_exactly(
     world: dict[str, Any], grid_design: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     out = tmp_path / "o"
-    both = _run_args(world, grid_design, out, "--edits", world["spec"])
+    both = cli_run_args(world, grid_design, out, "--edits", world["spec"])
     both += ["--candidate-rom", str(world["root"] / "candidate.bin")]
     _refused(capsys, "candidate_unstated", *both)
-    neither = _run_args(world, grid_design, out)
+    neither = cli_run_args(world, grid_design, out)
     _refused(capsys, "candidate_unstated", *neither)
     cand = ["--candidate-rom", str(world["root"] / "candidate.bin")]
-    prof = _profile_args(world)
+    prof = cli_profile_args(world)
     _refused(capsys, "base_unstated", "inspect", *prof, *cand)
-    _refused(capsys, "base_ambiguous", "inspect", *prof, *cand, "--revision", BASE,
+    _refused(capsys, "base_ambiguous", "inspect", *prof, *cand, "--revision", CLI_BASE,
              "--rom", world["root"] / "base.bin", "--sha256", world["sha"])  # fmt: skip
     _refused(
         capsys, "argument_missing", "inspect", *prof, *cand, "--rom", world["root"] / "base.bin"
     )
     _refused(
-        capsys, "argument_missing", "inspect", *prof, *cand, "--revision", BASE, "--sha256", "a"
+        capsys, "argument_missing", "inspect", *prof, *cand, "--revision", CLI_BASE, "--sha256", "a"
     )
     _refused(
         capsys, "candidate_events_ambiguous",
-        *_run_args(world, grid_design, out, "--edits", world["spec"]), "--candidate-events",
+        *cli_run_args(world, grid_design, out, "--edits", world["spec"]), "--candidate-events",
         "none", "ecu_reflash",
     )  # fmt: skip
     assert not out.exists()
@@ -1131,7 +1005,7 @@ def test_a_candidate_and_a_base_are_each_stated_exactly(
 def test_the_librarys_refusals_surface_by_their_own_reasons(
     world: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    prof = _profile_args(world)
+    prof = cli_profile_args(world)
     base = ["--rom", world["root"] / "base.bin", "--sha256", world["sha"]]
     # A base that is not the file it names.
     _refused(capsys, "image_hash_mismatch", "inspect", *prof, "--edits", world["spec"],
@@ -1153,9 +1027,17 @@ def test_the_librarys_refusals_surface_by_their_own_reasons(
     )
     # A revision without a ROM directory to find its image in.
     _refused(
-        capsys, "image_not_found", "inspect", *prof, "--revision", BASE, "--edits", world["spec"],
-        "--rom-dir", tmp_path,
-    )  # fmt: skip
+        capsys,
+        "image_not_found",
+        "inspect",
+        *prof,
+        "--revision",
+        CLI_BASE,
+        "--edits",
+        world["spec"],
+        "--rom-dir",
+        tmp_path,
+    )
     # Not a profile.
     _refused(
         capsys,
@@ -1174,17 +1056,31 @@ def test_the_revision_route_finds_its_image_in_the_rom_dirs_or_the_environment(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    prof = _profile_args(world)
+    prof = cli_profile_args(world)
     # The registry names a rom_file for the real revisions only; a synthetic
     # revision with an image_sha256 is found by hash among --image files, which
     # the CLI does not take, so its refusal is the resolver's own.
     monkeypatch.delenv("CANARY_ROM_DIRS", raising=False)
     _refused(
-        capsys, "image_not_found", "inspect", *prof, "--revision", BASE, "--edits", world["spec"]
+        capsys,
+        "image_not_found",
+        "inspect",
+        *prof,
+        "--revision",
+        CLI_BASE,
+        "--edits",
+        world["spec"],
     )
     monkeypatch.setenv("CANARY_ROM_DIRS", str(tmp_path))
     _refused(
-        capsys, "image_not_found", "inspect", *prof, "--revision", BASE, "--edits", world["spec"]
+        capsys,
+        "image_not_found",
+        "inspect",
+        *prof,
+        "--revision",
+        CLI_BASE,
+        "--edits",
+        world["spec"],
     )
 
 
@@ -1200,10 +1096,10 @@ def test_the_command_line_imports_nothing_that_talks_to_the_ecu(
     """Every subcommand's code path, in a fresh interpreter."""
     designs = tmp_path / "designs"
     run = tmp_path / "run"
-    prof = _profile_args(world)
+    prof = cli_profile_args(world)
     base = ["--rom", str(world["root"] / "base.bin"), "--sha256", world["sha"]]
     steps = [
-        ["design", "grid", *prof, "--base-revision", BASE, *GRID_ARGS, "--out", str(designs)],
+        ["design", "grid", *prof, "--base-revision", CLI_BASE, *GRID_ARGS, "--out", str(designs)],
         ["inspect", *prof, "--edits", str(world["spec"]), *base],
         ["inspect", *prof, "--candidate-rom", str(world["root"] / "candidate.bin"), *base],
         # design drives, on the committed slice and the real profile.
@@ -1241,7 +1137,7 @@ def test_the_command_line_imports_nothing_that_talks_to_the_ecu(
             "2",
             "--seed",
             "1",
-            *LEARNED,
+            *CLI_LEARNED,
             "--out",
             str(run),
         ]  # fmt: skip
@@ -1386,11 +1282,11 @@ def test_the_out_directory_is_refused_inside_or_around_a_rom_directory(
     for out in (library / "zzsim", library, tmp_path, link / "zzsim"):
         _refused(
             capsys, "inside_rom_library",
-            *_run_args(world, grid_design, out, "--edits", world["spec"], "--rom-dir", library),
+            *cli_run_args(world, grid_design, out, "--edits", world["spec"], "--rom-dir", library),
         )  # fmt: skip
         _refused(
-            capsys, "inside_rom_library", "design", "grid", *_profile_args(world),
-            "--base-revision", BASE, *GRID_ARGS, "--rom-dir", library, "--out", out,
+            capsys, "inside_rom_library", "design", "grid", *cli_profile_args(world),
+            "--base-revision", CLI_BASE, *GRID_ARGS, "--rom-dir", library, "--out", out,
         )  # fmt: skip
         _refused(
             capsys, "inside_rom_library", "design", "drives", "--base-revision", "ZS44A-20260920",
@@ -1401,13 +1297,13 @@ def test_the_out_directory_is_refused_inside_or_around_a_rom_directory(
     monkeypatch.setenv("CANARY_ROM_DIRS", str(library))
     _refused(
         capsys, "inside_rom_library",
-        *_run_args(world, grid_design, library / "zzsim", "--edits", world["spec"]),
+        *cli_run_args(world, grid_design, library / "zzsim", "--edits", world["spec"]),
     )  # fmt: skip
     assert sorted(p.name for p in library.iterdir()) == []
     # A directory beside it is fine.
     monkeypatch.delenv("CANARY_ROM_DIRS")
     other = tmp_path / "elsewhere"
-    code = rom_sim.main(_run_args(world, grid_design, other, "--edits", str(world["spec"])))
+    code = rom_sim.main(cli_run_args(world, grid_design, other, "--edits", str(world["spec"])))
     capsys.readouterr()
     assert code == 0 and (other / "result.json").is_file()
 
@@ -1422,7 +1318,7 @@ def test_a_non_finite_number_is_refused_and_nothing_is_written(
     flag: str,
     value: str,
 ) -> None:
-    args = _run_args(world, grid_design, tmp_path / "o", "--edits", world["spec"])
+    args = cli_run_args(world, grid_design, tmp_path / "o", "--edits", world["spec"])
     args[args.index(flag) + 1] = value
     payload = _refused(capsys, "argument_invalid", *args)
     assert flag in payload["message"]
@@ -1431,14 +1327,14 @@ def test_a_non_finite_number_is_refused_and_nothing_is_written(
     grid = list(GRID_ARGS)
     grid[grid.index("--baro-kpa") + 1] = value
     _refused(
-        capsys, "argument_invalid", "design", "grid", *_profile_args(world),
-        "--base-revision", BASE, *grid, "--out", tmp_path / "d",
+        capsys, "argument_invalid", "design", "grid", *cli_profile_args(world),
+        "--base-revision", CLI_BASE, *grid, "--out", tmp_path / "d",
     )  # fmt: skip
     edges = list(GRID_ARGS)
     edges[edges.index("--rpm-edges") + 1] = value
     _refused(
-        capsys, "argument_invalid", "design", "grid", *_profile_args(world),
-        "--base-revision", BASE, *edges, "--out", tmp_path / "d",
+        capsys, "argument_invalid", "design", "grid", *cli_profile_args(world),
+        "--base-revision", CLI_BASE, *edges, "--out", tmp_path / "d",
     )  # fmt: skip
     assert not (tmp_path / "d").exists()
 
@@ -1450,7 +1346,7 @@ def test_a_failure_while_publishing_leaves_no_partial_outputs(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    args = _run_args(world, grid_design, tmp_path / "o", "--edits", world["spec"])
+    args = cli_run_args(world, grid_design, tmp_path / "o", "--edits", world["spec"])
     # The result cannot be serialised: refused, and not even the traces appear.
     real_json = rom_sim._json
 
@@ -1484,10 +1380,10 @@ def test_a_failure_while_publishing_leaves_no_partial_outputs(
 def test_a_missing_required_argument_is_json_not_usage_text(
     world: dict[str, Any], grid_design: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    prof = _profile_args(world)
+    prof = cli_profile_args(world)
     drop = {"--out", "--base-revision", "--rpm-edges", "--load-edges"}
     for flag in sorted(drop):
-        args = list(GRID_ARGS) + ["--base-revision", BASE, "--out", str(tmp_path / "d")]
+        args = list(GRID_ARGS) + ["--base-revision", CLI_BASE, "--out", str(tmp_path / "d")]
         i = args.index(flag)
         j = i + 1
         while j < len(args) and not args[j].startswith("--"):
@@ -1498,7 +1394,7 @@ def test_a_missing_required_argument_is_json_not_usage_text(
     payload = _refused(capsys, "argument_missing", "design", "drives", *prof)
     assert "--base-revision" in payload["message"] and "--sessions" in payload["message"]
     assert "--out" in payload["message"]
-    run = _run_args(world, grid_design, tmp_path / "o", "--edits", world["spec"])
+    run = cli_run_args(world, grid_design, tmp_path / "o", "--edits", world["spec"])
     del run[run.index("--out") : run.index("--out") + 2]
     assert "--out" in _refused(capsys, "argument_missing", *run)["message"]
     assert not (tmp_path / "d").exists()
@@ -1521,7 +1417,7 @@ def test_a_file_route_lists_the_changed_bytes_outside_any_table(
     out = tmp_path / "o"
     code, _, _ = _cli(
         capsys,
-        *_run_args(world, grid_design, out, "--candidate-rom", str(saved)),
+        *cli_run_args(world, grid_design, out, "--candidate-rom", str(saved)),
     )
     assert code == 0
     rows = json.loads((out / "result.json").read_text())["run"]["edits"]

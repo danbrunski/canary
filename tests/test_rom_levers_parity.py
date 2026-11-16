@@ -45,8 +45,7 @@ from src.analysis.rom_levers import Blocker, LeverClassification, LeverEntry, Ou
 from src.analysis.sim_montecarlo import load_sim_kit
 from src.vehicle.tune_revisions import load_tune_revisions
 from tests.rom_fixtures import PROFILE
-from tests.test_rom_editor import FC_EDIT, K_EDIT
-from tests.test_sim_montecarlo import build_kit_and_image
+from tests.sim_builders import FC_EDIT, K_EDIT, build_kit_and_image
 from tools import rom_sim
 
 REPO = Path(__file__).resolve().parents[1]

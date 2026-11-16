@@ -74,25 +74,21 @@ from src.config import CanBusConfig, CollectionConfig
 from src.decode.dids import plan_memory_reads
 from src.yaml_load import load_yaml
 from tests.builders import CAPTURE_T0, capture_obd_record, write_capture_session
-from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock
-from tests.test_capture_quality import (
+from tests.capture_builders import (
     CLEAN,
-    TUPLE,
-    _scheduler,
-    _tuples,
-    _verified_losses,
-)
-from tests.test_capture_quality import (
-    _profile as quality_profile,
-)
-from tests.test_memory_window_burst import (
     LATENCY,
+    TUPLE,
     XTERRA_CATALOG,
     XTERRA_MODE06,
-    _profile,
-    _run,
-    _spec,
+    quality_scheduler,
+    quality_tuples,
+    verified_losses,
+    window_profile,
+    window_run,
+    window_spec,
 )
+from tests.capture_builders import quality_profile as quality_profile
+from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock
 
 WINDOW = "mem:fuel_target"
 TARGET_WORD = "mem:ECM_TARGET_EQUIV_RATIO"
@@ -259,10 +255,10 @@ def test_the_miss_is_logged_after_the_ledger_lock_is_released(
 def _armed_requests() -> tuple[list[Any], list[Any], int]:
     """The plan's requests under an armed `burst` profile, with fresh states."""
     tuning_profile.configure_did_aliases(did_alias_table(("ECM_RPM", "ECM_AIR_CHARGE")))
-    tuning_profile.activate(_profile(), source="test")
-    requests = build_poll_requests(None, _spec())
+    tuning_profile.activate(window_profile(), source="test")
+    requests = build_poll_requests(None, window_spec())
     index = next(i for i, request in enumerate(requests) if request.kind == "memory")
-    states = _initial_request_states(requests, _spec(), 0.0)
+    states = _initial_request_states(requests, window_spec(), 0.0)
     return requests, states, index
 
 
@@ -427,7 +423,7 @@ def test_the_loop_records_window_timeouts_and_batch_failures(
     per window read), and Mode 01 batches ignored (a whole-batch failure per
     member), each on its own request's row."""
     install_clock(monkeypatch, clock)
-    _run(clock, _profile(), 40.0, unseen_memory=True, ecu={"answer_batches": False})
+    window_run(clock, window_profile(), 40.0, unseen_memory=True, ecu={"answer_batches": False})
     snapshot = capture_lifetime.snapshot(clock.monotonic())
     assert snapshot is not None
     memory = [row for row in snapshot.requests.values() if row.kind == "memory"]
@@ -718,7 +714,7 @@ def _quality(
             lifetime.pop(key)  # a lifetime from before D03.70
     if source is not None:
         lifetime["requests_source"] = source
-    scheduler = _scheduler(TUPLE)
+    scheduler = quality_scheduler(TUPLE)
     scheduler["requests"].append(
         {
             "channel": WINDOW,
@@ -731,8 +727,8 @@ def _quality(
         profile=quality_profile(memory=["ECM_TARGET_EQUIV_RATIO", "ECM_ENGINE_PERIOD"]),
         scheduler=scheduler,
         lifetime=lifetime,
-        tuples=_tuples(600, elapsed=300.0),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(600, elapsed=300.0),
+        losses=verified_losses(CLEAN, CLEAN),
     )
 
 

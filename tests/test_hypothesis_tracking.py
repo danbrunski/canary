@@ -14,22 +14,18 @@ from __future__ import annotations
 
 import random
 import shutil
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
-import pandas as pd
 import pytest
 import yaml
 
-from src.analysis.delivery_investigation import investigate, select_measurement, unresolved_pairs
+from src.analysis.delivery_investigation import select_measurement, unresolved_pairs
 from src.analysis.fault_model import (
-    FAULT_MODEL_FILE,
     FaultModel,
     Feature,
     Likelihood,
-    load_fault_model,
 )
 from src.analysis.hypothesis_tracking import (
     rank_measurements,
@@ -39,89 +35,24 @@ from src.analysis.hypothesis_tracking import (
 from src.analysis.measurement_plan import (
     MEASUREMENT_PLAN_FILE,
     CaptureState,
-    MeasurementPlan,
     MeasurementPlanError,
     Proposal,
     load_measurement_plan,
     profile_shortfall,
     replay_proposals,
 )
-from src.analysis.tuning_context import TuningContext
-from src.collection.capture_profiles import CaptureProfileCatalog
-from src.config import CanaryConfig
 from src.evidence import Evidence, Investigation, MemoryLedger
-from src.vehicle.profiles import profile_dir, resolve_profile_for_tooling, scope_config
 from src.yaml_load import load_yaml
-from tests.test_delivery_investigation import PROFILE, Clock, Vehicle, _mint_all, _synthetic_drive
+from tests.hypothesis_builders import (
+    BUDGET,
+    PRESSURE,
+    PROFILE,
+    World,
+    tracking_rows,
+)
+from tests.hypothesis_builders import world as world  # noqa: F401 - fixture
 
-PRESSURE = "Log fuel pressure through a full-throttle pull (supercharger-build NA2)."
 WIDEBAND_PREFIX = "Fit an independent wideband lambda sensor"
-BUDGET = 8.0
-
-
-@dataclass
-class World:
-    vehicle: Vehicle
-    plan: MeasurementPlan
-    catalog: CaptureProfileCatalog
-    ledger: MemoryLedger
-    drive_a: tuple[str, str, str]
-    drive_b: tuple[str, str, str]
-    drive_c: tuple[str, str, str]
-    session_a: Path
-    session_b: Path
-    opened: str
-
-
-@pytest.fixture(scope="module")
-def world(tmp_path_factory: pytest.TempPathFactory) -> World:
-    base = CanaryConfig.from_yaml(Path("canary.dev.example.yaml"))
-    config = scope_config(base, resolve_profile_for_tooling(base, PROFILE))
-    data = profile_dir(config)
-    model, sha = load_fault_model(data / FAULT_MODEL_FILE)
-    context = TuningContext.from_config(config)
-    vehicle = Vehicle(context, model, sha, data)
-    plan, _sha = load_measurement_plan(
-        data / MEASUREMENT_PLAN_FILE, model, mode01_wot=context.mode01_wot
-    )
-    catalog = CaptureProfileCatalog.model_validate(
-        load_yaml((data / "capture_profiles.yaml").read_text())
-    )
-    root = tmp_path_factory.mktemp("tracking")
-    a = _synthetic_drive(
-        root, "_synthetic-wot-lean-2026-09-01T120000", datetime(2026, 9, 1, 12, tzinfo=UTC),
-        lean_pct=4.0, pressure_drop_pct=None,
-    )  # fmt: skip
-    b = _synthetic_drive(
-        root, "_synthetic-wot-lean-2026-11-01T120000", datetime(2026, 11, 1, 12, tzinfo=UTC),
-        lean_pct=4.0, pressure_drop_pct=0.2,
-    )  # fmt: skip
-    c = _synthetic_drive(
-        root, "_synthetic-wot-on-command-2026-11-08T120000",
-        datetime(2026, 11, 8, 12, tzinfo=UTC), lean_pct=0.0, pressure_drop_pct=None,
-    )  # fmt: skip
-    ledger = MemoryLedger(root / "memory.jsonl", vehicle=PROFILE)
-    clock = Clock(datetime(2026, 9, 1, 13, tzinfo=UTC))
-    drive_a = _mint_all(ledger, vehicle, a, clock)
-    opened = investigate(
-        ledger, model, delivery_evidence=drive_a[0], other_evidence=drive_a[1:], now=clock()
-    )
-    assert opened.investigation is not None
-    clock.at(datetime(2026, 11, 1, 13, tzinfo=UTC))
-    drive_b = _mint_all(ledger, vehicle, b, clock)
-    clock.at(datetime(2026, 11, 8, 13, tzinfo=UTC))
-    drive_c = _mint_all(ledger, vehicle, c, clock)
-    return World(
-        vehicle, plan, catalog, ledger, drive_a, drive_b, drive_c, a, b, opened.investigation
-    )
-
-
-def _rows(session: Path) -> list[tuple[float, str, float]]:
-    frame = pd.read_parquet(session)
-    t = frame["timestamp"].astype("int64").to_numpy() / 1e9
-    specs = (frame["source"] + ":" + frame["channel"]).to_numpy()
-    values = frame["value_number"].to_numpy()
-    return sorted(zip(t.tolist(), specs.tolist(), values.tolist(), strict=True))
 
 
 _CLOCK = [datetime(2027, 1, 1, tzinfo=UTC)]
@@ -392,7 +323,7 @@ def _ranked(world: World) -> list[Any]:
 
 def _replay(world: World, session: Path, capture: CaptureState, **kw: Any) -> list[Proposal]:
     ticks = replay_proposals(
-        world.plan, world.vehicle.model, world.catalog, _ranked(world), _rows(session),
+        world.plan, world.vehicle.model, world.catalog, _ranked(world), tracking_rows(session),
         capture=capture, default_budget=BUDGET, **kw,
     )  # fmt: skip
     return [p for _t, proposals in ticks for p in proposals]
@@ -453,7 +384,7 @@ def test_missing_or_stale_region_inputs_defer_with_a_named_reason(world: World) 
         )  # fmt: skip
         return {p.reason for _t, ps in ticks for p in ps if p.measurement == PRESSURE}
 
-    rows = _rows(world.session_b)
+    rows = tracking_rows(world.session_b)
     # Without RPM the region is unknown, never guessed.
     assert reasons([r for r in rows if r[1] != "obd:RPM"]) == {"region_missing_input"}
     # RPM that stopped arriving after the first minute is stale, not current.

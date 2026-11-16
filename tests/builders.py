@@ -11,11 +11,15 @@ each, here; fakes that stand in for real objects live in ``tests/fakes.py``.
 from __future__ import annotations
 
 import json
+import shutil
+from collections.abc import Callable
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 import numpy as np
 import pandas as pd
 
@@ -30,9 +34,15 @@ from src.behavior.behavior_models import (
 )
 from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
+from src.control.brain_jobs import BrainJobStore, BrainScheduler, canonical_params, run_brain_job
+from src.mcp_server.client import DaemonClient
+from src.paths import REPO_ROOT
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from src.vehicle.profiles import VehicleProfile, scope_config
+from src.yaml_load import load_yaml
 from tests.configs import READ_ONLY_INPUTS, isolated_config
+from tests.target_phi_builders import EXPECT, REPO
 
 # ---------------------------------------------------------------------------
 # OBD sessions on disk
@@ -175,11 +185,6 @@ def digest_config(tmp_path: Path) -> CanaryConfig:
     )
 
 
-# ---------------------------------------------------------------------------
-# isolation-forest trainer config
-# ---------------------------------------------------------------------------
-
-
 #: The trainer reads these attributes off ``config.models.isolation_forest``;
 #: small and seeded so a test fit is fast and deterministic.
 @dataclass(frozen=True)
@@ -191,11 +196,6 @@ class IFConfig:
     random_state: int = 7
     calibration_holdout_fraction: float = 0.2
     target_flag_rate: float = 0.05
-
-
-# ---------------------------------------------------------------------------
-# behavior-surface validation (refit recipes)
-# ---------------------------------------------------------------------------
 
 
 BEHAVIOR_T0 = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
@@ -289,11 +289,6 @@ def behavior_recipe(criteria: ValidationCriteria) -> Surface2DRecipe:
     )
 
 
-# ---------------------------------------------------------------------------
-# persisted capture rounds
-# ---------------------------------------------------------------------------
-
-
 CAPTURE_T0 = 1_700_000_000.0
 
 
@@ -355,11 +350,6 @@ def capture_rounds(n: int, *, both: bool = True) -> list[TelemetryRecord]:
     return records
 
 
-# ---------------------------------------------------------------------------
-# sequence-autoencoder training frames
-# ---------------------------------------------------------------------------
-
-
 def sequence_training_frame(rows: int = 14) -> pd.DataFrame:
     """One clean session of two slowly cycling channels, 1 Hz."""
     return pd.DataFrame(
@@ -372,14 +362,14 @@ def sequence_training_frame(rows: int = 14) -> pd.DataFrame:
     )
 
 
-# ---------------------------------------------------------------------------
-# K-line wire traffic (K01)
-# ---------------------------------------------------------------------------
-
 #: A wake-up on the wire: the sniffer reads the 25 ms low as one 0x00 byte.
 KLINE_WAKE = None
+
+
 #: The scan tool's ``22`` trailer, the same ``04 01`` UpRev sends the ECM.
 KLINE_TRAILER = b"\x04\x01"
+
+
 #: The ABS live-data screen's cycle as the scan tool read it on 2026-09-24
 #: (data/analyses/2026-09-24-abs-kline-scan-tool.md), with the parked values.
 ABS_SCREEN_CYCLE: tuple[tuple[int, bytes], ...] = (
@@ -465,10 +455,6 @@ def abs_scan_tool_frames(
     return frames
 
 
-# ---------------------------------------------------------------------------
-# Benchmark reports (R06.5: the evaluate_detectors protocol the gates read)
-# ---------------------------------------------------------------------------
-
 #: Engine hours on the one fixture drive: a rate of r false alarms per
 #: engine-hour is ``r * 100`` episodes, exact for the rates the tests use.
 _REPORT_ENGINE_HOURS = 100.0
@@ -537,3 +523,97 @@ def evaluation_report(
             if share is not None
         },
     }
+
+
+SLUG = "nissan-xterra-2008"
+
+
+SESSION = EXPECT["source_session"]
+
+
+def scoped_config(tmp_path: Path) -> CanaryConfig:
+    """The real vehicle profile's tracked files; every writable path under tmp."""
+    base = isolated_config(tmp_path, keep=("afr_calibration",))
+    return scope_config(base, VehicleProfile(slug=SLUG, vin="", name="Xterra"))
+
+
+def write_session(config: CanaryConfig, *, finished: bool = True) -> Path:
+    """The two committed October 4 slices as one stored capture session."""
+    session: Path = config.collection.storage_path / SESSION
+    session.mkdir(parents=True)
+    for i, part in enumerate(EXPECT["telemetry"]):
+        shutil.copyfile(REPO / part["path"], session / f"telemetry-{i:05d}.parquet")
+    if finished:
+        (session / "digest_skipped.json").write_text(json.dumps({"reason": "test"}))
+    return session
+
+
+def in_thread(kind: str, params: dict[str, Any], config: CanaryConfig, **kw: Any) -> Any:
+    kw["address_space_bytes"] = None  # never cap the test process itself
+    return run_brain_job(kind, params, config, **kw)
+
+
+def scheduler(
+    config: CanaryConfig,
+    activity: Callable[[], str | None] = lambda: None,
+    runner: Callable[..., Any] = in_thread,
+    **kw: Any,
+) -> BrainScheduler:
+    return BrainScheduler(
+        config,
+        activity=activity,
+        runner=runner,
+        executor_factory=lambda: ThreadPoolExecutor(max_workers=1),
+        poll_seconds=0.02,
+        **kw,
+    )
+
+
+def submit_twin(config: CanaryConfig) -> str:
+    params = canonical_params(config, "twin_session_evaluation", {"session": SESSION})
+    job, created = BrainJobStore.for_config(config).submit("twin_session_evaluation", params)
+    assert created
+    return job.job_id
+
+
+TOKEN = "secret"
+
+
+AUTH = {"Authorization": f"Bearer {TOKEN}"}
+
+
+def brain_mcp_client(app: Any) -> DaemonClient:
+    client = DaemonClient("http://daemon", TOKEN)
+    client._client = httpx.AsyncClient(
+        base_url="http://daemon", headers=AUTH, transport=httpx.ASGITransport(app=app)
+    )
+    return client
+
+
+EXAMPLE = REPO_ROOT / "canary.example.yaml"
+
+
+def state_dir_config(**daemon: Any) -> CanaryConfig:
+    raw = load_yaml(EXAMPLE.read_text())
+    raw.setdefault("daemon", {}).update(daemon)
+    return CanaryConfig.model_validate(raw)
+
+
+def budgeted(config: CanaryConfig, **daemon: Any) -> CanaryConfig:
+    return config.model_copy(update={"daemon": config.daemon.model_copy(update=daemon)})
+
+
+class RefusingExecutor(Executor):
+    """A pool that fails the test if anything is ever submitted to it.
+
+    The point of the row budget is that no child is *started* for an
+    over-budget session — counting the rows costs a Parquet footer read, and
+    starting a worker that would die costs a worker.
+    """
+
+    def __init__(self) -> None:
+        self.submissions = 0
+
+    def submit(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Future[Any]:
+        self.submissions += 1
+        raise AssertionError("a child was started for a session that should have been refused")

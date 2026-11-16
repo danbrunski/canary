@@ -12,8 +12,6 @@ from __future__ import annotations
 import pytest
 
 from src.analysis.ecu_state_models import (
-    BaseTimingCals,
-    BaseTimingTables,
     byte_curve8,
     coolant_rescaled,
     timing_26d0_curves,
@@ -31,41 +29,20 @@ from src.analysis.ecu_state_models import (
     timing_term_1512,
 )
 from src.analysis.paired_scenarios import coolant_rescaled_byte
-
-#: 0x9AF9: rows the rpm axis 0xC890 (compared with the rpm/50 byte), columns
-#: the X axis 0xC88C.
-RATE_9AF9 = (
-    (0x11, 0x1A, 0x28, 0x3A),
-    (0x19, 0x27, 0x3C, 0x55),
-    (0x1B, 0x2A, 0x42, 0x5E),
-    (0x1D, 0x2D, 0x46, 0x64),
+from tests.sim_builders import (
+    CALS,
+    CHARGE_9B89,
+    COOLANT_CURVE,
+    CURVE_CC1B,
+    CURVE_CC2B,
+    CURVE_CC33,
+    CURVE_CD9B,
+    FLAT_80,
+    LOAD_C88C,
+    RATE_9AF9,
+    RPM_C890,
+    TABLES,
 )
-#: 0x9B89: same axes, the rpm axis compared as byte x 4 with the rpm word.
-CHARGE_9B89 = (
-    (0x6C, 0x6C, 0x67, 0x64),
-    (0x64, 0x64, 0x6E, 0x7F),
-    (0x84, 0x84, 0x8D, 0xA0),
-    (0x76, 0x76, 0x8E, 0x9C),
-)
-RPM_C890 = (0x08, 0x38, 0x58, 0x78)
-LOAD_C88C = (0x10, 0x20, 0x40, 0x70)
-CURVE_CD9B = (0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0, 0xE0)
-FLAT_80 = (0x80,) * 8  # 0xCEAB and 0xD60F
-COOLANT_CURVE = (0x67, 0x6C, 0x76, 0x78, 0x78, 0x7B, 0x80, 0x80)  # 0xCEBB and 0xD9AF
-
-TABLES = BaseTimingTables(
-    rate_map_9af9=RATE_9AF9,
-    charge_map_9b89=CHARGE_9B89,
-    rpm_axis_c890=RPM_C890,
-    load_axis_c88c=LOAD_C88C,
-    load_curve_cd9b=CURVE_CD9B,
-    coolant_curve_cebb=COOLANT_CURVE,
-    charge_curve_ceab=FLAT_80,
-    coolant_curve_d9af=COOLANT_CURVE,
-    charge_curve_d60f=FLAT_80,
-)
-#: 0x880D, 0x880E, 0x8440, 0x8B0C.
-CALS = BaseTimingCals(cal_880d=179, cal_880e=25, cal_8440=32, cal_8b0c=14)
 
 #: Hot (rescaled coolant byte 208 = 90 degC), phi 1 (0xFFFF1B24 = 0x4000),
 #: 0xFFFF1512 = 0 (cal 0x8538 = 0). Common to the three operating points:
@@ -536,12 +513,6 @@ def test_279a_inputs_and_clamp() -> None:
     assert timing_term_279a(10, 20, 0x50) == 25  # 30 - 5
     assert timing_term_279a(200, 100, 0) == 255
     assert timing_term_279a(127, 252, 0xFF) == 255  # 379 - 15 = 364
-
-
-#: The 2026-10-17 image values: 0xCC33 is 0 except entries 6..9.
-CURVE_CC33 = (0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0)
-CURVE_CC1B = (0, 0, 0, 0x60, 0xC4, 0xD0, 0xFF, 0x88, 0x50, 0, 0, 0, 0, 0, 0, 0)
-CURVE_CC2B = (0x00, 0x02, 0x0B, 0x0C, 0x0A, 0x08, 0x03, 0x00)
 
 
 def test_26d0_is_zero_on_a_warm_engine() -> None:

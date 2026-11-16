@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import stat
-from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -28,6 +27,7 @@ from src.provisioning.network import (
     unescape_value,
     write_secret_file,
 )
+from tests.provisioning_builders import FakeRunner
 
 SCAN_OUTPUT = "\n".join(
     [
@@ -167,25 +167,6 @@ def test_profile_identity_is_stable_per_ssid() -> None:
     assert profile_uuid("Starlink") != profile_uuid("home")
     assert profile_filename("Starlink").startswith(PROFILE_PREFIX)
     assert profile_filename("Starlink").endswith(".nmconnection")
-
-
-class FakeRunner:
-    """Answers nmcli/ip by argv prefix; records every call."""
-
-    def __init__(self, responses: dict[tuple[str, ...], RunResult]) -> None:
-        self.responses = responses
-        self.calls: list[list[str]] = []
-
-    def __call__(self, argv: Sequence[str], *, timeout: float) -> RunResult:
-        self.calls.append(list(argv))
-        best: tuple[str, ...] = ()
-        for prefix in self.responses:
-            if tuple(argv[: len(prefix)]) == prefix and len(prefix) > len(best):
-                best = prefix
-        return self.responses.get(best, RunResult(0, "", ""))
-
-    def called(self, *prefix: str) -> bool:
-        return any(tuple(c[: len(prefix)]) == prefix for c in self.calls)
 
 
 SCAN = ("nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list")

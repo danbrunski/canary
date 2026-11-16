@@ -9,10 +9,8 @@ each degenerate input with its named cause.
 from __future__ import annotations
 
 import datetime as dt
-import functools
 import json
 import math
-from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -25,7 +23,6 @@ from pydantic import ValidationError
 from src.analysis.dyno import (
     DYNO_FILENAME,
     AltitudeNoise,
-    DirectionFit,
     Driveline,
     DynoCurve,
     DynoNoiseFloor,
@@ -35,15 +32,12 @@ from src.analysis.dyno import (
     EngineInertiaRecord,
     GearPull,
     InertiaConditions,
-    InertiaData,
     Leg,
     MotionSamples,
     PitchOffset,
-    RoadLoadCoefficients,
     RoadLoadConditions,
     RoadLoadFit,
     RunComparison,
-    RunConditions,
     SquatCoefficient,
     SquatConditions,
     SquatFit,
@@ -63,39 +57,42 @@ from src.analysis.dyno_squat import _grade_with_se
 from src.config import VehicleParameters
 from src.signals.committees import STANDARD_GRAVITY as G
 from src.vehicle.profiles import read_registry_file
+from tests.dyno_builders import (
+    FLAT_ETA,
+    FLAT_MASS,
+    FLAT_PARAMS,
+    INERTIA,
+    NEGLIGIBLE_NOISE,
+    ROAD_LOAD_FIT_BARO_KPA,
+    RPM,
+    TRUE_A,
+    TRUE_B,
+    TRUE_C,
+    TRUE_ENGINE_INERTIA,
+    TRUE_MOUNT_OFFSET_DEG,
+    TRUE_SQUAT_DEG_PER_G,
+    flat_accelerations,
+    flat_coast_pair,
+    flat_conditions,
+    flat_crest,
+    flat_curve,
+    flat_floor,
+    flat_in_frame,
+    flat_inertia_kwargs,
+    flat_noise,
+    flat_parked,
+    flat_pull,
+    flat_squat_record,
+    flat_stated_offset,
+    pitch_sf,
+)
 
 REPO = Path(__file__).resolve().parents[1]
-
-# Known answers the synthetic data is generated from. None of them is read
-# from a vehicle profile: the estimators must recover them, not echo them.
-MASS = 2311.0
-TRUE_SQUAT_DEG_PER_G = 1.2
-TRUE_MOUNT_OFFSET_DEG = 0.3
-TRUE_A, TRUE_B, TRUE_C = 180.0, 5.0, 0.55
-TRUE_ENGINE_INERTIA = 0.18  # the driveline below *estimates* 0.25
-ETA = 0.85
-
-PARAMS = VehicleParameters(
-    mass_kg=2184.4,
-    wheel_tire_assembly_kg=40.3,
-    final_drive=4.08,
-    gearbox_ratios=(4.368, 2.518, 1.743, 1.283, 1.0, 0.769),
-    tire_loaded_circumference_m=2.609,
-    driveline_evidence="synthetic test vehicle",
-    drivetrain_loss_fraction=1.0 - ETA,
-)
-INERTIA = InertiaData(
-    road_wheels=4,
-    wheel_shape_factor=0.7,
-    driveline_output_kg_m2=1.0,
-    engine_side_kg_m2=0.25,
-    evidence="synthetic estimate",
-)
 
 
 @pytest.fixture
 def driveline() -> Driveline:
-    built = Driveline.from_vehicle(PARAMS, INERTIA)
+    built = Driveline.from_vehicle(FLAT_PARAMS, INERTIA)
     assert isinstance(built, Driveline)
     return built
 
@@ -110,294 +107,6 @@ def _refused(result: object, kind: str) -> DynoRefusal:
 # ---------------------------------------------------------------------------
 # Synthetic generators
 # ---------------------------------------------------------------------------
-
-
-def _pitch_sf(accel: np.ndarray, grade: float | np.ndarray, deg_per_g: float) -> np.ndarray:
-    """Specific force a tilted IMU reads: a + g·sin(θ) + g·sin(δ(a)) + mounting."""
-    pitch = np.radians(deg_per_g * accel / G + TRUE_MOUNT_OFFSET_DEG)
-    return accel + G * np.sin(np.arctan(grade)) + G * np.sin(pitch)
-
-
-def _flat_accelerations(
-    rng: np.random.Generator,
-    *,
-    grade: float = 0.0,
-    seconds: float = 90.0,
-    amplitude: float = 2.5,
-    altitude_noise_m: float = 1.0,
-    hz: float = 10.0,
-    noise_f: float = 0.03,
-    noise_a: float = 0.02,
-    grade_of_t: Callable[[np.ndarray], np.ndarray] | None = None,
-    altitude_ar_sd_m: float = 0.0,
-    altitude_tau_s: float = 10.0,
-    altitude_error_m: np.ndarray | None = None,
-) -> MotionSamples:
-    """Accelerate and brake (period 20 s) on a road of constant or varying grade.
-
-    ``grade_of_t`` makes the grade a function of time, i.e. of where the
-    vehicle is when; the IMU sees it and GPS altitude integrates it. Altitude
-    error is white (``altitude_noise_m``) plus AR(1) wander
-    (``altitude_ar_sd_m``, ``altitude_tau_s``), or a given series
-    (``altitude_error_m``, e.g. real parked GNSS altitude).
-    """
-    t = np.arange(0.0, seconds, 1.0 / hz)
-    period = 20.0
-    accel = amplitude * np.sin(2 * math.pi * t / period)
-    speed = 15.0 + amplitude * period / (2 * math.pi) * (1 - np.cos(2 * math.pi * t / period))
-    road = np.full(len(t), grade) if grade_of_t is None else grade_of_t(t)
-    rise = np.diff(t) * 0.5 * (speed[1:] * road[1:] + speed[:-1] * road[:-1])
-    altitude = 1500.0 + np.concatenate([[0.0], np.cumsum(rise)])
-    sf = _pitch_sf(accel, road, TRUE_SQUAT_DEG_PER_G)
-    return MotionSamples(
-        t_s=t,
-        speed_mps=speed,
-        accel_mps2=accel + rng.normal(0, noise_a, len(t)),
-        sf_lon_mps2=sf + rng.normal(0, noise_f, len(t)),
-        altitude_m=altitude
-        + (
-            _altitude_error(rng, t, altitude_noise_m, altitude_ar_sd_m, altitude_tau_s)
-            if altitude_error_m is None
-            else altitude_error_m[: len(t)]
-        ),
-    )
-
-
-def _altitude_error(
-    rng: np.random.Generator, t: np.ndarray, white_sd: float, ar_sd: float, tau_s: float
-) -> np.ndarray:
-    """White plus exactly discretised AR(1) (Ornstein-Uhlenbeck) altitude error."""
-    error = rng.normal(0.0, white_sd, len(t)) if white_sd > 0 else np.zeros(len(t))
-    if ar_sd > 0:
-        wander = np.empty(len(t))
-        wander[0] = rng.normal(0.0, ar_sd)
-        for i in range(1, len(t)):
-            phi = math.exp(-(t[i] - t[i - 1]) / tau_s)
-            wander[i] = phi * wander[i - 1] + math.sqrt(1 - phi**2) * rng.normal(0.0, ar_sd)
-        error = error + wander
-    return error
-
-
-def _parked(
-    rng: np.random.Generator,
-    *,
-    seconds: float = 300.0,
-    hz: float = 10.0,
-    white_sd: float = 1.0,
-    ar_sd: float = 0.0,
-    tau_s: float = 10.0,
-) -> MotionSamples:
-    """A stationary reference: the truck parked, GNSS altitude doing what it does."""
-    t = np.arange(0.0, seconds, 1.0 / hz)
-    zeros = np.zeros(len(t))
-    return MotionSamples(
-        t_s=t,
-        speed_mps=zeros,
-        accel_mps2=zeros,
-        sf_lon_mps2=zeros,
-        altitude_m=1500.0 + _altitude_error(rng, t, white_sd, ar_sd, tau_s),
-    )
-
-
-@functools.cache
-def _noise(white_sd: float = 1.0, ar_sd: float = 0.0, tau_s: float = 10.0) -> AltitudeNoise:
-    """The noise model measured from a parked reference with these statistics."""
-    measured = measure_altitude_noise(
-        _parked(np.random.default_rng(999), white_sd=white_sd, ar_sd=ar_sd, tau_s=tau_s)
-    )
-    assert isinstance(measured, AltitudeNoise), measured
-    return measured
-
-
-#: For the noise-free algebra tests only: a model that resolves anything.
-_NEGLIGIBLE_NOISE = AltitudeNoise(
-    white_var_m2=1e-8, correlated_var_m2=0.0, tau_s=1.0, reference_s=60.0, n_reference=600
-)
-
-
-def _coastdown(
-    rng: np.random.Generator,
-    driveline: Driveline,
-    *,
-    heading_sign: float,
-    grade: float = 0.005,
-    wind_mps: float = 2.0,
-    v0: float = 31.0,
-    v_end: float = 5.5,
-    squat_deg_per_g: float = TRUE_SQUAT_DEG_PER_G,
-    hz: float = 10.0,
-    noise_f: float = 0.03,
-    noise_a: float = 0.02,
-) -> MotionSamples:
-    """Clutch-in coast on a graded road in wind; uphill and headwind one way."""
-    m_eff = driveline.neutral_effective_mass(MASS)
-    slope = grade * heading_sign
-    wind = wind_mps * heading_sign
-    theta = math.atan(slope)
-    dt_sim, every = 0.01, int(round(1.0 / (hz * 0.01)))
-    v, t, altitude = v0, 0.0, 1500.0
-    rows: list[tuple[float, float, float, float]] = []
-    step = 0
-    while v > v_end:
-        air = v + wind
-        force = TRUE_A + TRUE_B * v + TRUE_C * air * abs(air)
-        accel = -(force + MASS * G * math.sin(theta)) / m_eff
-        if step % every == 0:
-            rows.append((t, v, accel, altitude))
-        assert t < 600.0, "the coast never reaches v_end (downhill faster than drag)"
-        v += accel * dt_sim
-        altitude += slope * v * dt_sim
-        t += dt_sim
-        step += 1
-    arr = np.array(rows)
-    accel_col = arr[:, 2]
-    sf = _pitch_sf(accel_col, slope, squat_deg_per_g)
-    return MotionSamples(
-        t_s=arr[:, 0],
-        speed_mps=arr[:, 1],
-        accel_mps2=accel_col + rng.normal(0, noise_a, len(arr)),
-        sf_lon_mps2=sf + rng.normal(0, noise_f, len(arr)),
-        altitude_m=arr[:, 3],
-    )
-
-
-def _engine_torque(rpm: float) -> float:
-    return 280.0 + 40.0 * (1.0 - ((rpm - 4000.0) / 2000.0) ** 2)
-
-
-def _pull(
-    rng: np.random.Generator,
-    driveline: Driveline,
-    gear: int,
-    *,
-    grade: float = 0.01,
-    rpm_start: float = 2500.0,
-    rpm_end: float = 5500.0,
-    hz: float = 100.0,
-    eta_at_crank: float = ETA,
-    c_n_per_mps2: float = TRUE_C,
-) -> GearPull:
-    """A WOT pull in one gear from a known torque curve, road load and inertia.
-
-    ``c_n_per_mps2`` is the aero term in the pull's own air (``TRUE_C`` is
-    the coast-downs' air, :data:`ROAD_LOAD_FIT_BARO_KPA`).
-    """
-    ratio = driveline.overall_ratio(gear)
-    r = driveline.tire_radius_m
-    # The crank inertia is upstream of the lossy gearbox: the wheel sees
-    # ETA·N/r·(T − I_e·α), so the engine's share of m_eff is ETA·I_e·N²/r².
-    # Written out here, independently of Driveline.effective_mass.
-    m_eff = (
-        MASS
-        + driveline.wheel_side_kg_m2 / r**2
-        + eta_at_crank * TRUE_ENGINE_INERTIA * ratio**2 / r**2
-    )
-    theta = math.atan(grade)
-    dt_sim = 1.0 / hz
-    v = rpm_start * 2 * math.pi / 60 * r / ratio
-    t = 0.0
-    rows: list[tuple[float, float, float, float]] = []
-    while True:
-        rpm = v * ratio / r * 60 / (2 * math.pi)
-        if rpm > rpm_end:
-            break
-        drive = _engine_torque(rpm) * eta_at_crank * ratio / r
-        load = TRUE_A + TRUE_B * v + c_n_per_mps2 * v**2
-        accel = (drive - load - MASS * G * math.sin(theta)) / m_eff
-        rows.append((t, v, accel, rpm))
-        assert t < 60.0, f"gear {gear} never reaches {rpm_end} rpm: pick a reachable band"
-        v += accel * dt_sim
-        t += dt_sim
-    arr = np.array(rows)
-    accel_col = arr[:, 2]
-    sf = _pitch_sf(accel_col, grade, TRUE_SQUAT_DEG_PER_G)
-    return GearPull(
-        gear=gear,
-        samples=MotionSamples(
-            t_s=arr[:, 0],
-            speed_mps=arr[:, 1],
-            accel_mps2=accel_col + rng.normal(0, 0.02, len(arr)),
-            sf_lon_mps2=sf + rng.normal(0, 0.03, len(arr)),
-            rpm=arr[:, 3] + rng.normal(0, 5.0, len(arr)),
-        ),
-    )
-
-
-def _squat_record() -> SquatCoefficient:
-    fit = SquatFit(
-        deg_per_g=TRUE_SQUAT_DEG_PER_G,
-        deg_per_g_se=0.0,
-        offset_deg=0.0,
-        residual_sd_deg=0.1,
-        n_samples=500,
-        accel_span_g=0.5,
-        grade=0.0,
-        grade_se=0.001,
-        max_segment_grade=0.002,
-        grade_leak_deg_per_g=0.0,
-        grade_leak_se_deg_per_g=0.1,
-        altitude_noise=[_NEGLIGIBLE_NOISE],
-    )
-    return fit.to_record(
-        SquatConditions(
-            payload_kg=127.0,
-            tire_pressure_front_kpa=240.0,
-            tire_pressure_rear_kpa=240.0,
-            road="synthetic flat",
-            date=dt.date(2026, 9, 26),
-            sessions=["synthetic"],
-        )
-    )
-
-
-#: The air the synthetic road load (``TRUE_C``) was coasted in.
-ROAD_LOAD_FIT_BARO_KPA = 80.0
-ROAD_LOAD_FIT_AMBIENT_C = 18.0
-
-
-def _true_road_load() -> RoadLoadCoefficients:
-    """The exact synthetic road load, recorded at :data:`ROAD_LOAD_FIT_BARO_KPA`."""
-    direction = DirectionFit(
-        a_n=TRUE_A,
-        b_n_per_mps=TRUE_B,
-        c_n_per_mps2=TRUE_C,
-        a_se_n=0.0,
-        b_se_n_per_mps=0.0,
-        c_se_n_per_mps2=0.0,
-        residual_sd_n=0.0,
-        n_samples=1000,
-        speed_min_mps=4.0,
-        speed_max_mps=32.0,
-        static_pitch_deg=TRUE_MOUNT_OFFSET_DEG,
-    )
-    fit = RoadLoadFit(
-        a_n=TRUE_A,
-        b_n_per_mps=TRUE_B,
-        c_n_per_mps2=TRUE_C,
-        a_se_n=0.0,
-        b_se_n_per_mps=0.0,
-        c_se_n_per_mps2=0.0,
-        directions="pair",
-        per_direction={"northbound": direction, "southbound": direction},
-        residual_sd_n=0.0,
-        test_mass_kg=MASS,
-        neutral_effective_mass_kg=MASS,
-        inertia="estimated",
-        squat_corrected=True,
-        imu_pitch_offset_deg=TRUE_MOUNT_OFFSET_DEG,
-    )
-    return fit.to_record(
-        RoadLoadConditions(
-            road="synthetic flat",
-            date=dt.date(2026, 9, 26),
-            sessions=["synthetic"],
-            payload_kg=127.0,
-            tire_pressure_front_kpa=240.0,
-            tire_pressure_rear_kpa=240.0,
-            ambient_temp_c=ROAD_LOAD_FIT_AMBIENT_C,
-            baro_kpa=ROAD_LOAD_FIT_BARO_KPA,
-        )
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -428,10 +137,10 @@ def test_motion_samples_refuse_mismatched_and_non_finite_columns() -> None:
 
 def test_squat_is_exact_without_noise() -> None:
     fit = fit_squat(
-        _flat_accelerations(
+        flat_accelerations(
             np.random.default_rng(0), noise_f=0.0, noise_a=0.0, altitude_noise_m=0.0
         ),
-        altitude_noise=_NEGLIGIBLE_NOISE,
+        altitude_noise=NEGLIGIBLE_NOISE,
     )
     assert isinstance(fit, SquatFit), fit
     assert fit.deg_per_g == pytest.approx(TRUE_SQUAT_DEG_PER_G, rel=1e-3)
@@ -444,7 +153,7 @@ def test_squat_recovers_known_coefficient_on_flat_ground(seed: int) -> None:
     # 0.03 m/s^2 specific-force and 0.02 m/s^2 acceleration noise: the slope
     # scatters ~2 % (3.3 % for a 90 s window), so 5 % is ~2.5 sigma.
     fit = fit_squat(
-        _flat_accelerations(np.random.default_rng(seed), seconds=240.0), altitude_noise=_noise()
+        flat_accelerations(np.random.default_rng(seed), seconds=240.0), altitude_noise=flat_noise()
     )
     assert isinstance(fit, SquatFit), fit
     assert fit.deg_per_g == pytest.approx(TRUE_SQUAT_DEG_PER_G, rel=0.05)
@@ -454,8 +163,8 @@ def test_squat_recovers_known_coefficient_on_flat_ground(seed: int) -> None:
 
 def test_squat_constant_small_grade_goes_to_the_offset_not_the_slope() -> None:
     fit = fit_squat(
-        _flat_accelerations(np.random.default_rng(5), grade=0.003, noise_f=0.0, noise_a=0.0),
-        altitude_noise=_noise(),
+        flat_accelerations(np.random.default_rng(5), grade=0.003, noise_f=0.0, noise_a=0.0),
+        altitude_noise=flat_noise(),
     )
     assert isinstance(fit, SquatFit), fit
     assert fit.deg_per_g == pytest.approx(TRUE_SQUAT_DEG_PER_G, rel=1e-3)
@@ -463,18 +172,13 @@ def test_squat_constant_small_grade_goes_to_the_offset_not_the_slope() -> None:
     assert fit.offset_deg == pytest.approx(expected_offset, abs=1e-3)
 
 
-def _crest(t: np.ndarray) -> np.ndarray:
-    """+1.2 % while accelerating, −1.2 % while braking: a crest, mean grade ~0."""
-    return np.where(t < 10.0, 0.012, -0.012)
-
-
 @pytest.mark.parametrize("seed", [0, 1, 2])
 def test_squat_refuses_a_crest_whose_mean_grade_is_flat(seed: int) -> None:
     # One 20 s accelerate-then-brake cycle over a ~5 m crest: the window's mean
     # grade is ~0, so a mean-only gate passes it, and the pull uphill and the
     # lift downhill read as ~4.5 deg/g of "squat" against a true 1.2.
-    samples = _flat_accelerations(np.random.default_rng(seed), seconds=20.0, grade_of_t=_crest)
-    refusal = _refused(fit_squat(samples, altitude_noise=_noise()), "not_flat")
+    samples = flat_accelerations(np.random.default_rng(seed), seconds=20.0, grade_of_t=flat_crest)
+    refusal = _refused(fit_squat(samples, altitude_noise=flat_noise()), "not_flat")
     assert "though the window's mean is" in refusal.reason
     assert "over 0-200 m" in refusal.reason
 
@@ -484,8 +188,8 @@ def test_squat_refuses_a_rolling_road_in_phase_with_the_acceleration(seed: int) 
     def rolling(t: np.ndarray) -> np.ndarray:
         return 0.015 * np.sin(2 * math.pi * t / 20.0)
 
-    samples = _flat_accelerations(np.random.default_rng(seed), grade_of_t=rolling)
-    _refused(fit_squat(samples, altitude_noise=_noise()), "not_flat")
+    samples = flat_accelerations(np.random.default_rng(seed), grade_of_t=rolling)
+    _refused(fit_squat(samples, altitude_noise=flat_noise()), "not_flat")
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2, 3, 4])
@@ -496,14 +200,14 @@ def test_squat_refuses_sub_gate_grade_that_moves_with_the_acceleration(seed: int
     def gentle(t: np.ndarray) -> np.ndarray:
         return 0.004 * np.sin(2 * math.pi * t / 20.0)
 
-    samples = _flat_accelerations(np.random.default_rng(seed), grade_of_t=gentle)
-    refusal = _refused(fit_squat(samples, altitude_noise=_noise()), "grade_correlated")
+    samples = flat_accelerations(np.random.default_rng(seed), grade_of_t=gentle)
+    refusal = _refused(fit_squat(samples, altitude_noise=flat_noise()), "grade_correlated")
     assert "deg/g" in refusal.reason
 
 
 def test_squat_grade_checks_rarely_refuse_a_flat_road_and_report_an_honest_leak() -> None:
     fits = [
-        fit_squat(_flat_accelerations(np.random.default_rng(s)), altitude_noise=_noise())
+        fit_squat(flat_accelerations(np.random.default_rng(s)), altitude_noise=flat_noise())
         for s in range(20)
     ]
     passed = [f for f in fits if isinstance(f, SquatFit)]
@@ -528,9 +232,9 @@ def test_flat_road_under_wandering_altitude_is_unresolvable_not_not_flat(
     # not_flat; the road is flat, and what fails is GPS altitude's ability to
     # show it at 0.5 % per 200 m, so every one is grade_unresolvable (measured:
     # 100/100 at 90 s and 50/50 at 240 s for each of the three).
-    noise = _noise(white_sd=0.0, ar_sd=ar_sd, tau_s=tau_s)
+    noise = flat_noise(white_sd=0.0, ar_sd=ar_sd, tau_s=tau_s)
     for seed in range(3):
-        samples = _flat_accelerations(
+        samples = flat_accelerations(
             np.random.default_rng(seed),
             altitude_noise_m=0.0,
             altitude_ar_sd_m=ar_sd,
@@ -606,7 +310,7 @@ def test_squat_on_real_parked_altitude_noise_never_reads_as_not_flat() -> None:
     for window in range(4):
         grid = 180.0 + 90.0 * window + np.arange(0.0, 90.0, 0.1)
         error = np.interp(grid, t, z)
-        samples = _flat_accelerations(
+        samples = flat_accelerations(
             np.random.default_rng(window), altitude_error_m=error - error.mean()
         )
         fit = fit_squat(samples, altitude_noise=[before, after])
@@ -624,9 +328,9 @@ def test_each_standard_error_takes_the_noisier_reference() -> None:
     # A white-heavy and a wander-heavy reference: each se (window, leak) must
     # be the larger of the two computed separately, not whichever reference
     # is noisier at one lag.
-    white_heavy = _noise(white_sd=1.0)
-    wander_heavy = _noise(white_sd=0.05, ar_sd=0.3, tau_s=60.0)
-    samples = _flat_accelerations(np.random.default_rng(3), seconds=240.0, altitude_noise_m=0.3)
+    white_heavy = flat_noise(white_sd=1.0)
+    wander_heavy = flat_noise(white_sd=0.05, ar_sd=0.3, tau_s=60.0)
+    samples = flat_accelerations(np.random.default_rng(3), seconds=240.0, altitude_noise_m=0.3)
     both = fit_squat(samples, altitude_noise=[white_heavy, wander_heavy])
     alone = [fit_squat(samples, altitude_noise=ref) for ref in (white_heavy, wander_heavy)]
     assert isinstance(both, SquatFit), both
@@ -643,7 +347,7 @@ def test_each_standard_error_takes_the_noisier_reference() -> None:
     )
     assert both.altitude_noise == [white_heavy, wander_heavy]
     _refused(
-        fit_squat(_flat_accelerations(np.random.default_rng(3)), altitude_noise=[]),
+        fit_squat(flat_accelerations(np.random.default_rng(3)), altitude_noise=[]),
         "inputs_missing",
     )
 
@@ -656,8 +360,8 @@ def test_a_steep_grade_is_not_flat_however_noisy_the_altitude(seed: int) -> None
     # Under AR(1) 1 m / τ 10 s every flat window is grade_unresolvable; a 4 %
     # grade still reads ~4.05 ± 0.30 %, 12 se above the gate. The refusal must
     # say not_flat: "the road may be flat" would be false.
-    noise = _noise(white_sd=0.0, ar_sd=1.0, tau_s=10.0)
-    samples = _flat_accelerations(np.random.default_rng(seed), grade=0.04, **_AR_1M)
+    noise = flat_noise(white_sd=0.0, ar_sd=1.0, tau_s=10.0)
+    samples = flat_accelerations(np.random.default_rng(seed), grade=0.04, **_AR_1M)
     refusal = _refused(fit_squat(samples, altitude_noise=noise), "not_flat")
     assert "over" in refusal.reason and "may be flat" not in refusal.reason
 
@@ -668,8 +372,8 @@ def test_a_steep_crest_is_not_flat_however_noisy_the_altitude(seed: int) -> None
     def crest(t: np.ndarray) -> np.ndarray:
         return np.where(t < 10.0, 0.05, -0.05)
 
-    noise = _noise(white_sd=0.0, ar_sd=1.0, tau_s=10.0)
-    samples = _flat_accelerations(
+    noise = flat_noise(white_sd=0.0, ar_sd=1.0, tau_s=10.0)
+    samples = flat_accelerations(
         np.random.default_rng(seed), seconds=20.0, grade_of_t=crest, **_AR_1M
     )
     _refused(fit_squat(samples, altitude_noise=noise), "not_flat")
@@ -681,8 +385,8 @@ def test_segment_threshold_is_family_wise_not_two_se_per_segment() -> None:
     # not_flat, and with the family-wise z (3.1 here) none were.
     for seed in range(10):
         fit = fit_squat(
-            _flat_accelerations(np.random.default_rng(seed), seconds=240.0, grade=0.004),
-            altitude_noise=_noise(),
+            flat_accelerations(np.random.default_rng(seed), seconds=240.0, grade=0.004),
+            altitude_noise=flat_noise(),
         )
         assert not (isinstance(fit, DynoRefusal) and fit.kind == "not_flat"), (seed, fit)
 
@@ -694,10 +398,10 @@ def test_window_mean_gate_allows_for_its_own_standard_error() -> None:
     # 0.5 % + 2 se is shown to exceed the gate.
     for seed in range(10):
         fit = fit_squat(
-            _flat_accelerations(
+            flat_accelerations(
                 np.random.default_rng(seed), seconds=6.5, grade=0.005, altitude_noise_m=0.3
             ),
-            altitude_noise=_noise(white_sd=0.3),
+            altitude_noise=flat_noise(white_sd=0.3),
         )
         assert not (isinstance(fit, DynoRefusal) and fit.kind == "not_flat"), (seed, fit)
 
@@ -705,9 +409,9 @@ def test_window_mean_gate_allows_for_its_own_standard_error() -> None:
 def test_an_unresolvable_window_says_so_about_the_window() -> None:
     # Shorter than one segment (5 s, ~100 m) under 4 m of altitude noise:
     # the window itself cannot be resolved, and the refusal says the window.
-    samples = _flat_accelerations(np.random.default_rng(7), seconds=5.0)
+    samples = flat_accelerations(np.random.default_rng(7), seconds=5.0)
     refusal = _refused(
-        fit_squat(samples, altitude_noise=_noise(white_sd=4.0)), "grade_unresolvable"
+        fit_squat(samples, altitude_noise=flat_noise(white_sd=4.0)), "grade_unresolvable"
     )
     assert "the window's grade" in refusal.reason
     assert "segment takes" in refusal.reason  # names γ at the segment lag, not a sill
@@ -717,17 +421,17 @@ def test_altitude_too_sparse_for_segments_is_unresolvable() -> None:
     # 0.5 Hz altitude: a 200 m segment holds at most 7 samples, fewer than a
     # segment needs, so no crest check is possible and the fit must say so
     # rather than skip it.
-    samples = _flat_accelerations(np.random.default_rng(2), seconds=120.0, hz=0.5)
-    refusal = _refused(fit_squat(samples, altitude_noise=_noise()), "grade_unresolvable")
+    samples = flat_accelerations(np.random.default_rng(2), seconds=120.0, hz=0.5)
+    refusal = _refused(fit_squat(samples, altitude_noise=flat_noise()), "grade_unresolvable")
     assert "too sparse" in refusal.reason
 
 
 def test_altitude_noise_reference_refusals() -> None:
-    parked = _parked(np.random.default_rng(1))
+    parked = flat_parked(np.random.default_rng(1))
     _refused(measure_altitude_noise(replace(parked, altitude_m=None)), "inputs_missing")
     moving = replace(parked, speed_mps=np.full(len(parked), 3.0))
     _refused(measure_altitude_noise(moving), "not_stationary")
-    short = _parked(np.random.default_rng(1), seconds=100.0)
+    short = flat_parked(np.random.default_rng(1), seconds=100.0)
     refusal = _refused(measure_altitude_noise(short), "too_few_samples")
     assert "99.9 s parked" in refusal.reason
     frozen = replace(parked, altitude_m=np.full(len(parked), 1500.0))
@@ -741,7 +445,7 @@ def test_altitude_noise_reference_refusals() -> None:
 def test_squat_refuses_a_stretch_that_is_not_flat() -> None:
     refusal = _refused(
         fit_squat(
-            _flat_accelerations(np.random.default_rng(6), grade=0.02), altitude_noise=_noise()
+            flat_accelerations(np.random.default_rng(6), grade=0.02), altitude_noise=flat_noise()
         ),
         "not_flat",
     )
@@ -749,16 +453,16 @@ def test_squat_refuses_a_stretch_that_is_not_flat() -> None:
 
 
 def test_squat_refuses_when_gps_altitude_cannot_resolve_the_grade() -> None:
-    samples = _flat_accelerations(
+    samples = flat_accelerations(
         np.random.default_rng(7), seconds=8.0, altitude_noise_m=4.0, amplitude=2.5
     )
-    _refused(fit_squat(samples, altitude_noise=_noise(white_sd=4.0)), "grade_unresolvable")
+    _refused(fit_squat(samples, altitude_noise=flat_noise(white_sd=4.0)), "grade_unresolvable")
 
 
 def test_squat_refuses_without_altitude_too_few_points_or_no_acceleration() -> None:
-    samples = _flat_accelerations(np.random.default_rng(8))
+    samples = flat_accelerations(np.random.default_rng(8))
     _refused(
-        fit_squat(replace(samples, altitude_m=None), altitude_noise=_noise()), "inputs_missing"
+        fit_squat(replace(samples, altitude_m=None), altitude_noise=flat_noise()), "inputs_missing"
     )
     short = MotionSamples(
         t_s=samples.t_s[:20],
@@ -767,31 +471,31 @@ def test_squat_refuses_without_altitude_too_few_points_or_no_acceleration() -> N
         sf_lon_mps2=samples.sf_lon_mps2[:20],
         altitude_m=samples.altitude_m[:20] if samples.altitude_m is not None else None,
     )
-    _refused(fit_squat(short, altitude_noise=_noise()), "too_few_samples")
-    steady = _flat_accelerations(np.random.default_rng(9), amplitude=0.1)
-    _refused(fit_squat(steady, altitude_noise=_noise()), "accel_span_too_small")
+    _refused(fit_squat(short, altitude_noise=flat_noise()), "too_few_samples")
+    steady = flat_accelerations(np.random.default_rng(9), amplitude=0.1)
+    _refused(fit_squat(steady, altitude_noise=flat_noise()), "accel_span_too_small")
 
 
 def test_squat_record_requires_conditions() -> None:
-    fit = fit_squat(_flat_accelerations(np.random.default_rng(4)), altitude_noise=_noise())
+    fit = fit_squat(flat_accelerations(np.random.default_rng(4)), altitude_noise=flat_noise())
     assert isinstance(fit, SquatFit)
     with pytest.raises(ValidationError):
         SquatConditions(payload_kg=127.0, road="x", date=dt.date(2026, 9, 26), sessions=["s"])  # type: ignore[call-arg]
-    record = _squat_record()
+    record = flat_squat_record()
     accel = np.array([G * 0.1])
     one = _loose_motion(t_s=[0.0], speed_mps=[20.0], accel_mps2=accel, sf_lon_mps2=accel)
-    corrected = correct_specific_force(one, squat=record, pitch_offset=_stated_offset(0.0))
+    corrected = correct_specific_force(one, squat=record, pitch_offset=flat_stated_offset(0.0))
     assert not isinstance(corrected, DynoRefusal), corrected
     # 0.1 g of acceleration pitches 0.12 deg: sin(0.12 deg)·g removed.
     assert corrected[0] == pytest.approx(G * 0.1 - G * math.sin(math.radians(0.12)))
-    both = correct_specific_force(one, squat=record, pitch_offset=_stated_offset(0.3))
+    both = correct_specific_force(one, squat=record, pitch_offset=flat_stated_offset(0.3))
     assert not isinstance(both, DynoRefusal), both
     assert both[0] == pytest.approx(G * 0.1 - G * math.sin(math.radians(0.42)))
     # The public correction takes the offset with its frame, and refuses
     # samples resolved in another one.
     framed = replace(one, imu_reference_id="frame-b")
     refusal = _refused(
-        correct_specific_force(framed, squat=record, pitch_offset=_stated_offset(0.3)),
+        correct_specific_force(framed, squat=record, pitch_offset=flat_stated_offset(0.3)),
         "frame_mismatch",
     )
     assert "frame-b" in refusal.reason
@@ -800,15 +504,6 @@ def test_squat_record_requires_conditions() -> None:
 # ---------------------------------------------------------------------------
 # H07.5 — road load
 # ---------------------------------------------------------------------------
-
-
-def _coast_pair(driveline: Driveline, seed: int, *, runs: int = 1, **kwargs: float) -> list[Leg]:
-    rng = np.random.default_rng(seed)
-    legs: list[Leg] = []
-    for _ in range(runs):
-        legs.append(Leg("northbound", _coastdown(rng, driveline, heading_sign=+1.0, **kwargs)))
-        legs.append(Leg("southbound", _coastdown(rng, driveline, heading_sign=-1.0, **kwargs)))
-    return legs
 
 
 #: A steady wind leaves C·w² in the pair's A (2.2 N at 2 m/s); B and C are exact.
@@ -820,10 +515,10 @@ def test_road_load_is_exact_without_noise(driveline: Driveline) -> None:
     # 0.5 % grade, 2 m/s wind (headwind northbound), 1.2 deg/g squat, 0.3 deg
     # IMU pitch offset; no measurement noise: the algebra alone.
     fit = fit_road_load(
-        _coast_pair(driveline, 10, noise_f=0.0, noise_a=0.0),
+        flat_coast_pair(driveline, 10, noise_f=0.0, noise_a=0.0),
         driveline=driveline,
-        test_mass_kg=MASS,
-        squat=_squat_record(),
+        test_mass_kg=FLAT_MASS,
+        squat=flat_squat_record(),
     )
     assert isinstance(fit, RoadLoadFit), fit
     assert fit.a_n == pytest.approx(PAIR_A, rel=1e-3)
@@ -840,10 +535,10 @@ def test_road_load_recovers_known_coefficients_within_5_percent(
     # sample (H07.3's smoothed inputs). B's scatter is ~1.9 % here, so 5 % is
     # ~2.7 sigma on the weakest coefficient.
     fit = fit_road_load(
-        _coast_pair(driveline, seed, runs=3, noise_f=0.005, noise_a=0.003),
+        flat_coast_pair(driveline, seed, runs=3, noise_f=0.005, noise_a=0.003),
         driveline=driveline,
-        test_mass_kg=MASS,
-        squat=_squat_record(),
+        test_mass_kg=FLAT_MASS,
+        squat=flat_squat_record(),
     )
     assert isinstance(fit, RoadLoadFit), fit
     assert fit.a_n == pytest.approx(TRUE_A, rel=0.05)
@@ -872,10 +567,10 @@ def test_road_load_standard_errors_cover_the_truth_at_higher_noise(
     # reported se must say so rather than the point estimate implying 5 %.
     for seed in range(30, 40):
         fit = fit_road_load(
-            _coast_pair(driveline, seed),
+            flat_coast_pair(driveline, seed),
             driveline=driveline,
-            test_mass_kg=MASS,
-            squat=_squat_record(),
+            test_mass_kg=FLAT_MASS,
+            squat=flat_squat_record(),
         )
         assert isinstance(fit, RoadLoadFit), fit
         assert abs(fit.a_n - PAIR_A) <= 3.5 * fit.a_se_n
@@ -889,10 +584,10 @@ def test_road_load_standard_errors_are_not_inflated(driveline: Driveline) -> Non
     # (measured ratio 0.83-0.85 for A, B and C): a doubled se would read ~1.7.
     fits = [
         fit_road_load(
-            _coast_pair(driveline, seed),
+            flat_coast_pair(driveline, seed),
             driveline=driveline,
-            test_mass_kg=MASS,
-            squat=_squat_record(),
+            test_mass_kg=FLAT_MASS,
+            squat=flat_squat_record(),
         )
         for seed in range(30, 50)
     ]
@@ -910,8 +605,8 @@ def test_road_load_standard_errors_are_not_inflated(driveline: Driveline) -> Non
 def test_pitch_offset_separates_from_grade_only_with_both_directions(
     driveline: Driveline,
 ) -> None:
-    pair = _coast_pair(driveline, 16, grade=0.01, v_end=8.0)
-    offset = estimate_pitch_offset(pair, squat=_squat_record())
+    pair = flat_coast_pair(driveline, 16, grade=0.01, v_end=8.0)
+    offset = estimate_pitch_offset(pair, squat=flat_squat_record())
     assert isinstance(offset, PitchOffset), offset
     # Known answer 0.3 deg, on a 1 % grade that is 0.57 deg each way.
     assert offset.deg == pytest.approx(TRUE_MOUNT_OFFSET_DEG, abs=0.02)
@@ -941,7 +636,7 @@ def _crest_coastdown(
     the climb and descent are the other halves of the same road. ``stop_m``
     ends the run part-way (the road is still the 1,400 m crest).
     """
-    m_eff = driveline.neutral_effective_mass(MASS)
+    m_eff = driveline.neutral_effective_mass(FLAT_MASS)
     dt_sim, every = 0.01, int(round(1.0 / (hz * 0.01)))
     v, t, s = CREST_V0_MPS, 0.0, 0.0
     rows: list[tuple[float, float, float, float]] = []
@@ -949,7 +644,7 @@ def _crest_coastdown(
     while s < stop_m:
         grade = crest_grade * (1.0 - 2.0 * s / CREST_ROAD_M)
         load = TRUE_A + TRUE_B * v + TRUE_C * v**2
-        accel = -(load + MASS * G * math.sin(math.atan(grade))) / m_eff
+        accel = -(load + FLAT_MASS * G * math.sin(math.atan(grade))) / m_eff
         if step % every == 0:
             rows.append((t, v, accel, grade))
         v += accel * dt_sim
@@ -961,7 +656,7 @@ def _crest_coastdown(
         t_s=arr[:, 0],
         speed_mps=arr[:, 1],
         accel_mps2=arr[:, 2],
-        sf_lon_mps2=_pitch_sf(arr[:, 2], arr[:, 3], TRUE_SQUAT_DEG_PER_G),
+        sf_lon_mps2=pitch_sf(arr[:, 2], arr[:, 3], TRUE_SQUAT_DEG_PER_G),
     )
 
 
@@ -992,7 +687,7 @@ def test_pitch_offset_is_distance_weighted_over_a_crest(
     # A = 171.0 / 165.2 / 151.1 N for the true 180 N. Weighted by v·dt, every
     # metre of road counts once in each heading and the grade cancels; what is
     # left (≤ 1.5e-4 deg) is the last 10 Hz sample stopping short of the road's end.
-    squat = _squat_record()
+    squat = flat_squat_record()
     legs = [
         Leg("northbound", _crest_coastdown(driveline, crest_grade)),
         Leg("southbound", _crest_coastdown(driveline, crest_grade)),
@@ -1003,7 +698,7 @@ def test_pitch_offset_is_distance_weighted_over_a_crest(
     assert offset.deg == pytest.approx(TRUE_MOUNT_OFFSET_DEG, abs=5e-4)
     for heading in ("northbound", "southbound"):
         assert offset.heading_distance_m[heading] == pytest.approx(CREST_ROAD_M, abs=3.0)
-    fit = fit_road_load(legs, driveline=driveline, test_mass_kg=MASS, squat=squat)
+    fit = fit_road_load(legs, driveline=driveline, test_mass_kg=FLAT_MASS, squat=squat)
     assert isinstance(fit, RoadLoadFit), fit
     assert fit.imu_pitch_offset_deg == offset.deg
     assert fit.a_n == pytest.approx(TRUE_A, abs=0.2)
@@ -1014,11 +709,11 @@ def test_pitch_offset_is_distance_weighted_over_a_crest(
 def test_pitch_offset_gives_a_stop_no_weight(driveline: Driveline) -> None:
     # A minute parked on a 3 % slope at the end of one heading: time-weighted,
     # it would be ~40 % of that heading's samples; by distance it weighs nothing.
-    squat = _squat_record()
+    squat = flat_squat_record()
     north = _crest_coastdown(driveline, 0.005)
     south = _crest_coastdown(driveline, 0.005)
     t_stop = north.t_s[-1] + np.arange(1, 601) * 0.1
-    parked_sf = _pitch_sf(np.zeros(len(t_stop)), 0.03, TRUE_SQUAT_DEG_PER_G)
+    parked_sf = pitch_sf(np.zeros(len(t_stop)), 0.03, TRUE_SQUAT_DEG_PER_G)
     stopped = MotionSamples(
         t_s=np.concatenate([north.t_s, t_stop]),
         speed_mps=np.concatenate([north.speed_mps, np.zeros(len(t_stop))]),
@@ -1053,7 +748,7 @@ def test_pitch_offset_pools_a_headings_runs_by_distance(driveline: Driveline) ->
 
     def northbound(*runs: MotionSamples) -> tuple[float, float]:
         legs = [Leg("northbound", run) for run in runs] + [Leg("southbound", south)]
-        offset = estimate_pitch_offset(legs, squat=_squat_record())
+        offset = estimate_pitch_offset(legs, squat=flat_squat_record())
         assert isinstance(offset, PitchOffset), offset
         return offset.heading_pitch_deg["northbound"], offset.heading_distance_m["northbound"]
 
@@ -1109,29 +804,27 @@ def test_pitch_offset_refuses_a_heading_that_covered_no_distance(driveline: Driv
     assert "speed zero" not in refusal.reason
 
 
-def _in_frame(legs: list[Leg], frame: str | None) -> list[Leg]:
-    return [Leg(leg.heading, replace(leg.samples, imu_reference_id=frame)) for leg in legs]
-
-
 def test_pitch_offset_is_bound_to_the_frame_it_was_measured_in(driveline: Driveline) -> None:
     # A pitch offset is a property of one IMU rotation (imu_frame.json's
     # reference_id). It carries that id, and nothing applies it to samples
     # resolved in another frame.
-    pair = _in_frame(_coast_pair(driveline, 16), "frame-a")
-    offset = estimate_pitch_offset(pair, squat=_squat_record())
+    pair = flat_in_frame(flat_coast_pair(driveline, 16), "frame-a")
+    offset = estimate_pitch_offset(pair, squat=flat_squat_record())
     assert isinstance(offset, PitchOffset), offset
     assert offset.reference_id == "frame-a"
-    mixed = [pair[0], *_in_frame(pair[1:], "frame-b")]
+    mixed = [pair[0], *flat_in_frame(pair[1:], "frame-b")]
     refusal = _refused(estimate_pitch_offset(mixed, squat=None), "frame_mismatch")
     assert "frame-a" in refusal.reason and "frame-b" in refusal.reason
-    fit = fit_road_load(pair, driveline=driveline, test_mass_kg=MASS, squat=_squat_record())
+    fit = fit_road_load(
+        pair, driveline=driveline, test_mass_kg=FLAT_MASS, squat=flat_squat_record()
+    )
     assert isinstance(fit, RoadLoadFit), fit
     assert fit.imu_reference_id == "frame-a"
     _refused(
         fit_road_load(
             mixed,
             driveline=driveline,
-            test_mass_kg=MASS,
+            test_mass_kg=FLAT_MASS,
             squat=None,
             allow_single_direction=True,
         ),
@@ -1140,9 +833,9 @@ def test_pitch_offset_is_bound_to_the_frame_it_was_measured_in(driveline: Drivel
     # The two-gear fit applies the offset: pulls from another frame are refused,
     # pulls from the same frame are fitted and record it.
     rng = np.random.default_rng(3)
-    pulls = [_pull(rng, driveline, 2), _pull(rng, driveline, 3)]
+    pulls = [flat_pull(rng, driveline, 2), flat_pull(rng, driveline, 3)]
     framed = [GearPull(p.gear, replace(p.samples, imu_reference_id="frame-a")) for p in pulls]
-    kwargs = _inertia_kwargs(driveline)
+    kwargs = flat_inertia_kwargs(driveline)
     refusal = _refused(fit_engine_inertia(pulls, pitch_offset=offset, **kwargs), "frame_mismatch")
     assert "frame-a" in refusal.reason
     fitted = fit_engine_inertia(framed, pitch_offset=offset, **kwargs)
@@ -1165,13 +858,17 @@ def test_pitch_offset_is_bound_to_the_frame_it_was_measured_in(driveline: Drivel
 def test_road_load_single_direction_is_refused_unless_asked_and_then_labelled(
     driveline: Driveline,
 ) -> None:
-    one_way = _coast_pair(driveline, 12)[:1]
+    one_way = flat_coast_pair(driveline, 12)[:1]
     _refused(
-        fit_road_load(one_way, driveline=driveline, test_mass_kg=MASS, squat=None),
+        fit_road_load(one_way, driveline=driveline, test_mass_kg=FLAT_MASS, squat=None),
         "single_direction",
     )
     fit = fit_road_load(
-        one_way, driveline=driveline, test_mass_kg=MASS, squat=None, allow_single_direction=True
+        one_way,
+        driveline=driveline,
+        test_mass_kg=FLAT_MASS,
+        squat=None,
+        allow_single_direction=True,
     )
     assert isinstance(fit, RoadLoadFit)
     assert fit.directions == "single"
@@ -1194,31 +891,31 @@ def test_road_load_single_direction_is_refused_unless_asked_and_then_labelled(
 
 
 def test_road_load_refuses_degenerate_coastdowns(driveline: Driveline) -> None:
-    pair = _coast_pair(driveline, 13)
+    pair = flat_coast_pair(driveline, 13)
     three = [*pair, Leg("eastbound", pair[0].samples)]
     _refused(
-        fit_road_load(three, driveline=driveline, test_mass_kg=MASS, squat=None),
+        fit_road_load(three, driveline=driveline, test_mass_kg=FLAT_MASS, squat=None),
         "too_many_directions",
     )
-    narrow = _coast_pair(driveline, 14, v0=25.0, v_end=20.0)
+    narrow = flat_coast_pair(driveline, 14, v0=25.0, v_end=20.0)
     refusal = _refused(
-        fit_road_load(narrow, driveline=driveline, test_mass_kg=MASS, squat=None),
+        fit_road_load(narrow, driveline=driveline, test_mass_kg=FLAT_MASS, squat=None),
         "speed_span_too_small",
     )
     assert "km/h" in refusal.reason
-    tiny = [Leg(c.heading, _slice(c.samples, 30)) for c in _coast_pair(driveline, 15)]
+    tiny = [Leg(c.heading, _slice(c.samples, 30)) for c in flat_coast_pair(driveline, 15)]
     _refused(
-        fit_road_load(tiny, driveline=driveline, test_mass_kg=MASS, squat=None),
+        fit_road_load(tiny, driveline=driveline, test_mass_kg=FLAT_MASS, squat=None),
         "too_few_samples",
     )
     _refused(
-        fit_road_load([], driveline=driveline, test_mass_kg=MASS, squat=None), "inputs_missing"
+        fit_road_load([], driveline=driveline, test_mass_kg=FLAT_MASS, squat=None), "inputs_missing"
     )
     # Specific force of the wrong sign (e.g. an engaged-clutch pull fed in as a
     # coast): negative drag is not a road load.
     flipped = [Leg(c.heading, replace(c.samples, sf_lon_mps2=-c.samples.sf_lon_mps2)) for c in pair]
     _refused(
-        fit_road_load(flipped, driveline=driveline, test_mass_kg=MASS, squat=None),
+        fit_road_load(flipped, driveline=driveline, test_mass_kg=FLAT_MASS, squat=None),
         "non_physical",
     )
 
@@ -1254,38 +951,25 @@ def test_driveline_effective_mass_from_stated_estimates(driveline: Driveline) ->
     wheel_side = 4 * 0.7 * 40.3 * r**2 + 1.0
     assert driveline.wheel_side_kg_m2 == pytest.approx(wheel_side)
     assert driveline.inertia == "estimated"
-    assert driveline.neutral_effective_mass(MASS) == pytest.approx(MASS + wheel_side / r**2)
+    assert driveline.neutral_effective_mass(FLAT_MASS) == pytest.approx(
+        FLAT_MASS + wheel_side / r**2
+    )
     third = 1.743 * 4.08
     # The engine's share is η·I_e·N²/r²: its inertia torque comes off at the
     # crank, upstream of the 15 % driveline loss.
-    assert driveline.efficiency == pytest.approx(ETA)
-    assert driveline.effective_mass(MASS, 3) == pytest.approx(
-        MASS + wheel_side / r**2 + ETA * 0.25 * third**2 / r**2
+    assert driveline.efficiency == pytest.approx(FLAT_ETA)
+    assert driveline.effective_mass(FLAT_MASS, 3) == pytest.approx(
+        FLAT_MASS + wheel_side / r**2 + FLAT_ETA * 0.25 * third**2 / r**2
     )
     with pytest.raises(ValueError, match="gear 7"):
         driveline.overall_ratio(7)
 
 
-def _stated_offset(deg: float = TRUE_MOUNT_OFFSET_DEG) -> PitchOffset:
-    """A known pitch offset in the synthetic data's frame (``reference_id`` None)."""
-    return PitchOffset(deg=deg, heading_pitch_deg={}, n_samples=0, reference_id=None)
-
-
-def _inertia_kwargs(driveline: Driveline) -> dict[str, Any]:
-    return {
-        "driveline": driveline,
-        "test_mass_kg": MASS,
-        "road_load": _true_road_load(),
-        # The pulls run in the coast-downs' air unless a test says otherwise.
-        "baro_kpa": ROAD_LOAD_FIT_BARO_KPA,
-        "ambient_temp_c": ROAD_LOAD_FIT_AMBIENT_C,
-        "squat": _squat_record(),
-    }
-
-
 def test_two_gear_fit_is_exact_without_noise(driveline: Driveline) -> None:
-    pulls = [_pull(_Silent(), driveline, 2), _pull(_Silent(), driveline, 3)]  # type: ignore[arg-type]
-    fit = fit_engine_inertia(pulls, pitch_offset=_stated_offset(), **_inertia_kwargs(driveline))
+    pulls = [flat_pull(_Silent(), driveline, 2), flat_pull(_Silent(), driveline, 3)]  # type: ignore[arg-type]
+    fit = fit_engine_inertia(
+        pulls, pitch_offset=flat_stated_offset(), **flat_inertia_kwargs(driveline)
+    )
     assert isinstance(fit, EngineInertiaFit), fit
     assert fit.engine_kg_m2 == pytest.approx(TRUE_ENGINE_INERTIA, rel=0.005)
 
@@ -1306,11 +990,11 @@ def test_inertia_fit_moves_the_road_load_into_the_pulls_air_m01_8(
     rng: Any = _Silent() if seed is None else np.random.default_rng(seed)
     per_gear = 1 if seed is None else 3
     pulls = [
-        _pull(rng, driveline, gear, c_n_per_mps2=TRUE_C * ratio)
+        flat_pull(rng, driveline, gear, c_n_per_mps2=TRUE_C * ratio)
         for gear in (2, 3)
         for _ in range(per_gear)
     ]
-    kwargs = {**_inertia_kwargs(driveline), "pitch_offset": _stated_offset()}
+    kwargs = {**flat_inertia_kwargs(driveline), "pitch_offset": flat_stated_offset()}
     fit = fit_engine_inertia(pulls, **{**kwargs, "baro_kpa": 70.0})
     assert isinstance(fit, EngineInertiaFit), fit
     assert fit.engine_kg_m2 == pytest.approx(
@@ -1331,8 +1015,8 @@ def test_inertia_fit_moves_the_road_load_into_the_pulls_air_m01_8(
 
 
 def test_inertia_fit_refuses_a_road_load_without_its_air(driveline: Driveline) -> None:
-    pulls = [_pull(_Silent(), driveline, 2), _pull(_Silent(), driveline, 3)]  # type: ignore[arg-type]
-    kwargs = {**_inertia_kwargs(driveline), "pitch_offset": _stated_offset()}
+    pulls = [flat_pull(_Silent(), driveline, 2), flat_pull(_Silent(), driveline, 3)]  # type: ignore[arg-type]
+    kwargs = {**flat_inertia_kwargs(driveline), "pitch_offset": flat_stated_offset()}
     record = kwargs["road_load"]
     # An unrecorded fit says nothing about the air its C was fitted in.
     unrecorded = RoadLoadFit(
@@ -1352,25 +1036,27 @@ def test_inertia_convention_is_upstream_of_driveline_losses(driveline: Driveline
     # 0.85 to what is left (the physical arrangement). The fit measures η·I_e
     # and divides by the driveline's η: the crank inertia comes back, and the
     # product is what m_eff uses.
-    pulls = [_pull(_Silent(), driveline, 2), _pull(_Silent(), driveline, 3)]  # type: ignore[arg-type]
-    kwargs = {**_inertia_kwargs(driveline), "pitch_offset": _stated_offset()}
+    pulls = [flat_pull(_Silent(), driveline, 2), flat_pull(_Silent(), driveline, 3)]  # type: ignore[arg-type]
+    kwargs = {**flat_inertia_kwargs(driveline), "pitch_offset": flat_stated_offset()}
     fit = fit_engine_inertia(pulls, **kwargs)
     assert isinstance(fit, EngineInertiaFit), fit
-    assert fit.reflected_kg_m2 == pytest.approx(ETA * TRUE_ENGINE_INERTIA, rel=0.005)
-    assert fit.driveline_efficiency == pytest.approx(ETA)
+    assert fit.reflected_kg_m2 == pytest.approx(FLAT_ETA * TRUE_ENGINE_INERTIA, rel=0.005)
+    assert fit.driveline_efficiency == pytest.approx(FLAT_ETA)
     assert fit.engine_kg_m2 == pytest.approx(TRUE_ENGINE_INERTIA, rel=0.005)
     # A driveline that assumes no loss reads the reflected product as the crank
     # inertia (0.153 for 0.18): the assumed η is part of the answer, recorded.
     lossless = replace(driveline, efficiency=1.0)
     naive = fit_engine_inertia(pulls, **{**kwargs, "driveline": lossless})
     assert isinstance(naive, EngineInertiaFit)
-    assert naive.engine_kg_m2 == pytest.approx(ETA * TRUE_ENGINE_INERTIA, rel=0.005)
+    assert naive.engine_kg_m2 == pytest.approx(FLAT_ETA * TRUE_ENGINE_INERTIA, rel=0.005)
     assert naive.reflected_kg_m2 == pytest.approx(fit.reflected_kg_m2)
 
 
 def test_inertia_record_holds_one_convention(driveline: Driveline) -> None:
-    pulls = [_pull(_Silent(), driveline, 2), _pull(_Silent(), driveline, 3)]  # type: ignore[arg-type]
-    fit = fit_engine_inertia(pulls, pitch_offset=_stated_offset(), **_inertia_kwargs(driveline))
+    pulls = [flat_pull(_Silent(), driveline, 2), flat_pull(_Silent(), driveline, 3)]  # type: ignore[arg-type]
+    fit = fit_engine_inertia(
+        pulls, pitch_offset=flat_stated_offset(), **flat_inertia_kwargs(driveline)
+    )
     assert isinstance(fit, EngineInertiaFit)
     conditions = InertiaConditions(
         road="r",
@@ -1387,7 +1073,7 @@ def test_inertia_record_holds_one_convention(driveline: Driveline) -> None:
         EngineInertiaRecord.model_validate({**raw, "assumption": "eta applied at the wheels"})
     # A profile whose loss fraction has changed since the measurement is refused,
     # naming the measured product, rather than silently mixing two η.
-    changed = PARAMS.model_copy(update={"drivetrain_loss_fraction": 0.10})
+    changed = FLAT_PARAMS.model_copy(update={"drivetrain_loss_fraction": 0.10})
     refusal = _refused(
         Driveline.from_vehicle(changed, INERTIA.model_copy(update={"measured_engine": record})),
         "conditions_mismatch",
@@ -1401,11 +1087,13 @@ def test_two_gear_pulls_recover_a_known_engine_inertia(driveline: Driveline, see
     # 100 Hz with 0.03 m/s^2 specific-force noise; one pull per gear scatters
     # ~3 %, three ~1.7 %.
     rng = np.random.default_rng(seed)
-    pulls = [_pull(rng, driveline, gear) for gear in (2, 3) for _ in range(3)]
+    pulls = [flat_pull(rng, driveline, gear) for gear in (2, 3) for _ in range(3)]
     # The session's pitch offset, from its coast-down pair (same IMU mounting).
-    offset = estimate_pitch_offset(_coast_pair(driveline, seed + 100), squat=_squat_record())
+    offset = estimate_pitch_offset(
+        flat_coast_pair(driveline, seed + 100), squat=flat_squat_record()
+    )
     assert isinstance(offset, PitchOffset)
-    kwargs = _inertia_kwargs(driveline)
+    kwargs = flat_inertia_kwargs(driveline)
     fit = fit_engine_inertia(pulls, pitch_offset=offset, **kwargs)
     assert isinstance(fit, EngineInertiaFit), fit
     # Known answer 0.18 kg m^2 (the driveline's estimate is 0.25) within 5 %.
@@ -1413,7 +1101,7 @@ def test_two_gear_pulls_recover_a_known_engine_inertia(driveline: Driveline, see
     assert abs(fit.engine_kg_m2 - TRUE_ENGINE_INERTIA) <= 3.5 * fit.engine_kg_m2_se
     assert fit.imu_pitch_offset_deg == offset.deg
     # Why the offset is a required argument: left in, 0.3 deg moves it ~44 %.
-    blind = fit_engine_inertia(pulls, pitch_offset=_stated_offset(0.0), **kwargs)
+    blind = fit_engine_inertia(pulls, pitch_offset=flat_stated_offset(0.0), **kwargs)
     assert isinstance(blind, EngineInertiaFit)
     assert abs(blind.engine_kg_m2 / TRUE_ENGINE_INERTIA - 1.0) > 0.15
     assert fit.gears == (2, 3)
@@ -1428,7 +1116,7 @@ def test_two_gear_pulls_recover_a_known_engine_inertia(driveline: Driveline, see
         )
     )
     measured = Driveline.from_vehicle(
-        PARAMS, INERTIA.model_copy(update={"measured_engine": record})
+        FLAT_PARAMS, INERTIA.model_copy(update={"measured_engine": record})
     )
     assert isinstance(measured, Driveline)
     assert measured.inertia == "measured_engine"
@@ -1441,8 +1129,10 @@ def test_two_gear_standard_error_is_not_inflated(driveline: Driveline) -> None:
     fits = []
     for seed in range(12):
         rng = np.random.default_rng(seed)
-        pulls = [_pull(rng, driveline, 2), _pull(rng, driveline, 3)]
-        fit = fit_engine_inertia(pulls, pitch_offset=_stated_offset(), **_inertia_kwargs(driveline))
+        pulls = [flat_pull(rng, driveline, 2), flat_pull(rng, driveline, 3)]
+        fit = fit_engine_inertia(
+            pulls, pitch_offset=flat_stated_offset(), **flat_inertia_kwargs(driveline)
+        )
         assert isinstance(fit, EngineInertiaFit), fit
         fits.append(fit)
     scatter = np.std([f.engine_kg_m2 for f in fits], ddof=1)
@@ -1452,19 +1142,19 @@ def test_two_gear_standard_error_is_not_inflated(driveline: Driveline) -> None:
 
 def test_two_gear_fit_refuses_degenerate_pulls(driveline: Driveline) -> None:
     rng = np.random.default_rng(22)
-    second = _pull(rng, driveline, 2)
-    third = _pull(rng, driveline, 3)
-    kwargs = {**_inertia_kwargs(driveline), "pitch_offset": _stated_offset()}
+    second = flat_pull(rng, driveline, 2)
+    third = flat_pull(rng, driveline, 3)
+    kwargs = {**flat_inertia_kwargs(driveline), "pitch_offset": flat_stated_offset()}
     _refused(fit_engine_inertia([], **kwargs), "inputs_missing")
     _refused(fit_engine_inertia([second, second], **kwargs), "same_gear")
     no_rpm = GearPull(3, replace(third.samples, rpm=None))
     _refused(fit_engine_inertia([second, no_rpm], **kwargs), "inputs_missing")
-    high = _pull(rng, driveline, 3, rpm_start=4800.0, rpm_end=5500.0)
-    low = _pull(rng, driveline, 2, rpm_start=2500.0, rpm_end=3500.0)
+    high = flat_pull(rng, driveline, 3, rpm_start=4800.0, rpm_end=5500.0)
+    low = flat_pull(rng, driveline, 2, rpm_start=2500.0, rpm_end=3500.0)
     _refused(fit_engine_inertia([low, high], **kwargs), "rpm_overlap_too_small")
     # 5th and 6th accelerate the engine at nearly the same (low) rate.
-    fifth = _pull(rng, driveline, 5, rpm_start=1500.0, rpm_end=2600.0)
-    sixth = _pull(rng, driveline, 6, rpm_start=1500.0, rpm_end=2600.0)
+    fifth = flat_pull(rng, driveline, 5, rpm_start=1500.0, rpm_end=2600.0)
+    sixth = flat_pull(rng, driveline, 6, rpm_start=1500.0, rpm_end=2600.0)
     refusal = _refused(fit_engine_inertia([fifth, sixth], **kwargs), "alpha_difference_too_small")
     assert "rad/s^2" in refusal.reason
     _refused(fit_engine_inertia([second, third, fifth], **kwargs), "invalid_input")
@@ -1495,42 +1185,8 @@ def test_xterra_profile_builds_a_driveline_with_estimated_inertia() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _conditions(**overrides: object) -> RunConditions:
-    base: dict[str, object] = {
-        "gear": 3,
-        "direction": "pair",
-        "tune_revision": "ZS44A-20260920",
-        "induction": "na",
-        "baro_kpa": 80.1,
-        "intake_temp_c": 25.0,
-        "ambient_temp_c": 18.0,
-        "road": "flat straight",
-        "date": dt.date(2026, 9, 27),
-        "payload_kg": 127.0,
-        "sessions": ["_capture-tuning-2026-09-27T150000"],
-    }
-    base.update(overrides)
-    return RunConditions.model_validate(base)
-
-
-RPM = np.arange(2500.0, 6001.0, 25.0)
-
-
-def _curve(offset_kw: float = 0.0, **overrides: object) -> DynoCurve:
-    power = 60.0 + 30.0 * np.sin((RPM - 2500.0) / 3500.0 * math.pi * 0.8)
-    return DynoCurve("wheel_power_kw", RPM, power + offset_kw, _conditions(**overrides))
-
-
-def _floor() -> DynoNoiseFloor:
-    floor = record_dyno_floor(
-        [_curve(0.0), _curve(1.0), _curve(-1.0)], band_edges_rpm=[2500, 3500, 4500, 5500]
-    )
-    assert isinstance(floor, DynoNoiseFloor), floor
-    return floor
-
-
 def test_floor_records_per_band_spread_of_three_pull_pairs() -> None:
-    floor = _floor()
+    floor = flat_floor()
     assert floor.n_pull_pairs == 3
     assert floor.unit == "kW"
     assert [(b.rpm_min, b.rpm_max) for b in floor.bands] == [
@@ -1546,18 +1202,19 @@ def test_floor_records_per_band_spread_of_three_pull_pairs() -> None:
 
 def test_floor_refuses_too_few_pairs_singles_and_mixed_days_or_roms() -> None:
     _refused(
-        record_dyno_floor([_curve(), _curve(1.0)], band_edges_rpm=[2500, 3500]),
+        record_dyno_floor([flat_curve(), flat_curve(1.0)], band_edges_rpm=[2500, 3500]),
         "too_few_pull_pairs",
     )
     _refused(
         record_dyno_floor(
-            [_curve(), _curve(1.0), _curve(-1.0, direction="single")], band_edges_rpm=[2500, 3500]
+            [flat_curve(), flat_curve(1.0), flat_curve(-1.0, direction="single")],
+            band_edges_rpm=[2500, 3500],
         ),
         "direction_mismatch",
     )
     refusal = _refused(
         record_dyno_floor(
-            [_curve(), _curve(1.0), _curve(-1.0, tune_revision="ZS44A-20261001")],
+            [flat_curve(), flat_curve(1.0), flat_curve(-1.0, tune_revision="ZS44A-20261001")],
             band_edges_rpm=[2500, 3500],
         ),
         "not_same_day_same_rom",
@@ -1565,14 +1222,16 @@ def test_floor_refuses_too_few_pairs_singles_and_mixed_days_or_roms() -> None:
     assert "tune_revision" in refusal.reason
     _refused(
         record_dyno_floor(
-            [_curve(), _curve(1.0), _curve(-1.0, date=dt.date(2026, 9, 28))],
+            [flat_curve(), flat_curve(1.0), flat_curve(-1.0, date=dt.date(2026, 9, 28))],
             band_edges_rpm=[2500, 3500],
         ),
         "not_same_day_same_rom",
     )
-    _refused(record_dyno_floor([_curve()] * 3, band_edges_rpm=[2500, 3500]), "no_spread")
+    _refused(record_dyno_floor([flat_curve()] * 3, band_edges_rpm=[2500, 3500]), "no_spread")
     _refused(
-        record_dyno_floor([_curve(), _curve(1.0), _curve(-1.0)], band_edges_rpm=[7000, 8000]),
+        record_dyno_floor(
+            [flat_curve(), flat_curve(1.0), flat_curve(-1.0)], band_edges_rpm=[7000, 8000]
+        ),
         "no_overlap",
     )
 
@@ -1594,7 +1253,7 @@ def test_dyno_loader_refuses_malformed_files(tmp_path: Path) -> None:
     path.write_text("schema_version: 1\ninertia: {road_wheels: 4\n")
     with pytest.raises(yaml.YAMLError):
         load_dyno_profile(path)
-    raw = DynoProfile(noise_floors=[_floor()]).model_dump(mode="json")
+    raw = DynoProfile(noise_floors=[flat_floor()]).model_dump(mode="json")
     raw["noise_floors"][0]["bands"][0]["sd"] = -1.0
     path.write_text(yaml.safe_dump(raw))
     with pytest.raises(ValidationError, match="sd"):
@@ -1604,45 +1263,45 @@ def test_dyno_loader_refuses_malformed_files(tmp_path: Path) -> None:
 def test_floor_loader_round_trips_and_the_schema_requires_conditions(tmp_path: Path) -> None:
     path = tmp_path / DYNO_FILENAME
     assert load_dyno_profile(path) is None  # no file: no floor, never an invented one
-    save_dyno_profile(path, DynoProfile(inertia=INERTIA, noise_floors=[_floor()]))
+    save_dyno_profile(path, DynoProfile(inertia=INERTIA, noise_floors=[flat_floor()]))
     loaded = load_dyno_profile(path)
     assert loaded is not None
-    assert loaded.noise_floors == [_floor()]
-    raw = _floor().model_dump(mode="json")
+    assert loaded.noise_floors == [flat_floor()]
+    raw = flat_floor().model_dump(mode="json")
     del raw["conditions"]
     with pytest.raises(ValidationError, match="conditions"):
         DynoNoiseFloor.model_validate(raw)
-    raw = _floor().model_dump(mode="json")
+    raw = flat_floor().model_dump(mode="json")
     raw["n_pull_pairs"] = 2
     with pytest.raises(ValidationError, match="n_pull_pairs"):
         DynoNoiseFloor.model_validate(raw)
     with pytest.raises(ValidationError, match="same regime"):
-        DynoProfile(noise_floors=[_floor(), _floor()])
+        DynoProfile(noise_floors=[flat_floor(), flat_floor()])
 
 
 def test_committed_xterra_dyno_file_loads_and_has_no_floor_yet() -> None:
     profile = load_dyno_profile(REPO / "data" / "nissan-xterra-2008" / DYNO_FILENAME)
     assert profile is not None
     assert profile.inertia is not None and profile.inertia.measured_engine is None
-    _refused(profile.noise_floor_for("wheel_power_kw", _conditions()), "no_floor")
+    _refused(profile.noise_floor_for("wheel_power_kw", flat_conditions()), "no_floor")
 
 
 def test_profile_floor_lookup_names_the_recorded_regimes() -> None:
-    profile = DynoProfile(noise_floors=[_floor()])
-    assert profile.noise_floor_for("wheel_power_kw", _conditions()) == _floor()
+    profile = DynoProfile(noise_floors=[flat_floor()])
+    assert profile.noise_floor_for("wheel_power_kw", flat_conditions()) == flat_floor()
     refusal = _refused(
-        profile.noise_floor_for("wheel_power_kw", _conditions(gear=2)), "conditions_mismatch"
+        profile.noise_floor_for("wheel_power_kw", flat_conditions(gear=2)), "conditions_mismatch"
     )
     assert "gear 3" in refusal.reason and "gear 2" in refusal.reason
 
 
 def test_compare_refuses_to_call_a_difference_inside_the_floor() -> None:
-    floor = _floor()  # sd_of_difference = 1.414 kW; 2 sigma = 2.83 kW
-    inside = compare_runs(_curve(0.0), _curve(2.0), floor)
+    floor = flat_floor()  # sd_of_difference = 1.414 kW; 2 sigma = 2.83 kW
+    inside = compare_runs(flat_curve(0.0), flat_curve(2.0), floor)
     assert isinstance(inside, RunComparison), inside
     assert not inside.differs
     assert {b.verdict for b in inside.bands} == {"within_floor"}
-    outside = compare_runs(_curve(0.0), _curve(4.0), floor)
+    outside = compare_runs(flat_curve(0.0), flat_curve(4.0), floor)
     assert isinstance(outside, RunComparison)
     assert outside.differs
     assert all(b.verdict == "differs" for b in outside.bands)
@@ -1650,24 +1309,29 @@ def test_compare_refuses_to_call_a_difference_inside_the_floor() -> None:
 
 
 def test_compare_refusals_name_their_cause() -> None:
-    floor = _floor()
-    _refused(compare_runs(_curve(), _curve(5.0), None), "no_floor")
-    _refused(compare_runs(_curve(), _curve(5.0, gear=2), floor), "conditions_mismatch")
-    _refused(compare_runs(_curve(), _curve(5.0, induction="boosted"), floor), "conditions_mismatch")
-    _refused(compare_runs(_curve(), _curve(5.0, direction="single"), floor), "direction_mismatch")
-    torque = DynoCurve("wheel_torque_nm", RPM, np.full(len(RPM), 300.0), _conditions())
-    _refused(compare_runs(_curve(), torque, floor), "conditions_mismatch")
+    floor = flat_floor()
+    _refused(compare_runs(flat_curve(), flat_curve(5.0), None), "no_floor")
+    _refused(compare_runs(flat_curve(), flat_curve(5.0, gear=2), floor), "conditions_mismatch")
+    _refused(
+        compare_runs(flat_curve(), flat_curve(5.0, induction="boosted"), floor),
+        "conditions_mismatch",
+    )
+    _refused(
+        compare_runs(flat_curve(), flat_curve(5.0, direction="single"), floor), "direction_mismatch"
+    )
+    torque = DynoCurve("wheel_torque_nm", RPM, np.full(len(RPM), 300.0), flat_conditions())
+    _refused(compare_runs(flat_curve(), torque, floor), "conditions_mismatch")
     high = DynoCurve(
-        "wheel_power_kw", np.array([5600.0, 6000.0]), np.array([80.0, 82.0]), _conditions()
+        "wheel_power_kw", np.array([5600.0, 6000.0]), np.array([80.0, 82.0]), flat_conditions()
     )
     _refused(compare_runs(high, high, floor), "no_overlap")
 
 
 def test_compare_marks_bands_the_runs_do_not_cover() -> None:
-    floor = _floor()
+    floor = flat_floor()
     partial_rpm = np.arange(2500.0, 3800.0, 25.0)
     partial = DynoCurve(
-        "wheel_power_kw", partial_rpm, np.full(len(partial_rpm), 70.0), _conditions()
+        "wheel_power_kw", partial_rpm, np.full(len(partial_rpm), 70.0), flat_conditions()
     )
     result = compare_runs(partial, partial, floor)
     assert isinstance(result, RunComparison)

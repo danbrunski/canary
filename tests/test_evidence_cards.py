@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import ast
-import re
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -15,8 +13,6 @@ import src.evidence.cards as cards_module
 from src.evidence import (
     Conditions,
     Hypothesis,
-    Investigation,
-    InvestigationCard,
     MemoryLedger,
     MemoryReferenceError,
     Outcome,
@@ -26,10 +22,18 @@ from src.evidence import (
     investigation_card,
     render_text,
 )
-from src.evidence.text import IDENTIFIER
-from tests.test_evidence_interventions import WOT, _prediction
-from tests.test_evidence_memory import T0, _conditions, _evidence, _operator, _vehicle
-from tests.test_evidence_retrieval import _occurrence
+from tests.evidence_builders import (
+    T0,
+    WOT,
+    allowed_tokens,
+    cards_investigation,
+    interventions_prediction,
+    memory_evidence,
+    memory_operator,
+    memory_vehicle,
+    retrieval_occurrence,
+    unresolved_numbers,
+)
 
 SESSION = "2026-09-20T180000"
 
@@ -38,93 +42,11 @@ def _ledger(tmp_path: Path) -> MemoryLedger:
     return MemoryLedger(tmp_path / "memory.jsonl", vehicle="truck")
 
 
-def _investigation(**overrides: Any) -> Investigation:
-    fields: dict[str, Any] = {
-        "vehicle": _vehicle(),
-        "provenance": _operator(),
-        "conditions": _conditions(),
-        "valid_from": T0,
-        "title": "RPM channels disagree at WOT",
-        "question": "is the broadcast RPM decoded with the wrong scale",
-    }
-    fields.update(overrides)
-    return Investigation(**fields)
-
-
-def _allowed_tokens(card: InvestigationCard, ledger: MemoryLedger) -> set[str]:
-    """Every digit-bearing token a card may print: record values (as the
-    template formats them), record ids, times, sessions, channels, counts and
-    the tools' own detail text — all read from records."""
-    allowed: set[str] = set()
-
-    def add(text: str) -> None:
-        allowed.update(_tokens(text))
-
-    for entry in ledger.entries():
-        record = entry.record
-        add(record.id)
-        add(f"v{record.provenance.version}")
-        for stamp in (record.valid_from, record.valid_to, record.recorded_at):
-            if stamp is not None:
-                add(stamp.isoformat())
-        for name in ("subject", "title", "reason", "supersession_reason"):
-            value = getattr(record, name, None)
-            if isinstance(value, str):
-                add(value)
-        conditions = getattr(record, "conditions", None)
-        if conditions is not None:
-            add(conditions.regime)
-        result = getattr(record, "result", None)
-        if result is not None:
-            add(result.detail)
-        for source in getattr(record, "sources", ()):
-            add(source.session)
-            add(" ".join(source.channels))
-            add(str(source.n_samples))
-            add(source.window_start.isoformat())
-            add(source.window_end.isoformat())
-        for label in getattr(record, "labels", {}).values():
-            add(label)
-    payload = card.model_dump(mode="python")
-
-    def walk(value: Any) -> None:
-        if isinstance(value, dict):
-            if "occurrences" in value:
-                add(str(value["occurrences"]))
-            if {"value", "unit", "record_id"} <= set(value):
-                add(f"{value['value']:.6g}")
-                if value.get("uncertainty") is not None:
-                    add(f"{value['uncertainty']:.6g}")
-                add(value["name"])
-            for item in value.values():
-                walk(item)
-        elif isinstance(value, list | tuple):
-            for item in value:
-                walk(item)
-
-    walk(payload)
-    return allowed
-
-
-def _tokens(text: str) -> list[str]:
-    return [t.strip(".,;:()[]'\"") for t in re.split(r"\s+", text) if t.strip()]
-
-
-def _unresolved_numbers(text: str, allowed: set[str]) -> list[str]:
-    return [
-        token
-        for token in _tokens(text)
-        if any(ch.isdigit() for ch in token)
-        and token not in allowed
-        and not IDENTIFIER.fullmatch(token)
-    ]
-
-
 def test_a_complete_card_renders_every_number_from_a_record(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
-    observed = ledger.append(_occurrence(SESSION, T0), now=T0 + timedelta(hours=1))
+    observed = ledger.append(retrieval_occurrence(SESSION, T0), now=T0 + timedelta(hours=1))
     against = ledger.append(
-        _occurrence(
+        retrieval_occurrence(
             SESSION,
             T0 + timedelta(minutes=5),
             subject="compare_channels:scale-check",
@@ -134,7 +56,7 @@ def test_a_complete_card_renders_every_number_from_a_record(tmp_path: Path) -> N
         now=T0 + timedelta(hours=2),
     )
     investigation = ledger.append(
-        _investigation(
+        cards_investigation(
             observations=(observed.id,),
             hypotheses=(
                 Hypothesis(label="sample skew between the reads", supporting=(observed.id,)),
@@ -158,9 +80,9 @@ def test_a_complete_card_renders_every_number_from_a_record(tmp_path: Path) -> N
     text = render_text(card)
     assert render_text(investigation_card(ledger, investigation.id)) == text  # deterministic
     assert "difference_bias = 0.4 rpm" in text
-    assert _unresolved_numbers(text, _allowed_tokens(card, ledger)) == []
+    assert unresolved_numbers(text, allowed_tokens(card, ledger)) == []
     # Negative control: the checker does catch a number no record holds.
-    assert _unresolved_numbers(text + " lean by 3.7 percent", _allowed_tokens(card, ledger)) == [
+    assert unresolved_numbers(text + " lean by 3.7 percent", allowed_tokens(card, ledger)) == [
         "3.7"
     ]
     assert "normal" not in text.lower()
@@ -169,7 +91,7 @@ def test_a_complete_card_renders_every_number_from_a_record(tmp_path: Path) -> N
 def test_absent_input_is_unevaluable_never_normal(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
     missing = ledger.append(
-        _occurrence(
+        retrieval_occurrence(
             SESSION,
             T0,
             values={},
@@ -182,7 +104,7 @@ def test_absent_input_is_unevaluable_never_normal(tmp_path: Path) -> None:
         now=T0 + timedelta(hours=1),
     )
     investigation = ledger.append(
-        _investigation(
+        cards_investigation(
             title="Delivery error during the tuning drive",
             question="did fuel delivery track the command",
             observations=(missing.id,),
@@ -198,13 +120,13 @@ def test_absent_input_is_unevaluable_never_normal(tmp_path: Path) -> None:
     text = render_text(card)
     assert "UNEVALUABLE (missing_input)" in text
     assert text.lower().count("normal") == text.count("not a normal result")
-    assert _unresolved_numbers(text, _allowed_tokens(card, ledger)) == []
+    assert unresolved_numbers(text, allowed_tokens(card, ledger)) == []
 
 
 def test_an_investigation_with_no_evidence_says_so(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
     investigation = ledger.append(
-        _investigation(hypotheses=(Hypothesis(label="a vacuum leak"),)),
+        cards_investigation(hypotheses=(Hypothesis(label="a vacuum leak"),)),
         now=T0,
     )
     card = investigation_card(ledger, investigation.id)
@@ -215,12 +137,13 @@ def test_an_investigation_with_no_evidence_says_so(tmp_path: Path) -> None:
 
 def test_conflicting_evidence_is_named(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
-    for_it = ledger.append(_occurrence(SESSION, T0), now=T0 + timedelta(hours=1))
+    for_it = ledger.append(retrieval_occurrence(SESSION, T0), now=T0 + timedelta(hours=1))
     against = ledger.append(
-        _occurrence("2026-09-22T180000", T0 + timedelta(days=2)), now=T0 + timedelta(days=2)
+        retrieval_occurrence("2026-09-22T180000", T0 + timedelta(days=2)),
+        now=T0 + timedelta(days=2),
     )
     investigation = ledger.append(
-        _investigation(
+        cards_investigation(
             hypotheses=(
                 Hypothesis(
                     label="pump droop under load",
@@ -239,14 +162,14 @@ def test_conflicting_evidence_is_named(tmp_path: Path) -> None:
     text = render_text(card)
     assert "CONFLICTING" in text
     assert "RECURRENCE: 2 occurrences" in text  # the same subject over two drives
-    assert _unresolved_numbers(text, _allowed_tokens(card, ledger)) == []
+    assert unresolved_numbers(text, allowed_tokens(card, ledger)) == []
 
 
 def test_a_retraction_is_visible_and_as_of_shows_the_earlier_belief(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
-    finding = ledger.append(_occurrence(SESSION, T0), now=T0 + timedelta(hours=1))
+    finding = ledger.append(retrieval_occurrence(SESSION, T0), now=T0 + timedelta(hours=1))
     investigation = ledger.append(
-        _investigation(
+        cards_investigation(
             observations=(finding.id,),
             hypotheses=(
                 Hypothesis(
@@ -258,8 +181,8 @@ def test_a_retraction_is_visible_and_as_of_shows_the_earlier_belief(tmp_path: Pa
     )
     retraction = ledger.append(
         Retraction(
-            vehicle=_vehicle(),
-            provenance=_operator(),
+            vehicle=memory_vehicle(),
+            provenance=memory_operator(),
             valid_from=T0,
             retracts=(finding.id,),
             reason="the low byte of a rpm counter: means matched by accident",
@@ -283,14 +206,14 @@ def test_a_retraction_is_visible_and_as_of_shows_the_earlier_belief(tmp_path: Pa
 def test_predictions_and_outcomes_render_their_order_and_floor(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
     investigation = ledger.append(
-        _investigation(conditions=Conditions(regime=WOT, vehicle_state="engine_running")),
+        cards_investigation(conditions=Conditions(regime=WOT, vehicle_state="engine_running")),
         now=T0,
     )
     prediction = ledger.append(
-        _prediction(investigation=investigation.id), now=T0 + timedelta(hours=1)
+        interventions_prediction(investigation=investigation.id), now=T0 + timedelta(hours=1)
     )
     measured = ledger.append(
-        _evidence(
+        memory_evidence(
             conditions=Conditions(regime=WOT, vehicle_state="engine_running"),
             valid_from=T0 + timedelta(days=1),
             valid_to=T0 + timedelta(days=1, minutes=5),
@@ -299,8 +222,8 @@ def test_predictions_and_outcomes_render_their_order_and_floor(tmp_path: Path) -
     )
     ledger.append(
         Outcome(
-            vehicle=_vehicle(),
-            provenance=_operator(),
+            vehicle=memory_vehicle(),
+            provenance=memory_operator(),
             conditions=Conditions(regime=WOT, vehicle_state="engine_running"),
             valid_from=T0 + timedelta(days=1),
             prediction=prediction.id,
@@ -318,22 +241,22 @@ def test_predictions_and_outcomes_render_their_order_and_floor(tmp_path: Path) -
     assert view.detectable.value == pytest.approx(2 * view.noise_floor.value)
     text = render_text(card)
     assert "-> CONFIRMED" in text
-    assert _unresolved_numbers(text, _allowed_tokens(card, ledger)) == []
+    assert unresolved_numbers(text, allowed_tokens(card, ledger)) == []
 
 
 def test_investigation_prose_cannot_state_numbers() -> None:
     with pytest.raises(ValidationError, match="cannot state numbers"):
-        _investigation(title="STFT +8% at idle")
+        cards_investigation(title="STFT +8% at idle")
     with pytest.raises(ValidationError, match="cannot state numbers"):
         Hypothesis(label="pump drops 2psi")
     with pytest.raises(ValidationError, match="cannot state numbers"):
-        _investigation(unknowns=("whether 3000rpm is the knee",))
-    assert _investigation(title="P0171 on B1 with obd:SHORT_FUEL_TRIM_1").title
+        cards_investigation(unknowns=("whether 3000rpm is the knee",))
+    assert cards_investigation(title="P0171 on B1 with obd:SHORT_FUEL_TRIM_1").title
 
 
 def test_a_non_investigation_id_is_refused(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
-    evidence = ledger.append(_evidence())
+    evidence = ledger.append(memory_evidence())
     with pytest.raises(MemoryReferenceError, match="not an investigation"):
         investigation_card(ledger, evidence.id)
 
@@ -370,9 +293,9 @@ def test_the_cli_reads_queries_and_cards_from_the_scoped_ledger(
     base = CanaryConfig.from_yaml(config_path)
     config = scope_config(base, resolve_profile_for_tooling(base, "truck"))
     ledger = memory_ledger_for(config)
-    finding = ledger.append(_occurrence(SESSION, T0), now=T0 + timedelta(hours=1))
+    finding = ledger.append(retrieval_occurrence(SESSION, T0), now=T0 + timedelta(hours=1))
     investigation = ledger.append(
-        _investigation(observations=(finding.id,)), now=T0 + timedelta(hours=2)
+        cards_investigation(observations=(finding.id,)), now=T0 + timedelta(hours=2)
     )
     common = ["--config", str(config_path), "--profile", "truck"]
     assert main([*common, "query", "--kind", "evidence", "--json"]) == 0
@@ -387,14 +310,14 @@ def test_the_cli_reads_queries_and_cards_from_the_scoped_ledger(
 def test_a_retracted_prediction_and_outcome_stay_on_the_card_labelled(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
     investigation = ledger.append(
-        _investigation(conditions=Conditions(regime=WOT, vehicle_state="engine_running")),
+        cards_investigation(conditions=Conditions(regime=WOT, vehicle_state="engine_running")),
         now=T0,
     )
     prediction = ledger.append(
-        _prediction(investigation=investigation.id), now=T0 + timedelta(hours=1)
+        interventions_prediction(investigation=investigation.id), now=T0 + timedelta(hours=1)
     )
     measured = ledger.append(
-        _evidence(
+        memory_evidence(
             conditions=Conditions(regime=WOT, vehicle_state="engine_running"),
             valid_from=T0 + timedelta(days=1),
             valid_to=T0 + timedelta(days=1, minutes=5),
@@ -403,8 +326,8 @@ def test_a_retracted_prediction_and_outcome_stay_on_the_card_labelled(tmp_path: 
     )
     outcome = ledger.append(
         Outcome(
-            vehicle=_vehicle(),
-            provenance=_operator(),
+            vehicle=memory_vehicle(),
+            provenance=memory_operator(),
             conditions=Conditions(regime=WOT, vehicle_state="engine_running"),
             valid_from=T0 + timedelta(days=1),
             prediction=prediction.id,
@@ -417,8 +340,8 @@ def test_a_retracted_prediction_and_outcome_stay_on_the_card_labelled(tmp_path: 
     )
     retraction = ledger.append(
         Retraction(
-            vehicle=_vehicle(),
-            provenance=_operator(),
+            vehicle=memory_vehicle(),
+            provenance=memory_operator(),
             valid_from=T0,
             retracts=(prediction.id, outcome.id),
             reason="predicted the wrong quantity",

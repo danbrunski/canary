@@ -35,8 +35,8 @@ from src.control.rom_library import RomLibrary
 from src.evidence import MemoryLedger, Prediction
 from src.vehicle.tune_revisions import load_tune_revisions
 from tests.rom_fixtures import PROFILE, operator_image
-from tests.test_target_phi import _viewer
-from tests.test_twin_command_change import PATCH, SLUG, _vehicle
+from tests.target_phi_builders import phi_viewer
+from tests.twin_builders import PATCH, SLUG, change_vehicle
 
 #: Revision -> (operator file key, plain-image sha256 from tune_revisions.yaml).
 IMAGES = {
@@ -84,7 +84,7 @@ def _table(library: RomLibrary, revision: str) -> tuple[bytes, ResolvedTable]:
         image,
         library.rom_map(),
         definition,
-        viewer=_viewer(),
+        viewer=phi_viewer(),
         application_model=load_application_model(PROFILE),
         expected_sha256=IMAGES[revision][1],
         slot=1,
@@ -113,7 +113,7 @@ def test_the_fuel_comp_restore_predicts_no_command_change_and_names_what_it_chan
         ledger,
         change,
         definition,
-        vehicle=_vehicle(base),
+        vehicle=change_vehicle(base),
         now=datetime(2026, 10, 4, 22, tzinfo=UTC),
     )
     for pid in ids:

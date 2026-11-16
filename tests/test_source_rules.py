@@ -183,6 +183,14 @@ _TEST_IMPORT_HINTS = (
 )
 
 
+# Script strings are read by line; a ``;``-joined statement counts, and so do
+# all three import spellings the AST check above refuses.
+_TEST_IMPORT_LINE = re.compile(
+    r"(?:^|;)\s*(?:from tests\.(test_\w+) import|import tests\.(test_\w+)"
+    r"|from tests import (test_\w+))"
+)
+
+
 def _imports_another_test(rel: str, text: str) -> list[Hit]:
     """Each from tests.test_x import, from tests import test_x, import tests.test_x."""
     if not any(hint in text for hint in _TEST_IMPORT_HINTS):
@@ -200,6 +208,16 @@ def _imports_another_test(rel: str, text: str) -> list[Hit]:
             a.name.startswith(("tests.test_", "test_")) for a in node.names
         ):
             hits.append((node.lineno, "import tests.test_..."))
+    # A script a test hands to a subprocess is text, not an ImportNode: it imports a provider
+    # the same way. A test's own module is the one thing such a script may import.
+    own = rel.rsplit("/", 1)[-1].removesuffix(".py")
+    seen = {line for line, _ in hits}
+    for number, line in enumerate(text.splitlines(), 1):
+        for found in _TEST_IMPORT_LINE.finditer(line):
+            name = found.group(1) or found.group(2) or found.group(3)
+            if number not in seen and name != own:
+                hits.append((number, "import of another test module inside a script string"))
+                break
     return sorted(hits)
 
 
@@ -506,81 +524,18 @@ RULES: tuple[Rule, ...] = (
         name="tests-import-other-tests",
         why=(
             "a test module is not a library: each import re-executes the provider and a rename "
-            "there breaks every importer (R07.5 closed at zero, R30.2 found 58 files). Put the "
-            "builder in a plain tests/*_builders.py module (tests/configs.py, tests/builders.py)"
+            "there breaks every importer (R07.5 closed at zero, R30.2 found 58 files and closed "
+            "it again). Put the builder in a plain tests/*_builders.py module (tests/configs.py, "
+            "tests/builders.py, tests/sim_builders.py) under a public name"
         ),
         roots=("tests",),
         suffixes=(".py",),
         find=_imports_another_test,
-        allowed={
-            **_grant(
-                "imports another test module's private builders; moves to a tests/*_builders.py"
-                " module in R30.2 box 2",
-                {
-                    "tests/test_air_charge.py": 1,
-                    "tests/test_behavior_validation_boundaries.py": 1,
-                    "tests/test_brain_jobs.py": 1,
-                    "tests/test_brain_routes.py": 3,
-                    "tests/test_brain_state.py": 3,
-                    "tests/test_candidate_promotion.py": 2,
-                    "tests/test_capture_catalog_independence.py": 1,
-                    "tests/test_capture_request_ledger.py": 3,
-                    "tests/test_config_boundaries.py": 1,
-                    "tests/test_control_network.py": 1,
-                    "tests/test_control_network_wifi.py": 3,
-                    "tests/test_detector_evaluation_boundaries.py": 1,
-                    "tests/test_dyno_golden.py": 2,
-                    "tests/test_dyno_workbench.py": 1,
-                    "tests/test_ecu_twin_contract.py": 3,
-                    "tests/test_evidence_cards.py": 3,
-                    "tests/test_evidence_interventions.py": 1,
-                    "tests/test_evidence_retrieval.py": 1,
-                    "tests/test_feature_pipeline_boundaries.py": 1,
-                    "tests/test_fuel_comp_fit.py": 1,
-                    "tests/test_hypothesis_tracking.py": 1,
-                    "tests/test_ignition_timing.py": 1,
-                    "tests/test_imu_lon_mean.py": 2,
-                    "tests/test_imu_speed_hold.py": 2,
-                    "tests/test_kline_actions.py": 1,
-                    "tests/test_kline_sniff.py": 1,
-                    "tests/test_memory_burst_planner.py": 1,
-                    "tests/test_memory_burst_traces.py": 1,
-                    "tests/test_memory_catalog_timing_chain.py": 1,
-                    "tests/test_paired_refusals.py": 3,
-                    "tests/test_proposals_live.py": 4,
-                    "tests/test_provisioning_netsock.py": 1,
-                    "tests/test_provisioning_wifi.py": 1,
-                    "tests/test_residual_chain.py": 5,
-                    "tests/test_rom_edit_spec.py": 1,
-                    "tests/test_rom_editor.py": 2,
-                    "tests/test_rom_editor_api.py": 3,
-                    "tests/test_rom_editor_private_rom.py": 2,
-                    "tests/test_rom_levers.py": 2,
-                    "tests/test_rom_levers_parity.py": 2,
-                    "tests/test_rom_sim_cli.py": 3,
-                    "tests/test_rom_sim_known_answers.py": 2,
-                    "tests/test_sequence_cadence.py": 1,
-                    "tests/test_sim_assumptions.py": 4,
-                    "tests/test_sim_cells.py": 2,
-                    "tests/test_sim_design.py": 1,
-                    "tests/test_sim_montecarlo.py": 3,
-                    "tests/test_sim_report.py": 2,
-                    "tests/test_target_phi_private_rom.py": 1,
-                    "tests/test_timing_lookup.py": 3,
-                    "tests/test_trip_digests_per_trip.py": 1,
-                    "tests/test_twin_command_change.py": 4,
-                    "tests/test_twin_command_change_private_rom.py": 2,
-                    "tests/test_twin_investigation.py": 4,
-                    "tests/test_twin_live.py": 7,
-                    "tests/test_twin_profile.py": 1,
-                    "tests/test_twin_runner.py": 5,
-                    "tests/test_vehicle_power.py": 1,
-                },
-            ),
-        },
+        allowed={},
         bad=(
             "from tests.test_a import x\nfrom tests import test_b\nimport tests.test_c\n"
             "def f():\n    from tests.test_d import y\n"
+            "SCRIPT = '''\nfrom tests.test_e import z\n'''\n"
         ),
         good=(
             "from tests.configs import isolated_config\n"
@@ -780,9 +735,7 @@ RULES: tuple[Rule, ...] = (
                     "tests/test_memory_channels.py": 1,
                     "tests/test_memory_rate_weights.py": 1,
                     "tests/test_memory_relations.py": 1,
-                    "tests/test_memory_window_burst.py": 1,
                     "tests/test_migrate_channel_names.py": 1,
-                    "tests/test_operating_context.py": 1,
                     "tests/test_pairing_routes.py": 1,
                     "tests/test_paths.py": 1,
                     "tests/test_physical_drives.py": 1,
@@ -836,7 +789,6 @@ RULES: tuple[Rule, ...] = (
                     "tests/test_startup_timeline.py": 1,
                     "tests/test_storage_catalog.py": 1,
                     "tests/test_supply_voltage.py": 1,
-                    "tests/test_target_phi.py": 1,
                     "tests/test_time_lookup.py": 1,
                     "tests/test_timing_compare.py": 1,
                     "tests/test_torque_plant.py": 1,

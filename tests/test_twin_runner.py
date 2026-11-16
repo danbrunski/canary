@@ -82,7 +82,7 @@ from src.decode.target_phi_command import GATE_STATE_UNKNOWN, target_command, x_
 from src.jsonable import jsonable
 from src.preprocessing.loader import read_session
 from src.timefmt import format_epoch
-from tests.test_target_phi import EXPECT, _session, _table, fixture_frame, record_lines
+from tests.target_phi_builders import EXPECT, fixture_frame, phi_session, phi_table, record_lines
 from tools import fuel_plant_check
 
 REPO = Path(__file__).resolve().parents[1]
@@ -127,7 +127,7 @@ def _committed_ecu(kit: TwinKit) -> ResolvedEcu:
     """The committed target table (afr_calibration.yaml) with the fixture's
     recorded Load Point Scaler: no image."""
     table = dataclasses.replace(
-        _table(kit.twin), load_point_scaler=EXPECT["calibration"]["load_point_scaler"]
+        phi_table(kit.twin), load_point_scaler=EXPECT["calibration"]["load_point_scaler"]
     )
     return ResolvedEcu(table=table, air=None, pulse=None)
 
@@ -306,7 +306,7 @@ def test_an_uninitialised_map_magic_is_counted_not_refused(kit: TwinKit) -> None
 
 
 def test_a_session_without_identity_reads_names_them_not_captured(kit: TwinKit) -> None:
-    frame = _session()
+    frame = phi_session()
     identity = set(kit.twin.map_identity.channels())
     stripped = frame[~frame["channel"].isin(identity)]
     run = run_twin(stripped, kit, _committed_ecu(kit), name="synthetic", plant_version=PLANT)
@@ -421,7 +421,7 @@ def test_a_mutated_lookup_kernel_moves_both_front_ends(
 ) -> None:
     """One eligible override sample: the runner and the evaluator agree, then
     a one-count error in the shared kernel shows in both, identically."""
-    frame = _session()
+    frame = phi_session()
     ecu = _committed_ecu(kit)
     assert ecu.table is not None
     table = ecu.table
@@ -452,18 +452,17 @@ def test_a_mutated_lookup_kernel_moves_the_replay_and_the_paired_comparison(
     points (``twin_runner.stated_ecu``), so one count of error in the shared
     lookup kernel moves a replay residual and a paired phi word alike."""
     from src.analysis.paired_scenarios import run_paired
-    from tests.test_paired_scenarios import WOT, _scenario
-    from tests.test_sim_montecarlo import build_kit_and_image
+    from tests.sim_builders import WOT, build_kit_and_image, paired_scenario
 
     sim_kit, image = build_kit_and_image()
-    frame = _session()
+    frame = phi_session()
     ecu = _committed_ecu(kit)
     q = 1 << kit.twin.reference.q_bits
 
     def both() -> tuple[float, int]:
         run = run_twin(frame, kit, ecu, name="synthetic", plant_version=PLANT)
         (row,) = cast(Any, run.eligible("target_equiv_ratio").itertuples())
-        paired = run_paired(sim_kit, _scenario(sim_kit, image, image, WOT), image, image)
+        paired = run_paired(sim_kit, paired_scenario(sim_kit, image, image, WOT), image, image)
         phi = paired.points[0]["outputs"]["target_phi"]["base"]
         assert phi is not None
         return float(row.residual), round(phi * q)
@@ -512,7 +511,7 @@ def test_the_runner_imports_nothing_that_reaches_the_ecu() -> None:
         f"""
         import json, sys
         from src.analysis.twin_runner import load_twin_kit, run_twin, ResolvedEcu
-        from tests.test_target_phi import _table, fixture_frame
+        from tests.target_phi_builders import fixture_frame, phi_table as _table
         from pathlib import Path
         kit = load_twin_kit(Path({str(PROFILE)!r}), plant_version="fuel-mv-1")
         run = run_twin(fixture_frame(), kit, ResolvedEcu(_table(kit.twin), None, None),
@@ -583,9 +582,9 @@ def test_the_october_4_accounting_from_the_image(kit: TwinKit, image_ecu: Resolv
 
 def _raw_rows(session: Path) -> pd.DataFrame:
     """The rows E05.2's own test hands the evaluator (``_read`` there)."""
-    from tests.test_air_charge_private_rom import _read
+    from tests.twin_builders import private_rom_read
 
-    return _read([str(session / "telemetry-*.parquet")])
+    return private_rom_read([str(session / "telemetry-*.parquet")])
 
 
 @pytest.fixture(scope="module")
@@ -796,9 +795,9 @@ def test_two_bfs_reads_10_ms_apart_share_no_maf_read() -> None:
     evaluator before version 2) scored both from that one read; one-to-one
     pairing gives it to the first and names the second ``maf_unpaired``. The
     evaluator and the runner now agree, record for record."""
-    from tests.test_air_charge import _calibration
+    from tests.twin_builders import air_charge_calibration
 
-    cal = _calibration()
+    cal = air_charge_calibration()
     bfs = air_charge_twin.predict_steady_bfs(cal, maf_word=1500, rpm_word=160).mid
     rpm_payload = bytes([(160 * 50) >> 8, (160 * 50) & 0xFF])
 

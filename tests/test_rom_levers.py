@@ -62,7 +62,7 @@ from src.analysis.rom_map import RomMap
 from src.analysis.sim_contract import SimContract, SimulationRefusalError, load_contract
 from src.yaml_load import load_yaml
 from tests.rom_fixtures import PROFILE, xterra_map
-from tests.test_rom_effects import _bump, modelled_image
+from tests.sim_builders import effects_bump, modelled_image
 
 MODE = "conditional_rom_comparison"
 #: An image offset the application model does not read and ``rom_map.yaml``
@@ -105,7 +105,7 @@ class World:
         self.plant_q: Qualification = plant_qualification(load_fuel_plant(PROFILE)[0])
 
     def candidate(self, table: str, slot: int | None = 1) -> bytes:
-        edit = _bump(self.image, self.rom_map, table, slot, 0, 0)
+        edit = effects_bump(self.image, self.rom_map, table, slot, 0, 0)
         return make_candidate(self.image, self.rom_map, [edit], base_label="x").image
 
     def report(
@@ -510,17 +510,17 @@ def test_classifying_an_edit_imports_nothing_that_talks_to_the_ecu() -> None:
 
 
 class RunWorld:
-    """test_paired_scenarios' synthetic image and re-pinned real model, which
+    """tests.sim_builders' synthetic image and re-pinned real model, which
     ``run_paired`` can compute on (E07.6)."""
 
     def __init__(self) -> None:
         import dataclasses
 
         from src.analysis.paired_scenarios import load_kit
-        from tests import test_paired_scenarios as tp
+        from tests import sim_builders as tp
 
         kit = load_kit(PROFILE)
-        self.image = tp._image(kit.model, kit.plant)
+        self.image = tp.paired_image(kit.model, kit.plant)
         identity = kit.model.program.identity.model_copy(
             update={"sha256": program_sha256(self.image, kit.model)}
         )
@@ -531,11 +531,11 @@ class RunWorld:
         self.tp = tp
 
     def edit_all(self, table: str, slot: int | None, step: int) -> bytes:
-        return self.tp._edit_all(self.image, self.kit, table, slot, step)
+        return self.tp.paired_edit_all(self.image, self.kit, table, slot, step)
 
     def run(self, candidate: bytes, kit: Any = None) -> Any:
         kit = kit or self.kit
-        scenario = self.tp._scenario(kit, self.image, candidate, self.tp.WOT, self.tp.CRUISE)
+        scenario = self.tp.paired_scenario(kit, self.image, candidate, self.tp.WOT, self.tp.CRUISE)
         return paired_scenarios.run_paired(kit, scenario, self.image, candidate)
 
     def classify(self, candidate: bytes, kit: Any = None, **kwargs: Any) -> LeverClassification:
@@ -703,7 +703,7 @@ def _stated(rw: RunWorld, candidate: bytes, **conditioned: float) -> Any:
     import dataclasses
 
     point = dataclasses.replace(rw.tp.WOT, conditioned=conditioned, source="design: test")
-    scenario = rw.tp._scenario(rw.kit, rw.image, candidate, point)
+    scenario = rw.tp.paired_scenario(rw.kit, rw.image, candidate, point)
     return paired_scenarios.run_paired(rw.kit, scenario, rw.image, candidate).points[0]["outputs"]
 
 

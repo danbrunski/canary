@@ -12,7 +12,7 @@ from src.dashboard.api import create_app
 from src.provisioning.gate import read_window_remaining, write_window
 from src.provisioning.network import RunResult
 from src.provisioning.reader import NetworkStatusReader
-from tests.test_provisioning_reader import HEALTHY, FakeRunner
+from tests.provisioning_builders import HEALTHY, ReaderFakeRunner
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -76,7 +76,7 @@ def test_unwritable_window_file_is_503(tmp_path: Path) -> None:
 
 
 def test_network_read_reports_the_pi_and_the_window(tmp_path: Path) -> None:
-    runner = FakeRunner(HEALTHY)
+    runner = ReaderFakeRunner(HEALTHY)
     client, window = _api(tmp_path, reader=NetworkStatusReader(runner))
     write_window(5, window)
     body = client.get("/control/network", headers=AUTH).json()
@@ -91,7 +91,7 @@ def test_network_read_reports_the_pi_and_the_window(tmp_path: Path) -> None:
 
 
 def test_network_read_is_cached_across_polls(tmp_path: Path) -> None:
-    runner = FakeRunner(HEALTHY)
+    runner = ReaderFakeRunner(HEALTHY)
     client, _ = _api(tmp_path, reader=NetworkStatusReader(runner, ttl_s=60))
     for _ in range(10):
         assert client.get("/control/network", headers=AUTH).status_code == 200
@@ -100,7 +100,7 @@ def test_network_read_is_cached_across_polls(tmp_path: Path) -> None:
 
 def test_missing_networkmanager_is_an_error_field_not_a_500(tmp_path: Path) -> None:
     missing = RunResult(127, "", "not found")
-    runner = FakeRunner({("nmcli",): missing, ("ip",): missing})
+    runner = ReaderFakeRunner({("nmcli",): missing, ("ip",): missing})
     client, _ = _api(tmp_path, reader=NetworkStatusReader(runner))
     response = client.get("/control/network", headers=AUTH)
     assert response.status_code == 200
@@ -117,7 +117,7 @@ def test_unwired_reader_says_so(tmp_path: Path) -> None:
 
 
 def test_status_carries_the_network_without_waiting_on_nmcli(tmp_path: Path) -> None:
-    runner = FakeRunner(HEALTHY)
+    runner = ReaderFakeRunner(HEALTHY)
     spawned: list[Callable[[], None]] = []
     client, _ = _api(tmp_path, reader=NetworkStatusReader(runner, spawn=spawned.append))
     # First poll: nothing read yet, and the refresh is handed to a thread.

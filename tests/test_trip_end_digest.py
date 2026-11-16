@@ -47,7 +47,6 @@ from src.analysis.digest import (
     get_or_compute_digest,
 )
 from src.analysis.rolling_circumference import METHOD_VERSION
-from src.config import CanaryConfig
 from src.control import child_pool, trip_end
 from src.control.trip_end import (
     TripEndDigestUnavailableError,
@@ -64,34 +63,20 @@ from src.storage.session_products import (
     read_digest_skipped,
     read_rolling_circumference,
 )
-from tests.builders import RICH_SESSION_END, digest_config, write_rich_session
+from tests.builders import (
+    RICH_SESSION_END,
+    RefusingExecutor,
+    budgeted,
+    digest_config,
+    write_rich_session,
+)
 from tests.fakes import slow_digest
 
 _MIB = 1024 * 1024
 
 
-def _budgeted(config: CanaryConfig, **daemon: Any) -> CanaryConfig:
-    return config.model_copy(update={"daemon": config.daemon.model_copy(update=daemon)})
-
-
 def _session(tmp_path: Path, name: str = "2026-05-20T180000") -> Path:
     return write_rich_session(tmp_path, name=name)
-
-
-class _RefusingExecutor(Executor):
-    """A pool that fails the test if anything is ever submitted to it.
-
-    The point of the row budget is that no child is *started* for an
-    over-budget session — counting the rows costs a Parquet footer read, and
-    starting a worker that would die costs a worker.
-    """
-
-    def __init__(self) -> None:
-        self.submissions = 0
-
-    def submit(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Future[Any]:
-        self.submissions += 1
-        raise AssertionError("a child was started for a session that should have been refused")
 
 
 class _TiresOnlyExecutor(Executor):
@@ -195,7 +180,7 @@ async def test_a_session_over_the_span_budget_is_refused_and_only_its_tires_are_
     rows = count_session_rows(session)
     span = session_time_span_seconds(session)
     assert span is not None and span > 10
-    config = _budgeted(digest_config(tmp_path), digest_span_budget_seconds=10)
+    config = budgeted(digest_config(tmp_path), digest_span_budget_seconds=10)
     pool = _TiresOnlyExecutor()
 
     result = await handle_trip_end_off_loop(session, config, executor=pool)
@@ -228,7 +213,7 @@ async def test_a_capture_over_the_row_budget_is_refused_and_only_its_tires_are_m
     session = _session(tmp_path, name="_capture-tuning-2026-05-20T180000")
     rows = count_session_rows(session)
     assert rows is not None and rows > 10
-    config = _budgeted(digest_config(tmp_path), digest_row_budget=10)
+    config = budgeted(digest_config(tmp_path), digest_row_budget=10)
     pool = _TiresOnlyExecutor()
 
     result = await handle_trip_end_off_loop(session, config, executor=pool)
@@ -252,7 +237,7 @@ def test_an_ordinary_drive_is_not_budgeted_by_rows(tmp_path: Path) -> None:
     Pi (``2026-09-20T152758``: 12.8 M) no longer applies to one: its digest
     peaks at 503 MB where it peaked at 4,265 MB (P02.1)."""
     session = _session(tmp_path)
-    config = _budgeted(digest_config(tmp_path), digest_row_budget=10)
+    config = budgeted(digest_config(tmp_path), digest_row_budget=10)
     assert get_or_compute_digest(session, config, now=RICH_SESSION_END) is not None
     assert read_digest_skipped(session) is None
 
@@ -273,7 +258,7 @@ async def test_a_replay_directory_is_refused_by_the_shared_function(tmp_path: Pa
     the trip-end hook bypassed it and digested 5.9 M replayed rows."""
     session = _session(tmp_path, name="_replay-2026-05-20T180000")
     result = await handle_trip_end_off_loop(
-        session, digest_config(tmp_path), executor=_RefusingExecutor()
+        session, digest_config(tmp_path), executor=RefusingExecutor()
     )
     assert result is None
     skipped = read_digest_skipped(session)
@@ -288,7 +273,7 @@ def test_the_in_process_path_is_gated_by_the_same_budget(tmp_path: Path) -> None
     (HTTP route, MCP tool, scripts) — the budget lives there, not in the
     daemon wiring, so no caller can forget it."""
     session = _session(tmp_path)
-    config = _budgeted(digest_config(tmp_path), digest_span_budget_seconds=10)
+    config = budgeted(digest_config(tmp_path), digest_span_budget_seconds=10)
     assert get_or_compute_digest(session, config, now=RICH_SESSION_END) is None
     assert not (session / DIGEST_FILENAME).exists()
     assert (read_digest_skipped(session) or {})["reason"] == REASON_OVER_SPAN_BUDGET
@@ -296,11 +281,11 @@ def test_the_in_process_path_is_gated_by_the_same_budget(tmp_path: Path) -> None
 
 def test_a_zero_budget_disables_the_check(tmp_path: Path) -> None:
     session = _session(tmp_path)
-    config = _budgeted(digest_config(tmp_path), digest_span_budget_seconds=0)
+    config = budgeted(digest_config(tmp_path), digest_span_budget_seconds=0)
     assert get_or_compute_digest(session, config, now=RICH_SESSION_END) is not None
     assert read_digest_skipped(session) is None
     capture = _session(tmp_path, name="_capture-tuning-2026-05-20T180000")
-    no_rows = _budgeted(digest_config(tmp_path), digest_row_budget=0)
+    no_rows = budgeted(digest_config(tmp_path), digest_row_budget=0)
     assert digest_preflight(capture, no_rows) is None
 
 
@@ -369,7 +354,7 @@ def test_compute_digest_under_limit_caps_before_reading_anything(
 
 
 def test_the_ceiling_comes_from_config_when_set(tmp_path: Path) -> None:
-    config = _budgeted(digest_config(tmp_path), digest_address_space_mb=1500)
+    config = budgeted(digest_config(tmp_path), digest_address_space_mb=1500)
     assert digest_address_space_bytes(config) == 1500 * _MIB
 
 
@@ -609,7 +594,7 @@ async def test_a_digest_cancelled_at_shutdown_is_recorded_and_not_restarted(
 
 async def test_an_earlier_refusal_is_cleared_once_a_digest_lands(tmp_path: Path) -> None:
     session = _session(tmp_path)
-    tight = _budgeted(digest_config(tmp_path), digest_span_budget_seconds=10)
+    tight = budgeted(digest_config(tmp_path), digest_span_budget_seconds=10)
     assert await handle_trip_end_off_loop(session, tight) is None
     assert (session / DIGEST_SKIPPED_FILENAME).exists()
 
@@ -631,7 +616,7 @@ async def test_an_already_digested_session_is_not_recomputed(tmp_path: Path) -> 
     )
     assert (
         await handle_trip_end_off_loop(
-            session, digest_config(tmp_path), now=RICH_SESSION_END, executor=_RefusingExecutor()
+            session, digest_config(tmp_path), now=RICH_SESSION_END, executor=RefusingExecutor()
         )
         is None
     )
@@ -645,7 +630,7 @@ def test_the_catalog_tells_refused_apart_from_never_attempted(tmp_path: Path) ->
 
     refused = _session(tmp_path, name="2026-05-20T180000")
     untouched = _session(tmp_path, name="2026-05-21T180000")
-    tight = _budgeted(digest_config(tmp_path), digest_span_budget_seconds=10)
+    tight = budgeted(digest_config(tmp_path), digest_span_budget_seconds=10)
     get_or_compute_digest(refused, tight, now=RICH_SESSION_END)
 
     with SessionCatalog(tmp_path / "catalog.db") as catalog:
@@ -663,9 +648,7 @@ def test_the_catalog_drops_the_refusal_once_a_digest_exists(tmp_path: Path) -> N
     from src.storage.catalog import SessionCatalog
 
     session = _session(tmp_path)
-    get_or_compute_digest(
-        session, _budgeted(digest_config(tmp_path), digest_span_budget_seconds=10)
-    )
+    get_or_compute_digest(session, budgeted(digest_config(tmp_path), digest_span_budget_seconds=10))
     # Simulate a refusal sidecar left behind by an older build.
     get_or_compute_digest(session, digest_config(tmp_path), now=RICH_SESSION_END)
     (session / DIGEST_SKIPPED_FILENAME).write_text(json.dumps({"reason": "stale"}) + "\n")
@@ -686,13 +669,11 @@ def test_the_row_budget_is_derived_from_the_address_space_ceiling(tmp_path: Path
     fits". Deriving one from the other leaves a single number to change when
     the pivot moves after the resample.
     """
-    capped = _budgeted(
-        digest_config(tmp_path), digest_row_budget=None, digest_address_space_mb=4096
-    )
+    capped = budgeted(digest_config(tmp_path), digest_row_budget=None, digest_address_space_mb=4096)
     expected = 4096 * 1024 * 1024 // DIGEST_PEAK_BYTES_PER_ROW
     assert digest_row_budget(capped) == expected
     # Halving the ceiling halves the budget: they move together, by construction.
-    halved = _budgeted(capped, digest_address_space_mb=2048)
+    halved = budgeted(capped, digest_address_space_mb=2048)
     assert digest_row_budget(halved) == expected // 2
 
 
@@ -700,27 +681,27 @@ def test_the_span_budget_is_derived_from_the_address_space_ceiling(tmp_path: Pat
     """P02.1: the ``value_number`` chain's peak is a fixed cost plus a cost per
     second of session, so its budget is what the ceiling leaves after the
     fixed cost, per second -- ~13.7 h for the Pi's 4 GiB child."""
-    capped = _budgeted(digest_config(tmp_path), digest_address_space_mb=4096)
+    capped = budgeted(digest_config(tmp_path), digest_address_space_mb=4096)
     expected = (4096 * _MIB - DIGEST_CHAIN_FIXED_BYTES) / DIGEST_CHAIN_BYTES_PER_SECOND
     assert digest_span_budget_seconds(capped) == expected
     assert 13 * 3600 < expected < 14 * 3600
-    halved = _budgeted(capped, digest_address_space_mb=2048)
+    halved = budgeted(capped, digest_address_space_mb=2048)
     assert digest_span_budget_seconds(halved) < expected / 2
     # A ceiling that cannot hold the fixed cost refuses every session by name
     # rather than disabling the check (0 means disabled).
-    tiny = _budgeted(capped, digest_address_space_mb=1024)
+    tiny = budgeted(capped, digest_address_space_mb=1024)
     assert digest_span_budget_seconds(tiny) == 1.0
-    assert digest_span_budget_seconds(_budgeted(capped, digest_span_budget_seconds=600)) == 600
-    assert digest_span_budget_seconds(_budgeted(capped, digest_span_budget_seconds=0)) == 0
+    assert digest_span_budget_seconds(budgeted(capped, digest_span_budget_seconds=600)) == 600
+    assert digest_span_budget_seconds(budgeted(capped, digest_span_budget_seconds=0)) == 0
 
 
 def test_an_explicit_row_budget_still_wins(tmp_path: Path) -> None:
     """The derivation is a default, not a policy: an operator who has measured
     their own machine can say so."""
     config = digest_config(tmp_path)
-    explicit = _budgeted(config, digest_row_budget=123_456)
+    explicit = budgeted(config, digest_row_budget=123_456)
     assert digest_row_budget(explicit) == 123_456
-    disabled = _budgeted(config, digest_row_budget=0)
+    disabled = budgeted(config, digest_row_budget=0)
     assert digest_row_budget(disabled) == 0
 
 

@@ -95,12 +95,25 @@ from src.evidence import (
 from src.evidence.records import Retraction
 from src.signals.afr import load_afr_calibration
 from src.vehicle.profiles import profile_dir, resolve_profile_for_tooling, scope_config
+from tests.evidence_builders import allowed_tokens, unresolved_numbers
 from tests.rom_fixtures import xterra_map
-from tests.test_evidence_cards import _allowed_tokens, _unresolved_numbers
-from tests.test_operating_context import context_image, definition
-from tests.test_operating_context import resolve as _resolve_context
-from tests.test_target_phi import EXPECT, IMAGE_SHA, PROFILE, T0, _definition, _session, _viewer
-from tests.test_twin_investigation import REVISION, SLUG, _store
+from tests.target_phi_builders import (
+    EXPECT,
+    IMAGE_SHA,
+    PROFILE,
+    T0,
+    phi_definition,
+    phi_session,
+    phi_viewer,
+)
+from tests.twin_builders import (
+    INVESTIGATION_REVISION,
+    INVESTIGATION_SLUG,
+    context_image,
+    definition,
+    investigation_store,
+)
+from tests.twin_builders import resolve as _resolve_context
 
 WRONG_IMAGE = "ab" * 32
 TWIN_COMMAND_GROUP = "relation:memory:0xFFFF26BE+mode01:0x44"
@@ -109,7 +122,7 @@ OPERATOR = Provenance(producer="operator", producer_kind="operator", version="te
 
 @functools.cache
 def _definition_cached() -> tuple[TwinDefinition, str]:
-    return _definition()
+    return phi_definition()
 
 
 @functools.cache
@@ -126,7 +139,7 @@ def _blocked_table() -> ResolvedTable:
     return table_from_calibration(
         load_afr_calibration(PROFILE / "afr_calibration.yaml"),
         _definition_cached()[0],
-        viewer=_viewer(),
+        viewer=phi_viewer(),
         application_model=_application_model(),
         revision=EXPECT["calibration"]["revision"],
         image_sha256=IMAGE_SHA,
@@ -182,7 +195,7 @@ class Vehicle:
 @pytest.fixture(scope="module")
 def vehicle() -> Vehicle:
     base = CanaryConfig.from_yaml(Path("canary.dev.example.yaml"))
-    config = scope_config(base, resolve_profile_for_tooling(base, SLUG))
+    config = scope_config(base, resolve_profile_for_tooling(base, INVESTIGATION_SLUG))
     model, sha = load_fault_model(profile_dir(config) / FAULT_MODEL_FILE)
     return Vehicle(TuningContext.from_config(config), model, sha)
 
@@ -259,12 +272,12 @@ def _drive(
 ) -> Path:
     """SYNTHETIC: a twin tuple at ``T0 + TUPLE_AT`` and one WOT pull after the
     tuple's reads end, stored as one session in the writer's schema."""
-    tuple_ = _session(flag=flag, t=TUPLE_AT, end=TUPLE_END)
+    tuple_ = phi_session(flag=flag, t=TUPLE_AT, end=TUPLE_END)
     pulls = _pulls(T0 + pd.Timedelta(seconds=TUPLE_END + 5), lean_pct)
     frame = pd.concat([tuple_, pulls[tuple_.columns]], ignore_index=True)
     frame = frame[~frame["channel"].isin(drop)]
     frame = frame.sort_values("timestamp", kind="stable").reset_index(drop=True)
-    return _store(root, frame, name)
+    return investigation_store(root, frame, name)
 
 
 def _twin(ledger: MemoryLedger, session: Path, *, table: ResolvedTable | None = None) -> Evidence:
@@ -276,9 +289,9 @@ def _twin(ledger: MemoryLedger, session: Path, *, table: ResolvedTable | None = 
         definition=definition,
         definition_sha256=sha,
         identity=TwinSessionIdentity(
-            profile=SLUG,
+            profile=INVESTIGATION_SLUG,
             vin=None,
-            calibration=REVISION,
+            calibration=INVESTIGATION_REVISION,
             calibration_source="registry",
             image_sha256=IMAGE_SHA,
         ),
@@ -351,7 +364,7 @@ class Drives:
     def __init__(self, vehicle: Vehicle, root: Path) -> None:
         self.vehicle = vehicle
         self.root = root
-        self.scratch = MemoryLedger(root / "scratch.jsonl", vehicle=SLUG)
+        self.scratch = MemoryLedger(root / "scratch.jsonl", vehicle=INVESTIGATION_SLUG)
         self.sessions: dict[str, tuple[Path, Evidence]] = {}
         self.built: dict[str, Minted] = {}
 
@@ -372,7 +385,7 @@ class Drives:
     def _build(self, name: str) -> Minted:
         table, drive = DRIVES[name]
         session, delivery = self._session(name, drive)
-        ledger = MemoryLedger(self.root / f"{name}.jsonl", vehicle=SLUG)
+        ledger = MemoryLedger(self.root / f"{name}.jsonl", vehicle=INVESTIGATION_SLUG)
         twin = _twin(ledger, session, table=table())
         return Minted(ledger.path, session, twin.id, ledger.append(_copy(delivery)).id)
 
@@ -380,9 +393,13 @@ class Drives:
         """Two drives in one ledger: the correct drive's twin beside the lean
         drive's delivery record."""
         correct, lean = self["correct"], self["lean"]
-        ledger = MemoryLedger(self.root / "mixed.jsonl", vehicle=SLUG)
-        twin = _evidence(MemoryLedger(correct.ledger_path, vehicle=SLUG), correct.twin)
-        delivery = _evidence(MemoryLedger(lean.ledger_path, vehicle=SLUG), lean.delivery)
+        ledger = MemoryLedger(self.root / "mixed.jsonl", vehicle=INVESTIGATION_SLUG)
+        twin = _evidence(
+            MemoryLedger(correct.ledger_path, vehicle=INVESTIGATION_SLUG), correct.twin
+        )
+        delivery = _evidence(
+            MemoryLedger(lean.ledger_path, vehicle=INVESTIGATION_SLUG), lean.delivery
+        )
         twin_id = ledger.append(_copy(twin)).id
         return Minted(ledger.path, lean.session, twin_id, ledger.append(_copy(delivery)).id)
 
@@ -397,7 +414,7 @@ def _case(tmp_path: Path, minted: Drives, name: str) -> Case:
     spec = minted[name]
     path = tmp_path / f"{name}.jsonl"
     shutil.copyfile(spec.ledger_path, path)
-    ledger = MemoryLedger(path, vehicle=SLUG)
+    ledger = MemoryLedger(path, vehicle=INVESTIGATION_SLUG)
     return Case(
         ledger, spec.session, _evidence(ledger, spec.twin), _evidence(ledger, spec.delivery)
     )
@@ -598,7 +615,7 @@ def _assert_card_names_stage_without_a_cause(
         card.program_id or "",
         *(k for v in card.what_happened for k in v.labels),
     }
-    assert _unresolved_numbers(text, _allowed_tokens(card, ledger) | names) == []
+    assert unresolved_numbers(text, allowed_tokens(card, ledger) | names) == []
 
 
 # ---------------------------------------------------------------------------
@@ -611,7 +628,7 @@ def _rom() -> RomIdentity:
     return RomIdentity(
         image_sha256=IMAGE_SHA,
         program_id=_program_id(),
-        revision=REVISION,
+        revision=INVESTIGATION_REVISION,
         slot=1,
         context_fingerprint="sha256:" + "d" * 64,
     )
@@ -657,7 +674,10 @@ def _qualify(ledger: MemoryLedger, model: BehaviorModelIdentity, channels: tuple
     rom = _rom()
     reference = Reference(
         vehicle=VehicleIdentity(
-            profile=SLUG, vin=None, program_id=rom.program_id, calibration=rom.revision
+            profile=INVESTIGATION_SLUG,
+            vin=None,
+            program_id=rom.program_id,
+            calibration=rom.revision,
         ),
         provenance=OPERATOR,
         conditions=Conditions(
@@ -678,7 +698,9 @@ def _retire(ledger: MemoryLedger, affects: tuple[str, ...]) -> str:
     """A hardware change after every reference here, affecting ``affects``."""
     return ledger.append(
         Intervention(
-            vehicle=VehicleIdentity(profile=SLUG, vin=None, program_id=None, calibration=None),
+            vehicle=VehicleIdentity(
+                profile=INVESTIGATION_SLUG, vin=None, program_id=None, calibration=None
+            ),
             provenance=OPERATOR,
             conditions=Conditions(regime="all conditions", vehicle_state=None),
             valid_from=datetime(2026, 10, 5, tzinfo=UTC),
@@ -705,7 +727,7 @@ def test_an_unqualified_b08_residual_is_diagnostic_only(
     # Exact ROM and model versions.
     assert record.labels["image_sha256"] == IMAGE_SHA
     assert record.labels["program_id"] == record.vehicle.program_id == _rom().program_id
-    assert record.labels["revision"] == record.vehicle.calibration == REVISION
+    assert record.labels["revision"] == record.vehicle.calibration == INVESTIGATION_REVISION
     assert (record.labels["model"], record.labels["model_version"]) == ("throttle_fill_vs_maf", "0")
     assert record.labels["model_sha256"] == "c" * 64
     assert record.labels["context_fingerprint"] == "sha256:" + "d" * 64
@@ -746,7 +768,7 @@ def test_a_qualified_b08_residual_counts_until_its_reference_is_retired(
 
 
 def test_a_qualification_must_name_this_model_version_and_rom(tmp_path: Path) -> None:
-    ledger = MemoryLedger(tmp_path / "m.jsonl", vehicle=SLUG)
+    ledger = MemoryLedger(tmp_path / "m.jsonl", vehicle=INVESTIGATION_SLUG)
     session = "_synthetic-chain-q-2026-10-04T210000"
     other = BehaviorModelIdentity(name="throttle_fill_vs_maf", version="1", sha256="c" * 64)
     reference = _qualify(ledger, other, ("obd:MAF",))
@@ -766,7 +788,7 @@ def test_a_qualification_must_name_this_model_version_and_rom(tmp_path: Path) ->
 
 
 def test_without_a_rom_a_b08_residual_is_unknown_context(tmp_path: Path) -> None:
-    ledger = MemoryLedger(tmp_path / "m.jsonl", vehicle=SLUG)
+    ledger = MemoryLedger(tmp_path / "m.jsonl", vehicle=INVESTIGATION_SLUG)
     rid = mint_behavior_residual(
         ledger, session="_synthetic-chain-r-2026-10-04T210000", window=_window(), model=MODEL,
         rom=None, quantity="fill_vs_maf_pct", residual=Quantity(value=6.0, unit="percent"),
@@ -828,7 +850,10 @@ def _change(
     return ledger.append(
         Evidence(
             vehicle=VehicleIdentity(
-                profile=SLUG, vin=None, program_id=_program_id(), calibration=REVISION
+                profile=INVESTIGATION_SLUG,
+                vin=None,
+                program_id=_program_id(),
+                calibration=INVESTIGATION_REVISION,
             ),
             provenance=Provenance(
                 producer=CHANGE_TOOL, producer_kind="tool", version="2", code_version="0" * 64
@@ -864,7 +889,10 @@ def _change_reference(ledger: MemoryLedger) -> str:
     return ledger.append(
         Reference(
             vehicle=VehicleIdentity(
-                profile=SLUG, vin=None, program_id=_program_id(), calibration=REVISION
+                profile=INVESTIGATION_SLUG,
+                vin=None,
+                program_id=_program_id(),
+                calibration=INVESTIGATION_REVISION,
             ),
             provenance=Provenance(
                 producer=CHANGE_TOOL, producer_kind="tool", version="2", code_version="0" * 64
@@ -1068,7 +1096,7 @@ def test_alias_and_common_input_evidence_is_counted_once(
     second: tuple[str, ...],
     dependent: bool,
 ) -> None:
-    ledger = MemoryLedger(tmp_path / "m.jsonl", vehicle=SLUG)
+    ledger = MemoryLedger(tmp_path / "m.jsonl", vehicle=INVESTIGATION_SLUG)
     session = "_synthetic-chain-alias-2026-10-04T210000"
     a = BehaviorModelIdentity(name="model_a", version="1", sha256="1" * 64)
     b = BehaviorModelIdentity(name="model_b", version="1", sha256="2" * 64)

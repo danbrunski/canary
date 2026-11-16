@@ -53,8 +53,7 @@ from src.analysis.sim_design import load_design, write_design
 from src.decode.air_charge import TP_SCALE, TP_SCALE_SHIFT
 from src.yaml_load import load_yaml
 from tests.rom_fixtures import PROFILE
-from tests.test_paired_scenarios import LEARNED, WOT, _edit_all, _scenario
-from tests.test_sim_montecarlo import build_kit_and_image
+from tests.sim_builders import LEARNED, WOT, build_kit_and_image, paired_edit_all, paired_scenario
 from tools import rom_sim
 
 BASE = "SYNTH-base"
@@ -455,7 +454,7 @@ def _e076_reference(kit: SimKit, image: bytes, candidate: bytes, maf: float) -> 
     """E07.6's own path (``run_paired``, its ``_scenario`` and ``LEARNED``) at the point."""
     point = dataclasses.replace(WOT, maf_gps=maf, conditioned={"fuel_comp_load_byte": 200.0})
     outputs: dict[str, Any] = run_paired(
-        kit, _scenario(kit, image, candidate, point), image, candidate
+        kit, paired_scenario(kit, image, candidate, point), image, candidate
     ).points[0]["outputs"]
     return outputs
 
@@ -470,7 +469,7 @@ def test_a_target_afr_edit_of_four_counts_reproduces_e076s_wot_figures(
     draws = 200
     result, traces = _run(world, BASE, design, tmp_path / "run", "--edits", spec, draws=draws)
     # The spec makes E07.6's candidate byte for byte, under E07.6's learned state.
-    e076 = _edit_all(image, kit, "fuel_targets", 1, 4)
+    e076 = paired_edit_all(image, kit, "fuel_targets", 1, 4)
     assert result["inputs"]["candidate_sha256"] == hashlib.sha256(e076).hexdigest()
     assert (LEARNED.stft_pct, LEARNED.ltft_pct) == (0.0, 2.34)
     assert result["inputs"]["learned"]["ltft_pct"] == 2.34

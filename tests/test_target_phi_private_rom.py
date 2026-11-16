@@ -29,7 +29,7 @@ from src.analysis.target_phi import (
 from src.control.rom_library import RomLibrary
 from src.vehicle.tune_revisions import load_tune_revisions
 from tests.rom_fixtures import PROFILE, operator_image
-from tests.test_target_phi import EXPECT, IMAGE_SHA, _table, _viewer, fixture_frame
+from tests.target_phi_builders import EXPECT, IMAGE_SHA, fixture_frame, phi_table, phi_viewer
 
 #: The 2026-10-04 flash read, byte-identical to the decoded
 #: ZS44A-Tuned-20260920.OsirisROM (docs/skunkworks/uprev-backup-20261004.md).
@@ -72,12 +72,12 @@ def test_slot_1_from_the_image_equals_the_committed_table(library: RomLibrary) -
         image,
         library.rom_map(),
         definition,
-        viewer=_viewer(),
+        viewer=phi_viewer(),
         application_model=load_application_model(PROFILE),
         expected_sha256=IMAGE_SHA,
         slot=1,
     )
-    committed = _table(definition)
+    committed = phi_table(definition)
     assert table.cells == committed.cells
     assert table.row_breakpoints == committed.row_breakpoints
     assert table.column_breakpoints == committed.column_breakpoints
@@ -95,7 +95,7 @@ def test_the_image_refuses_an_unverified_slot_and_another_hash(library: RomLibra
             image,
             library.rom_map(),
             definition,
-            viewer=_viewer(),
+            viewer=phi_viewer(),
             application_model=load_application_model(PROFILE),
             expected_sha256=IMAGE_SHA,
             slot=2,
@@ -106,7 +106,7 @@ def test_the_image_refuses_an_unverified_slot_and_another_hash(library: RomLibra
             image,
             library.rom_map(),
             definition,
-            viewer=_viewer(),
+            viewer=phi_viewer(),
             application_model=load_application_model(PROFILE),
             expected_sha256="0" * 64,
             slot=1,
@@ -120,7 +120,7 @@ def test_the_fixture_accounts_identically_from_the_image(library: RomLibrary) ->
         library.image(IMAGE_SHA),
         library.rom_map(),
         definition,
-        viewer=_viewer(),
+        viewer=phi_viewer(),
         application_model=load_application_model(PROFILE),
         expected_sha256=IMAGE_SHA,
         slot=1,

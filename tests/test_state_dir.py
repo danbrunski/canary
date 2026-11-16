@@ -3,28 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from src.config import (
     DAEMON_STATE_LAYOUT,
     DAEMON_TRACKED_PATHS,
-    CanaryConfig,
     _daemon_path_fields,
 )
 from src.paths import REPO_ROOT
 from src.vehicle.profiles import VehicleProfile, operational_dir, scope_config
-from src.yaml_load import load_yaml
+from tests.builders import state_dir_config
 
-EXAMPLE = REPO_ROOT / "canary.example.yaml"
 #: Not a location the daemon writes on its own: the root itself, and the
 #: calibration directory, which is derived from ``jobs_dir`` when unset.
 UNCLASSIFIED_BY_DESIGN = frozenset({"state_dir", "calibration_dir"})
-
-
-def _config(**daemon: Any) -> CanaryConfig:
-    raw = load_yaml(EXAMPLE.read_text())
-    raw.setdefault("daemon", {}).update(daemon)
-    return CanaryConfig.model_validate(raw)
 
 
 def test_every_daemon_path_is_classified_exactly_once() -> None:
@@ -35,7 +26,7 @@ def test_every_daemon_path_is_classified_exactly_once() -> None:
 
 
 def test_unset_runtime_paths_resolve_under_state_dir(tmp_path: Path) -> None:
-    config = _config(state_dir=str(tmp_path))
+    config = state_dir_config(state_dir=str(tmp_path))
     for name, relative in DAEMON_STATE_LAYOUT.items():
         assert getattr(config.daemon, name) == tmp_path / relative, name
     assert config.profiles.registry_overlay_path == tmp_path / "control/profiles.yaml"
@@ -43,13 +34,13 @@ def test_unset_runtime_paths_resolve_under_state_dir(tmp_path: Path) -> None:
 
 
 def test_an_explicit_path_wins_over_state_dir(tmp_path: Path) -> None:
-    config = _config(state_dir=str(tmp_path), audit_log="/elsewhere/audit.jsonl")
+    config = state_dir_config(state_dir=str(tmp_path), audit_log="/elsewhere/audit.jsonl")
     assert config.daemon.audit_log == Path("/elsewhere/audit.jsonl")
     assert config.daemon.jobs_dir == tmp_path / "control/jobs"
 
 
 def test_tracked_inputs_stay_in_the_checkout(tmp_path: Path) -> None:
-    config = _config(state_dir=str(tmp_path))
+    config = state_dir_config(state_dir=str(tmp_path))
     for name in DAEMON_TRACKED_PATHS:
         assert getattr(config.daemon, name).is_relative_to(REPO_ROOT), name
 
@@ -57,7 +48,7 @@ def test_tracked_inputs_stay_in_the_checkout(tmp_path: Path) -> None:
 def test_scoped_state_paths_never_name_the_checkout(tmp_path: Path) -> None:
     """After vehicle scoping too: the calibration dir follows jobs_dir."""
     config = scope_config(
-        _config(state_dir=str(tmp_path)),
+        state_dir_config(state_dir=str(tmp_path)),
         VehicleProfile(slug="truck", vin="", name="Truck"),
     )
     for name in DAEMON_STATE_LAYOUT:
@@ -74,7 +65,7 @@ def test_investigation_memory_is_per_vehicle_state(tmp_path: Path) -> None:
 
     assert DAEMON_STATE_LAYOUT["memory_ledger"] == Path("control/memory.jsonl")
     config = scope_config(
-        _config(state_dir=str(tmp_path)),
+        state_dir_config(state_dir=str(tmp_path)),
         VehicleProfile(slug="truck", vin="", name="Truck"),
     )
     assert config.daemon.memory_ledger == tmp_path / "control/truck/memory.jsonl"
@@ -85,7 +76,7 @@ def test_investigation_memory_is_per_vehicle_state(tmp_path: Path) -> None:
 
 
 def test_without_state_dir_the_laptop_defaults_are_unchanged() -> None:
-    config = _config()
+    config = state_dir_config()
     assert config.daemon.state_dir is None
     assert config.daemon.models_dir == Path("models")
     assert config.daemon.behavior_models == REPO_ROOT / "data/behavior_models.yaml"
@@ -124,7 +115,9 @@ def test_seeding_copies_the_tracked_artifact_once_and_never_overwrites(tmp_path:
 
     state = tmp_path / "state"
     config = scope_config(
-        _config(state_dir=str(state), afr_calibration=str(tmp_path / "data/afr_calibration.yaml")),
+        state_dir_config(
+            state_dir=str(state), afr_calibration=str(tmp_path / "data/afr_calibration.yaml")
+        ),
         VehicleProfile(slug="truck", vin="", name="Truck"),
     )
     tracked = profile_dir(config) / "behavior_models.yaml"
@@ -144,7 +137,7 @@ def test_retention_footer_ledger_is_per_vehicle_state(tmp_path: Path) -> None:
     lives under ``state_dir``, per vehicle, never in the checkout."""
     assert DAEMON_STATE_LAYOUT["retention_footer_ledger"] == Path("control/retention_footers.json")
     config = scope_config(
-        _config(state_dir=str(tmp_path)),
+        state_dir_config(state_dir=str(tmp_path)),
         VehicleProfile(slug="truck", vin="", name="Truck"),
     )
     assert config.daemon.retention_footer_ledger == (

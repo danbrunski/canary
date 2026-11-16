@@ -391,7 +391,7 @@ absent by construction. It now refuses and names the cause.
 ## Package layers
 
 Imports between `src/` packages run one way, down the layers.
-`tests/test_layering.py` is the source of truth: its `LAYERS` map gives each
+`tests/test_layering.py` is the source of truth: the `LAYERS` map in `tests/layers.py` gives each
 package its layer, and it fails on any upward import or any same-layer pair
 that imports both ways. Function-level and `TYPE_CHECKING` imports count.
 `OWED` and `OWED_PAIRS` are empty (R09, closed 2026-10-03); `STANDING` holds

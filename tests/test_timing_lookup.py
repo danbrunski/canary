@@ -1,6 +1,6 @@
 """B08.4 — timing with the actual lookup context, on synthetic images and reads.
 
-The provider is B08.2's (``tests.test_operating_context``'s synthetic image,
+The provider is B08.2's (``tests.twin_builders``' synthetic image,
 whose trim A and trim B differ in every cell); the existing surface is a
 2-D grid fitted by B04's own fitter (:func:`fit_grid_binned_mean`). Nothing
 here fits a timing candidate.
@@ -53,12 +53,12 @@ from src.decode.dids import load_did_map
 from src.paths import DIDS_YAML
 from src.signals.pairing import PairingPolicy
 from src.yaml_load import load_yaml
-from tests import test_operating_context as operating_context_tests
+from tests import twin_builders
 from tests.rom_fixtures import PROFILE, xterra_map
-from tests.test_operating_context import (
-    _feed,
-    _long,
+from tests.twin_builders import (
+    context_feed,
     context_image,
+    context_long,
     definition,
     resolve,
     trim_a_cell,
@@ -92,7 +92,7 @@ def _program(image: bytes) -> tuple[ApplicationModel, str]:
 def image() -> bytes:
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(
-            operating_context_tests, "load_application_model", lambda _profile: _application_model()
+            twin_builders, "load_application_model", lambda _profile: _application_model()
         )
         return context_image()
 
@@ -163,7 +163,7 @@ def test_the_coordinate_is_observed_without_identity_coolant_or_latch(
     """The trim needs the image, the slot, coolant and the latch; the
     coordinate it searches is RAM and needs none of them."""
     stream = provider.stream(role="serve", captured=None)
-    _feed(
+    context_feed(
         stream,
         100.0,
         rpm_word=200,
@@ -184,7 +184,7 @@ def test_the_coordinate_carries_the_latch_as_read(
     provider: ContextProvider, high_det: bool, expected: bool
 ) -> None:
     stream = provider.stream(role="serve", captured=None)
-    _feed(stream, 100.0, high_det=high_det)
+    context_feed(stream, 100.0, high_det=high_det)
     coordinate = stream.context_at(100.1)["timing_coordinate"]
     assert coordinate["high_det"] is expected and coordinate["high_det_refused"] is None
 
@@ -194,7 +194,7 @@ def test_a_stale_or_skewed_coordinate_is_refused_by_name(provider: ContextProvid
         (100.0, "mem:ECM_ENGINE_SPEED_RAM", 2500.0),
         (100.4, "mem:ECM_FUEL_TARGET_MAP_X_TRACE", 40 * 0.250859),
     ]
-    skewed, stale = provider.evaluate_frame(_long(reads), [100.45, 100.7])
+    skewed, stale = provider.evaluate_frame(context_long(reads), [100.45, 100.7])
     assert skewed["timing_coordinate"]["refused"] == "skew:timing_coordinate"
     assert stale["timing_coordinate"]["refused"] == "stale:engine_speed_word"
 
@@ -228,7 +228,7 @@ def test_a_trim_or_coordinate_cannot_be_the_timing_target(
     with pytest.raises(TimingLookupRefusalError):
         identical_samples(
             provider,
-            _long([(T0, spec, 1.0)]),
+            context_long([(T0, spec, 1.0)]),
             surface.model_copy(update={"output": spec}),
             session=DEFAULT,
             policy=POLICY,
@@ -250,9 +250,9 @@ def _drive(t0: float) -> pd.DataFrame:
     - t0+30.1: a second target read whose only rpm partner was taken.
     """
     collect = _Collect()
-    _feed(collect, t0 - 0.05, rpm_word=120, x=40, high_det=True)
-    _feed(collect, t0 + 19.7, rpm_word=200, x=72, high_det=False)
-    _feed(
+    context_feed(collect, t0 - 0.05, rpm_word=120, x=40, high_det=True)
+    context_feed(collect, t0 + 19.7, rpm_word=200, x=72, high_det=False)
+    context_feed(
         collect,
         t0 + 29.95,
         rpm_word=200,
@@ -275,7 +275,7 @@ def _drive(t0: float) -> pd.DataFrame:
         (t0 + 30.05, "obd:ENGINE_LOAD", 30.0),
         (t0 + 30.12, "obd:ENGINE_LOAD", 30.0),
     ]
-    return _long(reads)
+    return context_long(reads)
 
 
 def test_each_target_read_is_paired_once_and_every_unpaired_read_is_named(
@@ -414,9 +414,9 @@ def test_the_coordinate_lands_on_the_trim_cells_both_tables_read(
     4) each table reads its own cell; the selected one equals the provider's
     resolved trim for the same reads with the latch set."""
     collect = _Collect()
-    _feed(collect, 100.0, rpm_word=128, x=40, high_det=True)
-    _feed(collect, 200.0, rpm_word=128, x=40, skip=("mem:ECM_FUEL_TARGET_MAP_X_TRACE",))
-    long = _long(collect.reads)
+    context_feed(collect, 100.0, rpm_word=128, x=40, high_det=True)
+    context_feed(collect, 200.0, rpm_word=128, x=40, skip=("mem:ECM_FUEL_TARGET_MAP_X_TRACE",))
+    long = context_long(collect.reads)
     samples = coordinate_samples(provider, long, session=DEFAULT)
     assert [s.refused for s in samples] == [None, "stale:bfs_x"]
     cov = trim_cell_coverage(samples, resolved, assumptions=("synthetic",))
@@ -467,9 +467,9 @@ def test_the_october_4_slice_resolves_no_coordinate_and_observes_no_latch(
     never reads HI DET: no coordinate is fresh at an rpm-word read, so the
     selected table is unobserved, by name."""
     from src.analysis.channels import read_channels
-    from tests.test_operating_context import _ram_study_frame
+    from tests.twin_builders import context_ram_study_frame
 
-    long = read_channels(_ram_study_frame(), provider.channels(), acquired_time=True)
+    long = read_channels(context_ram_study_frame(), provider.channels(), acquired_time=True)
     samples = coordinate_samples(provider, long, session="_capture-ram-study-2026-10-04T204557")
     assert samples and not any(s.observed for s in samples)
     assert {str(s.refused).split(":")[0] for s in samples} <= {"stale", "skew", "missing"}
@@ -485,7 +485,7 @@ def test_the_october_4_slice_resolves_no_coordinate_and_observes_no_latch(
 
 def _one_sample_reads(rpm_dt: float, load_dt: float) -> list[tuple[float, str, float]]:
     collect = _Collect()
-    _feed(collect, T0 - 0.05, rpm_word=120, x=40, high_det=True)
+    context_feed(collect, T0 - 0.05, rpm_word=120, x=40, high_det=True)
     return [
         *collect.reads,
         (T0, "obd:TIMING_ADVANCE", 21.0),
@@ -499,7 +499,7 @@ def test_an_axis_pairing_looser_than_the_lookup_skew_is_refused(
 ) -> None:
     """rpm and load read 4 s from the timing read do not describe it: a
     5 s policy is refused, never used to call them identical."""
-    long = _long(_one_sample_reads(4.0, -4.0))
+    long = context_long(_one_sample_reads(4.0, -4.0))
     with pytest.raises(TimingLookupRefusalError) as caught:
         identical_samples(
             provider, long, surface, session=DEFAULT, policy=PairingPolicy.within("5s")
@@ -520,8 +520,10 @@ def test_the_tool_refuses_a_pairing_looser_than_the_lookup_skew(tmp_path: Path) 
 def test_an_axis_read_on_a_logical_clock_is_named_clock_unacquired(
     provider: ContextProvider, surface: BehaviorModel2D
 ) -> None:
-    acquired = _long(_one_sample_reads(0.1, -0.1)[:-2])
-    logical = _long([(T0, "obd:RPM", 1500.0), (T0, "obd:ENGINE_LOAD", 30.0)], basis="logical")
+    acquired = context_long(_one_sample_reads(0.1, -0.1)[:-2])
+    logical = context_long(
+        [(T0, "obd:RPM", 1500.0), (T0, "obd:ENGINE_LOAD", 30.0)], basis="logical"
+    )
     samples = identical_samples(
         provider,
         pd.concat([acquired, logical], ignore_index=True),
@@ -537,7 +539,11 @@ def test_scoring_refuses_a_model_that_does_not_grade_final_timing(
 ) -> None:
     (tmp_path / DEFAULT).mkdir()
     samples = identical_samples(
-        provider, _long(_one_sample_reads(0.1, -0.1)), surface, session=DEFAULT, policy=POLICY
+        provider,
+        context_long(_one_sample_reads(0.1, -0.1)),
+        surface,
+        session=DEFAULT,
+        policy=POLICY,
     )
     assert [s.reason for s in samples] == [None]
     trim_model = surface.model_copy(update={"output": "derived:TIMING_TRIM"})
@@ -641,7 +647,9 @@ def test_only_a_declared_memory_only_target_has_a_memory_only_tuple(
     provider: ContextProvider, spec: str, reason: str
 ) -> None:
     with pytest.raises(TimingLookupRefusalError) as caught:
-        memory_only_samples(provider, _long([(T0, spec, 20.0)]), session=DEFAULT, target=spec)
+        memory_only_samples(
+            provider, context_long([(T0, spec, 20.0)]), session=DEFAULT, target=spec
+        )
     assert caught.value.reason == reason
 
 
@@ -649,7 +657,7 @@ def _burst(collect: _Collect, t: float, **feed: Any) -> list[tuple[float, str, f
     """One window's memory burst as option (b) issues it: the spark read
     (final timing and the rpm word) first, BFS-X 10 ms and HI DET 20 ms
     after; every other context channel at the spark read."""
-    _feed(collect, t, **feed)
+    context_feed(collect, t, **feed)
     later = {"mem:ECM_FUEL_TARGET_MAP_X_TRACE": 0.010, "mem:ECM_HIGH_DET_FLAGS": 0.020}
     reads = [(at + later.get(spec, 0.0), spec, v) for at, spec, v in collect.reads]
     collect.reads.clear()
@@ -685,7 +693,7 @@ def _memory_drive(t0: float) -> pd.DataFrame:
             for t, spec, v in _burst(collect, t0 + 50.21, rpm_word=120, x=40, high_det=False)
         ],
     ]
-    return _long(
+    return context_long(
         [
             *reads,
             (t0, TIMING_RAM, 24.0),

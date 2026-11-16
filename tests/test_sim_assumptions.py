@@ -38,21 +38,30 @@ from src.analysis.sim_montecarlo import (
 from src.analysis.sim_report import render_report
 from src.analysis.target_phi import predict as predict_phi
 from src.vehicle.tune_revisions import TuneRevisionRegistry
-from tests import test_rom_editor, test_rom_sim_cli, test_sim_montecarlo
 from tests.rom_fixtures import PROFILE
-from tests.test_paired_scenarios import CRUISE, WOT, _edit_all, _scenario
-from tests.test_rom_editor import request
-from tests.test_sim_montecarlo import P_CRUISE, P_MODEL, P_WOT, _design, _run, _template
+from tests.sim_builders import (
+    CRUISE,
+    P_CRUISE,
+    P_MODEL,
+    P_WOT,
+    WOT,
+    mc_design,
+    mc_run,
+    mc_template,
+    paired_edit_all,
+    paired_scenario,
+    request,
+)
+from tests.sim_builders import grid_design as grid_design  # noqa: F401 - fixture
+from tests.sim_builders import kit_and_image as kit_and_image  # noqa: F401 - fixture
+from tests.sim_builders import matched as matched  # noqa: F401 - fixture
+from tests.sim_builders import registry as registry  # noqa: F401 - fixture
+from tests.sim_builders import spec_run as spec_run  # noqa: F401 - fixture
+from tests.sim_builders import uncertainty as uncertainty  # noqa: F401 - fixture
+from tests.sim_builders import world as world  # noqa: F401 - fixture
 
-# The fixtures these tests share, bound here so pytest finds them: the
+# The fixtures these tests share, imported above so pytest finds them: the
 # synthetic kit, the CLI's synthetic world and grid run, the editor's registry.
-kit_and_image = test_sim_montecarlo.kit_and_image
-uncertainty = test_sim_montecarlo.uncertainty
-world = test_rom_sim_cli.world
-grid_design = test_rom_sim_cli.grid_design
-spec_run = test_rom_sim_cli.spec_run
-registry = test_rom_editor.registry
-matched = test_rom_editor.matched
 
 TARGET_GATE = "target_lookup:enrichment_gate_state_unknown"
 VE = "manifold_pressure"
@@ -93,11 +102,11 @@ def test_run_paired_names_each_working_assumption_the_registry_resolves(
     registry; VE only where the plant's manifold model sets MAP, the rail
     only where no rail reading was given. Moving the registry moves it."""
     kit, image = kit_and_image
-    cand = _edit_all(image, kit, "fuel_compensation", 1, 3)
+    cand = paired_edit_all(image, kit, "fuel_compensation", 1, 3)
     model_wot = dataclasses.replace(
         WOT, map_kpa_source="plant_model", rail_kpa_source="working_assumption", map_kpa=0.0
     )
-    result = run_paired(kit, _scenario(kit, image, cand, model_wot, CRUISE), image, cand)
+    result = run_paired(kit, paired_scenario(kit, image, cand, model_wot, CRUISE), image, cand)
     named = _named(result.assumptions)
     assert set(named) == _registry_working_assumptions(kit)
     assert {VE, RAIL} <= set(named)
@@ -107,12 +116,12 @@ def test_run_paired_names_each_working_assumption_the_registry_resolves(
         "fuel-mv-1; unresolved effect manifold_pressure_unmeasured)"
     )
     # Stated MAP and rail: the plant reads neither working value.
-    stated = run_paired(kit, _scenario(kit, image, cand, WOT, CRUISE), image, cand)
+    stated = run_paired(kit, paired_scenario(kit, image, cand, WOT, CRUISE), image, cand)
     assert set(_named(stated.assumptions)) == _registry_working_assumptions(kit) - {VE, RAIL}
     # A drawn parameter says so; the string carries no per-draw value.
     drawn = run_paired(
         kit,
-        _scenario(kit, image, cand, model_wot),
+        paired_scenario(kit, image, cand, model_wot),
         image,
         cand,
         plant_overrides={VE: 0.55},
@@ -129,7 +138,7 @@ def test_run_paired_names_each_working_assumption_the_registry_resolves(
 
     moved = _with_registry(kit, move)
     again = _named(
-        run_paired(moved, _scenario(moved, image, cand, model_wot), image, cand).assumptions
+        run_paired(moved, paired_scenario(moved, image, cand, model_wot), image, cand).assumptions
     )
     assert "= 0.65, bracket [0.45, 0.95]" in again[VE]
     assert "fuel_stoich_afr" not in again
@@ -140,13 +149,13 @@ def test_a_monte_carlo_names_the_drawn_and_held_assumptions_and_the_designs(
     kit_and_image: tuple[SimKit, bytes], uncertainty: LoadedUncertainty
 ) -> None:
     kit, image = kit_and_image
-    cand = _edit_all(image, kit, "fuel_compensation", 1, 3)
+    cand = paired_edit_all(image, kit, "fuel_compensation", 1, 3)
     design = dataclasses.replace(
-        _design(image, (P_MODEL, 190, 195), (P_CRUISE, 50, 55)),
+        mc_design(image, (P_MODEL, 190, 195), (P_CRUISE, 50, 55)),
         assumptions=("a stated design fact",),
         maf_frozen_points=1,
     )
-    result = _run(kit, image, cand, design, uncertainty, draws=3, vary=[VE])
+    result = mc_run(kit, image, cand, design, uncertainty, draws=3, vary=[VE])
     named = _named(result.assumptions)
     assert set(named) == _registry_working_assumptions(kit)
     assert "drawn inside its bracket" in named[VE]
@@ -160,7 +169,7 @@ def test_a_monte_carlo_names_the_drawn_and_held_assumptions_and_the_designs(
     moved = _with_registry(
         kit, lambda p: p["working_assumption"].update(value=0.65) if p["id"] == VE else None
     )
-    again = _run(moved, image, cand, design, uncertainty, draws=2)
+    again = mc_run(moved, image, cand, design, uncertainty, draws=2)
     assert "= 0.65, bracket [0.4, 1.0]" in _named(again.assumptions)[VE]
 
 
@@ -213,7 +222,7 @@ def test_a_target_lookup_gate_leaves_bfs_supported_in_run_paired_and_the_fast_pa
     supported; target phi, the pulse, lambda, fuel and the trim keep the
     reason. The fast path's own run_paired self-check passes."""
     kit, image = kit_and_image
-    cand = _edit_all(image, kit, "fuel_compensation", 1, 3)
+    cand = paired_edit_all(image, kit, "fuel_compensation", 1, 3)
     # The lookup is the twin runner's target-phi stage (E09.2c): one patch
     # reaches run_paired and the fast path alike.
     real_predict = predict_phi
@@ -228,15 +237,15 @@ def test_a_target_lookup_gate_leaves_bfs_supported_in_run_paired_and_the_fast_pa
         return out
 
     monkeypatch.setattr(twin_runner, "predict_phi", in_the_band)
-    design = _design(image, (P_WOT, 190, 200), (P_CRUISE, 50, 70))
-    result = _run(kit, image, cand, design, uncertainty, draws=4)
+    design = mc_design(image, (P_WOT, 190, 200), (P_CRUISE, 50, 70))
+    result = mc_run(kit, image, cand, design, uncertainty, draws=4)
     assert result.supported("base_fuel_schedule")[0].all()
     assert np.isfinite(result.delta("base_fuel_schedule")[0]).all()
     for name in set(OUTPUTS) - {"base_fuel_schedule"}:
         for d in range(result.draws):
             assert TARGET_GATE in result.reasons(name, 0, d), name
     # And run_paired itself, pair by pair, at the drawn bytes.
-    template = _template(kit, image, cand)
+    template = mc_template(kit, image, cand)
     for d in range(result.draws):
         points = tuple(
             dataclasses.replace(dp.point, conditioned={FILL_BYTE: float(result.fill_bytes[i, d])})
@@ -399,7 +408,7 @@ def test_a_run_level_gate_withholds_only_the_outputs_it_reaches(
     cand = make_candidate(
         image, kit.rom_map, [CellEdit("load_point_scaler", 0, 0, scaler + 2000)], base_label="s"
     ).image
-    plain = run_paired(kit, _scenario(kit, image, cand, WOT, CRUISE), image, cand)
+    plain = run_paired(kit, paired_scenario(kit, image, cand, WOT, CRUISE), image, cand)
     gate = "rom:observed_not_predicted:load_input_x"
     for point in plain.points:
         bfs = point["outputs"]["base_fuel_schedule"]
@@ -408,7 +417,7 @@ def test_a_run_level_gate_withholds_only_the_outputs_it_reaches(
         for name in set(OUTPUTS) - {"base_fuel_schedule"}:
             out = point["outputs"][name]
             assert gate in out["reasons"] and out["candidate"] is None, name
-    result = _run(kit, image, cand, _design(image, (P_WOT, 190, 200)), uncertainty, draws=3)
+    result = mc_run(kit, image, cand, mc_design(image, (P_WOT, 190, 200)), uncertainty, draws=3)
     assert result.supported("base_fuel_schedule").all()
     assert np.isfinite(result.candidate["base_fuel_schedule"]).all()
     for name in set(OUTPUTS) - {"base_fuel_schedule"}:

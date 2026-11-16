@@ -16,7 +16,6 @@ import dataclasses
 import hashlib
 import json
 import struct
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -25,10 +24,9 @@ import pytest
 from src.analysis.channels import read_channels
 from src.analysis.ecu_application import (
     ApplicationModel,
-    load_application_model,
     program_sha256,
 )
-from src.analysis.rom_trace import AxisTrace, ViewerDefinition, load_viewer_definition
+from src.analysis.rom_trace import AxisTrace, ViewerDefinition
 from src.analysis.target_phi import (
     ResolvedTable,
     TwinDefinition,
@@ -36,7 +34,6 @@ from src.analysis.target_phi import (
     bind_application,
     duplicate_use,
     evaluate_session,
-    load_twin_definition,
     predict,
     resolve_slot,
     resolve_table,
@@ -46,67 +43,29 @@ from src.analysis.target_phi import (
 from src.signals.afr import load_afr_calibration
 from src.yaml_load import load_yaml
 from tests.rom_fixtures import synthetic_image, xterra_map
-
-REPO = Path(__file__).resolve().parents[1]
-PROFILE = REPO / "data" / "nissan-xterra-2008"
-EXPECT_PATH = REPO / "tests" / "fixtures" / "ground_truth" / "target_phi.yaml"
-EXPECT: dict[str, Any] = load_yaml(EXPECT_PATH.read_text())
-IMAGE_SHA = EXPECT["calibration"]["image_sha256"]
-
-
-def _definition() -> tuple[TwinDefinition, str]:
-    return load_twin_definition(PROFILE)
-
-
-def _viewer() -> ViewerDefinition:
-    return load_viewer_definition(PROFILE)
-
-
-def _model() -> tuple[ApplicationModel, str]:
-    return load_application_model(PROFILE)
-
-
-def _table(definition: TwinDefinition) -> ResolvedTable:
-    calibration = load_afr_calibration(PROFILE / "afr_calibration.yaml")
-    return table_from_calibration(
-        calibration,
-        definition,
-        viewer=_viewer(),
-        application_model=_model(),
-        revision=EXPECT["calibration"]["revision"],
-        image_sha256=IMAGE_SHA,
-        slot=EXPECT["calibration"]["slot"],
-    )
-
-
-def fixture_frame() -> pd.DataFrame:
-    """The two committed slices as one session frame, after their hashes pass."""
-    frames = []
-    for part in EXPECT["telemetry"]:
-        path = REPO / part["path"]
-        assert hashlib.sha256(path.read_bytes()).hexdigest() == part["sha256"], part["path"]
-        frame = pd.read_parquet(path)
-        frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
-        frames.append(frame)
-    frame = pd.concat(frames, ignore_index=True)
-    return frame.sort_values("timestamp", kind="stable").reset_index(drop=True)
-
-
-def record_lines(result: dict[str, Any]) -> list[str]:
-    lines = []
-    for record in result["records"]:
-        sample = record["sample"]
-        stamp = pd.Timestamp(sample["acquired_at"]).strftime("%H:%M:%S.%f")
-        word = "cut" if sample["observed_word"] is None else sample["observed_word"]
-        lines.append(f"{stamp} {word} {record['state']} {record['reason']}")
-    return lines
-
+from tests.target_phi_builders import (
+    EXPECT,
+    IMAGE_SHA,
+    NAMED_STATES,
+    PROFILE,
+    REPO,
+    fixture_frame,
+    hysteresis_table,
+    phi_definition,
+    phi_evaluate,
+    phi_model,
+    phi_seconds,
+    phi_session,
+    phi_table,
+    phi_viewer,
+    record_lines,
+)
 
 # -- E02.1: the declared contract ---------------------------------------------------
 
 
 def test_the_shipped_definition_declares_every_input_gate_and_limit() -> None:
-    definition, _ = _definition()
+    definition, _ = phi_definition()
     assert definition.inputs.channels() == {
         "load": "mem:ECM_FUEL_TARGET_MAP_X_TRACE",
         "rpm": "mem:ECM_ENGINE_SPEED_RAM",
@@ -188,8 +147,8 @@ def test_a_missing_gate_section_is_refused() -> None:
 
 
 def test_the_pedal_flag_forces_the_last_column_whatever_the_load_byte() -> None:
-    definition, _ = _definition()
-    table = _table(definition)
+    definition, _ = phi_definition()
+    table = phi_table(definition)
     for load in (0, 10, 100, 128):
         prediction = predict(table, definition, load_raw=load, rpm_raw=236, flag_raw=1)
         assert (prediction.branch, prediction.cell, prediction.word) == ("override", 149, 19072)
@@ -199,8 +158,8 @@ def test_the_pedal_flag_forces_the_last_column_whatever_the_load_byte() -> None:
 
 
 def test_an_ordinary_lookup_below_the_enrichment_threshold_commands_stoich() -> None:
-    definition, _ = _definition()
-    table = _table(definition)
+    definition, _ = phi_definition()
+    table = phi_table(definition)
     prediction = predict(table, definition, load_raw=10, rpm_raw=236, flag_raw=0)
     assert (prediction.cell, prediction.word, prediction.phi) == (128, 16384, 1.0)
     # An enriched interior cell passes the gate unchanged: 146 (see test_ecm_lookup).
@@ -208,8 +167,8 @@ def test_an_ordinary_lookup_below_the_enrichment_threshold_commands_stoich() -> 
 
 
 def test_a_lookup_inside_the_gates_hysteresis_band_is_ambiguous() -> None:
-    definition, _ = _definition()
-    base = _table(definition)
+    definition, _ = phi_definition()
+    base = phi_table(definition)
     # 128 -> 132 a quarter of the way: 129, inside [129, 130).
     table = ResolvedTable(
         **{
@@ -234,7 +193,7 @@ def _image_with_modelled_constants(**kwargs: Any) -> bytes:
     image[0x8B3D] = 129
     image[0xD247 : 0xD247 + 8] = bytes([128] * 8)
     struct.pack_into(">H", image, 0x9416, 44019)
-    model, _ = _model()
+    model, _ = phi_model()
     for marker in model.program.patch.markers:
         raw = bytes.fromhex(marker.bytes)
         image[marker.offset : marker.offset + len(raw)] = raw
@@ -249,26 +208,26 @@ def _image_with_modelled_constants(**kwargs: Any) -> bytes:
 def _synthetic_program(image: bytes) -> tuple[ApplicationModel, str]:
     """The real application model, with its program identity re-pinned to a
     synthetic image's program spans: the stand-in for "the same program"."""
-    model, sha = _model()
+    model, sha = phi_model()
     identity = model.program.identity.model_copy(update={"sha256": program_sha256(image, model)})
     program = model.program.model_copy(update={"identity": identity})
     return model.model_copy(update={"program": program}), sha
 
 
 def test_resolution_reads_the_slot_table_axes_and_scaler_from_the_image() -> None:
-    definition, _ = _definition()
+    definition, _ = phi_definition()
     image = _image_with_modelled_constants()
     sha = hashlib.sha256(image).hexdigest()
     table = resolve_table(
         image,
         xterra_map(),
         definition,
-        viewer=_viewer(),
+        viewer=phi_viewer(),
         application_model=_synthetic_program(image),
         expected_sha256=sha,
         slot=1,
     )
-    reference = _table(definition)
+    reference = phi_table(definition)
     assert table.cells == reference.cells
     assert table.row_breakpoints == tuple(b * 4 for b in table.row_axis_raw)
     assert table.load_point_scaler == 44019
@@ -296,7 +255,7 @@ def test_resolution_refuses_by_name(change: str, reason: str) -> None:
     never the ID alone); ``patch`` loses UpRev's pointer redirect;
     ``dead_path`` schedules the alternate multiplier writer the model treats
     as calibration-dead."""
-    definition, _ = _definition()
+    definition, _ = phi_definition()
     kwargs: dict[str, Any] = {}
     if change == "program":
         kwargs["calibration_id"] = b"1ZS04C00000"
@@ -309,7 +268,7 @@ def test_resolution_refuses_by_name(change: str, reason: str) -> None:
         image[0x055EC4 + 3] ^= 0xFF
     if change == "dead_path":
         image[0x8AD3] |= 0x10
-    application = _model() if change == "program_hash" else _synthetic_program(bytes(image))
+    application = phi_model() if change == "program_hash" else _synthetic_program(bytes(image))
     sha = hashlib.sha256(bytes(image)).hexdigest()
     slot = 2 if change == "slot" else 1
     if change == "hash":
@@ -325,7 +284,7 @@ def test_resolution_refuses_by_name(change: str, reason: str) -> None:
             bytes(image),
             rom_map,
             definition,
-            viewer=_viewer(),
+            viewer=phi_viewer(),
             application_model=application,
             expected_sha256=sha,
             slot=slot,
@@ -334,7 +293,7 @@ def test_resolution_refuses_by_name(change: str, reason: str) -> None:
 
 
 def _viewer_with(axis: str, **changes: Any) -> ViewerDefinition:
-    viewer = _viewer()
+    viewer = phi_viewer()
     info = viewer.table("fuel_targets")
     assert info is not None and info.trace is not None
     old = getattr(info.trace, axis)
@@ -366,7 +325,7 @@ def test_resolution_consumes_w05s_trace_mapping_and_refuses_by_name(
 ) -> None:
     """The twin reads W05.1's verdict on how the ECM's coordinates land on
     the axes; an unverified or different mapping refuses both table paths."""
-    definition, _ = _definition()
+    definition, _ = phi_definition()
     viewer = _viewer_with(viewer_change[0], **viewer_change[1])
     calibration = load_afr_calibration(PROFILE / "afr_calibration.yaml")
     with pytest.raises(TwinRefusalError) as refused:
@@ -374,7 +333,7 @@ def test_resolution_consumes_w05s_trace_mapping_and_refuses_by_name(
             calibration,
             definition,
             viewer=viewer,
-            application_model=_model(),
+            application_model=phi_model(),
             revision="ZS44A-20260920",
             image_sha256=IMAGE_SHA,
             slot=1,
@@ -407,131 +366,12 @@ def test_resolution_consumes_w05s_trace_mapping_and_refuses_by_name(
 def test_slot_resolution_names_unresolved_state(
     magic: int, active: int, selector: int, slot: int | None, reason: str | None
 ) -> None:
-    definition, _ = _definition()
+    definition, _ = phi_definition()
     resolved = resolve_slot(definition, magic=magic, active_map=active, selector=selector)
     assert (resolved.slot, resolved.reason) == (slot, reason)
 
 
 # -- E02.5: synthetic sessions, one named reason each ---------------------------------
-
-T0 = pd.Timestamp("2026-10-04T21:00:00Z")
-X_SCALE = 0.250859
-
-
-def _row(
-    t: float, channel: str, value: float | None, *, text: str | None = None, basis: str = "acquired"
-) -> dict[str, Any]:
-    stamp = T0 + pd.Timedelta(seconds=t)
-    meta: dict[str, Any] = {"round_id": 1}
-    if basis == "acquired":
-        meta["acquired_at"] = stamp.timestamp()
-    return {
-        "timestamp": stamp,
-        "source": "obd",
-        "channel": channel,
-        "value_number": value,
-        "value_text": text,
-        "unit": "",
-        "metadata_json": json.dumps(meta),
-    }
-
-
-def _session(
-    *,
-    t: float = 30.0,
-    load: int = 100,
-    rpm_word: int = 236,
-    flag: int = 1,
-    word: int | None = 19072,
-    load_at: float | None = 0.0,
-    flag_at: float = 0.12,
-    extra_load_at: float | None = None,
-    magic: int = 0xAA5555AA,
-    active: int = 0,
-    active_after: int | None = None,
-    selector: int = 0,
-    coolant: float | None = 90.0,
-    fuel_status: float = 4.0,
-    fuel_status_after: float | None = None,
-    rpm_span: float = 50.0,
-    target_basis: str = "acquired",
-    end: float = 60.0,
-) -> pd.DataFrame:
-    """One command sample at ``t`` with its tuple (all within 120 ms by
-    default), identity reads every 5 s (one lands exactly on ``t = 30``),
-    and 1-2 Hz gate channels over ``0..end`` seconds."""
-    rows = []
-    if word is None:
-        rows.append(_row(t, "mem:ECM_TARGET_EQUIV_RATIO_SENTINEL", None, text="fuel cut"))
-    else:
-        rows.append(
-            _row(t, "mem:ECM_TARGET_EQUIV_RATIO", word * 6.103515625e-05, basis=target_basis)
-        )
-    if load_at is not None:
-        rows.append(_row(t + load_at, "mem:ECM_FUEL_TARGET_MAP_X_TRACE", load * X_SCALE))
-    if extra_load_at is not None:
-        rows.append(_row(t + extra_load_at, "mem:ECM_FUEL_TARGET_MAP_X_TRACE", load * X_SCALE))
-    rows.append(_row(t + 0.06, "mem:ECM_ENGINE_SPEED_RAM", rpm_word * 12.5))
-    rows.append(_row(t + flag_at, "mem:ECM_PEDAL_ENRICH_FLAGS", float(flag)))
-    s = 0.0
-    while s <= end:
-        slot = active if active_after is None or s <= t else active_after
-        rows += [
-            _row(s, "mem:ECM_UPREV_MAGIC", float(magic)),
-            _row(s, "mem:ECM_ACTIVE_MAP", float(slot)),
-            _row(s, "mem:ECM_UPREV_MAP_SELECTOR", float(selector)),
-        ]
-        s += 5.0
-    for k in range(int(end) + 1):
-        if coolant is not None:
-            rows.append(_row(k, "COOLANT_TEMP", coolant))
-        for half in (0.0, 0.5):
-            status = fuel_status
-            if fuel_status_after is not None and k + half > t:
-                status = fuel_status_after
-            rows.append(_row(k + half, "FUEL_STATUS", status))
-        rpm = 2950.0 + (rpm_span if k % 2 else 0.0)
-        rows.append(_row(k + 0.2, "RPM", rpm))
-        rows.append(_row(k + 0.7, "RPM", rpm))
-        rows.append(_row(k + 0.3, "MAF", 120.0))
-        rows.append(_row(k + 0.8, "MAF", 121.0))
-    frame = pd.DataFrame(rows)
-    return frame.sort_values("timestamp", kind="stable").reset_index(drop=True)
-
-
-def _seconds(frame: pd.DataFrame) -> pd.Series:
-    return (frame["timestamp"] - T0).dt.total_seconds()
-
-
-def _without(frame: pd.DataFrame, channel: str, start: float, end: float) -> pd.DataFrame:
-    """``frame`` minus ``channel``'s rows in ``[start, end]`` seconds."""
-    seconds = _seconds(frame)
-    drop = (frame["channel"] == channel) & (seconds >= start) & (seconds <= end)
-    return frame[~drop].reset_index(drop=True)
-
-
-def _until(frame: pd.DataFrame, end: float) -> pd.DataFrame:
-    """A capture still recording: nothing after ``end`` seconds yet."""
-    return frame[_seconds(frame) <= end].reset_index(drop=True)
-
-
-def _hysteresis_table() -> ResolvedTable:
-    """Row 0 runs 128 -> 132 over the first load span, so load 0x38 at the
-    first rpm breakpoint looks up 129: inside the gate's [129, 130) band."""
-    definition, _ = _definition()
-    base = _table(definition)
-    return ResolvedTable(
-        **{**base.__dict__, "cells": tuple(tuple([128, 132] + [128] * 6) for _ in range(8))}
-    )
-
-
-def _evaluate(
-    frame: pd.DataFrame, *, table: ResolvedTable | None = None, **kwargs: Any
-) -> dict[str, Any]:
-    definition, sha = _definition()
-    return evaluate_session(
-        frame, definition, table or _table(definition), definition_sha256=sha, **kwargs
-    )
 
 
 def _only(result: dict[str, Any]) -> dict[str, Any]:
@@ -541,7 +381,7 @@ def _only(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_a_complete_steady_open_loop_override_tuple_is_eligible_and_passes() -> None:
-    result = _evaluate(_session())
+    result = phi_evaluate(phi_session())
     record = _only(result)
     assert (record["state"], record["reason"], record["branch"]) == ("eligible", None, "override")
     assert (record["predicted_word"], record["difference_words"]) == (19072, 0)
@@ -571,11 +411,11 @@ def test_qualification_follows_the_application_models_blockers() -> None:
     application model's (E05.1). With none left and the constants checked on
     an image, the same eligible pass issues its qualified residual; the
     model's blockers alone withhold it."""
-    definition, _ = _definition()
-    base = _table(definition)
+    definition, _ = phi_definition()
+    base = phi_table(definition)
     assert base.application.blockers == ("final_command_path_unverified", "ram_copy_unverified")
     checked = ResolvedTable(**{**base.__dict__, "final_command_constants_checked": True})
-    record = _only(_evaluate(_session(), table=checked))
+    record = _only(phi_evaluate(phi_session(), table=checked))
     assert record["qualified_residual_phi"] is None
     resolved = ResolvedTable(
         **{
@@ -583,14 +423,14 @@ def test_qualification_follows_the_application_models_blockers() -> None:
             "application": dataclasses.replace(base.application, blockers=()),
         }
     )
-    result = _evaluate(_session(), table=resolved)
+    result = phi_evaluate(phi_session(), table=resolved)
     assert result["qualification_blockers"] == []
     assert _only(result)["qualified_residual_phi"] == 0.0
 
 
 def test_the_twin_refuses_an_application_model_that_describes_other_inputs() -> None:
-    definition, _ = _definition()
-    model, sha = _model()
+    definition, _ = phi_definition()
+    model, sha = phi_model()
     observed = model.node("pedal_enrichment_flag").observed_as[0]
     moved = observed.model_copy(update={"spec": "mem:ECM_PEDAL_ENRICH_FLAGS_OTHER"})
     nodes = [
@@ -610,7 +450,7 @@ def test_the_twin_refuses_an_application_model_that_describes_other_inputs() -> 
         table_from_calibration(
             calibration,
             definition,
-            viewer=_viewer(),
+            viewer=phi_viewer(),
             application_model=(model, sha),
             revision=EXPECT["calibration"]["revision"],
             image_sha256="0" * 64,
@@ -620,88 +460,12 @@ def test_the_twin_refuses_an_application_model_that_describes_other_inputs() -> 
 
 
 def test_a_miss_is_counted_not_absorbed() -> None:
-    record = _only(_evaluate(_session(word=19072 + 2)))
+    record = _only(phi_evaluate(phi_session(word=19072 + 2)))
     assert (record["state"], record["difference_words"], record["within_tolerance"]) == (
         "eligible",
         2,
         False,
     )
-
-
-#: Every per-sample reason the evaluator can give, each reached below.
-#: ``(session kwargs, frame edit, evaluate kwargs, state, reason)``.
-NAMED_STATES: list[tuple[dict[str, Any], Any, dict[str, Any], str, str]] = [
-    ({"word": None}, None, {}, "unevaluable", "sentinel"),
-    ({"load_at": 0.4}, None, {}, "unevaluable", "input_stale:load"),
-    ({"flag_at": 0.4}, None, {}, "unevaluable", "input_stale:flag"),
-    ({"load_at": -0.2}, None, {}, "unevaluable", "input_stale:tuple_spread"),
-    ({"load_at": None}, None, {}, "unevaluable", "input_not_captured:load"),
-    ({"target_basis": "round"}, None, {}, "unevaluable", "unsupported_clock"),
-    ({"magic": 0}, None, {}, "unevaluable", "map_uninitialised"),
-    ({"selector": 2}, None, {}, "unevaluable", "slot_ambiguous"),
-    ({"active": 2}, None, {}, "unevaluable", "slot_unresolved"),
-    ({"active": 1, "active_after": 2}, None, {}, "unevaluable", "map_switching"),
-    ({"t": 58.0, "end": 58.0}, None, {}, "unevaluable", "map_identity_unbracketed"),
-    ({"coolant": None}, None, {}, "unevaluable", "gate_missing:coolant"),
-    (
-        {},
-        lambda f: _without(f, "COOLANT_TEMP", 19.0, 41.0),
-        {},
-        "unevaluable",
-        "gate_stale:coolant",
-    ),
-    ({}, lambda f: _without(f, "FUEL_STATUS", 0.0, 99.0), {}, "unevaluable", "gate_missing:mode"),
-    ({}, lambda f: _without(f, "FUEL_STATUS", 24.0, 36.0), {}, "unevaluable", "gate_stale:mode"),
-    ({"fuel_status": 3.0}, None, {}, "unevaluable", "mode_unknown"),
-    (
-        {},
-        lambda f: _without(f, "RPM", 27.5, 30.0),
-        {},
-        "unevaluable",
-        "steadiness_unobserved:obd:RPM",
-    ),
-    (
-        {},
-        lambda f: _without(f, "MAF", 27.5, 30.0),
-        {},
-        "unevaluable",
-        "steadiness_unobserved:obd:MAF",
-    ),
-    ({"flag": 0, "load": 10}, None, {}, "unevaluable", "uncovered_region"),
-    ({"rpm_word": 600}, None, {}, "unevaluable", "uncovered_region"),
-    (
-        {"flag": 0, "load": 0x38, "rpm_word": 96},
-        None,
-        {"table": "hysteresis"},
-        "unevaluable",
-        "enrichment_gate_state_unknown",
-    ),
-    ({"coolant": 60.0}, None, {}, "excluded", "cold"),
-    ({"fuel_status": 2.0}, None, {}, "excluded", "closed_loop"),
-    ({"fuel_status_after": 2.0}, None, {}, "excluded", "mode_transition"),
-    ({"rpm_span": 400.0}, None, {}, "excluded", "transient"),
-    (
-        {"load_at": None, "extra_load_at": -5.0},
-        lambda f: _until(f, 30.13),
-        {"session_complete": False},
-        "pending",
-        "awaiting_input:load",
-    ),
-    (
-        {},
-        lambda f: _until(f, 30.13),
-        {"session_complete": False},
-        "pending",
-        "awaiting_mode_read",
-    ),
-    (
-        {},
-        lambda f: _until(f, 30.13),
-        {"session_complete": False},
-        "pending",
-        "awaiting_identity_read",
-    ),
-]
 
 
 @pytest.mark.parametrize(
@@ -712,13 +476,13 @@ NAMED_STATES: list[tuple[dict[str, Any], Any, dict[str, Any], str, str]] = [
 def test_each_unmet_condition_has_a_named_state_and_a_null_qualified_residual(
     kwargs: dict[str, Any], edit: Any, evaluate: dict[str, Any], state: str, reason: str
 ) -> None:
-    frame = _session(**kwargs)
+    frame = phi_session(**kwargs)
     if edit is not None:
         frame = edit(frame)
     evaluate = dict(evaluate)
     if evaluate.pop("table", None) == "hysteresis":
-        evaluate["table"] = _hysteresis_table()
-    record = _only(_evaluate(frame, **evaluate))
+        evaluate["table"] = hysteresis_table()
+    record = _only(phi_evaluate(frame, **evaluate))
     assert record["state"] == state
     # The primary reason when it is the only one; otherwise among the named
     # reasons of that state (a capture still recording waits on several reads).
@@ -748,15 +512,15 @@ def test_a_switch_right_after_an_identity_read_at_the_sample_is_caught() -> None
     """An identity read stamped exactly at the sample is the *prior*; the
     bracket still needs the next read. Taking the one read as both sides hid
     this switch (slot 1 at t, slot 2 at t + 5 s)."""
-    frame = _session(t=30.0, active=1, active_after=2)
-    assert (_seconds(frame[frame["channel"] == "mem:ECM_ACTIVE_MAP"]) == 30.0).any()
-    record = _only(_evaluate(frame))
+    frame = phi_session(t=30.0, active=1, active_after=2)
+    assert (phi_seconds(frame[frame["channel"] == "mem:ECM_ACTIVE_MAP"]) == 30.0).any()
+    record = _only(phi_evaluate(frame))
     assert record["reason"] == "map_switching"
     assert [record["map_identity"][side]["slot"] for side in ("before", "after")] == [1, 2]
 
 
 def test_an_unreadable_gate_source_refuses_the_session() -> None:
-    definition, sha = _definition()
+    definition, sha = phi_definition()
     gates = definition.gates
     broken = definition.model_copy(
         update={
@@ -768,12 +532,12 @@ def test_an_unreadable_gate_source_refuses_the_session() -> None:
         }
     )
     with pytest.raises(TwinRefusalError) as refused:
-        evaluate_session(_session(), broken, _table(definition), definition_sha256=sha)
+        evaluate_session(phi_session(), broken, phi_table(definition), definition_sha256=sha)
     assert refused.value.reason == "gate_unreadable"
 
 
 def test_a_window_the_catalog_disagrees_with_refuses_the_session() -> None:
-    definition, sha = _definition()
+    definition, sha = phi_definition()
     acquisition = definition.acquisition
     windows = {**acquisition.windows}
     windows["spark"], windows["flags_2841"] = windows["flags_2841"], windows["spark"]
@@ -781,7 +545,7 @@ def test_a_window_the_catalog_disagrees_with_refuses_the_session() -> None:
         update={"acquisition": acquisition.model_copy(update={"windows": windows})}
     )
     with pytest.raises(TwinRefusalError) as refused:
-        evaluate_session(_session(), moved, _table(definition), definition_sha256=sha)
+        evaluate_session(phi_session(), moved, phi_table(definition), definition_sha256=sha)
     assert refused.value.reason == "window_mismatch"
 
 
@@ -795,20 +559,20 @@ def test_duplicate_use_counts_an_input_read_placed_in_two_tuples() -> None:
     assert duplicate_use(records) == 1
     # Two commands 0.1 s apart with one X read between them: pairing gives it
     # to one, and the other is stale rather than sharing it.
-    frame = _session()
+    frame = phi_session()
     second = frame[frame["channel"] == "mem:ECM_TARGET_EQUIV_RATIO"].copy()
     second["timestamp"] = second["timestamp"] + pd.Timedelta("100ms")
     second["metadata_json"] = [
         json.dumps({"round_id": 1, "acquired_at": t.timestamp()}) for t in second["timestamp"]
     ]
     frame = pd.concat([frame, second]).sort_values("timestamp", kind="stable")
-    result = _evaluate(frame.reset_index(drop=True))
+    result = phi_evaluate(frame.reset_index(drop=True))
     assert result["accounting"]["duplicate_use"] == 0
     assert sorted(r["reason"] or "" for r in result["records"])[-1].startswith("input_stale")
 
 
 def test_a_transient_keeps_its_diagnostic_difference_separately() -> None:
-    result = _evaluate(_session(rpm_span=400.0, word=19072 + 5))
+    result = phi_evaluate(phi_session(rpm_span=400.0, word=19072 + 5))
     record = _only(result)
     assert (record["state"], record["difference_words"]) == ("excluded", 5)
     assert result["accounting"]["transient_differences"] == {"outside_tolerance": 1}
@@ -816,17 +580,17 @@ def test_a_transient_keeps_its_diagnostic_difference_separately() -> None:
 
 
 def test_a_sample_still_waiting_for_reads_is_pending_while_the_session_records() -> None:
-    frame = _session(t=58.0, end=58.0)
-    assert _only(_evaluate(frame, session_complete=False))["state"] == "pending"
-    assert _only(_evaluate(frame))["reason"] == "map_identity_unbracketed"
+    frame = phi_session(t=58.0, end=58.0)
+    assert _only(phi_evaluate(frame, session_complete=False))["state"] == "pending"
+    assert _only(phi_evaluate(frame))["reason"] == "map_identity_unbracketed"
 
 
 def test_a_load_byte_stored_under_another_decode_refuses_the_session() -> None:
-    frame = _session()
+    frame = phi_session()
     rows = frame["channel"] == "mem:ECM_FUEL_TARGET_MAP_X_TRACE"
     frame.loc[rows, "value_number"] = 100.0  # raw counts, not raw x 0.250859
     with pytest.raises(TwinRefusalError) as refused:
-        _evaluate(frame)
+        phi_evaluate(frame)
     assert refused.value.reason == "wrong_units"
 
 
@@ -853,10 +617,10 @@ def _nearest_before(long: pd.DataFrame, spec: str, at: pd.Timestamp) -> tuple[fl
 
 
 def test_the_two_enrichment_commands_are_exactly_the_forced_last_column() -> None:
-    definition, _ = _definition()
-    table = _table(definition)
+    definition, _ = phi_definition()
+    table = phi_table(definition)
     frame = fixture_frame()
-    result = _evaluate(frame)
+    result = phi_evaluate(frame)
     # Exactly two commands read 0x4A80 all drive, at the recorded instants,
     # and neither is a live pass: their inputs were read ~0.9 s earlier.
     at_override = [
@@ -901,8 +665,8 @@ def test_the_two_enrichment_commands_are_exactly_the_forced_last_column() -> Non
 def test_the_override_known_answer_exposes_an_rpm_decode_mistake() -> None:
     """Negative control: reading the rpm word at the axis's 50 rpm per count
     (instead of 12.5) lands in row 0, whose last column is 0x92, not 0x95."""
-    definition, _ = _definition()
-    table = _table(definition)
+    definition, _ = phi_definition()
+    table = phi_table(definition)
     for case in EXPECT["known_override"]:
         wrong = round(case["rpm_raw"] * 12.5 / 50)
         prediction = predict(table, definition, load_raw=0, rpm_raw=wrong, flag_raw=1)
@@ -910,7 +674,7 @@ def test_the_override_known_answer_exposes_an_rpm_decode_mistake() -> None:
 
 
 def test_the_x_relation_reproduces_168_of_194_and_its_misses_both_signs() -> None:
-    definition, _ = _definition()
+    definition, _ = phi_definition()
     expected = EXPECT["x_relation"]
     result = x_formula_check(
         fixture_frame(), definition, scaler=EXPECT["calibration"]["load_point_scaler"]
@@ -927,7 +691,7 @@ def test_the_x_relation_exposes_an_x_scale_mistake() -> None:
     """Negative control: comparing the stored (display-scaled) X with the
     formula, as if it were the raw byte, matches no pair; so does the wrong
     scaler."""
-    definition, _ = _definition()
+    definition, _ = phi_definition()
     frame = fixture_frame()
     good = x_formula_check(frame, definition, scaler=44019)
     stored = [p["x"] * 0.250859 for p in good["pairs"]]
@@ -937,7 +701,7 @@ def test_the_x_relation_exposes_an_x_scale_mistake() -> None:
 
 
 def test_every_october_4_command_sample_is_accounted_for() -> None:
-    result = _evaluate(fixture_frame())
+    result = phi_evaluate(fixture_frame())
     accounting = result["accounting"]
     expected = EXPECT["accounting"]
     assert accounting["candidates"] == expected["candidates"]
@@ -956,5 +720,5 @@ def test_every_october_4_command_sample_is_accounted_for() -> None:
 
 
 if __name__ == "__main__":  # pragma: no cover - fixture minting
-    for line in record_lines(_evaluate(fixture_frame())):
+    for line in record_lines(phi_evaluate(fixture_frame())):
         print(f"  - '{line}'")

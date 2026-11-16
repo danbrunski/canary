@@ -58,8 +58,46 @@ from src.analysis.dyno import (
 from src.analysis.dyno_squat import _grade_with_se
 from src.config import VehicleParameters
 from src.yaml_load import load_yaml
-from tests import test_dyno as td
-from tests import test_dyno_power as tp
+from tests.dyno_builders import FLAT_MASS as TD_MASS
+from tests.dyno_builders import FLAT_PARAMS as TD_PARAMS
+from tests.dyno_builders import (
+    GEAR as TP_GEAR,
+)
+from tests.dyno_builders import (
+    GEARBOX as TP_GEARBOX,
+)
+from tests.dyno_builders import INERTIA as TD_INERTIA
+from tests.dyno_builders import (
+    PAIR as TP_PAIR,
+)
+from tests.dyno_builders import RPM as TD_RPM
+from tests.dyno_builders import (
+    SILENT as TP_SILENT,
+)
+from tests.dyno_builders import (
+    DynoNoise as tp_Noise,
+)
+from tests.dyno_builders import dyno_conditions as tp_conditions
+from tests.dyno_builders import dyno_edit as tp_edit
+from tests.dyno_builders import dyno_offset as tp_offset
+from tests.dyno_builders import dyno_power as tp_power
+from tests.dyno_builders import (
+    dyno_pull as tp_pull,
+)
+from tests.dyno_builders import flat_accelerations as td_flat_accelerations
+from tests.dyno_builders import flat_coast_pair as td_coast_pair
+from tests.dyno_builders import flat_conditions as td_conditions
+from tests.dyno_builders import flat_crest as td_crest
+from tests.dyno_builders import flat_curve as td_curve
+from tests.dyno_builders import flat_floor as td_floor
+from tests.dyno_builders import flat_in_frame as td_in_frame
+from tests.dyno_builders import flat_inertia_kwargs as td_inertia_kwargs
+from tests.dyno_builders import flat_noise as td_noise
+from tests.dyno_builders import flat_parked as td_parked
+from tests.dyno_builders import flat_pull as td_pull
+from tests.dyno_builders import flat_squat_record as td_squat_record
+from tests.dyno_builders import flat_stated_offset as td_stated_offset
+from tests.dyno_builders import pair_road_load as tp_pair_road_load
 
 REPO = Path(__file__).resolve().parents[1]
 GOLDEN = Path(__file__).parent / "fixtures" / "dyno_golden.json"
@@ -162,27 +200,27 @@ def _inertia_conditions() -> InertiaConditions:
 
 def _motion_cases() -> dict[str, Any]:
     out: dict[str, Any] = {}
-    flat = td._flat_accelerations(np.random.default_rng(1), seconds=60.0)
-    squat = td._squat_record()
+    flat = td_flat_accelerations(np.random.default_rng(1), seconds=60.0)
+    squat = td_squat_record()
     out["correct_specific_force_squat_and_offset"] = correct_specific_force(
-        flat, squat=squat, pitch_offset=td._stated_offset(0.3)
+        flat, squat=squat, pitch_offset=td_stated_offset(0.3)
     )
     out["correct_specific_force_no_squat"] = correct_specific_force(
-        flat, squat=None, pitch_offset=td._stated_offset(0.0)
+        flat, squat=None, pitch_offset=td_stated_offset(0.0)
     )
     out["correct_specific_force_frame_mismatch"] = correct_specific_force(
         dataclasses.replace(flat, imu_reference_id="b"),
         squat=squat,
-        pitch_offset=td._stated_offset(0.3),
+        pitch_offset=td_stated_offset(0.3),
     )
-    drive = Driveline.from_vehicle(td.PARAMS, td.INERTIA)
+    drive = Driveline.from_vehicle(TD_PARAMS, TD_INERTIA)
     assert isinstance(drive, Driveline)
-    legs = td._coast_pair(drive, 31, noise_f=0.005, noise_a=0.003)
+    legs = td_coast_pair(drive, 31, noise_f=0.005, noise_a=0.003)
     out["pitch_offset_pair"] = estimate_pitch_offset(legs, squat=squat)
     out["pitch_offset_no_squat"] = estimate_pitch_offset(legs, squat=None)
     out["pitch_offset_single"] = estimate_pitch_offset(legs[:1], squat=squat)
     out["pitch_offset_framed"] = estimate_pitch_offset(
-        td._in_frame(legs, "a")[:1] + td._in_frame(legs, "b")[1:], squat=squat
+        td_in_frame(legs, "a")[:1] + td_in_frame(legs, "b")[1:], squat=squat
     )
     out["pitch_offset_few"] = estimate_pitch_offset(legs, squat=squat, min_samples=10**6)
     out["pitch_offset_no_legs"] = estimate_pitch_offset([], squat=squat)
@@ -192,17 +230,17 @@ def _motion_cases() -> dict[str, Any]:
 
 def _squat_cases() -> dict[str, Any]:
     out: dict[str, Any] = {}
-    parked = td._parked(np.random.default_rng(5))
+    parked = td_parked(np.random.default_rng(5))
     noise = measure_altitude_noise(parked)
     out["altitude_noise"] = noise
     out["altitude_noise_wander"] = measure_altitude_noise(
-        td._parked(np.random.default_rng(6), ar_sd=2.0, tau_s=15.0)
+        td_parked(np.random.default_rng(6), ar_sd=2.0, tau_s=15.0)
     )
     out["altitude_noise_moving"] = measure_altitude_noise(
-        td._flat_accelerations(np.random.default_rng(1))
+        td_flat_accelerations(np.random.default_rng(1))
     )
     out["altitude_noise_short"] = measure_altitude_noise(
-        td._parked(np.random.default_rng(5), seconds=60.0)
+        td_parked(np.random.default_rng(5), seconds=60.0)
     )
     out["altitude_noise_frozen"] = measure_altitude_noise(
         dataclasses.replace(parked, altitude_m=np.full(len(parked), 1500.0))
@@ -210,35 +248,35 @@ def _squat_cases() -> dict[str, Any]:
     out["altitude_noise_none"] = measure_altitude_noise(
         dataclasses.replace(parked, altitude_m=None)
     )
-    flat = td._flat_accelerations(np.random.default_rng(2), seconds=240.0)
-    fit = fit_squat(flat, altitude_noise=td._noise())
+    flat = td_flat_accelerations(np.random.default_rng(2), seconds=240.0)
+    fit = fit_squat(flat, altitude_noise=td_noise())
     out["squat"] = fit
     out["squat_record"] = fit.to_record(_squat_conditions()) if hasattr(fit, "to_record") else None
     out["squat_two_references"] = fit_squat(
-        flat, altitude_noise=[td._noise(), td._noise(1.0, 2.0, 10.0)]
+        flat, altitude_noise=[td_noise(), td_noise(1.0, 2.0, 10.0)]
     )
     out["squat_constant_grade"] = fit_squat(
-        td._flat_accelerations(np.random.default_rng(5), grade=0.003), altitude_noise=td._noise()
+        td_flat_accelerations(np.random.default_rng(5), grade=0.003), altitude_noise=td_noise()
     )
     out["squat_not_flat"] = fit_squat(
-        td._flat_accelerations(np.random.default_rng(6), grade=0.02), altitude_noise=td._noise()
+        td_flat_accelerations(np.random.default_rng(6), grade=0.02), altitude_noise=td_noise()
     )
     out["squat_crest"] = fit_squat(
-        td._flat_accelerations(np.random.default_rng(3), grade_of_t=td._crest, seconds=120.0),
-        altitude_noise=td._noise(),
+        td_flat_accelerations(np.random.default_rng(3), grade_of_t=td_crest, seconds=120.0),
+        altitude_noise=td_noise(),
     )
     out["squat_unresolvable"] = fit_squat(
-        td._flat_accelerations(
+        td_flat_accelerations(
             np.random.default_rng(7), seconds=8.0, altitude_noise_m=4.0, amplitude=2.5
         ),
-        altitude_noise=td._noise(white_sd=4.0),
+        altitude_noise=td_noise(white_sd=4.0),
     )
     out["squat_no_altitude"] = fit_squat(
-        dataclasses.replace(flat, altitude_m=None), altitude_noise=td._noise()
+        dataclasses.replace(flat, altitude_m=None), altitude_noise=td_noise()
     )
     out["squat_no_reference"] = fit_squat(flat, altitude_noise=[])
     out["squat_steady"] = fit_squat(
-        td._flat_accelerations(np.random.default_rng(9), amplitude=0.1), altitude_noise=td._noise()
+        td_flat_accelerations(np.random.default_rng(9), amplitude=0.1), altitude_noise=td_noise()
     )
     out["squat_too_few"] = fit_squat(
         dataclasses.replace(
@@ -249,7 +287,7 @@ def _squat_cases() -> dict[str, Any]:
             sf_lon_mps2=flat.sf_lon_mps2[:20],
             altitude_m=flat.altitude_m[:20] if flat.altitude_m is not None else None,
         ),
-        altitude_noise=td._noise(),
+        altitude_noise=td_noise(),
     )
     out["grade_with_se"] = _grade_with_se(
         flat.t_s,
@@ -257,26 +295,26 @@ def _squat_cases() -> dict[str, Any]:
             [[0.0], np.cumsum(np.diff(flat.t_s) * 0.5 * (flat.speed_mps[1:] + flat.speed_mps[:-1]))]
         ),
         flat.altitude_m if flat.altitude_m is not None else flat.t_s,
-        td._noise(),
+        td_noise(),
     )
     return out
 
 
 def _driveline_cases() -> dict[str, Any]:
     out: dict[str, Any] = {}
-    drive = Driveline.from_vehicle(td.PARAMS, td.INERTIA)
+    drive = Driveline.from_vehicle(TD_PARAMS, TD_INERTIA)
     assert isinstance(drive, Driveline)
-    out["effective_mass"] = [drive.effective_mass(td.MASS, g) for g in range(1, 7)]
-    out["neutral_effective_mass"] = drive.neutral_effective_mass(td.MASS)
+    out["effective_mass"] = [drive.effective_mass(TD_MASS, g) for g in range(1, 7)]
+    out["neutral_effective_mass"] = drive.neutral_effective_mass(TD_MASS)
     out["missing_facts"] = Driveline.from_vehicle(VehicleParameters(mass_kg=2000.0), None)
     out["bad_efficiency"] = Driveline.from_vehicle(
-        td.PARAMS.model_copy(update={"drivetrain_loss_fraction": 1.5}), td.INERTIA
+        TD_PARAMS.model_copy(update={"drivetrain_loss_fraction": 1.5}), TD_INERTIA
     )
-    pulls = [td._pull(np.random.default_rng(g), drive, g) for g in (2, 3) for _ in range(2)]
-    legs = td._coast_pair(drive, 41, noise_f=0.005, noise_a=0.003)
-    offset = estimate_pitch_offset(legs, squat=td._squat_record())
+    pulls = [td_pull(np.random.default_rng(g), drive, g) for g in (2, 3) for _ in range(2)]
+    legs = td_coast_pair(drive, 41, noise_f=0.005, noise_a=0.003)
+    offset = estimate_pitch_offset(legs, squat=td_squat_record())
     assert isinstance(offset, dyno.PitchOffset)
-    kwargs = td._inertia_kwargs(drive)
+    kwargs = td_inertia_kwargs(drive)
     fit = fit_engine_inertia(pulls, pitch_offset=offset, **kwargs)
     out["inertia_fit"] = fit
     out["inertia_record"] = (
@@ -287,7 +325,7 @@ def _driveline_cases() -> dict[str, Any]:
     )
     out["inertia_same_gear"] = fit_engine_inertia(pulls[:2], pitch_offset=offset, **kwargs)
     out["inertia_three_gears"] = fit_engine_inertia(
-        pulls + [td._pull(np.random.default_rng(4), drive, 4, rpm_end=4500.0)],
+        pulls + [td_pull(np.random.default_rng(4), drive, 4, rpm_end=4500.0)],
         pitch_offset=offset,
         **kwargs,
     )
@@ -303,24 +341,24 @@ def _driveline_cases() -> dict[str, Any]:
     )
     if isinstance(fit, dyno.EngineInertiaFit):
         measured = Driveline.from_vehicle(
-            td.PARAMS,
-            td.INERTIA.model_copy(update={"measured_engine": fit.to_record(_inertia_conditions())}),
+            TD_PARAMS,
+            TD_INERTIA.model_copy(update={"measured_engine": fit.to_record(_inertia_conditions())}),
         )
         out["driveline_measured"] = measured
         out["driveline_measured_eta_changed"] = Driveline.from_vehicle(
-            td.PARAMS.model_copy(update={"drivetrain_loss_fraction": 0.2}),
-            td.INERTIA.model_copy(update={"measured_engine": fit.to_record(_inertia_conditions())}),
+            TD_PARAMS.model_copy(update={"drivetrain_loss_fraction": 0.2}),
+            TD_INERTIA.model_copy(update={"measured_engine": fit.to_record(_inertia_conditions())}),
         )
     return out
 
 
 def _road_load_cases() -> dict[str, Any]:
     out: dict[str, Any] = {}
-    drive = Driveline.from_vehicle(td.PARAMS, td.INERTIA)
+    drive = Driveline.from_vehicle(TD_PARAMS, TD_INERTIA)
     assert isinstance(drive, Driveline)
-    squat = td._squat_record()
-    legs = td._coast_pair(drive, 51, runs=2, noise_f=0.005, noise_a=0.003)
-    fit = fit_road_load(legs, driveline=drive, test_mass_kg=td.MASS, squat=squat)
+    squat = td_squat_record()
+    legs = td_coast_pair(drive, 51, runs=2, noise_f=0.005, noise_a=0.003)
+    fit = fit_road_load(legs, driveline=drive, test_mass_kg=TD_MASS, squat=squat)
     out["road_load_pair"] = fit
     out["road_load_record"] = (
         fit.to_record(_road_conditions()) if hasattr(fit, "to_record") else None
@@ -328,33 +366,33 @@ def _road_load_cases() -> dict[str, Any]:
     if isinstance(fit, dyno.RoadLoadFit):
         out["road_load_force"] = fit.force(np.linspace(5.0, 30.0, 11))
     out["road_load_no_squat"] = fit_road_load(
-        legs, driveline=drive, test_mass_kg=td.MASS, squat=None
+        legs, driveline=drive, test_mass_kg=TD_MASS, squat=None
     )
     out["road_load_single_refused"] = fit_road_load(
-        legs[:1], driveline=drive, test_mass_kg=td.MASS, squat=squat
+        legs[:1], driveline=drive, test_mass_kg=TD_MASS, squat=squat
     )
     out["road_load_single_allowed"] = fit_road_load(
-        legs[:1], driveline=drive, test_mass_kg=td.MASS, squat=squat, allow_single_direction=True
+        legs[:1], driveline=drive, test_mass_kg=TD_MASS, squat=squat, allow_single_direction=True
     )
     out["road_load_short_span"] = fit_road_load(
-        legs, driveline=drive, test_mass_kg=td.MASS, squat=squat, min_speed_span_kph=1e3
+        legs, driveline=drive, test_mass_kg=TD_MASS, squat=squat, min_speed_span_kph=1e3
     )
     out["road_load_too_few"] = fit_road_load(
-        legs, driveline=drive, test_mass_kg=td.MASS, squat=squat, min_samples=10**6
+        legs, driveline=drive, test_mass_kg=TD_MASS, squat=squat, min_samples=10**6
     )
     out["road_load_three_headings"] = fit_road_load(
         legs + [dyno.Leg("eastbound", legs[0].samples)],
         driveline=drive,
-        test_mass_kg=td.MASS,
+        test_mass_kg=TD_MASS,
         squat=squat,
     )
     out["road_load_frames"] = fit_road_load(
-        td._in_frame(legs[:1], "a") + td._in_frame(legs[1:], "b"),
+        td_in_frame(legs[:1], "a") + td_in_frame(legs[1:], "b"),
         driveline=drive,
-        test_mass_kg=td.MASS,
+        test_mass_kg=TD_MASS,
         squat=squat,
     )
-    out["road_load_none"] = fit_road_load([], driveline=drive, test_mass_kg=td.MASS, squat=squat)
+    out["road_load_none"] = fit_road_load([], driveline=drive, test_mass_kg=TD_MASS, squat=squat)
     # One direction measures no pitch offset, so a constant force bias reaches A.
     out["road_load_negative"] = fit_road_load(
         [
@@ -364,7 +402,7 @@ def _road_load_cases() -> dict[str, Any]:
             )
         ],
         driveline=drive,
-        test_mass_kg=td.MASS,
+        test_mass_kg=TD_MASS,
         squat=squat,
         allow_single_direction=True,
     )
@@ -373,57 +411,57 @@ def _road_load_cases() -> dict[str, Any]:
 
 def _comparison_cases() -> dict[str, Any]:
     out: dict[str, Any] = {}
-    floor = td._floor()
+    floor = td_floor()
     out["floor"] = floor
     out["floor_matches"] = [
-        floor.matches("wheel_power_kw", td._conditions()),
-        floor.matches("wheel_torque_nm", td._conditions()),
-        floor.matches("wheel_power_kw", td._conditions(gear=2)),
+        floor.matches("wheel_power_kw", td_conditions()),
+        floor.matches("wheel_torque_nm", td_conditions()),
+        floor.matches("wheel_power_kw", td_conditions(gear=2)),
     ]
-    out["compare_inside"] = compare_runs(td._curve(0.0), td._curve(2.0), floor)
-    out["compare_outside"] = compare_runs(td._curve(0.0), td._curve(4.0), floor)
+    out["compare_inside"] = compare_runs(td_curve(0.0), td_curve(2.0), floor)
+    out["compare_outside"] = compare_runs(td_curve(0.0), td_curve(4.0), floor)
     out["compare_sigma_override"] = compare_runs(
-        td._curve(0.0), td._curve(2.0), floor, sigma_threshold=1.0, grid_step_rpm=100.0
+        td_curve(0.0), td_curve(2.0), floor, sigma_threshold=1.0, grid_step_rpm=100.0
     )
-    out["compare_as_dict"] = compare_runs(td._curve(0.0), td._curve(4.0), floor)
+    out["compare_as_dict"] = compare_runs(td_curve(0.0), td_curve(4.0), floor)
     result = out["compare_outside"]
     out["compare_outside_as_dict"] = result.as_dict() if hasattr(result, "as_dict") else None
     partial_rpm = np.arange(2500.0, 3800.0, 25.0)
     partial = DynoCurve(
-        "wheel_power_kw", partial_rpm, np.full(len(partial_rpm), 70.0), td._conditions()
+        "wheel_power_kw", partial_rpm, np.full(len(partial_rpm), 70.0), td_conditions()
     )
     out["compare_partial"] = compare_runs(partial, partial, floor)
     high = DynoCurve(
-        "wheel_power_kw", np.array([5600.0, 6000.0]), np.array([80.0, 82.0]), td._conditions()
+        "wheel_power_kw", np.array([5600.0, 6000.0]), np.array([80.0, 82.0]), td_conditions()
     )
     out["compare_no_overlap"] = compare_runs(high, high, floor)
-    out["compare_no_floor"] = compare_runs(td._curve(), td._curve(5.0), None)
-    out["compare_gear"] = compare_runs(td._curve(), td._curve(5.0, gear=2), floor)
-    out["compare_induction"] = compare_runs(td._curve(), td._curve(5.0, induction="boosted"), floor)
-    out["compare_single"] = compare_runs(td._curve(), td._curve(5.0, direction="single"), floor)
-    torque = DynoCurve("wheel_torque_nm", td.RPM, np.full(len(td.RPM), 300.0), td._conditions())
-    out["compare_quantity"] = compare_runs(td._curve(), torque, floor)
-    out["floor_two"] = record_dyno_floor([td._curve(), td._curve(1.0)], band_edges_rpm=[2500, 3500])
+    out["compare_no_floor"] = compare_runs(td_curve(), td_curve(5.0), None)
+    out["compare_gear"] = compare_runs(td_curve(), td_curve(5.0, gear=2), floor)
+    out["compare_induction"] = compare_runs(td_curve(), td_curve(5.0, induction="boosted"), floor)
+    out["compare_single"] = compare_runs(td_curve(), td_curve(5.0, direction="single"), floor)
+    torque = DynoCurve("wheel_torque_nm", TD_RPM, np.full(len(TD_RPM), 300.0), td_conditions())
+    out["compare_quantity"] = compare_runs(td_curve(), torque, floor)
+    out["floor_two"] = record_dyno_floor([td_curve(), td_curve(1.0)], band_edges_rpm=[2500, 3500])
     out["floor_single"] = record_dyno_floor(
-        [td._curve(), td._curve(1.0), td._curve(-1.0, direction="single")],
+        [td_curve(), td_curve(1.0), td_curve(-1.0, direction="single")],
         band_edges_rpm=[2500, 3500],
     )
     out["floor_days"] = record_dyno_floor(
-        [td._curve(), td._curve(1.0), td._curve(-1.0, date=dt.date(2026, 9, 28))],
+        [td_curve(), td_curve(1.0), td_curve(-1.0, date=dt.date(2026, 9, 28))],
         band_edges_rpm=[2500, 3500],
     )
-    out["floor_identical"] = record_dyno_floor([td._curve()] * 3, band_edges_rpm=[2500, 3500])
+    out["floor_identical"] = record_dyno_floor([td_curve()] * 3, band_edges_rpm=[2500, 3500])
     out["floor_no_overlap"] = record_dyno_floor(
-        [td._curve(), td._curve(1.0), td._curve(-1.0)], band_edges_rpm=[7000, 8000]
+        [td_curve(), td_curve(1.0), td_curve(-1.0)], band_edges_rpm=[7000, 8000]
     )
     out["floor_one_edge"] = record_dyno_floor(
-        [td._curve(), td._curve(1.0), td._curve(-1.0)], band_edges_rpm=[7000]
+        [td_curve(), td_curve(1.0), td_curve(-1.0)], band_edges_rpm=[7000]
     )
     out["floor_mixed"] = record_dyno_floor(
         [
-            td._curve(),
-            td._curve(1.0),
-            DynoCurve("wheel_torque_nm", td.RPM, np.full(len(td.RPM), 300.0), td._conditions()),
+            td_curve(),
+            td_curve(1.0),
+            DynoCurve("wheel_torque_nm", TD_RPM, np.full(len(TD_RPM), 300.0), td_conditions()),
         ],
         band_edges_rpm=[2500, 3500],
     )
@@ -432,92 +470,90 @@ def _comparison_cases() -> dict[str, Any]:
 
 def _power_cases() -> dict[str, Any]:
     out: dict[str, Any] = {}
-    quiet = tp.PAIR
+    quiet = TP_PAIR
     noisy = [
-        tp._pull(heading, noise=tp._Noise(np.random.default_rng(seed)))
+        tp_pull(heading, noise=tp_Noise(np.random.default_rng(seed)))
         for heading, seed in (("northbound", 61), ("southbound", 62))
     ]
-    out["power_exact"] = tp._power(quiet)
-    out["power_noisy"] = tp._power(noisy)
-    out["power_corrected"] = tp._power(
+    out["power_exact"] = tp_power(quiet)
+    out["power_noisy"] = tp_power(noisy)
+    out["power_corrected"] = tp_power(
         noisy,
         correction=J1349Correction(vapour_pressure_kpa=1.0, vapour_pressure_source="synthetic"),
     )
-    out["power_single_allowed"] = tp._power(
-        quiet[:1], allow_single_direction=True, conditions=tp._conditions(direction="single")
+    out["power_single_allowed"] = tp_power(
+        quiet[:1], allow_single_direction=True, conditions=tp_conditions(direction="single")
     )
     result = out["power_noisy"]
     if isinstance(result, dyno.DynoPower):
         out["power_dyno_curve_power"] = result.dyno_curve("wheel_power_kw")
         out["power_dyno_curve_torque"] = result.dyno_curve("wheel_torque_nm")
         out["power_scaled"] = result.curve.scaled(1.25)
-    out["power_none"] = tp._power([])
-    out["power_conditions_gear"] = tp._power(quiet, conditions=tp._conditions(gear=2))
-    out["power_single_road_load"] = tp._power(
-        quiet, road_load=tp._pair_road_load().model_copy(update={"directions": "single"})
+    out["power_none"] = tp_power([])
+    out["power_conditions_gear"] = tp_power(quiet, conditions=tp_conditions(gear=2))
+    out["power_single_road_load"] = tp_power(
+        quiet, road_load=tp_pair_road_load().model_copy(update={"directions": "single"})
     )
-    out["power_boosted_correction"] = tp._power(
+    out["power_boosted_correction"] = tp_power(
         quiet,
-        conditions=tp._conditions(induction="boosted"),
+        conditions=tp_conditions(induction="boosted"),
         correction=J1349Correction(vapour_pressure_kpa=1.0, vapour_pressure_source="synthetic"),
     )
-    out["power_no_dry_air"] = tp._power(
+    out["power_no_dry_air"] = tp_power(
         quiet,
         correction=J1349Correction(vapour_pressure_kpa=90.0, vapour_pressure_source="synthetic"),
     )
-    out["power_frame"] = tp._power(quiet, pitch_offset=tp._offset(frame="a"))
-    out["power_direction_mismatch"] = tp._power(
-        quiet, conditions=tp._conditions(direction="single")
-    )
+    out["power_frame"] = tp_power(quiet, pitch_offset=tp_offset(frame="a"))
+    out["power_direction_mismatch"] = tp_power(quiet, conditions=tp_conditions(direction="single"))
     north, south = quiet
-    out["power_one_direction"] = tp._power([north])
-    out["power_too_many"] = tp._power(
-        [north, south, dyno.PowerPull("eastbound", tp.GEAR, south.samples, south.demand)]
+    out["power_one_direction"] = tp_power([north])
+    out["power_too_many"] = tp_power(
+        [north, south, dyno.PowerPull("eastbound", TP_GEAR, south.samples, south.demand)]
     )
     n = len(north.samples)
     part = np.zeros(n, dtype=bool)
     part[n // 2 : n // 2 + 60] = True
     rpm = north.samples.rpm
     assert rpm is not None
-    ratio = tp.GEARBOX[3] / tp.GEARBOX[2]
-    out["power_no_rpm"] = tp._power([tp._edit(north, rpm=None), south])
-    out["power_no_demand"] = tp._power([tp._edit(north, demand=None), south])
-    out["power_gear_change"] = tp._power(
-        [tp._edit(north, rpm=np.where(part, rpm * ratio, rpm)), south]
+    ratio = TP_GEARBOX[3] / TP_GEARBOX[2]
+    out["power_no_rpm"] = tp_power([tp_edit(north, rpm=None), south])
+    out["power_no_demand"] = tp_power([tp_edit(north, demand=None), south])
+    out["power_gear_change"] = tp_power(
+        [tp_edit(north, rpm=np.where(part, rpm * ratio, rpm)), south]
     )
-    out["power_clutch_slip"] = tp._power(
-        [tp._edit(north, rpm=np.where(part, rpm * 1.08, rpm)), south]
+    out["power_clutch_slip"] = tp_power(
+        [tp_edit(north, rpm=np.where(part, rpm * 1.08, rpm)), south]
     )
-    out["power_ratio_mismatch"] = tp._power(
-        [tp._edit(north, speed_mps=north.samples.speed_mps * 1.10), south]
+    out["power_ratio_mismatch"] = tp_power(
+        [tp_edit(north, speed_mps=north.samples.speed_mps * 1.10), south]
     )
     assert north.demand is not None
-    out["power_not_wot"] = tp._power(
-        [tp._edit(north, demand=np.where(part, 3.5, north.demand)), south]
+    out["power_not_wot"] = tp_power(
+        [tp_edit(north, demand=np.where(part, 3.5, north.demand)), south]
     )
-    out["power_grade_varies"] = tp._power(
+    out["power_grade_varies"] = tp_power(
         [
-            tp._pull(
+            tp_pull(
                 "northbound",
-                noise=tp.SILENT,
+                noise=TP_SILENT,
                 grade=lambda x: 0.03 * np.sin(2 * np.pi * np.asarray(x, dtype=float) / 150.0),
             ),
             south,
         ]
     )
-    out["power_short_span"] = tp._power(
-        [tp._pull("northbound", noise=tp.SILENT, rpm_end=3200.0), south]
+    out["power_short_span"] = tp_power(
+        [tp_pull("northbound", noise=TP_SILENT, rpm_end=3200.0), south]
     )
-    out["power_below_floor"] = tp._power(
-        [tp._pull("northbound", noise=tp.SILENT, rpm_start=1500.0, rpm_end=2520.0), south]
+    out["power_below_floor"] = tp_power(
+        [tp_pull("northbound", noise=TP_SILENT, rpm_start=1500.0, rpm_end=2520.0), south]
     )
-    out["power_no_overlap"] = tp._power(
+    out["power_no_overlap"] = tp_power(
         [
-            tp._pull("northbound", noise=tp.SILENT, rpm_end=3700.0),
-            tp._pull("southbound", noise=tp.SILENT, rpm_start=3900.0),
+            tp_pull("northbound", noise=TP_SILENT, rpm_end=3700.0),
+            tp_pull("southbound", noise=TP_SILENT, rpm_start=3900.0),
         ]
     )
-    out["power_low_rate"] = tp._power([tp._pull("northbound", noise=tp.SILENT, hz=10.0), south])
+    out["power_low_rate"] = tp_power([tp_pull("northbound", noise=TP_SILENT, hz=10.0), south])
     return out
 
 
@@ -594,10 +630,10 @@ def full_profile() -> DynoProfile:
             speed=[SpeedSource(channel="decoded:SPEED", ratio_to_gps=0.932, evidence="measured")],
             rpm=["decoded:ECM_RPM", "obd:RPM"],
         ),
-        inertia=td.INERTIA.model_copy(update={"measured_engine": record}),
-        squat=td._squat_record(),
+        inertia=TD_INERTIA.model_copy(update={"measured_engine": record}),
+        squat=td_squat_record(),
         road_load=load.to_record(_road_conditions()),
-        noise_floors=[td._floor()],
+        noise_floors=[td_floor()],
     )
 
 
@@ -615,10 +651,10 @@ def stored_side(tmp: Path) -> dict[str, Any]:
         "schema": DynoProfile.model_json_schema(),
         "floor_lookup": canon(
             [
-                full_profile().noise_floor_for("wheel_power_kw", td._conditions()),
-                full_profile().noise_floor_for("wheel_torque_nm", td._conditions()),
-                full_profile().noise_floor_for("wheel_power_kw", td._conditions(gear=2)),
-                DynoProfile().noise_floor_for("wheel_power_kw", td._conditions()),
+                full_profile().noise_floor_for("wheel_power_kw", td_conditions()),
+                full_profile().noise_floor_for("wheel_torque_nm", td_conditions()),
+                full_profile().noise_floor_for("wheel_power_kw", td_conditions(gear=2)),
+                DynoProfile().noise_floor_for("wheel_power_kw", td_conditions()),
             ]
         ),
         "refusal_kinds": sorted(dyno.RefusalKind.__args__),  # type: ignore[attr-defined]

@@ -28,15 +28,11 @@ is lean 4 % again with fuel pressure that holds through the pulls.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
 
-import numpy as np
-import pandas as pd
 import pytest
 
 from src.analysis.delivery_evidence import (
@@ -44,7 +40,6 @@ from src.analysis.delivery_evidence import (
     DELIVERY_TOOL,
     INFORMED_REFUSAL,
     mint_delivery_error,
-    mint_fuel_pressure_droop,
 )
 from src.analysis.delivery_investigation import (
     InvestigationStep,
@@ -57,7 +52,7 @@ from src.analysis.delivery_investigation import (
     predict_recurrence,
     retrieve,
 )
-from src.analysis.fault_model import FAULT_MODEL_FILE, FaultModel, Feature, load_fault_model
+from src.analysis.fault_model import FAULT_MODEL_FILE, Feature, load_fault_model
 from src.analysis.tuning import delivery_error
 from src.analysis.tuning_context import TuningContext
 from src.config import CanaryConfig
@@ -77,6 +72,13 @@ from src.evidence import (
     render_text,
 )
 from src.vehicle.profiles import profile_dir, resolve_profile_for_tooling, scope_config
+from tests.hypothesis_builders import (
+    PROFILE,
+    Clock,
+    Vehicle,
+    delivery_mint_all,
+    delivery_synthetic_drive,
+)
 
 FIXTURES = Path("tests/fixtures/delivery_investigation")
 WOT_LEAN = FIXTURES / "_capture-tuning-2026-09-23T164007"
@@ -91,21 +93,6 @@ HELD_OUT = {
     "_capture-tuning-hybrid-research-2026-09-17T201000": (-0.61, 46),
 }
 FUEL_PRESSURE_MEASUREMENT = "Log fuel pressure through a full-throttle pull"
-PROFILE = "nissan-xterra-2008"
-REGIONS: tuple[Literal["high_airflow", "enrichment"], ...] = ("high_airflow", "enrichment")
-
-
-@dataclass
-class Vehicle:
-    context: TuningContext
-    model: FaultModel
-    model_sha: str
-    data: Path
-
-    @property
-    def floor_conditions(self) -> str:
-        assert self.context.lambda_delivery is not None
-        return self.context.lambda_delivery.noise_floors["enrichment"].conditions
 
 
 @pytest.fixture(scope="module")
@@ -117,47 +104,10 @@ def vehicle() -> Vehicle:
     return Vehicle(TuningContext.from_config(config), model, sha, data)
 
 
-class Clock:
-    def __init__(self, start: datetime) -> None:
-        self.t = start
-
-    def at(self, start: datetime) -> None:
-        self.t = max(self.t, start)
-
-    def __call__(self) -> datetime:
-        self.t += timedelta(seconds=1)
-        return self.t
-
-
 def _evidence(ledger: MemoryLedger, evidence_id: str) -> Evidence:
     record = ledger.resolve_evidence(evidence_id).record
     assert isinstance(record, Evidence)
     return record
-
-
-def _mint_all(
-    ledger: MemoryLedger, vehicle: Vehicle, session: Path, clock: Clock
-) -> tuple[str, str, str]:
-    """Delivery, closed-loop droop and enrichment flow loss for one drive."""
-    delivery = mint_delivery_error(
-        ledger, session, vehicle.context, vehicle.model, vehicle.model_sha,
-        vin=None, program_id=None, now=clock(),
-    )  # fmt: skip
-    high, loss = (
-        mint_fuel_pressure_droop(
-            ledger,
-            session,
-            vehicle.context,
-            vehicle.model,
-            vehicle.model_sha,
-            region=region,
-            vin=None,
-            program_id=None,
-            now=clock(),
-        )  # fmt: skip
-        for region in REGIONS
-    )
-    return delivery, high, loss
 
 
 # ---------------------------------------------------------------------------
@@ -191,8 +141,8 @@ def real(vehicle: Vehicle, tmp_path_factory: pytest.TempPathFactory) -> Real:
         )  # fmt: skip
         investigate(ledger, vehicle.model, delivery_evidence=held[name], now=clock())
     clock.at(datetime(2026, 10, 4, 21, tzinfo=UTC))
-    pressure = _mint_all(ledger, vehicle, PRESSURE_DRIVE, clock)
-    no_command = _mint_all(ledger, vehicle, NO_COMMAND, clock)
+    pressure = delivery_mint_all(ledger, vehicle, PRESSURE_DRIVE, clock)
+    no_command = delivery_mint_all(ledger, vehicle, NO_COMMAND, clock)
     return Real(ledger, wot, step, held, pressure, no_command)
 
 
@@ -286,84 +236,6 @@ def test_closed_loop_droop_is_minted_and_enrichment_pressure_is_uncovered(real: 
 # Labelled synthetic drives
 
 
-def _synthetic_drive(
-    root: Path, name: str, start: datetime, *, lean_pct: float, pressure_drop_pct: float | None
-) -> Path:
-    """SYNTHETIC: idle, three cruise-then-WOT cycles, idle; Mode 01 at 4 Hz.
-
-    At WOT the ECM commands phi 1.17 open loop and the measured lambda is
-    ``lean_pct`` lean of it; pressure (when logged, 100 Hz) falls by
-    ``pressure_drop_pct`` at WOT only.
-    """
-    rng = np.random.default_rng(7)
-    segments: list[tuple[float, str]] = [(60.0, "idle")]
-    for _ in range(3):
-        segments += [(20.0, "cruise"), (10.0, "wot")]
-    segments.append((40.0, "idle"))
-    rows: list[dict[str, object]] = []
-    t0 = start.timestamp()
-    t = 0.0
-    round_id = 0
-    for duration, kind in segments:
-        steps = int(duration * 4)
-        for k in range(steps):
-            stamp = t + k * 0.25
-            frac = k / max(steps - 1, 1)
-            if kind == "wot":
-                rpm, maf, load, status, phi = 3000 + 2000 * frac, 90 + 50 * frac, 95.0, 4.0, 1.17
-                lam = (1 / phi) * (1 + lean_pct / 100)
-            else:
-                rpm, maf, load, status, phi = (
-                    (800.0, 5.0, 20.0, 2.0, 1.0)
-                    if kind == "idle"
-                    else (2000.0, 25.0, 40.0, 2.0, 1.0)
-                )
-                lam = 1.0 + float(rng.normal(0, 0.003))
-            round_id += 1
-            meta = json.dumps(
-                {"acquired_at": t0 + stamp, "acquired_clock": "kernel", "round_id": round_id,
-                 "ts_schema": 2}
-            )  # fmt: skip
-            for channel, value, unit in (
-                ("RPM", rpm, "rpm"),
-                ("MAF", maf, "g/s"),
-                ("ENGINE_LOAD", load, "%"),
-                ("FUEL_STATUS", status, "bitmask"),
-                ("COMMANDED_EQUIV_RATIO", phi, "ratio"),
-                ("O2_WR_LAMBDA_S1", lam, "ratio"),
-            ):
-                rows.append(
-                    {"t": t0 + stamp, "source": "obd", "channel": channel, "value": value,
-                     "unit": unit, "meta": meta}
-                )  # fmt: skip
-        if pressure_drop_pct is not None:
-            for k in range(int(duration * 100)):
-                level = 350.0 * (1 - pressure_drop_pct / 100) if kind == "wot" else 350.0
-                rows.append(
-                    {"t": t0 + t + k * 0.01, "source": "sensor", "channel": "FUEL_PRESSURE",
-                     "value": level + float(rng.normal(0, 0.5)), "unit": "kPa", "meta": "{}"}
-                )  # fmt: skip
-        t += duration
-    frame = pd.DataFrame(rows).sort_values("t", kind="stable")
-    out = pd.DataFrame(
-        {
-            "timestamp": pd.to_datetime(frame["t"], unit="s", utc=True),
-            "source": frame["source"],
-            "channel": frame["channel"],
-            "value_number": frame["value"].astype(float),
-            "value_text": pd.Series([None] * len(frame), dtype=object),
-            "value_bool": pd.Series([None] * len(frame), dtype=object),
-            "unit": frame["unit"],
-            "payload": [b""] * len(frame),
-            "metadata_json": frame["meta"],
-        }
-    )
-    session = root / name
-    session.mkdir(parents=True)
-    out.to_parquet(session / "telemetry-00000.parquet", index=False)
-    return session
-
-
 @dataclass
 class Synthetic:
     ledger: MemoryLedger
@@ -383,18 +255,18 @@ class Synthetic:
 @pytest.fixture(scope="module")
 def synthetic(vehicle: Vehicle, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Synthetic]:
     root = tmp_path_factory.mktemp("synthetic")
-    a = _synthetic_drive(
+    a = delivery_synthetic_drive(
         root, "_synthetic-wot-lean-2026-09-01T120000", datetime(2026, 9, 1, 12, tzinfo=UTC),
         lean_pct=4.0, pressure_drop_pct=None,
     )  # fmt: skip
-    b = _synthetic_drive(
+    b = delivery_synthetic_drive(
         root, "_synthetic-wot-lean-2026-11-01T120000", datetime(2026, 11, 1, 12, tzinfo=UTC),
         lean_pct=4.0, pressure_drop_pct=0.2,
     )  # fmt: skip
     ledger = MemoryLedger(root / "memory.jsonl", vehicle=PROFILE)
     clock = Clock(datetime(2026, 9, 1, 13, tzinfo=UTC))
     # Observe and investigate, after drive A.
-    drive_a = _mint_all(ledger, vehicle, a, clock)
+    drive_a = delivery_mint_all(ledger, vehicle, a, clock)
     opened = investigate(
         ledger, vehicle.model, delivery_evidence=drive_a[0], other_evidence=drive_a[1:],
         now=clock(),
@@ -419,7 +291,7 @@ def synthetic(vehicle: Vehicle, tmp_path_factory: pytest.TempPathFactory) -> Ite
     on_held_out = evaluate_outcome(ledger, recurrence, held, now=clock())
     # Drive B, with fuel pressure.
     clock.at(datetime(2026, 11, 1, 13, tzinfo=UTC))
-    drive_b = _mint_all(ledger, vehicle, b, clock)
+    drive_b = delivery_mint_all(ledger, vehicle, b, clock)
     found = retrieve(ledger, drive_b[0])
     updated = investigate(
         ledger, vehicle.model, delivery_evidence=drive_b[0], other_evidence=drive_b[1:],

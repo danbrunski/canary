@@ -26,9 +26,10 @@ from src.analysis.sim_contract import SimulationRefusalError
 from src.analysis.target_phi import TwinRefusalError
 from src.analysis.twin_runner import TwinRunnerRefusalError
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
-from tests import test_rom_editor as w09
-from tests.test_paired_scenarios import WOT, _scenario
-from tests.test_sim_montecarlo import build_kit_and_image
+from tests.sim_builders import REVISION as W09_REVISION
+from tests.sim_builders import WOT, build_kit_and_image, paired_scenario
+from tests.sim_builders import editor_params as w09_params
+from tests.sim_builders import request as w09_request
 
 
 @pytest.fixture(scope="module")
@@ -42,7 +43,7 @@ def _matched(image: bytes) -> tuple[Any, dict[str, Any]]:
     registry = TuneRevisionRegistry(
         revisions=[
             TuneRevision(
-                revision=w09.REVISION,
+                revision=W09_REVISION,
                 flashed_at=datetime(2026, 10, 1, tzinfo=UTC),
                 image_sha256=sha256_hex(image),
             )
@@ -81,7 +82,7 @@ def test_a_runner_refusal_leaves_run_paired_as_a_simulation_refusal(
     kit, image = kit_and_image
     moved = _rekerneled(kit)
     with pytest.raises(SimulationRefusalError) as refused:
-        run_paired(moved, _scenario(moved, image, image, WOT), image, image)
+        run_paired(moved, paired_scenario(moved, image, image, WOT), image, image)
     assert refused.value.reason == "kernel_mismatch"
     assert isinstance(refused.value.__cause__, TwinRunnerRefusalError)
 
@@ -93,7 +94,7 @@ def test_a_workbench_job_on_a_model_the_runner_refuses_returns_the_refusal(
     returns the refusal as data (W09's ``REFUSALS``), never raises it."""
     kit, image = kit_and_image
     registry, matched = _matched(image)
-    params = w09._params(image, tmp_path, matched, request=w09.request(draws=2))
+    params = w09_params(image, tmp_path, matched, request=w09_request(draws=2))
     out = rom_editor.run_job("rom_sim", params, kit=_rekerneled(kit), registry=registry)
     assert out["refused"]["kind"] == "simulation"
     assert out["refused"]["reason"] == "kernel_mismatch"
@@ -114,7 +115,7 @@ def test_a_zero_load_point_scaler_is_refused_by_name_not_divided_by(
     zero = make_candidate(
         image, kit.rom_map, [CellEdit("load_point_scaler", 0, 0, 0, slot=None)], base_label="s"
     ).image
-    result = run_paired(kit, _scenario(kit, image, zero, WOT), image, zero)
+    result = run_paired(kit, paired_scenario(kit, image, zero, WOT), image, zero)
     (point,) = result.points
     bfs = point["outputs"]["base_fuel_schedule"]
     assert bfs["base"] is not None and bfs["candidate"] is None

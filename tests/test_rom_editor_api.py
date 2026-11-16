@@ -19,7 +19,6 @@ import functools
 import json
 import shutil
 from collections.abc import Callable, Iterator
-from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -37,20 +36,17 @@ from src.config import CanaryConfig
 from src.control import workbench_jobs
 from src.dashboard.routes import rom_editor as rom_editor_routes
 from src.dashboard.routes.rom_editor import register_rom_editor_routes
-from src.dashboard.routes.rom_library import register_rom_library_routes
 from src.vehicle.profiles import operational_dir
 from src.vehicle.tune_revisions import load_tune_revisions
 from src.yaml_load import load_yaml
 from tests import repo_guard
 from tests.app_context import bare_context
 from tests.configs import isolated_config
+from tests.rom_editor_builders import AUTH, OCTET, CountingExecutor, make_app
 from tests.rom_fixtures import PROFILE, synthetic_image
-from tests.test_rom_editor import FC_EDIT
-from tests.test_rom_editor import request as sim_request
-from tests.test_sim_montecarlo import build_kit_and_image
+from tests.sim_builders import FC_EDIT, build_kit_and_image
+from tests.sim_builders import request as sim_request
 
-AUTH = {"Authorization": "Bearer secret"}
-OCTET = {**AUTH, "Content-Type": "application/octet-stream"}
 REVISION = "synthetic-w09"
 REVISIONS_YAML = """\
 schema_version: 1
@@ -98,29 +94,10 @@ def config(tmp_path: Path, profile: Path) -> CanaryConfig:
     return isolated_config(tmp_path, daemon={"afr_calibration": profile / "afr_calibration.yaml"})
 
 
-def make_app(config: CanaryConfig) -> FastAPI:
-    app = FastAPI()
-    register_rom_library_routes(app, bare_context(config))
-    register_rom_editor_routes(app, bare_context(config))
-    return app
-
-
 @pytest.fixture
 def client(config: CanaryConfig) -> Iterator[TestClient]:
     with TestClient(make_app(config)) as test_client:
         yield test_client
-
-
-class CountingExecutor(ThreadPoolExecutor):
-    """The in-process stand-in for the spawn child, counting what it was given."""
-
-    def __init__(self) -> None:
-        super().__init__(max_workers=1)
-        self.submitted = 0
-
-    def submit(self, fn: Any, /, *args: Any, **kwargs: Any) -> Future[Any]:
-        self.submitted += 1
-        return super().submit(fn, *args, **kwargs)
 
 
 @pytest.fixture

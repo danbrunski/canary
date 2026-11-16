@@ -13,9 +13,6 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
-import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 import pytest
 
 from src.analysis.delivery_investigation import NotEngineResponseError, detect_discrepancy
@@ -29,40 +26,22 @@ from src.analysis.twin_investigation import (
 )
 from src.evidence import MemoryLedger, investigation_card, render_text
 from src.evidence.records import Evidence, Investigation
-from src.storage.parquet_writer import TELEMETRY_SCHEMA
 from src.vehicle.tune_revisions import load_tune_revisions
-from tests.test_evidence_cards import _allowed_tokens, _unresolved_numbers
-from tests.test_evidence_memory import _evidence, _vehicle
-from tests.test_target_phi import IMAGE_SHA, PROFILE, _definition, _session, _table
-
-SLUG = "nissan-xterra-2008"
-REVISION = "ZS44A-20260920"
-
-
-def _store(root: Path, frame: pd.DataFrame, name: str) -> Path:
-    """``frame`` as a stored session (the writer's schema)."""
-    session = root / name
-    session.mkdir(parents=True)
-    rows = [
-        {
-            **row,
-            "timestamp": row["timestamp"].floor("us").to_pydatetime(),
-            "value_number": None if pd.isna(row["value_number"]) else row["value_number"],
-            "value_bool": None,
-            "payload": None,
-        }
-        for row in frame.to_dict("records")
-    ]
-    table = pa.Table.from_pylist(rows, schema=TELEMETRY_SCHEMA)
-    pq.write_table(table, session / "telemetry-00000.parquet")  # type: ignore[no-untyped-call]
-    return session
+from tests.evidence_builders import (
+    allowed_tokens,
+    memory_evidence,
+    memory_vehicle,
+    unresolved_numbers,
+)
+from tests.target_phi_builders import IMAGE_SHA, PROFILE, phi_definition, phi_session, phi_table
+from tests.twin_builders import INVESTIGATION_REVISION, INVESTIGATION_SLUG, investigation_store
 
 
 def _qualified() -> ResolvedTable:
     """The committed table with the application model's blockers lifted and
     the constants marked checked: what a fully verified path would give."""
-    definition, _ = _definition()
-    base = _table(definition)
+    definition, _ = phi_definition()
+    base = phi_table(definition)
     return ResolvedTable(
         **{
             **base.__dict__,
@@ -81,8 +60,8 @@ def _mint(
     refuse: str | None = None,
     **session: Any,
 ) -> Evidence:
-    definition, sha = _definition()
-    chosen = table or _table(definition)
+    definition, sha = phi_definition()
+    chosen = table or phi_table(definition)
 
     def table_for_slot(slot: int) -> ResolvedTable:
         if refuse is not None:
@@ -92,13 +71,13 @@ def _mint(
 
     minted = evaluate_and_mint(
         ledger,
-        _store(tmp_path / "sessions", _session(**session), name),
+        investigation_store(tmp_path / "sessions", phi_session(**session), name),
         definition=definition,
         definition_sha256=sha,
         identity=TwinSessionIdentity(
-            profile=SLUG,
+            profile=INVESTIGATION_SLUG,
             vin=None,
-            calibration=REVISION,
+            calibration=INVESTIGATION_REVISION,
             calibration_source="registry",
             image_sha256=IMAGE_SHA,
         ),
@@ -113,7 +92,7 @@ def _mint(
 
 @pytest.fixture
 def ledger(tmp_path: Path) -> MemoryLedger:
-    return MemoryLedger(tmp_path / "memory.jsonl", vehicle=SLUG)
+    return MemoryLedger(tmp_path / "memory.jsonl", vehicle=INVESTIGATION_SLUG)
 
 
 def test_twin_evidence_names_its_class_image_and_the_logic_it_omits(
@@ -126,12 +105,12 @@ def test_twin_evidence_names_its_class_image_and_the_logic_it_omits(
     assert (labels["image_sha256"], labels["slot"], labels["revision"]) == (
         IMAGE_SHA,
         "1",
-        REVISION,
+        INVESTIGATION_REVISION,
     )
     # The image reference resolves to the flash history's revision.
     registry = load_tune_revisions(PROFILE / "tune_revisions.yaml")
     assert registry is not None
-    assert registry.match_image(labels["image_sha256"]) == (REVISION, None)
+    assert registry.match_image(labels["image_sha256"]) == (INVESTIGATION_REVISION, None)
     blockers = labels["blockers"].split(",")
     assert {"final_command_path_unverified", "ram_copy_unverified"} <= set(blockers)
     omitted = labels["omitted_logic"].split(",")
@@ -183,7 +162,7 @@ def test_a_positive_residual_reads_as_the_ecm_commanding_richer(
     # template check, the names the card prints from records (vehicle,
     # program, label keys) are identifiers, not numbers.
     names = {card.vehicle, card.program_id or "", *view.labels}
-    assert _unresolved_numbers(text, _allowed_tokens(card, ledger) | names) == []
+    assert unresolved_numbers(text, allowed_tokens(card, ledger) | names) == []
 
 
 def test_a_zero_residual_makes_no_engine_health_claim(ledger: MemoryLedger, tmp_path: Path) -> None:
@@ -224,7 +203,7 @@ def test_command_residuals_and_engine_response_never_cross(
     twin = _mint(ledger, tmp_path, table=_qualified(), word=19072 + 2)
     with pytest.raises(NotEngineResponseError, match="ECU-computation"):
         detect_discrepancy(ledger, twin.id)
-    measured = ledger.append(_evidence(vehicle=_vehicle(SLUG)))
+    measured = ledger.append(memory_evidence(vehicle=memory_vehicle(INVESTIGATION_SLUG)))
     with pytest.raises(NotEcuCommandError, match="ECU-command evidence"):
         investigate_command_residual(ledger, measured.id)
     # A related engine-response record is provenance, never an observation.
@@ -287,7 +266,7 @@ def test_a_later_occurrence_of_the_same_direction_updates_its_investigation(
 def test_the_brain_twin_job_links_each_minted_record_to_its_investigation(tmp_path: Path) -> None:
     from src.control.brain_jobs import canonical_params, run_brain_job
     from src.evidence import memory_ledger_for
-    from tests.test_brain_jobs import SESSION, scoped_config, write_session
+    from tests.builders import SESSION, scoped_config, write_session
 
     config = scoped_config(tmp_path)
     write_session(config)
@@ -349,24 +328,24 @@ def test_a_changed_input_recomputes_the_record_and_keeps_one_investigation(
     """The case a shared tree can produce between two job runs, forced: the
     same session minted under different inputs supersedes, and the
     investigation is re-stated once over it, not duplicated."""
-    ledger = MemoryLedger(tmp_path / "memory.jsonl", vehicle=SLUG)
+    ledger = MemoryLedger(tmp_path / "memory.jsonl", vehicle=INVESTIGATION_SLUG)
     first = _mint(ledger, tmp_path)
     opened = investigate_command_residual(ledger, first.id)
-    definition, _ = _definition()
+    definition, _ = phi_definition()
     recomputed = evaluate_and_mint(
         ledger,
         tmp_path / "sessions" / "2026-10-04T210000",
         definition=definition,
         definition_sha256="0" * 64,  # another definition: a recompute
         identity=TwinSessionIdentity(
-            profile=SLUG,
+            profile=INVESTIGATION_SLUG,
             vin=None,
-            calibration=REVISION,
+            calibration=INVESTIGATION_REVISION,
             calibration_source="registry",
             image_sha256=IMAGE_SHA,
         ),
         program_id=first.vehicle.program_id,
-        table_for_slot=lambda slot: _table(definition),
+        table_for_slot=lambda slot: phi_table(definition),
     )
     (second,) = recomputed["evidence"]
     assert second != first.id and ledger.get(second).supersedes == (first.id,)

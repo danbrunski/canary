@@ -9,7 +9,6 @@ and equal per-channel rates with zero joint coverage.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 import pandas as pd
@@ -33,39 +32,17 @@ from src.storage.capture_losses import (
     RESET,
     UNKNOWN,
     VERIFIED,
-    LossEpoch,
-    reconcile_losses,
-    summarize_losses,
 )
 from src.storage.capture_manifest import SCOPE_TRAILING, normalize_quality_payload
 from src.telemetry import TelemetryRecord
-
-TUPLE = ["RPM", "ENGINE_LOAD", "FUEL_STATUS", "COMMANDED_EQUIV_RATIO", "O2_WR_LAMBDA_S1"]
-
-
-def _profile(**overrides: object) -> dict[str, Any]:
-    base: dict[str, Any] = {
-        "name": "fuel-map",
-        "mode01": {name: 1.0 for name in TUPLE} | {"COOLANT_TEMP": 0.25},
-        "target_rate_hz": 4.0,
-        "required_tuple": list(TUPLE),
-        "min_achieved_rate_hz": 3.0,
-        "round_timestamps": True,
-    }
-    base.update(overrides)
-    return base
-
-
-def _scheduler(
-    channels: list[str], *, trailing_hz: dict[str, float] | None = None
-) -> dict[str, Any]:
-    return {
-        "capture_observed_seconds": 60.0,
-        "achieved_hz_capture": dict(trailing_hz or {}),
-        "capture_max_gap_seconds": {},
-        "requests": [{"channel": c, "kind": "pid", "capture_selected": True} for c in channels],
-        "batching": {"max_pids": 6, "mean_pids_per_batch": 5.2},
-    }
+from tests.capture_builders import (
+    CLEAN,
+    TUPLE,
+    quality_profile,
+    quality_scheduler,
+    quality_tuples,
+    verified_losses,
+)
 
 
 def _lifetime(
@@ -98,53 +75,6 @@ def _healthy(elapsed: float = 300.0) -> dict[str, Any]:
     )
 
 
-def _tuples(
-    complete: int,
-    elapsed: float = 300.0,
-    *,
-    windows: list[tuple[float, float, float]] | None = None,
-    **overrides: Any,
-) -> dict[str, Any]:
-    acc = ChannelAccumulator("__tuple__")
-    if windows is None:
-        for i in range(complete):
-            acc.observe(i * 0.25)
-    else:
-        for start, stop, period in windows:
-            t = start
-            while t <= stop + 1e-9:
-                acc.observe(t)
-                t += period
-    block = {
-        "source": "persisted_rows",
-        "attempted": complete,
-        "complete": complete,
-        "persisted": complete,
-        "incomplete": 0,
-        "skew_rejected": 0,
-        "member_misses": dict.fromkeys(TUPLE, 0),
-        "skew": {"p95_s": 0.01, "max_s": 0.02},
-        "lifetime": acc.snapshot(elapsed).to_dict(),
-    }
-    block.update(overrides)
-    return block
-
-
-def _epoch(counters: dict[str, int | None], at: float = 0.0) -> LossEpoch:
-    return LossEpoch(taken_at_monotonic=at, taken_at_wall=at, counters=counters)
-
-
-def _verified_losses(
-    start: Mapping[str, int | None], stop: Mapping[str, int | None]
-) -> dict[str, Any]:
-    return summarize_losses(reconcile_losses(_epoch(dict(start)), _epoch(dict(stop), 300.0)))
-
-
-CLEAN: dict[str, int | None] = {
-    "storage.dropped_records": 0,
-    "storage.errors": 0,
-    "can0.rx_dropped": 0,
-}
 CHANNELS = [*TUPLE, "COOLANT_TEMP"]
 
 
@@ -163,14 +93,14 @@ def test_a_five_minute_capture_with_samples_only_in_the_last_minute_fails() -> N
         {name: [(240.0, 300.0, 0.25)] for name in CHANNELS},
         elapsed=300.0,
     )
-    trailing = _scheduler(CHANNELS, trailing_hz=dict.fromkeys(CHANNELS, 4.0))
+    trailing = quality_scheduler(CHANNELS, trailing_hz=dict.fromkeys(CHANNELS, 4.0))
     trailing["capture_max_gap_seconds"] = dict.fromkeys(CHANNELS, 0.25)
     quality = evaluate_capture_quality(
-        profile=_profile(),
+        profile=quality_profile(),
         scheduler=trailing,
         lifetime=lifetime,
-        tuples=_tuples(240, elapsed=300.0),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(240, elapsed=300.0),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     assert quality.verdict == "fail"
     assert ACQUISITION_GAP in _clauses(quality)
@@ -186,7 +116,7 @@ def test_a_five_minute_capture_with_samples_only_in_the_last_minute_fails() -> N
 
 
 def test_live_quality_uses_the_shared_resolved_plan_as_its_request_truth() -> None:
-    scheduler = _scheduler([*CHANNELS, "UNSELECTED_STARTUP_MEMBER"])
+    scheduler = quality_scheduler([*CHANNELS, "UNSELECTED_STARTUP_MEMBER"])
     scheduler["resolved_plan"] = {
         "members": [
             {
@@ -200,11 +130,11 @@ def test_live_quality_uses_the_shared_resolved_plan_as_its_request_truth() -> No
         ]
     }
     quality = evaluate_capture_quality(
-        profile=_profile(),
+        profile=quality_profile(),
         scheduler=scheduler,
         lifetime=_healthy(),
-        tuples=_tuples(1200),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(1200),
+        losses=verified_losses(CLEAN, CLEAN),
     )
 
     assert "UNSELECTED_STARTUP_MEMBER" not in {row.channel for row in quality.channels}
@@ -220,22 +150,22 @@ def test_an_earlier_storage_loss_incident_is_not_attributed_to_a_later_clean_cap
     before = {"storage.dropped_records": 0, "storage.errors": 0, "can0.rx_dropped": 0}
     after_incident = {"storage.dropped_records": 2491, "storage.errors": 1, "can0.rx_dropped": 0}
     first = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_healthy(),
-        tuples=_tuples(1200),
-        losses=_verified_losses(before, after_incident),
+        tuples=quality_tuples(1200),
+        losses=verified_losses(before, after_incident),
     )
     assert first.verdict == "fail"
     loss = next(f for f in first.failures if f["clause"] == PERSISTENCE_LOSS)
     assert loss["evidence"]["storage.dropped_records"]["delta"] == 2491
 
     later = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_healthy(),
-        tuples=_tuples(1200),
-        losses=_verified_losses(after_incident, after_incident),
+        tuples=quality_tuples(1200),
+        losses=verified_losses(after_incident, after_incident),
     )
     assert later.verdict == "pass", later.failures
     assert later.losses["recording"]["status"] == VERIFIED
@@ -246,11 +176,11 @@ def test_an_earlier_storage_loss_incident_is_not_attributed_to_a_later_clean_cap
 def test_a_capture_local_loss_fails_even_with_a_clean_final_minute() -> None:
     """The trailing window at stop was clean; the loss happened at minute two."""
     quality = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS, trailing_hz=dict.fromkeys(CHANNELS, 4.0)),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS, trailing_hz=dict.fromkeys(CHANNELS, 4.0)),
         lifetime=_healthy(),
-        tuples=_tuples(1200),
-        losses=_verified_losses(CLEAN, {**CLEAN, "storage.dropped_records": 40}),
+        tuples=quality_tuples(1200),
+        losses=verified_losses(CLEAN, {**CLEAN, "storage.dropped_records": 40}),
     )
     assert quality.verdict == "fail"
     assert _clauses(quality) == {PERSISTENCE_LOSS}
@@ -258,10 +188,10 @@ def test_a_capture_local_loss_fails_even_with_a_clean_final_minute() -> None:
 
 def test_unknown_or_reset_counters_never_produce_a_verified_no_loss_claim() -> None:
     unknown = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_healthy(),
-        tuples=_tuples(1200),
+        tuples=quality_tuples(1200),
         losses=None,
     )
     assert unknown.verdict == "unverified"
@@ -270,22 +200,22 @@ def test_unknown_or_reset_counters_never_produce_a_verified_no_loss_claim() -> N
     assert unknown.losses["recording"]["lost"] is None
 
     reset = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_healthy(),
-        tuples=_tuples(1200),
-        losses=_verified_losses({**CLEAN, "storage.dropped_records": 500}, CLEAN),
+        tuples=quality_tuples(1200),
+        losses=verified_losses({**CLEAN, "storage.dropped_records": 500}, CLEAN),
     )
     assert reset.verdict == "unverified"
     counter = reset.losses["recording"]["counters"]["storage.dropped_records"]
     assert counter["status"] == RESET and counter["delta"] is None
 
     missing_can0 = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_healthy(),
-        tuples=_tuples(1200),
-        losses=_verified_losses(
+        tuples=quality_tuples(1200),
+        losses=verified_losses(
             {**CLEAN, "can0.rx_dropped": None}, {**CLEAN, "can0.rx_dropped": None}
         ),
     )
@@ -294,15 +224,15 @@ def test_unknown_or_reset_counters_never_produce_a_verified_no_loss_claim() -> N
 
 
 def test_dashboard_only_drops_are_reported_beside_recording_loss_not_inside_it() -> None:
-    losses = _verified_losses(
+    losses = verified_losses(
         {**CLEAN, "broadcast.dropped_records": 0, "live.dropped_records": 0},
         {**CLEAN, "broadcast.dropped_records": 900, "live.dropped_records": 3},
     )
     quality = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_healthy(),
-        tuples=_tuples(1200),
+        tuples=quality_tuples(1200),
         losses=losses,
     )
     assert quality.verdict == "pass"
@@ -356,13 +286,15 @@ def test_equal_per_channel_rates_with_disjoint_rounds_yield_zero_tuples() -> Non
     assert tuples["member_misses"] == {"A": 120, "B": 120}
 
     lifetime = _lifetime({"A": [(0.0, 60.0, 0.5)], "B": [(0.25, 60.0, 0.5)]}, elapsed=60.0)
-    profile = _profile(mode01={"A": 1.0, "B": 1.0}, required_tuple=["A", "B"], target_rate_hz=2.0)
+    profile = quality_profile(
+        mode01={"A": 1.0, "B": 1.0}, required_tuple=["A", "B"], target_rate_hz=2.0
+    )
     quality = evaluate_capture_quality(
         profile=profile,
-        scheduler=_scheduler(["A", "B"]),
+        scheduler=quality_scheduler(["A", "B"]),
         lifetime=lifetime,
         tuples=tuples,
-        losses=_verified_losses(CLEAN, CLEAN),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     assert quality.verdict == "fail"
     assert _clauses(quality) == {TUPLE_INCOMPLETE}
@@ -400,7 +332,7 @@ def test_members_in_one_round_but_too_far_apart_are_skew_rejected() -> None:
     assert tuples["complete"] == 0
     assert tuples["skew_rejected"] == 40
     assert tuples["skew"]["max_s"] == pytest.approx(0.2)
-    profile = _profile(
+    profile = quality_profile(
         mode01={"A": 1.0, "B": 1.0},
         required_tuple=["A", "B"],
         target_rate_hz=4.0,
@@ -408,10 +340,10 @@ def test_members_in_one_round_but_too_far_apart_are_skew_rejected() -> None:
     )
     quality = evaluate_capture_quality(
         profile=profile,
-        scheduler=_scheduler(["A", "B"]),
+        scheduler=quality_scheduler(["A", "B"]),
         lifetime=_lifetime({"A": [(0.0, 10.0, 0.25)], "B": [(0.2, 10.2, 0.25)]}, elapsed=10.0),
         tuples=tuples,
-        losses=_verified_losses(CLEAN, CLEAN),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     assert _clauses(quality) == {TUPLE_SKEW}
     assert quality.tuples["max_tuple_skew_s"] == 0.125
@@ -424,11 +356,11 @@ def test_rows_without_round_identity_are_no_evidence_not_zero_yield() -> None:
     )
     assert tuples["source"] == "no_round_evidence"
     quality = evaluate_capture_quality(
-        profile=_profile(mode01={"A": 1.0}, required_tuple=["A"], target_rate_hz=1.0),
-        scheduler=_scheduler(["A"]),
+        profile=quality_profile(mode01={"A": 1.0}, required_tuple=["A"], target_rate_hz=1.0),
+        scheduler=quality_scheduler(["A"]),
         lifetime=_lifetime({"A": [(0.0, 10.0, 1.0)]}, elapsed=10.0),
         tuples=tuples,
-        losses=_verified_losses(CLEAN, CLEAN),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     assert quality.verdict == "unverified"
     assert quality.tuples["source"] == "no_round_evidence"
@@ -451,11 +383,11 @@ def test_the_2026_08_10_rates_fail_as_a_rate_shortfall_with_evidence() -> None:
     }
     lifetime = _lifetime({n: [(0.0, 1434.0, 1.0 / hz)] for n, hz in slow.items()}, elapsed=1434.0)
     quality = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=lifetime,
-        tuples=_tuples(2, elapsed=1434.0, attempted=400, incomplete=398),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(2, elapsed=1434.0, attempted=400, incomplete=398),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     assert quality.verdict == "fail"
     assert RATE_SHORTFALL in _clauses(quality)
@@ -467,11 +399,11 @@ def test_the_2026_08_10_rates_fail_as_a_rate_shortfall_with_evidence() -> None:
 
 def test_the_context_weight_is_part_of_the_promise_not_a_shortfall() -> None:
     quality = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_healthy(),
-        tuples=_tuples(1200),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(1200),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     coolant = next(row for row in quality.channels if row.channel == "COOLANT_TEMP")
     assert coolant.requested_hz == 1.0
@@ -481,14 +413,14 @@ def test_the_context_weight_is_part_of_the_promise_not_a_shortfall() -> None:
 
 def test_an_unanswered_channel_is_not_a_shortfall_and_silences_the_tuple_clause() -> None:
     lifetime = _healthy()
-    profile = _profile()
+    profile = quality_profile()
     profile["mode01"] = {**profile["mode01"], "O2_WR_LAMBDA_S2": 1.0}
     quality = evaluate_capture_quality(
         profile=profile,
-        scheduler=_scheduler([*CHANNELS, "O2_WR_LAMBDA_S2"]),
+        scheduler=quality_scheduler([*CHANNELS, "O2_WR_LAMBDA_S2"]),
         lifetime=lifetime,
-        tuples=_tuples(1200),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(1200),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     assert quality.verdict == "fail"
     failure = next(f for f in quality.failures if f["clause"] == UNANSWERED_INPUT)
@@ -500,11 +432,11 @@ def test_an_unanswered_channel_is_not_a_shortfall_and_silences_the_tuple_clause(
         {n: [(0.0, 300.0, 0.25)] for n in CHANNELS if n != "COMMANDED_EQUIV_RATIO"}, elapsed=300.0
     )
     quality = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=lifetime_missing,
-        tuples=_tuples(0, attempted=1200, incomplete=1200),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(0, attempted=1200, incomplete=1200),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     assert _clauses(quality) == {UNANSWERED_INPUT}
     assert quality.tuple_rate_bound_hz is None
@@ -513,11 +445,11 @@ def test_an_unanswered_channel_is_not_a_shortfall_and_silences_the_tuple_clause(
 def test_a_pause_is_excluded_by_name_but_an_engine_off_gap_is_not() -> None:
     windows = [(0.0, 100.0, 0.25), (160.0, 300.0, 0.25)]
     paused = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_lifetime({n: windows for n in CHANNELS}, elapsed=300.0, pauses=[[100.0, 160.0]]),
-        tuples=_tuples(960, windows=windows),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(960, windows=windows),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     assert paused.verdict == "pass", paused.failures
     assert paused.interval["paused_s"] == pytest.approx(60.0)
@@ -525,11 +457,11 @@ def test_a_pause_is_excluded_by_name_but_an_engine_off_gap_is_not() -> None:
     assert paused.interval["pause_windows"] == [[100.0, 160.0]]
 
     engine_off = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_lifetime({n: windows for n in CHANNELS}, elapsed=300.0),
-        tuples=_tuples(960, windows=windows),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(960, windows=windows),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     assert engine_off.verdict == "fail"
     assert ACQUISITION_GAP in _clauses(engine_off)
@@ -539,21 +471,21 @@ def test_a_pause_is_excluded_by_name_but_an_engine_off_gap_is_not() -> None:
 
 def test_a_stall_older_than_the_trailing_window_and_a_missing_tail_both_fail() -> None:
     stalled = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_lifetime(
             {n: [(0.0, 60.0, 0.25), (150.0, 400.0, 0.25)] for n in CHANNELS}, elapsed=400.0
         ),
-        tuples=_tuples(1200, elapsed=400.0),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(1200, elapsed=400.0),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     assert ACQUISITION_GAP in _clauses(stalled)
     tail = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_lifetime({n: [(0.0, 100.0, 0.25)] for n in CHANNELS}, elapsed=300.0),
-        tuples=_tuples(400),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(400),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     gap = next(f for f in tail.failures if f["clause"] == ACQUISITION_GAP)
     assert gap["evidence"]["RPM"]["missing_final_s"] == pytest.approx(200.0)
@@ -561,11 +493,11 @@ def test_a_stall_older_than_the_trailing_window_and_a_missing_tail_both_fail() -
 
 def test_a_late_writer_failure_at_stop_is_a_persistence_loss() -> None:
     quality = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_healthy(),
-        tuples=_tuples(1200),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(1200),
+        losses=verified_losses(CLEAN, CLEAN),
         persistence={"flushed": False, "flush_error": "OSError: disk full", "rows_written": 9000},
     )
     assert quality.verdict == "fail"
@@ -573,11 +505,11 @@ def test_a_late_writer_failure_at_stop_is_a_persistence_loss() -> None:
     assert failure["evidence"]["flush_error"] == "OSError: disk full"
 
     short = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_healthy(),
-        tuples=_tuples(1200),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(1200),
+        losses=verified_losses(CLEAN, CLEAN),
         persistence={
             "flushed": True,
             "flush_error": None,
@@ -590,26 +522,26 @@ def test_a_late_writer_failure_at_stop_is_a_persistence_loss() -> None:
 
 def test_too_short_an_interval_is_unverified_not_a_pass() -> None:
     quality = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_healthy(elapsed=1.0),
-        tuples=_tuples(4, elapsed=1.0),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(4, elapsed=1.0),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     assert quality.verdict == "unverified"
     assert any("minimum" in note for note in quality.notes)
 
 
 def test_batching_off_is_called_out() -> None:
-    scheduler = _scheduler(["RPM", "COOLANT_TEMP"])
+    scheduler = quality_scheduler(["RPM", "COOLANT_TEMP"])
     scheduler["batching"] = None
     quality = evaluate_capture_quality(
-        profile=_profile(required_tuple=[]),
+        profile=quality_profile(required_tuple=[]),
         scheduler=scheduler,
         lifetime=_lifetime(
             {"RPM": [(0.0, 60.0, 0.25)], "COOLANT_TEMP": [(0.0, 60.0, 1.0)]}, elapsed=60.0
         ),
-        losses=_verified_losses(CLEAN, CLEAN),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     assert any("batching" in note for note in quality.notes)
     assert quality.tuples["source"] == "no_required_tuple"
@@ -644,14 +576,14 @@ def _batching(*, desyncs: int, failures: int, requests: int, loop: float = 12.5)
 
 
 def _scored_with_batching(start: dict[str, Any] | None, now: dict[str, Any] | None) -> Any:
-    scheduler = _scheduler(TUPLE)
+    scheduler = quality_scheduler(TUPLE)
     scheduler["batching"] = now
     return evaluate_capture_quality(
-        profile=_profile(),
+        profile=quality_profile(),
         scheduler=scheduler,
         lifetime=_healthy(elapsed=100.0),
-        tuples=_tuples(400, elapsed=100.0),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(400, elapsed=100.0),
+        losses=verified_losses(CLEAN, CLEAN),
         batching_start=start,
     ).to_dict()["batching"]
 
@@ -659,7 +591,10 @@ def _scored_with_batching(start: dict[str, Any] | None, now: dict[str, Any] | No
 def test_desyncs_from_an_earlier_capture_are_not_this_captures() -> None:
     """2026-09-18: a capture reported 102 desyncs, 99 of them from the capture
     before it on the same daemon — the lifetime block was copied verbatim."""
-    at_arm = {**_scheduler(TUPLE), "batching": _batching(desyncs=99, failures=40, requests=1000)}
+    at_arm = {
+        **quality_scheduler(TUPLE),
+        "batching": _batching(desyncs=99, failures=40, requests=1000),
+    }
     now = _batching(desyncs=102, failures=41, requests=1400)
     block = _scored_with_batching(batching_baseline(at_arm), now)
     assert block["scope"] == "capture"
@@ -680,7 +615,7 @@ def test_desyncs_from_an_earlier_capture_are_not_this_captures() -> None:
 
 
 def test_batching_off_at_arm_is_a_zero_baseline() -> None:
-    at_arm = {**_scheduler(TUPLE), "batching": None}
+    at_arm = {**quality_scheduler(TUPLE), "batching": None}
     block = _scored_with_batching(
         batching_baseline(at_arm), _batching(desyncs=2, failures=0, requests=50)
     )
@@ -689,7 +624,10 @@ def test_batching_off_at_arm_is_a_zero_baseline() -> None:
 
 
 def test_a_counter_reset_mid_capture_is_flagged_never_negative() -> None:
-    at_arm = {**_scheduler(TUPLE), "batching": _batching(desyncs=99, failures=40, requests=1000)}
+    at_arm = {
+        **quality_scheduler(TUPLE),
+        "batching": _batching(desyncs=99, failures=40, requests=1000),
+    }
     # The daemon restarted: every counter began again from zero.
     now = _batching(desyncs=2, failures=1, requests=30, loop=900.0)
     block = _scored_with_batching(batching_baseline(at_arm), now)
@@ -704,7 +642,7 @@ def test_a_counter_reset_mid_capture_is_flagged_never_negative() -> None:
 
 def test_a_restart_that_regrew_past_the_baseline_is_still_a_reset() -> None:
     """Counters higher than at arm are not a delta if their loop is new."""
-    at_arm = {**_scheduler(TUPLE), "batching": _batching(desyncs=1, failures=1, requests=10)}
+    at_arm = {**quality_scheduler(TUPLE), "batching": _batching(desyncs=1, failures=1, requests=10)}
     now = _batching(desyncs=5, failures=3, requests=900, loop=900.0)
     block = _scored_with_batching(batching_baseline(at_arm), now)
     assert block["status"] == "reset"
@@ -723,11 +661,11 @@ def test_no_arm_time_reading_is_unknown_not_the_lifetime_total() -> None:
 
 def test_the_sidecar_is_versioned_and_never_claims_an_exact_bound() -> None:
     payload = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_healthy(),
-        tuples=_tuples(1200),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(1200),
+        losses=verified_losses(CLEAN, CLEAN),
         scope="stop",
     ).to_dict()
     assert payload["schema_version"] == 2
@@ -806,7 +744,7 @@ def test_a_did_capture_is_scored_under_the_profiles_own_channel_names() -> None:
     lifetime = _lifetime(
         {c: [(0.0, 120.0, 0.05)] for c in ("DID_1209", "DID_1208", "DID_1219")}, elapsed=120.0
     )
-    tuples = _tuples(2400, elapsed=120.0)
+    tuples = quality_tuples(2400, elapsed=120.0)
     tuples["lifetime"] = ChannelAccumulator("__tuple__").snapshot(0.0).to_dict()
     acc = ChannelAccumulator("__tuple__")
     for i in range(2400):
@@ -817,7 +755,7 @@ def test_a_did_capture_is_scored_under_the_profiles_own_channel_names() -> None:
         scheduler=_did_scheduler(),
         lifetime=lifetime,
         tuples=tuples,
-        losses=_verified_losses(CLEAN, CLEAN),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     assert quality.verdict == "pass", quality.failures
     names = [row.channel for row in quality.channels]
@@ -846,8 +784,8 @@ def test_did_context_weight_changes_only_its_own_rate_promise() -> None:
         profile=profile,
         scheduler=_did_scheduler(),
         lifetime=lifetime,
-        tuples=_tuples(100, elapsed=20.0),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(100, elapsed=20.0),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     by_name = {row.channel: row for row in quality.channels}
     assert by_name["ECM_MAF_GPS"].requested_hz == pytest.approx(5.0)
@@ -865,13 +803,13 @@ def test_did_context_weight_changes_only_its_own_rate_promise() -> None:
 def test_short_gaps_in_an_otherwise_complete_capture_are_degraded_not_failed() -> None:
     """A 20 s stall in a 300 s capture leaves every channel >= 90 % covered."""
     quality = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_lifetime(
             {n: [(0.0, 140.0, 0.25), (160.0, 300.0, 0.25)] for n in CHANNELS}, elapsed=300.0
         ),
-        tuples=_tuples(1100),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(1100),
+        losses=verified_losses(CLEAN, CLEAN),
     )
     assert ACQUISITION_GAP in _clauses(quality)
     assert quality.verdict == "degraded"
@@ -882,11 +820,11 @@ def test_controller_overflow_is_reported_but_does_not_fail_the_capture() -> None
     start = {**CLEAN, "can0.rx_over_errors": 113}
     stop = {**CLEAN, "can0.rx_over_errors": 221}
     quality = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_healthy(),
-        tuples=_tuples(1200),
-        losses=_verified_losses(start, stop),
+        tuples=quality_tuples(1200),
+        losses=verified_losses(start, stop),
     )
     assert PERSISTENCE_LOSS not in _clauses(quality)
     assert quality.losses["controller"]["lost"] == 108
@@ -896,11 +834,11 @@ def test_controller_overflow_is_reported_but_does_not_fail_the_capture() -> None
 def test_socket_drops_still_fail_the_capture() -> None:
     """rx_dropped is CANary not keeping up — a recording loss, unlike controller overflow."""
     quality = evaluate_capture_quality(
-        profile=_profile(),
-        scheduler=_scheduler(CHANNELS),
+        profile=quality_profile(),
+        scheduler=quality_scheduler(CHANNELS),
         lifetime=_healthy(),
-        tuples=_tuples(1200),
-        losses=_verified_losses(CLEAN, {**CLEAN, "can0.rx_dropped": 5}),
+        tuples=quality_tuples(1200),
+        losses=verified_losses(CLEAN, {**CLEAN, "can0.rx_dropped": 5}),
     )
     assert quality.verdict == "fail"
     assert PERSISTENCE_LOSS in _clauses(quality)
@@ -943,9 +881,9 @@ def _kline_lifetime(
 def _kline_quality(lifetime: dict[str, Any]) -> Any:
     return evaluate_capture_quality(
         profile={"name": "kline-target", "mode01": {}, "kline": list(KLINE_ENTRIES)},
-        scheduler=_scheduler([]),
+        scheduler=quality_scheduler([]),
         lifetime=lifetime,
-        losses=_verified_losses(CLEAN, CLEAN),
+        losses=verified_losses(CLEAN, CLEAN),
     )
 
 
@@ -1061,7 +999,7 @@ def _target_word_quality(*, cut: str) -> Any:
         t += 0.5
     snap = ledger.snapshot(300.0)
     assert snap is not None
-    scheduler = _scheduler(TUPLE)
+    scheduler = quality_scheduler(TUPLE)
     scheduler["requests"].append(
         {
             "channel": "mem:fuel_target",
@@ -1071,11 +1009,11 @@ def _target_word_quality(*, cut: str) -> Any:
         }
     )
     return evaluate_capture_quality(
-        profile=_profile(memory=["ECM_TARGET_EQUIV_RATIO"]),
+        profile=quality_profile(memory=["ECM_TARGET_EQUIV_RATIO"]),
         scheduler=scheduler,
         lifetime=snap.to_dict(),
-        tuples=_tuples(600, elapsed=300.0),
-        losses=_verified_losses(CLEAN, CLEAN),
+        tuples=quality_tuples(600, elapsed=300.0),
+        losses=verified_losses(CLEAN, CLEAN),
     )
 
 

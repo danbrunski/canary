@@ -18,7 +18,6 @@ from __future__ import annotations
 import random
 import threading
 import time
-from collections.abc import Iterator
 from concurrent.futures import Executor, Future
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -39,59 +38,30 @@ from src.daemon.twin_live import (
     _InlineExecutor,
     build_live_twin,
 )
-from src.decode.dids import load_did_map
 from src.features.live import LiveFeatureSource
-from src.paths import DIDS_YAML
 from src.telemetry import TelemetryRecord
 from src.vehicle.profiles import VehicleProfile, scope_config
+from tests.builders import SLUG
 from tests.configs import isolated_config
-from tests.test_brain_jobs import SLUG
-from tests.test_lambda_delivery_live import _records
-from tests.test_target_phi import (
+from tests.target_phi_builders import (
     EXPECT,
-    IMAGE_SHA,
     NAMED_STATES,
-    _definition,
-    _evaluate,
-    _hysteresis_table,
-    _session,
-    _table,
     fixture_frame,
+    hysteresis_table,
+    phi_definition,
+    phi_evaluate,
+    phi_session,
+    phi_table,
 )
-
-CATALOG = load_did_map(DIDS_YAML)
-REVISION = EXPECT["calibration"]["revision"]
-IDENTITY = TwinIdentity(REVISION, IMAGE_SHA, "registry", False, "known", "program")
-
-
-class FakeResolver:
-    """The shared resolver's contract with injected segments and tables.
-
-    ``segments`` maps the asked instant to segments; ``table`` maps an
-    identity to its default-slot table (or raises its refusal). Every other
-    slot refuses ``table_unverified``, as the real profile's slots 2-5 do."""
-
-    def __init__(
-        self,
-        table: ResolvedTable | None = None,
-        *,
-        segments: Any = None,
-        table_for: Any = None,
-    ) -> None:
-        self.definition, self.definition_sha256 = _definition()
-        chosen = table or _table(self.definition)
-        self._segments = segments or (lambda _at: [IdentitySegment(None, None, IDENTITY)])
-        self._table_for = table_for or (lambda _identity: chosen)
-        self.asked: list[float | None] = []
-
-    def segments(self, session: Path | None, *, first_read: float | None) -> list[Any]:
-        self.asked.append(first_read)
-        return list(self._segments(first_read))
-
-    def table(self, identity: TwinIdentity, slot: int) -> ResolvedTable:
-        if slot != self.definition.map_identity.default_slot.slot:
-            raise TwinRefusalError("table_unverified", f"slot {slot} is inferred")
-        return self._table_for(identity)
+from tests.twin_live_builders import (
+    CATALOG,
+    IDENTITY,
+    REVISION,
+    FakeResolver,
+    lambda_live_records,
+    live_drive,
+    live_twin,
+)
 
 
 @pytest.fixture(scope="module")
@@ -101,69 +71,7 @@ def frame() -> pd.DataFrame:
 
 @pytest.fixture(scope="module")
 def stored(frame: pd.DataFrame) -> dict[str, Any]:
-    return _evaluate(frame)
-
-
-def _twin(
-    table: ResolvedTable | None = None,
-    *,
-    resolver: FakeResolver | None = None,
-    recorder: InferenceTimingRecorder | None = None,
-    executor: Executor | None = None,
-    session: str = "s",
-    capacity: int | None = None,
-    recheck_s: float = 60.0,
-    by_segment: dict[int, list[dict[str, Any]]] | None = None,
-) -> tuple[LiveTwin, list[dict[str, Any]]]:
-    """A live twin on a fake resolver, preloaded; returns it and the list its
-    default-slot records land in (``by_segment`` splits them per segment)."""
-    chosen = resolver or FakeResolver(table)
-    out: list[dict[str, Any]] = []
-
-    def sink(segment: int, slot: int, records: list[dict[str, Any]]) -> None:
-        if slot == chosen.definition.map_identity.default_slot.slot:
-            out.extend(records)
-            if by_segment is not None:
-                by_segment.setdefault(segment, []).extend(records)
-
-    kwargs: dict[str, Any] = {}
-    if capacity is not None:
-        kwargs["intake_capacity"] = capacity
-    twin = LiveTwin(
-        resolver=lambda: chosen,
-        recorder=recorder,
-        did_map=CATALOG,
-        catalog=CATALOG,
-        session=session,
-        executor=executor or _InlineExecutor(),
-        identity_recheck_s=recheck_s,
-        on_records=sink,
-        **kwargs,
-    )
-    twin.tick(session=session, vehicle_state=None)  # the worker preloads
-    return twin, out
-
-
-def _drive(
-    twin: LiveTwin,
-    records: Iterator[TelemetryRecord] | list[TelemetryRecord],
-    *,
-    tick_s: float = 1.0,
-    session: str = "s",
-    flush: bool = True,
-) -> None:
-    """Records into the intake, one tick per ``tick_s`` of stored time."""
-    next_tick: datetime | None = None
-    for record in records:
-        if next_tick is None:
-            next_tick = record.timestamp + timedelta(seconds=tick_s)
-        while record.timestamp >= next_tick:
-            twin.tick(session=session, vehicle_state="engine_running")
-            next_tick += timedelta(seconds=tick_s)
-        twin.intake.observe(record)
-    twin.tick(session=session, vehicle_state="engine_running")
-    if flush:
-        twin.flush(session=session)
+    return phi_evaluate(frame)
 
 
 def _same_as_stored(live: list[dict[str, Any]], stored: dict[str, Any], twin: LiveTwin) -> None:
@@ -187,11 +95,11 @@ def test_the_live_path_gives_the_stored_records_on_october_4(
 ) -> None:
     """Records through a real LiveFeatureSource's observer seam, one tick per
     data second: the 174 records the stored evaluator mints, field for field."""
-    twin, live = _twin()
+    twin, live = live_twin()
     source = LiveFeatureSource(config=isolated_config(tmp_path, profiles={"enabled": False}))
     twin.attach(source)
     next_tick: datetime | None = None
-    for record in _records(frame):
+    for record in lambda_live_records(frame):
         if next_tick is None:
             next_tick = record.timestamp + timedelta(seconds=1)
         while record.timestamp >= next_tick:
@@ -212,8 +120,8 @@ def test_the_live_path_gives_the_stored_records_on_october_4(
 def test_the_tick_cadence_changes_nothing(
     frame: pd.DataFrame, stored: dict[str, Any], tick_s: float
 ) -> None:
-    twin, live = _twin()
-    _drive(twin, _records(frame), tick_s=tick_s)
+    twin, live = live_twin()
+    live_drive(twin, lambda_live_records(frame), tick_s=tick_s)
     _same_as_stored(live, stored, twin)
 
 
@@ -222,7 +130,7 @@ def test_reads_arriving_out_of_order_within_the_settle_margin_change_nothing(
 ) -> None:
     """Shuffle arrival inside 1.5 s blocks (the settle margin is 2 s); stamps
     are unchanged, so the decided records are."""
-    records = list(_records(frame))
+    records = list(lambda_live_records(frame))
     rng = random.Random(4)
     shuffled: list[TelemetryRecord] = []
     block: list[TelemetryRecord] = []
@@ -236,7 +144,7 @@ def test_reads_arriving_out_of_order_within_the_settle_margin_change_nothing(
     rng.shuffle(block)
     shuffled += block
     assert shuffled != records
-    twin, live = _twin()
+    twin, live = live_twin()
     # Tick by arrival, not by stamp: a shuffled stream is not monotonic.
     for i, record in enumerate(shuffled):
         twin.intake.observe(record)
@@ -251,7 +159,7 @@ def test_a_late_read_is_counted_and_dropped_never_folded_in(frame: pd.DataFrame)
     """Hold back a stretch of rpm-word and flag reads until long after the
     horizon passed them: they are counted late, and the records are exactly
     the stored evaluator's over the reads the stream accepted."""
-    records = list(_records(frame))
+    records = list(lambda_live_records(frame))
     start = records[0].timestamp
     held = [
         r
@@ -262,8 +170,8 @@ def test_a_late_read_is_counted_and_dropped_never_folded_in(frame: pd.DataFrame)
     assert held
     held_ids = {id(r) for r in held}
     on_time = [r for r in records if id(r) not in held_ids]
-    twin, live = _twin()
-    _drive(twin, on_time, flush=False)
+    twin, live = live_twin()
+    live_drive(twin, on_time, flush=False)
     for record in held:
         twin.intake.observe(record)
     twin.tick(session="s", vehicle_state="engine_running")
@@ -277,7 +185,7 @@ def test_a_late_read_is_counted_and_dropped_never_folded_in(frame: pd.DataFrame)
             & (frame["timestamp"] - frame["timestamp"].iloc[0] <= pd.Timedelta(minutes=8))
         )
     ].reset_index(drop=True)
-    _same_as_stored(live, _evaluate(accepted), twin)
+    _same_as_stored(live, phi_evaluate(accepted), twin)
 
 
 def test_a_gap_is_named_on_the_samples_inside_it_never_bridged(frame: pd.DataFrame) -> None:
@@ -288,9 +196,9 @@ def test_a_gap_is_named_on_the_samples_inside_it_never_bridged(frame: pd.DataFra
         ["mem:ECM_UPREV_MAGIC", "mem:ECM_ACTIVE_MAP", "mem:ECM_UPREV_MAP_SELECTOR"]
     )
     gapped = frame[~(identity & (seconds >= 300) & (seconds <= 540))].reset_index(drop=True)
-    stored = _evaluate(gapped)
-    twin, live = _twin()
-    _drive(twin, _records(gapped))
+    stored = phi_evaluate(gapped)
+    twin, live = live_twin()
+    live_drive(twin, lambda_live_records(gapped))
     _same_as_stored(live, stored, twin)
     inside = [
         r
@@ -312,10 +220,10 @@ def test_a_restart_starts_empty_and_names_what_it_cannot_know(frame: pd.DataFram
         frame["timestamp"].iloc[0] + (frame["timestamp"].iloc[-1] - frame["timestamp"].iloc[0]) / 2
     )
     after = frame[frame["timestamp"] >= half].reset_index(drop=True)
-    twin, live = _twin()
-    _drive(twin, _records(after))
-    _same_as_stored(live, _evaluate(after), twin)
-    whole = {r["sample"]["acquired_at"]: r for r in _evaluate(frame)["records"]}
+    twin, live = live_twin()
+    live_drive(twin, lambda_live_records(after))
+    _same_as_stored(live, phi_evaluate(after), twin)
+    whole = {r["sample"]["acquired_at"]: r for r in phi_evaluate(frame)["records"]}
     first = live[0]
     assert first["sample"]["acquired_at"] in whole
     # The first sample's before-side identity read lay before the restart.
@@ -337,21 +245,21 @@ def test_a_restart_starts_empty_and_names_what_it_cannot_know(frame: pd.DataFram
 def test_every_named_state_is_decided_the_same_live(
     kwargs: dict[str, Any], edit: Any, evaluate: dict[str, Any], state: str, reason: str
 ) -> None:
-    session = _session(**kwargs)
+    session = phi_session(**kwargs)
     if edit is not None:
         session = edit(session)
     evaluate = dict(evaluate)
-    table = _hysteresis_table() if evaluate.pop("table", None) == "hysteresis" else None
-    twin, live = _twin(table)
+    table = hysteresis_table() if evaluate.pop("table", None) == "hysteresis" else None
+    twin, live = live_twin(table)
     if evaluate.get("session_complete") is False:
         # A capture still recording: the sample is pending until reads past
         # its decision horizon arrive, and counted as such.
-        _drive(twin, _records(session), flush=False)
+        live_drive(twin, lambda_live_records(session), flush=False)
         assert live == []
         assert twin.snapshot()["stream"]["pending"] == 1
         return
-    _drive(twin, _records(session))
-    _same_as_stored(live, _evaluate(session, table=table), twin)
+    live_drive(twin, lambda_live_records(session))
+    _same_as_stored(live, phi_evaluate(session, table=table), twin)
     (record,) = live
     assert (record["state"], record["reason"]) == (state, reason)
 
@@ -368,10 +276,10 @@ def test_every_named_state_is_decided_the_same_live(
     ids=["eligible-override", "sentinel", "mode-transition", "eligible-ordinary", "miss"],
 )
 def test_eligible_sentinel_and_mode_transition_samples_match(kwargs: dict[str, Any]) -> None:
-    session = _session(**kwargs)
-    twin, live = _twin()
-    _drive(twin, _records(session))
-    stored = _evaluate(session)
+    session = phi_session(**kwargs)
+    twin, live = live_twin()
+    live_drive(twin, lambda_live_records(session))
+    stored = phi_evaluate(session)
     _same_as_stored(live, stored, twin)
     if not kwargs or "word" in kwargs and kwargs["word"]:
         (record,) = live
@@ -381,16 +289,16 @@ def test_eligible_sentinel_and_mode_transition_samples_match(kwargs: dict[str, A
 def test_several_samples_compete_for_reads_exactly_as_stored() -> None:
     """Two samples 0.1 s apart share one load read: one pairs, the other goes
     stale, on both paths, whichever tick decides each."""
-    session = _session(extra_load_at=None)
-    second = _session(t=30.1, load_at=None)
+    session = phi_session(extra_load_at=None)
+    second = phi_session(t=30.1, load_at=None)
     both = (
         pd.concat([session, second[second["channel"] == "mem:ECM_TARGET_EQUIV_RATIO"]])
         .sort_values("timestamp", kind="stable")
         .reset_index(drop=True)
     )
-    twin, live = _twin()
-    _drive(twin, _records(both), tick_s=0.05)
-    _same_as_stored(live, _evaluate(both), twin)
+    twin, live = live_twin()
+    live_drive(twin, lambda_live_records(both), tick_s=0.05)
+    _same_as_stored(live, phi_evaluate(both), twin)
     assert sorted(r["reason"] or "" for r in live) == ["", "input_stale:load"]
 
 
@@ -403,8 +311,8 @@ LATER = TwinIdentity("ZS44A-later", "e" * 64, "registry", False, "known", "progr
 
 def _crossing_session() -> pd.DataFrame:
     """A 30 s sample on one calibration and an 80 s sample on the next."""
-    first = _session(end=100.0)
-    later = _session(t=80.0, end=100.0)
+    first = phi_session(end=100.0)
+    later = phi_session(t=80.0, end=100.0)
     tuple_rows = later[
         later["channel"].str.startswith("mem:")
         & ~later["channel"].isin(
@@ -424,21 +332,21 @@ def test_a_flash_inside_a_session_is_two_segments_on_both_paths() -> None:
     passes the flash, and decides each exactly as the stored evaluator's
     windowed evaluation of that segment, each on its own table."""
     session = _crossing_session()
-    hysteresis = _hysteresis_table()
-    definition, _sha = _definition()
+    hysteresis = hysteresis_table()
+    definition, _sha = phi_definition()
     change = CHANGE.timestamp()
     resolver = FakeResolver(
         segments=lambda _at: [
             IdentitySegment(None, change, IDENTITY),
             IdentitySegment(change, None, LATER),
         ],
-        table_for=lambda identity: hysteresis if identity == LATER else _table(definition),
+        table_for=lambda identity: hysteresis if identity == LATER else phi_table(definition),
     )
     segments: dict[int, list[dict[str, Any]]] = {}
-    twin, _live = _twin(resolver=resolver, by_segment=segments)
-    _drive(twin, _records(session))
-    before = _evaluate(session, window=(None, change))
-    after = _evaluate(session, table=hysteresis, window=(change, None))
+    twin, _live = live_twin(resolver=resolver, by_segment=segments)
+    live_drive(twin, lambda_live_records(session))
+    before = phi_evaluate(session, window=(None, change))
+    after = phi_evaluate(session, table=hysteresis, window=(change, None))
     assert segments[0] == before["records"] and len(segments[0]) == 1
     assert segments[1] == after["records"] and len(segments[1]) == 1
     assert segments[1][0]["provenance"]["revision"] == hysteresis.revision
@@ -457,17 +365,17 @@ def test_a_flash_recorded_mid_session_is_picked_up_at_the_default_recheck(
     new calibration; past decisions are not re-made."""
     start = frame["timestamp"].iloc[0].timestamp()
     switch = start + 600.0
-    hysteresis = _hysteresis_table()
-    definition, _sha = _definition()
+    hysteresis = hysteresis_table()
+    definition, _sha = phi_definition()
     resolver = FakeResolver(
         segments=lambda at: [
             IdentitySegment(None, None, LATER if at is not None and at >= switch else IDENTITY)
         ],
-        table_for=lambda identity: hysteresis if identity == LATER else _table(definition),
+        table_for=lambda identity: hysteresis if identity == LATER else phi_table(definition),
     )
     segments: dict[int, list[dict[str, Any]]] = {}
-    twin, live = _twin(resolver=resolver, by_segment=segments)
-    _drive(twin, _records(frame))
+    twin, live = live_twin(resolver=resolver, by_segment=segments)
+    live_drive(twin, lambda_live_records(frame))
     block = twin.snapshot()
     (change,) = [i for i in block["invalidations"] if i["kind"] == "calibration_changed"]
     asked = [a for a in resolver.asked if a is not None]
@@ -488,12 +396,12 @@ def test_a_program_the_table_loader_refuses_is_withheld_by_name() -> None:
     session = _crossing_session()
     change = CHANGE.timestamp()
     other = TwinIdentity(REVISION, "f" * 64, "registry", False, "other_program", None)
-    definition, _sha = _definition()
+    definition, _sha = phi_definition()
 
     def table_for(identity: TwinIdentity) -> ResolvedTable:
         if identity.program_status != "known":
             raise TwinRefusalError("wrong_program", "another program")
-        return _table(definition)
+        return phi_table(definition)
 
     resolver = FakeResolver(
         segments=lambda _at: [
@@ -503,9 +411,9 @@ def test_a_program_the_table_loader_refuses_is_withheld_by_name() -> None:
         table_for=table_for,
     )
     segments: dict[int, list[dict[str, Any]]] = {}
-    twin, _live = _twin(resolver=resolver, by_segment=segments)
-    _drive(twin, _records(session))
-    assert segments[0] == _evaluate(session, window=(None, change))["records"]
+    twin, _live = live_twin(resolver=resolver, by_segment=segments)
+    live_drive(twin, lambda_live_records(session))
+    assert segments[0] == phi_evaluate(session, window=(None, change))["records"]
     assert 1 not in segments
     block = twin.snapshot()
     assert block["segments"][1]["slots"]["1"]["refusal"]["reason"] == "wrong_program"
@@ -520,8 +428,8 @@ def test_a_replay_is_its_own_session_and_writes_nothing(tmp_path: Path) -> None:
         storage_writer=None,
         config=SimpleNamespace(collection=SimpleNamespace(storage_path=tmp_path)),
     )
-    twin, live = _twin(session="live")
-    for record in _records(_session()):
+    twin, live = live_twin(session="live")
+    for record in lambda_live_records(phi_session()):
         twin.intake.observe(record)
     twin.tick_live(components, "replay")  # type: ignore[arg-type]
     block = twin.snapshot()
@@ -553,9 +461,9 @@ class _StalledExecutor(Executor):
 def test_a_stalled_worker_costs_counted_reads_never_a_backlog() -> None:
     stalled = _StalledExecutor()
     recorder = InferenceTimingRecorder()
-    twin, _live = _twin(executor=_InlineExecutor(), recorder=recorder, capacity=200)
+    twin, _live = live_twin(executor=_InlineExecutor(), recorder=recorder, capacity=200)
     twin._executor = stalled  # the worker stalls after the preload
-    records = list(_records(fixture_frame()))[:2000]
+    records = list(lambda_live_records(fixture_frame()))[:2000]
     started = time.perf_counter()
     for i, record in enumerate(records):
         twin.intake.observe(record)
@@ -605,8 +513,8 @@ def test_the_tick_never_waits_for_the_worker() -> None:
 
 def test_status_carries_the_block_and_both_stage_timings(frame: pd.DataFrame) -> None:
     recorder = InferenceTimingRecorder()
-    twin, _live = _twin(recorder=recorder)
-    _drive(twin, list(_records(frame))[:1500], flush=False)
+    twin, _live = live_twin(recorder=recorder)
+    live_drive(twin, list(lambda_live_records(frame))[:1500], flush=False)
     timing = recorder.snapshot().to_dict()
     block = timing["twin"]
     assert block["role"] == "ecu_command_prediction" and block["alerts"] is False
@@ -618,11 +526,11 @@ def test_status_carries_the_block_and_both_stage_timings(frame: pd.DataFrame) ->
 
 
 def test_a_load_byte_stored_under_another_decode_withholds_the_stream() -> None:
-    session = _session()
+    session = phi_session()
     load = session["channel"] == "mem:ECM_FUEL_TARGET_MAP_X_TRACE"
     session.loc[load, "value_number"] = session.loc[load, "value_number"] + 0.1
-    twin, live = _twin()
-    _drive(twin, _records(session))
+    twin, live = live_twin()
+    live_drive(twin, lambda_live_records(session))
     block = twin.snapshot()
     assert (block["result"], block["reason"]) == ("withheld", "wrong_units")
     assert live == []
@@ -669,7 +577,7 @@ def test_a_replay_is_resolved_paired_and_decided_as_the_stored_brain_job(
 
     from src.control.brain_jobs import BrainJobStore, canonical_params
     from src.control.twin_identity import TwinResolver
-    from tests.test_brain_jobs import SESSION, scheduler, scoped_config
+    from tests.builders import SESSION, scheduler, scoped_config
 
     config = scoped_config(tmp_path)
     session = config.collection.storage_path / SESSION
@@ -743,7 +651,7 @@ def test_build_live_twin_uses_the_shared_resolver(tmp_path: Path, frame: pd.Data
         while twin.snapshot()["result"] == "starting" and time.monotonic() < deadline:
             time.sleep(0.02)
             twin.tick(session="s", vehicle_state=None)
-        for record in list(_records(frame))[:400]:
+        for record in list(lambda_live_records(frame))[:400]:
             source.observe(record)
         twin.flush(session="s")
         block = twin.snapshot()
@@ -770,8 +678,8 @@ def test_identity_is_resolved_at_the_datas_own_time() -> None:
     own time), never the wall clock: first at the first read, then once per
     recheck interval of data time."""
     resolver = FakeResolver()
-    twin, _live = _twin(resolver=resolver, recheck_s=10.0)
-    _drive(twin, _records(_session()), flush=False)
+    twin, _live = live_twin(resolver=resolver, recheck_s=10.0)
+    live_drive(twin, lambda_live_records(phi_session()), flush=False)
     start = datetime(2026, 10, 4, 21, 0, tzinfo=UTC).timestamp()
     assert resolver.asked[0] is not None and start <= resolver.asked[0] < start + 1.0
     assert 5 <= len(resolver.asked) <= 7
@@ -789,15 +697,15 @@ def test_the_brain_status_route_and_mcp_serve_the_published_live_block(
 
     from src.dashboard.api import create_app
     from src.mcp_server.tools import brain as brain_tool
-    from tests.test_brain_routes import AUTH, TOKEN, _mcp_client
+    from tests.builders import AUTH, TOKEN, brain_mcp_client
 
     config = scope_config(
         isolated_config(tmp_path, keep=("afr_calibration",)),
         VehicleProfile(slug=SLUG, vin="", name="Xterra"),
     )
     recorder = InferenceTimingRecorder()
-    twin, _live = _twin(recorder=recorder)
-    _drive(twin, list(_records(frame))[:1500], flush=False)
+    twin, _live = live_twin(recorder=recorder)
+    live_drive(twin, list(lambda_live_records(frame))[:1500], flush=False)
     app = create_app(
         config, anomalies_dir=tmp_path / "an", control_token=TOKEN, inference_timing=recorder
     )
@@ -807,7 +715,7 @@ def test_the_brain_status_route_and_mcp_serve_the_published_live_block(
     assert live == recorder.snapshot().to_dict()["twin"]
     assert live["latest_prediction"] is None or "predicted_phi" in live["latest_prediction"]
     assert live["recent"] and live["accounting"]["candidates"] > 0
-    via_mcp = asyncio.run(brain_tool.get_brain_status(_mcp_client(app)))
+    via_mcp = asyncio.run(brain_tool.get_brain_status(brain_mcp_client(app)))
     assert via_mcp["live_twin"] == live
 
 
@@ -820,29 +728,29 @@ def test_a_coolant_source_that_first_appears_mid_session_is_causal_on_both_paths
     Mode 01 and the one at 40 s on the DID (cold), on the stored path and on
     the live path at every tick rate: the source is chosen per sample from
     reads at or before it (or in its gate bracket), never from the future."""
-    from tests.test_target_phi import _row
+    from tests.target_phi_builders import phi_row
 
-    early = _session(t=10.0, end=60.0)
-    late = _session(t=40.0, end=60.0)
+    early = phi_session(t=10.0, end=60.0)
+    late = phi_session(t=40.0, end=60.0)
     tuple_rows = late[
         late["channel"].str.startswith("mem:")
         & ~late["channel"].isin(
             ["mem:ECM_UPREV_MAGIC", "mem:ECM_ACTIVE_MAP", "mem:ECM_UPREV_MAP_SELECTOR"]
         )
     ]
-    did = pd.DataFrame([_row(25.0 + k, "DID_1101", None, text="6E") for k in range(36)])
+    did = pd.DataFrame([phi_row(25.0 + k, "DID_1101", None, text="6E") for k in range(36)])
     session = (
         pd.concat([early, tuple_rows, did])
         .sort_values("timestamp", kind="stable")
         .reset_index(drop=True)
     )
-    stored = _evaluate(session)
+    stored = phi_evaluate(session)
     sources = [r["gates"]["coolant"]["spec"] for r in stored["records"]]
     assert sources == ["obd:COOLANT_TEMP", "did:ECM_COOLANT_TEMP"]
     assert [r["reason"] for r in stored["records"]][1] == "cold"
     assert stored["coolant_sources"] == ["did:ECM_COOLANT_TEMP", "obd:COOLANT_TEMP"]
-    twin, live = _twin()
-    _drive(twin, _records(session), tick_s=tick_s)
+    twin, live = live_twin()
+    live_drive(twin, lambda_live_records(session), tick_s=tick_s)
     _same_as_stored(live, stored, twin)
     assert twin.snapshot()["applicability"]["coolant_sources"] == stored["coolant_sources"]
 
@@ -851,12 +759,12 @@ def test_an_input_first_read_mid_session_is_not_captured_before_it_on_both_paths
     """``input_not_captured`` is asked per sample (a read at or before
     ``t + horizon``): the pedal flag first read at 45 s is not captured for
     the 10 s sample, and merely stale (not paired) for a later one."""
-    early = _session(t=10.0, end=60.0, flag_at=40.0)
-    stored = _evaluate(early)
+    early = phi_session(t=10.0, end=60.0, flag_at=40.0)
+    stored = phi_evaluate(early)
     (record,) = stored["records"]
     assert "input_not_captured:flag" in record["reasons"]
-    twin, live = _twin()
-    _drive(twin, _records(early), tick_s=0.5)
+    twin, live = live_twin()
+    live_drive(twin, lambda_live_records(early), tick_s=0.5)
     _same_as_stored(live, stored, twin)
 
 
@@ -867,7 +775,7 @@ def test_the_shared_resolver_splits_at_a_flash_inside_the_span_only(tmp_path: Pa
     not, and crosses the bound when its data does). The ROM is hashed at
     most once per image."""
     from src.control.twin_identity import TwinResolver
-    from tests.test_brain_jobs import scoped_config
+    from tests.builders import scoped_config
 
     resolver = TwinResolver(scoped_config(tmp_path))
     before = datetime(2026, 10, 4, 20, 45, tzinfo=UTC).timestamp()

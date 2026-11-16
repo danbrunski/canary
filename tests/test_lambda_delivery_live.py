@@ -16,7 +16,6 @@ capture (R03.12 gates learned-normal detectors only) and never alerts.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -40,7 +39,6 @@ from src.analysis.tuning import DeliveryRoute, InputsNotCapturedError, read_deli
 from src.analysis.tuning_context import TuningContext
 from src.collection import tuning_profile
 from src.collection.capture_profiles import CaptureProfile
-from src.collection.replay import _metadata, _value
 from src.daemon import build_components
 from src.daemon.inference_metrics import InferenceTimingRecorder
 from src.daemon.lambda_delivery_live import (
@@ -55,6 +53,7 @@ from src.preprocessing.loader import read_session
 from src.signals.afr import AfrCalibration, load_afr_calibration
 from src.telemetry import TelemetryRecord
 from tests.configs import isolated_config
+from tests.twin_live_builders import lambda_live_records
 
 REPO = Path(__file__).resolve().parents[1]
 PROFILE = REPO / "data" / "nissan-xterra-2008"
@@ -144,21 +143,6 @@ def _concat(batches: list[JudgedRows]) -> JudgedRows:
     )
 
 
-def _records(session: pd.DataFrame) -> Iterator[TelemetryRecord]:
-    """The stored polled rows as the collector's records, in stored order."""
-    stamps = pd.to_datetime(session["timestamp"], utc=True)
-    for (_, row), stamp in zip(session.iterrows(), stamps, strict=True):
-        unit = row.get("unit")
-        yield TelemetryRecord(
-            timestamp=stamp.to_pydatetime(),
-            source=str(row["source"]),  # type: ignore[arg-type]
-            channel=str(row["channel"]),
-            value=_value(row),
-            unit="" if unit is None or pd.isna(unit) else str(unit),
-            metadata=_metadata(row),
-        )
-
-
 def _readout(
     declaration: LambdaDeliveryDeclaration,
     calibration: AfrCalibration,
@@ -188,7 +172,7 @@ def _drive_live(
     source = LiveFeatureSource(config=isolated_config(tmp_path, profiles={"enabled": False}))
     live.attach(source)
     next_tick: datetime | None = None
-    for record in _records(session):
+    for record in lambda_live_records(session):
         if next_tick is None:
             next_tick = record.timestamp + timedelta(seconds=1)
         while record.timestamp >= next_tick:

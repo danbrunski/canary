@@ -23,7 +23,7 @@ from src.collection.kline.sniff import (
 )
 from src.collection.kline.transport import KlineTransport, Mode, RxChunk
 from src.collection.obd_scheduler import did_response_widths
-from tests.test_kline_transport import PINS
+from tests.kline_builders import PINS
 
 FIXTURE = Path(__file__).parent / "fixtures" / "kline" / "uprev_session_bytes.json.gz"
 

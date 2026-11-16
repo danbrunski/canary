@@ -16,7 +16,6 @@ import subprocess
 import sys
 import textwrap
 import typing
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -31,10 +30,8 @@ from src.analysis.rom_effects import (
     CellEdit,
     EffectReport,
     OutputEffect,
-    compare_roms,
     make_candidate,
 )
-from src.analysis.rom_image import sha256_hex
 from src.analysis.sim_cells import (
     HEADLINE_BY_LOOP,
     MEMBERSHIP,
@@ -51,22 +48,24 @@ from src.analysis.sim_cells import (
     target_afr_axes,
 )
 from src.analysis.sim_contract import SimulationRefusalError
-from src.analysis.sim_design import DesignPoint, SessionCheck, SimDesign
+from src.analysis.sim_design import SimDesign
 from src.analysis.sim_montecarlo import (
     UNCERTAINTY_FILE,
     LoadedUncertainty,
-    MonteCarloDesign,
     MonteCarloResult,
     load_uncertainty,
-    run_monte_carlo,
 )
 from src.decode.air_charge import rpm_load_lookup
 from src.decode.ecm_lookup import lookup_2d
 from tests.rom_fixtures import PROFILE
-from tests.test_paired_scenarios import CRUISE, _scenario
-from tests.test_sim_montecarlo import _template, build_kit_and_image
-
-MODE = "conditional_rom_comparison"
+from tests.sim_builders import (
+    CRUISE,
+    MODE,
+    build_kit_and_image,
+    cells_design,
+    cells_run,
+    paired_scenario,
+)
 
 
 @pytest.fixture(scope="module")
@@ -87,77 +86,7 @@ def axes(kit_and_image: tuple[SimKit, bytes]) -> CellAxes:
 
 # -- designs ------------------------------------------------------------------------------
 
-#: A warm part-load point (E07.6's cruise), every source measured.
-_POINT: dict[str, Any] = dict(
-    rpm=2000.0,
-    maf_gps=18.0,
-    maf_source="pid:0x10",
-    baro_kpa=81.0,
-    iat_c=25.0,
-    coolant_c=88.0,
-    battery_v=14.0,
-    battery_v_source="measured",
-    rail_kpa=350.0,
-    rail_kpa_source="measured",
-    map_kpa=40.0,
-    map_kpa_source="measured",
-    throttle_pct=10.0,
-    throttle_pct_lo=10.0,
-    throttle_pct_hi=10.0,
-    throttle_pct_source="pid:0x11",
-    pedal_flag=0,
-    pedal_flag_source="stated_zero:not_logged",
-    fill_byte_lo=60,
-    fill_byte_hi=60,
-    fill_byte_source="test",
-    weight=1.0,
-    regime="closed_loop",
-)
 WOT_POINT: dict[str, Any] = dict(rpm=4800.0, maf_gps=150.0, map_kpa=79.0, throttle_pct=90.0)
-
-
-def _design(image: bytes, kit: SimKit, *points: dict[str, Any]) -> SimDesign:
-    pts = []
-    for i, over in enumerate(points):
-        fields = {**_POINT, **over}
-        fields.setdefault("throttle_pct_lo", fields["throttle_pct"])
-        fields["throttle_pct_lo"] = fields["throttle_pct_hi"] = fields["throttle_pct"]
-        pts.append(DesignPoint(index=i, session="_sim-test", t=float(i), **fields))
-    n = len(pts)
-    dwell = float(sum(p.weight for p in pts))
-    return SimDesign(
-        schema_version=1,
-        kind="drive",
-        vehicle_profile="test",
-        base_revision="synthetic",
-        base_image_sha256=sha256_hex(image),
-        plant_version=kit.plant.plant_version,
-        plant_file_sha256="0" * 64,
-        plant_baseline_sha256="test",
-        manifold_model="test",
-        weight_basis="dwell_s",
-        dwell_cap_s=2.0,
-        sessions=[
-            SessionCheck(
-                session="_sim-test",
-                dated_at=datetime(2026, 10, 15, tzinfo=UTC),
-                revision_at_start="synthetic",
-                revisions_in_reads=["synthetic"],
-                reads=n,
-                plant_states={"eligible": n},
-                placement={"placed": n},
-                eligible_dwell_s=dwell,
-                placed_weight=dwell,
-            )
-        ],
-        reads=n,
-        plant_states={"eligible": n},
-        placement={"placed": n},
-        eligible_dwell_s=dwell,
-        unplaced_dwell_s={},
-        assumptions=[],
-        points=pts,
-    )
 
 
 # -- hand-built results ---------------------------------------------------------------------
@@ -313,7 +242,7 @@ def test_pairs_are_placed_by_the_byte_each_draw_used_never_the_midpoint(
     kit, image = kit_and_image
     # Interval [20, 44]: bytes <= 24 belong to column 1 (bp 16), 25..40 to
     # column 2 (bp 32), 41..44 to column 3 (bp 48). The midpoint, 32, is column 2.
-    design = _design(image, kit, dict(fill_byte_lo=20, fill_byte_hi=44))
+    design = cells_design(image, kit, dict(fill_byte_lo=20, fill_byte_hi=44))
     fill = np.array([[20, 24, 25, 32, 40, 41, 44, 44]])
     result, effects = _hand(design, draws=8, fill=fill)
     table = aggregate_cells(result, design, axes, effects=effects)
@@ -339,7 +268,7 @@ def test_moving_one_point_across_a_breakpoint_moves_only_that_point(
     deltas = {"base_fuel_schedule": rng.normal(1.0, 0.1, size=(4, 6))}
 
     def table_for(rpm: float, fill: np.ndarray) -> CellTable:
-        design = _design(
+        design = cells_design(
             image, kit, *others, dict(rpm=rpm, weight=1.5, fill_byte_lo=30, fill_byte_hi=50)
         )
         result, effects = _hand(design, draws=6, fill=fill, candidate=deltas)
@@ -375,7 +304,7 @@ def test_every_status_on_one_grid_and_no_kind_of_empty_collapses(
     one cell, unchanged in one, unsupported in one and partly supported in
     one; every other cell has no points."""
     kit, image = kit_and_image
-    design = _design(
+    design = cells_design(
         image,
         kit,
         dict(rpm=800.0, fill_byte_lo=0, fill_byte_hi=0),  # (1, 0): changed
@@ -446,7 +375,7 @@ def test_a_nonzero_delta_on_an_unreached_output_refuses_the_table(
     kit_and_image: tuple[SimKit, bytes], axes: CellAxes
 ) -> None:
     kit, image = kit_and_image
-    design = _design(image, kit, dict(rpm=800.0))
+    design = cells_design(image, kit, dict(rpm=800.0))
     bfs = np.ones((1, 3))
     bfs[0, 2] = 1.0001
     result, effects = _hand(
@@ -462,7 +391,7 @@ def test_a_learned_reset_reaches_the_fuel_side_and_identical_images_are_no_chang
     kit_and_image: tuple[SimKit, bytes], axes: CellAxes
 ) -> None:
     kit, image = kit_and_image
-    design = _design(image, kit, dict(rpm=800.0))
+    design = cells_design(image, kit, dict(rpm=800.0))
     unchanged = _rom_outputs(base_fuel_schedule_word="unchanged", target_equiv_ratio="unchanged")
     reset = {
         "base": {"stft_pct": 0.0, "ltft_pct": 2.34},
@@ -509,7 +438,7 @@ def test_quantiles_are_dwell_weighted_over_pairs_against_brute_force(
 ) -> None:
     kit, image = kit_and_image
     weights = [1.0, 7.0, 2.0, 5.0, 3.0]
-    design = _design(
+    design = cells_design(
         image, kit, *(dict(rpm=2000.0 + 10 * i, weight=w) for i, w in enumerate(weights))
     )
     d = 9
@@ -547,7 +476,7 @@ def test_regime_and_loop_shares_are_weight_shares(
     kit_and_image: tuple[SimKit, bytes], axes: CellAxes
 ) -> None:
     kit, image = kit_and_image
-    design = _design(
+    design = cells_design(
         image,
         kit,
         dict(weight=3.0, regime="closed_loop"),
@@ -567,40 +496,6 @@ def test_regime_and_loop_shares_are_weight_shares(
 # -- run results ----------------------------------------------------------------------------
 
 
-def _run(
-    kit: SimKit,
-    image: bytes,
-    candidate: bytes,
-    design: SimDesign,
-    uncertainty: LoadedUncertainty,
-    *,
-    draws: int = 6,
-) -> tuple[MonteCarloResult, EffectReport]:
-    result = run_monte_carlo(
-        kit,
-        _template(kit, image, candidate),
-        MonteCarloDesign.from_sim_design(design),
-        image,
-        candidate,
-        uncertainty,
-        draws=draws,
-        seed=7,
-    )
-    effects = compare_roms(
-        image,
-        candidate,
-        kit.rom_map,
-        kit.model,
-        kit.model_sha256,
-        base_slot=1,
-        candidate_slot=1,
-        slot_source="default_slot",
-        contract=kit.contract,
-        mode=MODE,
-    )
-    return result, effects
-
-
 def test_an_edited_cell_shows_in_its_own_grid_cell_on_a_real_run(
     kit_and_image: tuple[SimKit, bytes], axes: CellAxes, uncertainty: LoadedUncertainty
 ) -> None:
@@ -612,8 +507,10 @@ def test_an_edited_cell_shows_in_its_own_grid_cell_on_a_real_run(
         image, kit.rom_map, [CellEdit("fuel_compensation", 4, 4, 148, slot=1)], base_label="t"
     ).image
     rpms = (1700.0, 1850.0, 2000.0, 2150.0, 2300.0, 2800.0)
-    design = _design(image, kit, *(dict(rpm=r, fill_byte_lo=40, fill_byte_hi=100) for r in rpms))
-    result, effects = _run(kit, image, candidate, design, uncertainty, draws=24)
+    design = cells_design(
+        image, kit, *(dict(rpm=r, fill_byte_lo=40, fill_byte_hi=100) for r in rpms)
+    )
+    result, effects = cells_run(kit, image, candidate, design, uncertainty, draws=24)
     table = aggregate_cells(result, design, axes, effects=effects)
     bfs = table.cell(4, 4).outputs["base_fuel_schedule"]
     assert bfs.status == "changed" and bfs.changed_share == 1.0
@@ -649,13 +546,13 @@ def test_closed_loop_cells_report_the_trim_with_its_reason_as_given(
         [CellEdit("fuel_compensation", r, c, 136, slot=1) for r in range(16) for c in range(16)],
         base_label="t",
     ).image
-    design = _design(
+    design = cells_design(
         image,
         kit,
         dict(fill_byte_lo=60, fill_byte_hi=60),  # cruise: closed loop
         dict(**WOT_POINT, fill_byte_lo=200, fill_byte_hi=200, regime="enrichment"),
     )
-    result, effects = _run(kit, image, candidate, design, uncertainty)
+    result, effects = cells_run(kit, image, candidate, design, uncertainty)
     table = aggregate_cells(result, design, axes, effects=effects)
     cruise = table.cell(4, 4)
     assert cruise.loop_shares == {"closed_loop": 1.0}
@@ -697,8 +594,8 @@ def test_the_overlay_marks_edits_axis_moves_and_moved_lookups(
         ],
         base_label="t",
     ).image
-    design = _design(image, kit, dict(fill_byte_lo=60, fill_byte_hi=90))
-    result, effects = _run(kit, image, candidate, design, uncertainty, draws=4)
+    design = cells_design(image, kit, dict(fill_byte_lo=60, fill_byte_hi=90))
+    result, effects = cells_run(kit, image, candidate, design, uncertainty, draws=4)
     table = aggregate_cells(result, design, axes, effects=effects)
     overlay = table.overlay
     assert [(e.row, e.col) for e in overlay.edited_cells] == [(4, 4)]
@@ -731,13 +628,13 @@ def test_the_target_afr_grid_places_pairs_by_the_base_roms_x(
     candidate = make_candidate(
         image, kit.rom_map, [CellEdit("fuel_compensation", 4, 4, 140, slot=1)], base_label="t"
     ).image
-    design = _design(
+    design = cells_design(
         image,
         kit,
         dict(fill_byte_lo=40, fill_byte_hi=90),
         dict(**WOT_POINT, fill_byte_lo=200, fill_byte_hi=200, pedal_flag=1),
     )
-    result, effects = _run(kit, image, candidate, design, uncertainty, draws=8)
+    result, effects = cells_run(kit, image, candidate, design, uncertainty, draws=8)
     table = aggregate_cells(result, design, target, effects=effects)
     # A Fuel Comp edit moves where Target AFR is read: on this grid, not Fuel Comp's.
     on_grid = {m.node: m.on_this_grid for m in table.overlay.moved_lookups}
@@ -770,13 +667,13 @@ def test_an_identical_candidate_is_unchanged_in_every_visited_cell(
     kit_and_image: tuple[SimKit, bytes], axes: CellAxes, uncertainty: LoadedUncertainty
 ) -> None:
     kit, image = kit_and_image
-    design = _design(
+    design = cells_design(
         image,
         kit,
         dict(fill_byte_lo=40, fill_byte_hi=90),
         dict(**WOT_POINT, fill_byte_lo=190, fill_byte_hi=210, regime="enrichment"),
     )
-    result, effects = _run(kit, image, bytes(image), design, uncertainty)
+    result, effects = cells_run(kit, image, bytes(image), design, uncertainty)
     table = aggregate_cells(result, design, axes, effects=effects)
     assert {r.status for r in table.reach.values()} == {"no_change"}
     for cell in table.cells:
@@ -798,7 +695,7 @@ def test_an_aggregate_first_path_cannot_be_written(
 ) -> None:
     kit, image = kit_and_image
     assert typing.get_type_hints(aggregate_cells)["result"] is MonteCarloResult
-    design = _design(image, kit, dict())
+    design = cells_design(image, kit, dict())
     result, effects = _hand(design, draws=2)
     for frame in (result.traces(), result.traces().groupby("output").mean(numeric_only=True)):
         assert (
@@ -811,9 +708,9 @@ def test_inputs_that_are_not_the_runs_are_refused_by_name(
     kit_and_image: tuple[SimKit, bytes], axes: CellAxes
 ) -> None:
     kit, image = kit_and_image
-    design = _design(image, kit, dict(fill_byte_lo=50, fill_byte_hi=70))
+    design = cells_design(image, kit, dict(fill_byte_lo=50, fill_byte_hi=70))
     result, effects = _hand(design, draws=2)
-    other = _design(image, kit, dict(rpm=2100.0, fill_byte_lo=50, fill_byte_hi=70))
+    other = cells_design(image, kit, dict(rpm=2100.0, fill_byte_lo=50, fill_byte_hi=70))
     assert _refusal(aggregate_cells, result, other, axes, effects=effects) == "design_mismatch"
     reweighted = dataclasses.replace(result, weights=result.weights * 2)
     assert _refusal(aggregate_cells, reweighted, design, axes, effects=effects) == "design_mismatch"
@@ -860,7 +757,7 @@ def test_changed_means_any_supported_pair_moved_even_with_a_zero_median(
     """The accepted deviation: weighted p50 is 0, p95 is not. "|p50| above
     zero" would leave this cell no status; it is changed, with the share."""
     kit, image = kit_and_image
-    design = _design(image, kit, dict())
+    design = cells_design(image, kit, dict())
     cand = np.array([[1.0, 1.0, 1.0, 1.5]])
     result, effects = _hand(design, draws=4, candidate={"base_fuel_schedule": cand})
     out = aggregate_cells(result, design, axes, effects=effects).cell(4, 4)
@@ -875,7 +772,7 @@ def test_a_zero_base_is_counted_out_of_the_relative_quantiles(
     kit_and_image: tuple[SimKit, bytes], axes: CellAxes
 ) -> None:
     kit, image = kit_and_image
-    design = _design(image, kit, dict())
+    design = cells_design(image, kit, dict())
     base = np.array([[0.0, 2.0, 2.0, 2.0]])
     cand = np.array([[0.5, 2.2, 2.2, 2.2]])
     result, effects = _hand(
@@ -909,9 +806,9 @@ def test_a_points_row_is_the_word_the_paired_run_read(
 
     monkeypatch.setattr(twin_runner, "steady_bfs", spy)
     point = dataclasses.replace(CRUISE, rpm=rpm)
-    run_paired(kit, _scenario(kit, image, bytes(image), point), image, bytes(image))
+    run_paired(kit, paired_scenario(kit, image, bytes(image), point), image, bytes(image))
     assert seen and set(seen) == {rpm_word(rpm, kit.contract)}
-    design = _design(image, kit, dict(rpm=rpm))
+    design = cells_design(image, kit, dict(rpm=rpm))
     result, effects = _hand(design, draws=1)
     table = aggregate_cells(result, design, axes, effects=effects)
     (cell,) = [c for c in table.cells if c.pairs]
@@ -922,7 +819,7 @@ def test_the_validator_refuses_a_missing_repeated_or_misplaced_cell(
     kit_and_image: tuple[SimKit, bytes], axes: CellAxes
 ) -> None:
     kit, image = kit_and_image
-    design = _design(image, kit, dict())
+    design = cells_design(image, kit, dict())
     result, effects = _hand(design, draws=2)
     data = aggregate_cells(result, design, axes, effects=effects).to_dict()
     CellTable.model_validate(data)
@@ -959,7 +856,7 @@ def test_the_cell_table_is_explicit_versioned_json(
     kit_and_image: tuple[SimKit, bytes], axes: CellAxes
 ) -> None:
     kit, image = kit_and_image
-    design = _design(image, kit, dict(fill_byte_lo=50, fill_byte_hi=70), dict(rpm=4800.0))
+    design = cells_design(image, kit, dict(fill_byte_lo=50, fill_byte_hi=70), dict(rpm=4800.0))
     cand = {"base_fuel_schedule": np.array([[1.02, 1.03, 1.0], [1.0, 1.0, 1.0]])}
     result, effects = _hand(
         design, draws=3, fill=np.array([[50, 60, 70], [60, 60, 60]]), candidate=cand
@@ -1022,8 +919,8 @@ def test_aggregating_cells_imports_nothing_that_talks_to_the_ecu() -> None:
         """
         import json, sys
         from src.analysis.sim_cells import aggregate_cells, fuel_comp_axes, target_afr_axes
-        from tests.test_sim_cells import _design, _hand
-        from tests.test_sim_montecarlo import build_kit_and_image
+        from tests.test_sim_cells import _hand
+        from tests.sim_builders import build_kit_and_image, cells_design as _design
         kit, image = build_kit_and_image()
         design = _design(image, kit, dict())
         result, effects = _hand(design, draws=2)

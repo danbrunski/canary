@@ -307,9 +307,8 @@ def test_the_stored_and_live_twins_reach_the_same_kernel_call(
 ) -> None:
     from src.analysis import target_phi
     from src.decode import target_phi_command
-    from tests.test_lambda_delivery_live import _records
-    from tests.test_target_phi import _evaluate, _session
-    from tests.test_twin_live import _drive, _twin
+    from tests.target_phi_builders import phi_evaluate, phi_session
+    from tests.twin_live_builders import lambda_live_records, live_drive, live_twin
 
     calls: list[tuple[int, int, int, int | None]] = []
     real = target_phi_command.target_command
@@ -321,11 +320,11 @@ def test_the_stored_and_live_twins_reach_the_same_kernel_call(
         return result
 
     monkeypatch.setattr(target_phi, "target_command", spy)
-    session = _session(flag=0, load=100)
-    stored = _evaluate(session)
+    session = phi_session(flag=0, load=100)
+    stored = phi_evaluate(session)
     stored_calls, calls[:] = list(calls), []
-    twin, live = _twin()
-    _drive(twin, _records(session))
+    twin, live = live_twin()
+    live_drive(twin, lambda_live_records(session))
     live_calls = list(calls)
     assert stored_calls and stored_calls == live_calls
     (record,) = stored["records"]

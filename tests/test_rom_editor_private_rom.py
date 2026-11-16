@@ -74,8 +74,8 @@ from src.dashboard.routes import rom_editor as rom_editor_routes
 from src.decode.air_charge import TP_SCALE, TP_SCALE_SHIFT
 from src.vehicle.tune_revisions import TuneRevisionRegistry, load_tune_revisions
 from tests.configs import isolated_config
+from tests.rom_editor_builders import AUTH, OCTET, CountingExecutor, make_app
 from tests.rom_fixtures import OPERATOR_ROMS, PROFILE, operator_image
-from tests.test_rom_editor_api import AUTH, OCTET, CountingExecutor, make_app
 from tools import rom_sim
 
 pytestmark = pytest.mark.slow
@@ -1172,7 +1172,7 @@ def test_the_timing_points_equal_the_per_pair_path_on_the_real_image_with_varyin
     pairs which differ cannot pass: the rows must be ``==`` the one-call-per-pair path's
     (the pre-W09.13 loop, ``tests.test_rom_editor._timing_points_per_pair``), and the premise,
     a point with two outcomes, is asserted too."""
-    from tests.test_rom_editor import _timing_points_per_pair
+    from tests.sim_builders import editor_timing_points_per_pair
 
     if label == "fuel_comp_spec":
         edits = [
@@ -1192,7 +1192,7 @@ def test_the_timing_points_equal_the_per_pair_path_on_the_real_image_with_varyin
         patch.setattr(rom_editor, "ignition_timing_points", spy)
         simulate(real, request(edits, draws=draws))
     rows = seen["rows"]
-    reference = _timing_points_per_pair(seen["args"][0], *seen["args"][1:], **seen["kw"])
+    reference = editor_timing_points_per_pair(seen["args"][0], *seen["args"][1:], **seen["kw"])
     assert sum(1 for r in rows if len(r["outcomes"]) >= 2) >= 5
     assert all(sum(o["draws"] for o in r["outcomes"]) == draws for r in rows)
     assert rows == reference

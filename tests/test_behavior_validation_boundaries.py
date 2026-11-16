@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_layering import LAYERS
+from tests.layers import LAYERS
 
 REPO = Path(__file__).resolve().parents[1]
 A = "src.analysis."

@@ -50,8 +50,8 @@ from src.collection.calibration_id import CalibrationIdSpec
 from src.collection.can_obd_loop import run_can_obd_loop
 from src.collection.obd_reading import ObdReading
 from src.collection.obd_scheduler import did_alias_table
+from tests.capture_builders import DIDS, LATENCY, window_profile, window_spec
 from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock
-from tests.test_memory_window_burst import DIDS, LATENCY, _profile, _spec
 
 GOLDEN = Path(__file__).resolve().parent / "fixtures" / "memory_burst_traces.json"
 DIGITS = 9
@@ -357,7 +357,7 @@ def _execute(scenario: Scenario, *, seconds: float | None = None) -> dict[str, A
         patch.setattr(can_obd_loop._CanObdLoop, "_memory_burst", traced_decide)
 
         tuning_profile.configure_did_aliases(did_alias_table(DIDS))
-        tuning_profile.activate(_profile(**scenario.profile), source="test")
+        tuning_profile.activate(window_profile(**scenario.profile), source="test")
         bus = ScriptedEcu(clock, latency=LATENCY, session_gated=True, **scenario.ecu)
         run = _Run(clock=clock, bus=bus, stop=threading.Event())
         if scenario.setup is not None:
@@ -382,7 +382,7 @@ def _execute(scenario: Scenario, *, seconds: float | None = None) -> dict[str, A
 
         bus.send = send  # type: ignore[method-assign]
         bus.recv = recv  # type: ignore[method-assign]
-        spec = _spec(**scenario.spec)
+        spec = window_spec(**scenario.spec)
         if scenario.calibration:
             spec = dataclasses.replace(
                 spec,

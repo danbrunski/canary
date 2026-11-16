@@ -629,17 +629,18 @@ def test_run_keys_are_named_and_checked_against_the_table() -> None:
 
 
 def test_a_real_aggregated_run_renders_with_its_design_summary() -> None:
-    from tests.test_sim_cells import _design, _run
-    from tests.test_sim_montecarlo import build_kit_and_image
+    from tests.sim_builders import build_kit_and_image, cells_design, cells_run
 
     kit, image = build_kit_and_image()
     candidate = make_candidate(
         image, kit.rom_map, [CellEdit("fuel_compensation", 4, 4, 148, slot=1)], base_label="t"
     ).image
     rpms = (1700.0, 2000.0, 2300.0, 4800.0)
-    design = _design(image, kit, *(dict(rpm=r, fill_byte_lo=40, fill_byte_hi=100) for r in rpms))
+    design = cells_design(
+        image, kit, *(dict(rpm=r, fill_byte_lo=40, fill_byte_hi=100) for r in rpms)
+    )
     uncertainty = load_uncertainty(PROFILE / UNCERTAINTY_FILE)
-    result, effects = _run(kit, image, candidate, design, uncertainty, draws=6)
+    result, effects = cells_run(kit, image, candidate, design, uncertainty, draws=6)
     table = aggregate_cells(result, design, fuel_comp_axes(kit, image, slot=1), effects=effects)
     prov = result.provenance
     run = {

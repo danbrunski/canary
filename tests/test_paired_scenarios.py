@@ -11,21 +11,17 @@ whatever it shows.
 from __future__ import annotations
 
 import dataclasses
-import struct
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from src.analysis.ecu_application import ApplicationModel, program_sha256
-from src.analysis.fuel_plant import PLANT_FILE, FuelPlantProfile
+from src.analysis.ecu_application import program_sha256
 from src.analysis.fuel_plant_eval import identify
 from src.analysis.paired_scenarios import (
     OUTPUTS,
     TOOL_VERSION,
-    LearnedState,
-    OperatingPoint,
     PairedScenario,
     SimKit,
     load_kit,
@@ -36,12 +32,8 @@ from src.analysis.paired_scenarios import (
 from src.analysis.paired_steady import steady_coverage
 from src.analysis.plant_validation import EcuOutputVerdict, InterventionVerdict
 from src.analysis.rom_effects import CellEdit, make_candidate
-from src.analysis.rom_image import sha256_hex
-from src.analysis.rom_map import load_rom_map
 from src.analysis.sim_contract import (
     CONTRACT_FILE,
-    EcuIdentity,
-    PlantIdentity,
     SimContract,
     SimulationRefusalError,
     SuppliedValue,
@@ -59,66 +51,23 @@ from src.evidence.records import (
     VehicleIdentity,
 )
 from src.yaml_load import load_yaml
-from tests.rom_fixtures import PROFILE, synthetic_image
-
-
-def _image(model: ApplicationModel, kit_plant: Any) -> bytes:
-    """A synthetic image every decode the slice uses describes: the twin's final-
-    command constants and Load Point Scaler, the model's constants and
-    conditions, UpRev's patch, and the pulse chain's published words."""
-    image = bytearray(synthetic_image())
-    image[0x8B39] = 130
-    image[0x8B3D] = 129
-    image[0xD247 : 0xD247 + 8] = bytes([128] * 8)
-    struct.pack_into(">H", image, 0x9416, 44019)
-    for marker in model.program.patch.markers:
-        raw = bytes.fromhex(marker.bytes)
-        image[marker.offset : marker.offset + len(raw)] = raw
-    for node in model.nodes:
-        for ref in node.rom:
-            if ref.offset is not None:
-                assert ref.width is not None and ref.value is not None
-                width = ref.width // 8
-                image[ref.offset : ref.offset + width] = ref.value.to_bytes(width, "big")
-        for c in node.calibration_conditions:
-            for k in range(c.count):
-                image[c.offset + k] = (image[c.offset + k] & ~c.mask & 0xFF) | c.equals
-    chain = kit_plant.pulse_chain
-    for word in (
-        chain.dead_time_base,
-        chain.dead_time_slope,
-        chain.rail_reference,
-        chain.flow_scaler,
-    ):
-        image[word.address : word.address + word.width] = word.value.to_bytes(word.width, "big")
-    _air_charge_calibration(image)
-    return bytes(image)
-
-
-def _air_charge_calibration(image: bytearray) -> None:
-    """The steady-BFS calibration at the 20260920 tune's values (K 28715, flow
-    and speed multipliers 226/3, MAF report scale 149, BFS ceiling 255:
-    docs/ecu-firmware-analysis.md, tests/test_air_charge.py), flat Fuel Comp
-    128 on rising axes, so WOT BFS lands near the truck's ~38-40k."""
-    rom_map = load_rom_map(PROFILE)
-
-    def put(table_id: str, slot: int | None, values: list[int], width: int = 1) -> None:
-        at = rom_map.table_address(rom_map.table(table_id), slot)
-        for k, v in enumerate(values):
-            image[at + k * width : at + (k + 1) * width] = v.to_bytes(width, "big")
-
-    put("fuel_comp_engine_speed_axis", None, [8 * (i + 1) for i in range(16)])
-    put("fuel_comp_flow_axis", None, [16 * i for i in range(16)])
-    put("fuel_compensation", 1, [128] * 256)
-    put("k_constant", 1, [28715], width=2)
-    put("bfs_ceiling", None, [255] * 16)
-    image[0x89D2], image[0x88AD], image[0x83E9] = 226, 3, 149
+from tests.rom_fixtures import PROFILE
+from tests.sim_builders import (
+    CRUISE,
+    SPARK_TRACED,
+    WOT,
+    paired_edit_all,
+    paired_image,
+    paired_minted,
+    paired_plant_with,
+    paired_scenario,
+)
 
 
 @pytest.fixture(scope="module")
 def kit_and_image() -> tuple[SimKit, bytes]:
     kit = load_kit(PROFILE)
-    image = _image(kit.model, kit.plant)
+    image = paired_image(kit.model, kit.plant)
     identity = kit.model.program.identity.model_copy(
         update={"sha256": program_sha256(image, kit.model)}
     )
@@ -128,81 +77,11 @@ def kit_and_image() -> tuple[SimKit, bytes]:
     return dataclasses.replace(kit, model=model), image
 
 
-WOT = OperatingPoint(
-    rpm=4800.0,
-    maf_gps=150.0,
-    baro_kpa=81.0,
-    iat_c=25.0,
-    coolant_c=88.0,
-    battery_v=14.0,
-    rail_kpa=350.0,
-    map_kpa=79.0,
-    throttle_pct=90.0,
-    pedal_flag=0,
-    conditioned={"fuel_comp_load_byte": 200.0},
-    source="design: WOT point, E07.6 test grid",
-)
-CRUISE = dataclasses.replace(
-    WOT,
-    rpm=2000.0,
-    maf_gps=18.0,
-    map_kpa=40.0,
-    throttle_pct=10.0,
-    conditioned={"fuel_comp_load_byte": 60.0},
-    source="design: cruise point, E07.6 test grid",
-)
-LEARNED = LearnedState(
-    stft_pct=0.0,
-    ltft_pct=2.34,
-    throttle_closed_learned=0.0,
-    idle_air_learned=0.0,
-    evap_purge_area=0.0,
-    source="design: stated trims",
-)
-
-
-def _identity(image: bytes) -> EcuIdentity:
-    return EcuIdentity(
-        program_id="ZS44A", image_sha256=sha256_hex(image), slot=1, slot_source="default_slot"
-    )
-
-
-def _scenario(
-    kit: SimKit, base: bytes, candidate: bytes, *points: OperatingPoint, **over: Any
-) -> PairedScenario:
-    plant = PlantIdentity(
-        version=kit.plant.plant_version,
-        hardware_configuration=kit.plant.hardware_configuration,
-    )
-    fields: dict[str, Any] = dict(
-        mode="conditional_rom_comparison",
-        base=_identity(base),
-        candidate=_identity(candidate),
-        plant=plant,
-        points=points or (WOT, CRUISE),
-        learned=LEARNED,
-    )
-    fields.update(over)
-    return PairedScenario(**fields)
-
-
-def _edit_all(image: bytes, kit: SimKit, table_id: str, slot: int | None, step: int) -> bytes:
-    table = kit.rom_map.table(table_id)
-    start = kit.rom_map.table_address(table, slot)
-    edits = []
-    for r in range(table.rows):
-        for c in range(table.cols):
-            raw = image[start + r * table.cols + c]
-            edits.append(CellEdit(table_id, r, c, min(255, max(0, raw + step)), slot=slot))
-    edits = [e for e in edits if e.raw != image[start + e.row * table.cols + e.col]]
-    return make_candidate(image, kit.rom_map, edits, base_label="synthetic").image
-
-
 def test_the_negative_control_rom_reproduces_the_baseline_exactly(
     kit_and_image: tuple[SimKit, bytes],
 ) -> None:
     kit, image = kit_and_image
-    result = run_paired(kit, _scenario(kit, image, bytes(image)), image, bytes(image))
+    result = run_paired(kit, paired_scenario(kit, image, bytes(image)), image, bytes(image))
     assert result.outcome == "identical"
     assert result.label == "simulation" and result.synthetic is True
     assert result.affected_cells == []
@@ -224,7 +103,7 @@ def test_the_negative_control_rom_reproduces_the_baseline_exactly(
     lo, hi = wot["base_fuel_schedule"]["interval"]["base"]
     assert lo <= wot["base_fuel_schedule"]["base"] <= hi
     assert result.provenance["tool_version"] == TOOL_VERSION == "3"
-    again = run_paired(kit, _scenario(kit, image, bytes(image)), image, bytes(image))
+    again = run_paired(kit, paired_scenario(kit, image, bytes(image)), image, bytes(image))
     assert again.to_dict() == result.to_dict()
 
 
@@ -232,8 +111,8 @@ def test_a_target_afr_edit_is_computed_through_the_pulse_and_the_plant(
     kit_and_image: tuple[SimKit, bytes],
 ) -> None:
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_targets", 1, 4)
-    result = run_paired(kit, _scenario(kit, image, candidate), image, candidate)
+    candidate = paired_edit_all(image, kit, "fuel_targets", 1, 4)
+    result = run_paired(kit, paired_scenario(kit, image, candidate), image, candidate)
     assert {c["table"] for c in result.affected_cells} == {"fuel_targets"}
     wot = result.points[0]["outputs"]
     assert wot["target_phi"]["status"] == "supported"
@@ -272,8 +151,8 @@ def test_a_fuel_comp_edit_is_computed_through_steady_bfs(
     point, so the edit reaches X, phi, the pulse and lambda as numbers, with
     the fill dynamics the fixed point absorbs stated, never silently held."""
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
-    result = run_paired(kit, _scenario(kit, image, candidate), image, candidate)
+    candidate = paired_edit_all(image, kit, "fuel_compensation", 1, 3)
+    result = run_paired(kit, paired_scenario(kit, image, candidate), image, candidate)
     assert {c["table"] for c in result.affected_cells} == {"fuel_compensation"}
     wot = result.points[0]["outputs"]
     bfs = wot["base_fuel_schedule"]
@@ -292,7 +171,7 @@ def test_a_fuel_comp_edit_is_computed_through_steady_bfs(
     # traced, unevaluable, so the change still cannot be ranked.
     assert result.traced_outputs["ignition_timing"]["status"] == "unevaluable"
     assert "base_fuel_schedule_word" not in result.traced_outputs
-    verdict = rank_as_improvement(result, intervention=_minted(result, "pass"))
+    verdict = rank_as_improvement(result, intervention=paired_minted(result, "pass"))
     assert not verdict["rankable"]
     assert "unsupported:ignition_timing:unevaluable" in verdict["reasons"]
 
@@ -301,7 +180,7 @@ def test_a_k_edit_moves_bfs_one_for_one(kit_and_image: tuple[SimKit, bytes]) -> 
     kit, image = kit_and_image
     k = CellEdit("k_constant", 0, 0, 28715 * 105 // 100, slot=1)
     candidate = make_candidate(image, kit.rom_map, [k], base_label="synthetic").image
-    result = run_paired(kit, _scenario(kit, image, candidate, WOT), image, candidate)
+    result = run_paired(kit, paired_scenario(kit, image, candidate, WOT), image, candidate)
     bfs = result.points[0]["outputs"]["base_fuel_schedule"]
     assert bfs["status"] == "supported"
     assert bfs["candidate"] / bfs["base"] == pytest.approx(1.05, rel=2e-3)
@@ -313,8 +192,8 @@ def test_an_edit_reaching_the_stated_fill_byte_is_unresolved(
     """The fill byte is conditioned on (not computed): a fill-curve edit
     reaches it, so nothing downstream is given as if the byte were fixed."""
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fill_curve_low", None, 2)
-    result = run_paired(kit, _scenario(kit, image, candidate), image, candidate)
+    candidate = paired_edit_all(image, kit, "fill_curve_low", None, 2)
+    result = run_paired(kit, paired_scenario(kit, image, candidate), image, candidate)
     for point in result.points:
         for name in OUTPUTS:
             o = point["outputs"][name]
@@ -334,11 +213,11 @@ def test_a_computed_quantity_cannot_be_stated(kit_and_image: tuple[SimKit, bytes
             WOT, conditioned={"fuel_comp_load_byte": 200.0, quantity: 42000.0}
         )
         with pytest.raises(SimulationRefusalError) as err:
-            run_paired(kit, _scenario(kit, image, image, stated), image, bytes(image))
+            run_paired(kit, paired_scenario(kit, image, image, stated), image, bytes(image))
         assert err.value.reason == "conditioning_not_allowed"
         assert "computed here" in str(err.value)
     missing = dataclasses.replace(WOT, conditioned={})
-    result = run_paired(kit, _scenario(kit, image, image, missing), image, bytes(image))
+    result = run_paired(kit, paired_scenario(kit, image, image, missing), image, bytes(image))
     out = result.points[0]["outputs"]["base_fuel_schedule"]
     assert "conditioning_missing:fuel_comp_load_byte" in out["reasons"]
 
@@ -348,10 +227,10 @@ def test_closed_loop_runs_at_the_trims_fixed_point(kit_and_image: tuple[SimKit, 
     metered open time, so lambda and fuel do not move and the total trim
     carries the change, k_c = k_b x G_b / G_c."""
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
+    candidate = paired_edit_all(image, kit, "fuel_compensation", 1, 3)
     result = run_paired(
         kit,
-        _scenario(kit, image, candidate, CRUISE, candidate_events=("ecu_reflash",)),
+        paired_scenario(kit, image, candidate, CRUISE, candidate_events=("ecu_reflash",)),
         image,
         candidate,
     )
@@ -381,8 +260,8 @@ def test_a_moved_closed_loop_setpoint_is_not_computed(
     feedback setpoint's relation to it is undecoded, so the candidate's fuel
     side is refused by name instead of computed at the stated trims."""
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_targets", 1, 4)
-    result = run_paired(kit, _scenario(kit, image, candidate, CRUISE), image, candidate)
+    candidate = paired_edit_all(image, kit, "fuel_targets", 1, 4)
+    result = run_paired(kit, paired_scenario(kit, image, candidate, CRUISE), image, candidate)
     point = result.points[0]
     assert point["loop"] == "closed_loop_setpoint_moved"
     out = point["outputs"]
@@ -429,7 +308,7 @@ def test_the_flash_resets_the_learned_trim_on_the_candidate_only(
     kit_and_image: tuple[SimKit, bytes],
 ) -> None:
     kit, image = kit_and_image
-    scenario = _scenario(kit, image, bytes(image), WOT, candidate_events=("ecu_reflash",))
+    scenario = paired_scenario(kit, image, bytes(image), WOT, candidate_events=("ecu_reflash",))
     result = run_paired(kit, scenario, image, bytes(image))
     assert result.learned_state["resets"] == {"ltft_b1": "ecu_reflash"}
     assert result.learned_state["base"]["ltft_pct"] == 2.34
@@ -440,7 +319,9 @@ def test_the_flash_resets_the_learned_trim_on_the_candidate_only(
     with pytest.raises(SimulationRefusalError) as err:
         run_paired(
             kit,
-            _scenario(kit, image, bytes(image), WOT, candidate_events=("battery_disconnect",)),
+            paired_scenario(
+                kit, image, bytes(image), WOT, candidate_events=("battery_disconnect",)
+            ),
             image,
             bytes(image),
         )
@@ -458,32 +339,32 @@ def test_recorded_or_computed_values_cannot_be_fed_back(
         return err.value.reason
 
     copied = dataclasses.replace(WOT, source="median of _capture-tuning-2026-10-05T120000")
-    assert reason(_scenario(kit, image, image, copied)) == "recorded_value_refused"
+    assert reason(paired_scenario(kit, image, image, copied)) == "recorded_value_refused"
     from_channel = {"evap_purge_area": SuppliedValue(channel="did:ECM_AIR_CHARGE", source="x")}
     # A channel is refused by the contract itself in a comparison.
     assert (
-        reason(_scenario(kit, image, image, WOT, extra_boundaries=from_channel))
+        reason(paired_scenario(kit, image, image, WOT, extra_boundaries=from_channel))
         == "recorded_value_refused"
     )
     bfs = {"base_fuel_schedule": SuppliedValue(value=42000.0, source="design")}
     assert (
-        reason(_scenario(kit, image, image, WOT, extra_boundaries=bfs))
+        reason(paired_scenario(kit, image, image, WOT, extra_boundaries=bfs))
         == "boundary_not_supplied_here"
     )
     # A rollout computes rpm, airflow and the trims: a point that prescribes them is refused.
-    assert reason(_scenario(kit, image, image, WOT, mode="coupled_rollout")) == (
+    assert reason(paired_scenario(kit, image, image, WOT, mode="coupled_rollout")) == (
         "boundary_not_supplied_here"
     )
     # Conditioning is only for computed, unmodelled ECU quantities.
     odd = dataclasses.replace(WOT, conditioned={"mass_air_flow": 150.0})
-    assert reason(_scenario(kit, image, image, odd)) == "conditioning_not_allowed"
+    assert reason(paired_scenario(kit, image, image, odd)) == "conditioning_not_allowed"
 
 
 def test_synthetic_traces_stay_out_of_evidence_and_baseline_data(
     kit_and_image: tuple[SimKit, bytes], tmp_path: Path
 ) -> None:
     kit, image = kit_and_image
-    result = run_paired(kit, _scenario(kit, image, bytes(image)), image, bytes(image))
+    result = run_paired(kit, paired_scenario(kit, image, bytes(image)), image, bytes(image))
     traces = result.traces()
     assert traces.attrs["synthetic"] is True
     session = result.session
@@ -539,47 +420,19 @@ def test_optimisation_is_refused() -> None:
 # -- ranking needs a derived verdict and a qualified, recorded plant ------------------------
 
 
-def _minted(result: Any, verdict: str, **over: Any) -> InterventionVerdict:
-    """A verdict as evaluate_intervention mints it (the test stands in for a run)."""
-    fields: dict[str, Any] = dict(
-        case="test",
-        verdict=verdict,
-        synthetic=False,
-        base_image_sha256=result.base_image_sha256,
-        candidate_image_sha256=result.candidate_image_sha256,
-        baseline_sha256=result.plant["baseline_sha256"],
-        plant_version="fuel-mv-1",
-        qualified_regimes=("closed_loop", "enrichment"),
-    )
-    fields.update(over)
-    return InterventionVerdict._mint(**fields)
-
-
-def _plant_with(verdict: str, *, synthetic: bool = False) -> FuelPlantProfile:
-    raw: dict[str, Any] = load_yaml((PROFILE / PLANT_FILE).read_text())
-    raw["synthetic"] = synthetic
-    for rec in raw["spent_held_out"]:
-        rec["verdict"] = verdict
-    return FuelPlantProfile.model_validate(raw)
-
-
-# A Target AFR edit's traced spark refusal (see the ranking test below).
-SPARK_TRACED = "unsupported:ignition_timing:unevaluable"
-
-
 def test_ranking_needs_a_sealed_matching_verdict_and_a_recorded_qualified_plant(
     kit_and_image: tuple[SimKit, bytes],
 ) -> None:
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_targets", 1, 4)
-    qualified = dataclasses.replace(kit, plant=_plant_with("pass"))
-    result = run_paired(qualified, _scenario(kit, image, candidate, WOT), image, candidate)
+    candidate = paired_edit_all(image, kit, "fuel_targets", 1, 4)
+    qualified = dataclasses.replace(kit, plant=paired_plant_with("pass"))
+    result = run_paired(qualified, paired_scenario(kit, image, candidate, WOT), image, candidate)
     # Everything the fuel side needs holds: a supported WOT edit, a qualified
     # recorded plant and a passing test of this change on this baseline. The
     # one refusal left is spark: a Target AFR edit moves the enrichment
     # multiplier, which scales charge word 1B24 into base timing term 27C6, and
     # an edit whose spark change is not computed never ranks (E09.7 part B).
-    assert rank_as_improvement(result, intervention=_minted(result, "pass")) == {
+    assert rank_as_improvement(result, intervention=paired_minted(result, "pass")) == {
         "rankable": False,
         "reasons": [SPARK_TRACED],
     }
@@ -591,21 +444,24 @@ def test_ranking_needs_a_sealed_matching_verdict_and_a_recorded_qualified_plant(
         return [x for x in out["reasons"] if x != SPARK_TRACED]
 
     # The verdict is derived, never stated: an edited one fails its seal.
-    forged = dataclasses.replace(_minted(result, "pending"), verdict="pass")
+    forged = dataclasses.replace(paired_minted(result, "pending"), verdict="pass")
     assert reasons(forged) == ["intervention_verdict_unsealed: not minted by evaluate_intervention"]
-    assert reasons(_minted(result, "pass", synthetic=True)) == ["intervention_test_synthetic"]
-    assert reasons(_minted(result, "pass", candidate_image_sha256="0" * 64)) == [
+    assert reasons(paired_minted(result, "pass", synthetic=True)) == ["intervention_test_synthetic"]
+    assert reasons(paired_minted(result, "pass", candidate_image_sha256="0" * 64)) == [
         "intervention_images_differ: the test was of another change"
     ]
-    assert reasons(_minted(result, "pass", baseline_sha256="0" * 64)) == [
+    assert reasons(paired_minted(result, "pass", baseline_sha256="0" * 64)) == [
         "intervention_plant_differs: the test ran another baseline"
     ]
     # A relabelled synthetic plant never ranks, whatever its verdicts say.
-    synthetic = dataclasses.replace(kit, plant=_plant_with("pass", synthetic=True))
-    relabelled = run_paired(synthetic, _scenario(kit, image, candidate, WOT), image, candidate)
+    synthetic = dataclasses.replace(kit, plant=paired_plant_with("pass", synthetic=True))
+    relabelled = run_paired(
+        synthetic, paired_scenario(kit, image, candidate, WOT), image, candidate
+    )
     assert relabelled.plant["synthetic"] is True
     assert any(
-        r.startswith("synthetic_plant") for r in reasons(_minted(relabelled, "pass"), relabelled)
+        r.startswith("synthetic_plant")
+        for r in reasons(paired_minted(relabelled, "pass"), relabelled)
     )
 
 
@@ -613,9 +469,9 @@ def test_a_closed_loop_only_qualification_cannot_rank_wot_deltas(
     kit_and_image: tuple[SimKit, bytes],
 ) -> None:
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_targets", 1, 4)
-    closed_only = dataclasses.replace(kit, plant=_plant_with("pass_closed_loop_only"))
-    result = run_paired(closed_only, _scenario(kit, image, candidate, WOT), image, candidate)
+    candidate = paired_edit_all(image, kit, "fuel_targets", 1, 4)
+    closed_only = dataclasses.replace(kit, plant=paired_plant_with("pass_closed_loop_only"))
+    result = run_paired(closed_only, paired_scenario(kit, image, candidate, WOT), image, candidate)
     wot = result.points[0]["outputs"]
     for name in ("delivered_lambda", "fuel_per_event_g"):
         assert wot[name]["status"] == "unsupported"
@@ -623,7 +479,7 @@ def test_a_closed_loop_only_qualification_cannot_rank_wot_deltas(
     # The ECU-side outputs do not rest on the plant.
     assert wot["target_phi"]["status"] == "supported"
     out = rank_as_improvement(
-        result, intervention=_minted(result, "pass", qualified_regimes=("closed_loop",))
+        result, intervention=paired_minted(result, "pass", qualified_regimes=("closed_loop",))
     )
     assert not out["rankable"]
     assert any("regime_not_qualified:enrichment" in r for r in out["reasons"])
@@ -636,7 +492,7 @@ def test_ranking_refuses_anything_but_an_intervention_verdict_by_name(
     on a plant effect: handed to the ranker it is refused by name, never an
     AttributeError halfway through the checks."""
     kit, image = kit_and_image
-    result = run_paired(kit, _scenario(kit, image, image), image, image)
+    result = run_paired(kit, paired_scenario(kit, image, image), image, image)
     ecu = EcuOutputVerdict._mint(
         case="test",
         outcomes=(),

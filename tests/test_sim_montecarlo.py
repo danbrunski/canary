@@ -22,13 +22,11 @@ import pytest
 import yaml
 
 from src.analysis import sim_montecarlo
-from src.analysis.ecu_application import program_sha256
 from src.analysis.fuel_plant_eval import plant_inputs
 from src.analysis.paired_scenarios import (
     BATTERY_UNMEASURED,
     OUTPUTS,
     OVERRIDES_NOT_FROZEN,
-    OperatingPoint,
     PairedScenario,
     SimKit,
     load_kit,
@@ -45,10 +43,8 @@ from src.analysis.sim_montecarlo import (
     LUMPED_SCALE,
     STRUCTURAL_ERROR_NOT_SAMPLED,
     UNCERTAINTY_FILE,
-    DesignPoint,
     LoadedUncertainty,
     MonteCarloDesign,
-    MonteCarloResult,
     UncertaintyDeclaration,
     bracketed_parameters,
     check_uncertainty,
@@ -59,72 +55,42 @@ from src.analysis.sim_montecarlo import (
 from src.session import is_synthetic_session
 from src.yaml_load import load_yaml
 from tests.rom_fixtures import PROFILE
-from tests.test_paired_scenarios import (
+from tests.sim_builders import (
     CRUISE,
-    LEARNED,
+    DESIGN_SHA,
+    P_CRUISE,
+    P_MODEL,
+    P_WOT,
     SPARK_TRACED,
     WOT,
-    _edit_all,
-    _identity,
-    _image,
-    _minted,
-    _plant_with,
+    mc_design,
+    mc_point,
+    mc_run,
+    mc_template,
+    paired_edit_all,
+    paired_identity,
+    paired_minted,
+    paired_plant_with,
 )
+from tests.sim_builders import kit_and_image as kit_and_image  # noqa: F401 - fixture
+from tests.sim_builders import uncertainty as uncertainty  # noqa: F401 - fixture
 
-DESIGN_SHA = "d" * 64
-SOURCE = f"design:{DESIGN_SHA}"
-
-
-def build_kit_and_image() -> tuple[SimKit, bytes]:
-    kit = load_kit(PROFILE)
-    image = _image(kit.model, kit.plant)
-    identity = kit.model.program.identity.model_copy(
-        update={"sha256": program_sha256(image, kit.model)}
-    )
-    model = kit.model.model_copy(
-        update={"program": kit.model.program.model_copy(update={"identity": identity})}
-    )
-    return dataclasses.replace(kit, model=model), image
-
-
-@pytest.fixture(scope="module")
-def kit_and_image() -> tuple[SimKit, bytes]:
-    return build_kit_and_image()
-
-
-@pytest.fixture(scope="module")
-def uncertainty() -> LoadedUncertainty:
-    return load_uncertainty(PROFILE / UNCERTAINTY_FILE)
-
-
-def _point(base: OperatingPoint, **over: Any) -> OperatingPoint:
-    return dataclasses.replace(base, conditioned={}, source=SOURCE, **over)
-
-
-#: Open loop (enrichment) at WOT, and closed-loop cruise, from E07.6's grid.
-P_WOT = _point(WOT)
-P_CRUISE = _point(CRUISE)
 #: Open loop on a short pulse: low airflow at high rpm, still an enrichment
 #: target on the synthetic image; about 1 ms of metered open time, just
 #: above the plant's 1.0 ms floor, so supported.
-P_SHORT = _point(WOT, maf_gps=12.0, map_kpa=25.0, throttle_pct=8.0)
+P_SHORT = mc_point(WOT, maf_gps=12.0, map_kpa=25.0, throttle_pct=8.0)
 #: Below it: the pulse sits at the chain's minimum G on both ROMs, and is
 #: unsupported as short_pulse_undecoded (computed all the same).
-P_MIN_G = _point(WOT, maf_gps=10.5, map_kpa=25.0, throttle_pct=8.0)
+P_MIN_G = mc_point(WOT, maf_gps=10.5, map_kpa=25.0, throttle_pct=8.0)
 #: Cold: the plant's outputs are unsupported, the ECU side is not.
-P_COLD = _point(WOT, coolant_c=20.0)
-#: The design's other route: MAP from the plant's own manifold model, no rail
-#: reading (the working value applies), no module voltage read.
-P_MODEL = _point(
-    WOT, map_kpa_source="plant_model", rail_kpa_source="working_assumption", map_kpa=0.0
-)
-P_CRUISE_MODEL = _point(
+P_COLD = mc_point(WOT, coolant_c=20.0)
+P_CRUISE_MODEL = mc_point(
     CRUISE, map_kpa_source="plant_model", rail_kpa_source="working_assumption", map_kpa=0.0
 )
 #: Part load, open loop, MAP from the model: below ambient at every drawn VE
 #: (at WOT fuel-mv-1's speed-density MAP is capped at baro across the whole
 #: VE bracket, so a VE draw cannot move it there).
-P_PART_MODEL = _point(
+P_PART_MODEL = mc_point(
     WOT,
     maf_gps=20.0,
     throttle_pct=8.0,
@@ -132,15 +98,7 @@ P_PART_MODEL = _point(
     rail_kpa_source="working_assumption",
     map_kpa=0.0,
 )
-P_NO_VB = _point(WOT, battery_v_source="unmeasured")
-
-
-def _design(image: bytes, *specs: tuple[OperatingPoint, int, int]) -> MonteCarloDesign:
-    return MonteCarloDesign(
-        sha256=DESIGN_SHA,
-        base_image_sha256=sha256_hex(image),
-        points=tuple(DesignPoint(p, lo, hi, 1.0 + k) for k, (p, lo, hi) in enumerate(specs)),
-    )
+P_NO_VB = mc_point(WOT, battery_v_source="unmeasured")
 
 
 def _ramped(image: bytes, kit: SimKit) -> bytes:
@@ -153,39 +111,6 @@ def _ramped(image: bytes, kit: SimKit) -> bytes:
         if 96 + 4 * c != 128
     ]
     return make_candidate(image, kit.rom_map, edits, base_label="synthetic").image
-
-
-def _template(kit: SimKit, base: bytes, candidate: bytes, **over: Any) -> PairedScenario:
-    from src.analysis.sim_contract import PlantIdentity
-
-    fields: dict[str, Any] = dict(
-        mode="conditional_rom_comparison",
-        base=_identity(base),
-        candidate=_identity(candidate),
-        plant=PlantIdentity(
-            version=kit.plant.plant_version,
-            hardware_configuration=kit.plant.hardware_configuration,
-        ),
-        points=(),
-        learned=LEARNED,
-    )
-    fields.update(over)
-    return PairedScenario(**fields)
-
-
-def _run(
-    kit: SimKit,
-    image: bytes,
-    candidate: bytes,
-    design: MonteCarloDesign,
-    uncertainty: LoadedUncertainty,
-    **kw: Any,
-) -> MonteCarloResult:
-    kw.setdefault("draws", 12)
-    kw.setdefault("seed", 20261015)
-    return run_monte_carlo(
-        kit, _template(kit, image, candidate), design, image, candidate, uncertainty, **kw
-    )
 
 
 def _with_declaration(loaded: LoadedUncertainty, edit: Any) -> UncertaintyDeclaration:
@@ -260,7 +185,7 @@ def test_the_paired_hook_refuses_unknown_and_outside_overrides(
 ) -> None:
     kit, image = kit_and_image
     scenario = dataclasses.replace(
-        _template(kit, image, image),
+        mc_template(kit, image, image),
         points=(dataclasses.replace(WOT, source="design: hook test"),),
     )
     plain = run_paired(kit, scenario, image, bytes(image))
@@ -293,16 +218,16 @@ def test_the_negative_control_is_exactly_zero_at_every_point_and_draw(
     kit_and_image: tuple[SimKit, bytes], uncertainty: LoadedUncertainty
 ) -> None:
     kit, image = kit_and_image
-    design = _design(image, (P_WOT, 180, 220), (P_CRUISE, 40, 80), (P_SHORT, 100, 140))
+    design = mc_design(image, (P_WOT, 180, 220), (P_CRUISE, 40, 80), (P_SHORT, 100, 140))
     for seed in (1, 2):
-        result = _run(kit, image, bytes(image), design, uncertainty, seed=seed, draws=20)
+        result = mc_run(kit, image, bytes(image), design, uncertainty, seed=seed, draws=20)
         assert result.outcome == "identical"
         for name in OUTPUTS:
             delta = result.delta(name)
             assert np.isfinite(delta).all(), name
             assert (delta == 0.0).all(), name
-    one = _run(kit, image, bytes(image), design, uncertainty, seed=1, draws=20)
-    two = _run(kit, image, bytes(image), design, uncertainty, seed=2, draws=20)
+    one = mc_run(kit, image, bytes(image), design, uncertainty, seed=1, draws=20)
+    two = mc_run(kit, image, bytes(image), design, uncertainty, seed=2, draws=20)
     # A different seed draws different numbers, and the control still holds.
     assert not np.array_equal(one.fill_bytes, two.fill_bytes)
     assert not np.array_equal(one.parameters[LUMPED_SCALE], two.parameters[LUMPED_SCALE])
@@ -312,16 +237,16 @@ def test_the_same_seed_gives_a_byte_identical_result(
     kit_and_image: tuple[SimKit, bytes], uncertainty: LoadedUncertainty
 ) -> None:
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
-    design = _design(image, (P_WOT, 180, 220), (P_CRUISE, 40, 80))
-    a = _run(kit, image, candidate, design, uncertainty)
-    b = _run(kit, image, candidate, design, uncertainty)
+    candidate = paired_edit_all(image, kit, "fuel_compensation", 1, 3)
+    design = mc_design(image, (P_WOT, 180, 220), (P_CRUISE, 40, 80))
+    a = mc_run(kit, image, candidate, design, uncertainty)
+    b = mc_run(kit, image, candidate, design, uncertainty)
     assert a.digest() == b.digest()
     assert a.traces().to_json() == b.traces().to_json()
     for name in OUTPUTS:
         assert a.base[name].tobytes() == b.base[name].tobytes()
         assert a.candidate[name].tobytes() == b.candidate[name].tobytes()
-    c = _run(kit, image, candidate, design, uncertainty, seed=7)
+    c = mc_run(kit, image, candidate, design, uncertainty, seed=7)
     assert c.digest() != a.digest()
 
 
@@ -333,10 +258,10 @@ def test_the_lumped_scale_cancels_in_relative_delta_lambda_and_dead_time_does_no
     metered open times by different fractions, so it does not cancel. Both
     are asserted, so the cancellation claim can fail."""
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
+    candidate = paired_edit_all(image, kit, "fuel_compensation", 1, 3)
     # Fill bytes known exactly: only the named parameter varies.
-    design = _design(image, (P_WOT, 200, 200), (P_SHORT, 120, 120))
-    scale = _run(kit, image, candidate, design, uncertainty, draws=40, vary=[LUMPED_SCALE])
+    design = mc_design(image, (P_WOT, 200, 200), (P_SHORT, 120, 120))
+    scale = mc_run(kit, image, candidate, design, uncertainty, draws=40, vary=[LUMPED_SCALE])
     assert scale.provenance["varied"] == [LUMPED_SCALE]
     assert "parameter_held:injector_dead_time" in scale.caveats
     assert (scale.loop == "open_loop").all()
@@ -346,7 +271,7 @@ def test_the_lumped_scale_cancels_in_relative_delta_lambda_and_dead_time_does_no
         assert np.ptp(lam[i]) > 1e-4  # the draws do move lambda...
         assert np.ptp(rel[i]) <= 1e-12  # ...and not the paired change
     assert (rel < 0).all()
-    dead = _run(kit, image, candidate, design, uncertainty, draws=40, vary=["injector_dead_time"])
+    dead = mc_run(kit, image, candidate, design, uncertainty, draws=40, vary=["injector_dead_time"])
     rel_dead = dead.relative_delta("delivered_lambda")
     # The shorter the pulse, the larger the share an offset takes from it.
     short, long_ = np.ptp(rel_dead[1]), np.ptp(rel_dead[0])
@@ -362,14 +287,14 @@ def test_cached_and_vectorised_equals_the_plain_run_paired_loop_exactly(
     closed-loop setpoint, a gated fill-byte edit, cold and short pulses."""
     kit, image = kit_and_image
     candidates = {
-        "fuel_comp": _edit_all(image, kit, "fuel_compensation", 1, 3),
-        "target_afr": _edit_all(image, kit, "fuel_targets", 1, 4),
-        "fill_curve": _edit_all(image, kit, "fill_curve_low", None, 2),
+        "fuel_comp": paired_edit_all(image, kit, "fuel_compensation", 1, 3),
+        "target_afr": paired_edit_all(image, kit, "fuel_targets", 1, 4),
+        "fill_curve": paired_edit_all(image, kit, "fill_curve_low", None, 2),
         "k": make_candidate(
             image, kit.rom_map, [CellEdit("k_constant", 0, 0, 30150, slot=1)], base_label="s"
         ).image,
     }
-    design = _design(
+    design = mc_design(
         image,
         (P_WOT, 190, 200),
         (P_CRUISE, 50, 70),
@@ -381,8 +306,8 @@ def test_cached_and_vectorised_equals_the_plain_run_paired_loop_exactly(
         (P_NO_VB, 199, 200),
     )
     for label, candidate in candidates.items():
-        result = _run(kit, image, candidate, design, uncertainty, draws=5, seed=3)
-        template = _template(kit, image, candidate)
+        result = mc_run(kit, image, candidate, design, uncertainty, draws=5, seed=3)
+        template = mc_template(kit, image, candidate)
         support: dict[tuple[int, int, str], tuple[str, ...]] = {}
         for d in range(result.draws):
             points = tuple(
@@ -426,7 +351,7 @@ def test_cached_and_vectorised_equals_the_plain_run_paired_loop_exactly(
             assert all(a in result.caveats for a in plain.assumptions), label
         assert len(result.provenance["self_checked_pairs"]) >= 2
     # The gated edit gives no candidate value at all, as run_paired does.
-    gated = _run(kit, image, candidates["fill_curve"], design, uncertainty, draws=3)
+    gated = mc_run(kit, image, candidates["fill_curve"], design, uncertainty, draws=3)
     for name in OUTPUTS:
         assert np.isnan(gated.candidate[name]).all()
         assert not gated.supported(name).any()
@@ -436,9 +361,9 @@ def test_support_does_not_vary_by_plant_draw(
     kit_and_image: tuple[SimKit, bytes], uncertainty: LoadedUncertainty
 ) -> None:
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
-    design = _design(image, (P_WOT, 200, 200), (P_CRUISE, 60, 60), (P_SHORT, 120, 120))
-    result = _run(kit, image, candidate, design, uncertainty, draws=30)
+    candidate = paired_edit_all(image, kit, "fuel_compensation", 1, 3)
+    design = mc_design(image, (P_WOT, 200, 200), (P_CRUISE, 60, 60), (P_SHORT, 120, 120))
+    result = mc_run(kit, image, candidate, design, uncertainty, draws=30)
     for i in range(result.n_points):
         for name in OUTPUTS:
             entries = result.point_support(i, name)
@@ -454,8 +379,8 @@ def test_the_fill_byte_is_drawn_over_its_whole_interval(
     kit_and_image: tuple[SimKit, bytes], uncertainty: LoadedUncertainty
 ) -> None:
     kit, image = kit_and_image
-    design = _design(image, (P_WOT, 190, 194))
-    result = _run(kit, image, _ramped(image, kit), design, uncertainty, draws=500)
+    design = mc_design(image, (P_WOT, 190, 194))
+    result = mc_run(kit, image, _ramped(image, kit), design, uncertainty, draws=500)
     values, counts = np.unique(result.fill_bytes[0], return_counts=True)
     assert values.tolist() == [190, 191, 192, 193, 194]
     assert counts.min() > 70  # 100 expected each
@@ -473,9 +398,9 @@ def test_provenance_caveats_and_synthetic_traces(
     kit_and_image: tuple[SimKit, bytes], uncertainty: LoadedUncertainty
 ) -> None:
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
-    design = _design(image, (P_WOT, 195, 200), (P_CRUISE, 55, 60))
-    result = _run(kit, image, candidate, design, uncertainty, draws=4, seed=11)
+    candidate = paired_edit_all(image, kit, "fuel_compensation", 1, 3)
+    design = mc_design(image, (P_WOT, 195, 200), (P_CRUISE, 55, 60))
+    result = mc_run(kit, image, candidate, design, uncertainty, draws=4, seed=11)
     prov = result.provenance
     assert prov["base_image_sha256"] == sha256_hex(image)
     assert prov["candidate_image_sha256"] == sha256_hex(candidate)
@@ -518,15 +443,15 @@ def test_the_design_and_template_are_refused_by_name(
     kit, image = kit_and_image
 
     def reason(design: MonteCarloDesign, **kw: Any) -> str:
-        return _refusal(_run, kit, image, bytes(image), design, uncertainty, **kw)
+        return _refusal(mc_run, kit, image, bytes(image), design, uncertainty, **kw)
 
-    good = _design(image, (P_WOT, 190, 200))
+    good = mc_design(image, (P_WOT, 190, 200))
     recorded = dataclasses.replace(P_WOT, source="median of _capture-tuning-2026-10-05T120000")
-    assert reason(_design(image, (recorded, 190, 200))) == "source_not_design"
+    assert reason(mc_design(image, (recorded, 190, 200))) == "source_not_design"
     stated = dataclasses.replace(P_WOT, conditioned={FILL_BYTE: 195.0})
-    assert reason(_design(image, (stated, 190, 200))) == "conditioned_stated"
-    assert reason(_design(image, (P_WOT, 200, 190))) == "fill_byte_interval_invalid"
-    assert reason(_design(image, (P_WOT, 250, 256))) == "fill_byte_interval_invalid"
+    assert reason(mc_design(image, (stated, 190, 200))) == "conditioned_stated"
+    assert reason(mc_design(image, (P_WOT, 200, 190))) == "fill_byte_interval_invalid"
+    assert reason(mc_design(image, (P_WOT, 250, 256))) == "fill_byte_interval_invalid"
     assert reason(dataclasses.replace(good, base_image_sha256="0" * 64)) == (
         "design_revision_mismatch"
     )
@@ -534,7 +459,7 @@ def test_the_design_and_template_are_refused_by_name(
     assert reason(zero) == "weight_invalid"
     assert reason(good, draws=0) == "draws_invalid"
     assert reason(good, vary=["fuel_density"]) == "parameter_unknown"
-    with_points = dataclasses.replace(_template(kit, image, image), points=(WOT,))
+    with_points = dataclasses.replace(mc_template(kit, image, image), points=(WOT,))
     assert (
         _refusal(
             run_monte_carlo, kit, with_points, good, image, image, uncertainty, draws=2, seed=1
@@ -547,14 +472,14 @@ def test_a_named_plant_version_must_match_its_declaration_and_the_contract(
     kit_and_image: tuple[SimKit, bytes], uncertainty: LoadedUncertainty
 ) -> None:
     kit, image = kit_and_image
-    design = _design(image, (P_WOT, 195, 200))
+    design = mc_design(image, (P_WOT, 195, 200))
     same = kit_for_plant(kit, PROFILE, "fuel-mv-1")
-    a = _run(same, image, bytes(image), design, uncertainty, draws=3)
-    b = _run(kit, image, bytes(image), design, uncertainty, draws=3)
+    a = mc_run(same, image, bytes(image), design, uncertainty, draws=3)
+    b = mc_run(kit, image, bytes(image), design, uncertainty, draws=3)
     assert a.digest() == b.digest()
     mv3 = kit_for_plant(kit, PROFILE, "fuel-mv-3")
     assert mv3.plant.plant_version == "fuel-mv-3"
-    assert _refusal(_run, mv3, image, bytes(image), design, uncertainty) == (
+    assert _refusal(mc_run, mv3, image, bytes(image), design, uncertainty) == (
         "uncertainty_plant_mismatch"
     )
 
@@ -577,7 +502,7 @@ def test_a_named_plant_version_must_match_its_declaration_and_the_contract(
     declared = LoadedUncertainty(_with_declaration(uncertainty, for_mv3), "0" * 64, "test")
     check_uncertainty(declared.declaration, mv3)
     # The contract still decides which plant a scenario may run.
-    template = _template(mv3, image, bytes(image))
+    template = mc_template(mv3, image, bytes(image))
     assert (
         _refusal(
             run_monte_carlo, mv3, template, design, image, bytes(image), declared, draws=2, seed=1
@@ -599,7 +524,8 @@ def test_a_monte_carlo_run_imports_nothing_that_talks_to_the_ecu() -> None:
         import dataclasses
         from src.analysis.sim_montecarlo import UNCERTAINTY_FILE, load_uncertainty
         from tests.rom_fixtures import PROFILE
-        from tests.test_sim_montecarlo import P_WOT, _design, _run, build_kit_and_image
+        from tests.sim_builders import P_WOT, build_kit_and_image
+        from tests.sim_builders import mc_design as _design, mc_run as _run
         kit, image = build_kit_and_image()
         loaded = load_uncertainty(PROFILE / UNCERTAINTY_FILE)
         _run(kit, image, bytes(image), _design(image, (P_WOT, 195, 200)), loaded, draws=2)
@@ -640,10 +566,10 @@ def test_a_run_on_overridden_parameters_is_its_own_run_and_never_ranks(
     """Two draws, or a draw and the frozen plant, must not share a session or
     rank: the result says which parameters it ran on."""
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_targets", 1, 4)
-    qualified = dataclasses.replace(kit, plant=_plant_with("pass"))
+    candidate = paired_edit_all(image, kit, "fuel_targets", 1, 4)
+    qualified = dataclasses.replace(kit, plant=paired_plant_with("pass"))
     scenario = dataclasses.replace(
-        _template(kit, image, candidate),
+        mc_template(kit, image, candidate),
         points=(dataclasses.replace(WOT, source="design: override test"),),
     )
     frozen = run_paired(qualified, scenario, image, candidate)
@@ -653,9 +579,9 @@ def test_a_run_on_overridden_parameters_is_its_own_run_and_never_ranks(
     assert len({frozen.session, one.session, two.session}) == 3
     # The frozen run is refused only for the traced spark change (a Target AFR
     # edit reaches 27C6 through charge word 1B24); the override adds its own.
-    frozen_verdict = rank_as_improvement(frozen, intervention=_minted(frozen, "pass"))
+    frozen_verdict = rank_as_improvement(frozen, intervention=paired_minted(frozen, "pass"))
     assert frozen_verdict["reasons"] == [SPARK_TRACED]
-    verdict = rank_as_improvement(one, intervention=_minted(one, "pass"))
+    verdict = rank_as_improvement(one, intervention=paired_minted(one, "pass"))
     assert not verdict["rankable"]
     assert [r.split(":")[0] for r in verdict["reasons"]] == [OVERRIDES_NOT_FROZEN, "unsupported"]
     assert verdict["reasons"][1] == SPARK_TRACED
@@ -669,8 +595,8 @@ def test_a_wrong_assembly_is_refused_by_the_run_paired_check(
     """The self-check compares the assembled arrays, not only the cache: a
     plant pass that puts a value in the wrong place is refused."""
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
-    design = _design(image, (P_WOT, 190, 200), (P_MODEL, 190, 200))
+    candidate = paired_edit_all(image, kit, "fuel_compensation", 1, 3)
+    design = mc_design(image, (P_WOT, 190, 200), (P_MODEL, 190, 200))
     real = sim_montecarlo._plant
 
     def shifted(*args: Any, **kw: Any) -> dict[str, Any]:
@@ -678,32 +604,32 @@ def test_a_wrong_assembly_is_refused_by_the_run_paired_check(
         return {k: v[::-1] for k, v in out.items()}  # base and candidate swapped
 
     monkeypatch.setattr(sim_montecarlo, "_plant", shifted)
-    assert _refusal(_run, kit, image, candidate, design, uncertainty) == "fast_path_diverged"
+    assert _refusal(mc_run, kit, image, candidate, design, uncertainty) == "fast_path_diverged"
 
 
 def test_map_and_rail_reach_the_spread_where_the_plant_computes_them(
     kit_and_image: tuple[SimKit, bytes], uncertainty: LoadedUncertainty
 ) -> None:
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
-    design = _design(image, (P_PART_MODEL, 120, 120), (P_MODEL, 200, 200))
-    computed = _run(kit, image, candidate, design, uncertainty)
+    candidate = paired_edit_all(image, kit, "fuel_compensation", 1, 3)
+    design = mc_design(image, (P_PART_MODEL, 120, 120), (P_MODEL, 200, 200))
+    computed = mc_run(kit, image, candidate, design, uncertainty)
     assert computed.inert_parameters == ["lambda_observation_delay"]
     assert computed.provenance["point_sources"]["map_kpa"] == {"plant_model": 2}
     for pid in ("manifold_pressure", "rail_pressure"):
-        alone = _run(kit, image, candidate, design, uncertainty, vary=[pid])
+        alone = mc_run(kit, image, candidate, design, uncertainty, vary=[pid])
         lam = alone.base["delivered_lambda"]
         assert np.ptp(lam[0]) > 1e-4, pid
         assert alone.supported("delivered_lambda").all()
         # Both ROMs share the drawn MAP and rail: the paired change barely moves.
         assert np.ptp(alone.relative_delta("delivered_lambda")[0]) < 1e-3
     # At WOT the capped MAP sits at baro across the VE bracket; rail still moves it.
-    ve_wot = _run(kit, image, candidate, design, uncertainty, vary=["manifold_pressure"])
+    ve_wot = mc_run(kit, image, candidate, design, uncertainty, vary=["manifold_pressure"])
     assert np.ptp(ve_wot.base["delivered_lambda"][1]) == 0.0
     # A stated or measured MAP and rail is a boundary: held for every draw.
     for source in ("stated", "measured"):
-        held = _point(WOT, map_kpa_source=source, rail_kpa_source=source)
-        stated = _run(kit, image, candidate, _design(image, (held, 200, 200)), uncertainty)
+        held = mc_point(WOT, map_kpa_source=source, rail_kpa_source=source)
+        stated = mc_run(kit, image, candidate, mc_design(image, (held, 200, 200)), uncertainty)
         assert stated.inert_parameters == [
             "lambda_observation_delay",
             "manifold_pressure",
@@ -718,7 +644,7 @@ def test_an_unstated_map_is_the_contracts_declared_internal_model(
     plant's internal model computes it there; without that, it is missing."""
     kit, image = kit_and_image
     model_point = dataclasses.replace(P_MODEL, conditioned={FILL_BYTE: 200.0})
-    scenario = dataclasses.replace(_template(kit, image, image), points=(model_point,))
+    scenario = dataclasses.replace(mc_template(kit, image, image), points=(model_point,))
     [contract_scenario] = scenario.contract_scenarios(kit.contract, kit.contract_sha256)
     assert "manifold_pressure" not in contract_scenario.boundaries
     result = run_paired(kit, scenario, image, bytes(image))
@@ -736,8 +662,8 @@ def test_an_unmeasured_battery_voltage_unsupports_only_the_absolute_pulse(
     kit_and_image: tuple[SimKit, bytes], uncertainty: LoadedUncertainty
 ) -> None:
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
-    result = _run(kit, image, candidate, _design(image, (P_NO_VB, 200, 200)), uncertainty)
+    candidate = paired_edit_all(image, kit, "fuel_compensation", 1, 3)
+    result = mc_run(kit, image, candidate, mc_design(image, (P_NO_VB, 200, 200)), uncertainty)
     assert result.reasons("injector_pulse_ms", 0, 0) == (BATTERY_UNMEASURED,)
     assert not result.supported("injector_pulse_ms").any()
     for name in OUTPUTS:
@@ -745,8 +671,8 @@ def test_an_unmeasured_battery_voltage_unsupports_only_the_absolute_pulse(
             assert result.supported(name).all(), name
     # The dead time it reads cancels out of the metered part: lambda and its
     # change do not move with the stated voltage.
-    other = _point(WOT, battery_v_source="unmeasured", battery_v=12.5)
-    low = _run(kit, image, candidate, _design(image, (other, 200, 200)), uncertainty)
+    other = mc_point(WOT, battery_v_source="unmeasured", battery_v=12.5)
+    low = mc_run(kit, image, candidate, mc_design(image, (other, 200, 200)), uncertainty)
     assert np.allclose(
         low.relative_delta("delivered_lambda"),
         result.relative_delta("delivered_lambda"),
@@ -757,9 +683,9 @@ def test_an_unmeasured_battery_voltage_unsupports_only_the_absolute_pulse(
 
 
 def test_an_e08_2_design_adapts_with_its_sources() -> None:
-    from tests.test_sim_design import _grid
+    from tests.sim_builders import design_grid
 
-    grid = _grid()
+    grid = design_grid()
     design = MonteCarloDesign.from_sim_design(grid)
     assert design.sha256 == grid.sha256()
     assert design.base_image_sha256 == grid.base_image_sha256
@@ -782,8 +708,8 @@ def test_a_design_built_on_another_plant_is_refused(
     kit_and_image: tuple[SimKit, bytes], uncertainty: LoadedUncertainty
 ) -> None:
     kit, image = kit_and_image
-    design = dataclasses.replace(_design(image, (P_WOT, 190, 200)), plant_version="fuel-mv-3")
-    assert _refusal(_run, kit, image, bytes(image), design, uncertainty) == (
+    design = dataclasses.replace(mc_design(image, (P_WOT, 190, 200)), plant_version="fuel-mv-3")
+    assert _refusal(mc_run, kit, image, bytes(image), design, uncertainty) == (
         "design_plant_mismatch"
     )
 
@@ -793,9 +719,9 @@ def test_a_design_built_on_another_plant_is_refused(
 
 def test_an_e08_2_design_with_an_unknown_source_is_refused_by_name() -> None:
     """A typo or a new source must not become a held measured boundary."""
-    from tests.test_sim_design import _grid
+    from tests.sim_builders import design_grid
 
-    grid = _grid()
+    grid = design_grid()
     first = grid.points[0]
 
     def with_point(**update: str) -> Any:
@@ -822,14 +748,14 @@ def test_the_rail_working_assumption_is_named_in_every_result_that_rests_on_it(
     kit, image = kit_and_image
     rail = "plant:rail_pressure_unmeasured"
     on_rail = dataclasses.replace(P_MODEL, conditioned={FILL_BYTE: 200.0})
-    template = _template(kit, image, image)
+    template = mc_template(kit, image, image)
     paired = run_paired(kit, dataclasses.replace(template, points=(on_rail,)), image, bytes(image))
     assert rail in paired.unresolved
     stated = run_paired(kit, dataclasses.replace(template, points=(WOT,)), image, bytes(image))
     assert rail not in stated.unresolved
-    mc = _run(kit, image, bytes(image), _design(image, (P_MODEL, 200, 200)), uncertainty)
+    mc = mc_run(kit, image, bytes(image), mc_design(image, (P_MODEL, 200, 200)), uncertainty)
     assert rail in mc.unresolved
-    held = _run(kit, image, bytes(image), _design(image, (P_WOT, 200, 200)), uncertainty)
+    held = mc_run(kit, image, bytes(image), mc_design(image, (P_WOT, 200, 200)), uncertainty)
     assert rail not in held.unresolved
 
 
@@ -845,7 +771,7 @@ def _mv2(kit: SimKit) -> tuple[SimKit, LoadedUncertainty]:
 
 #: Warm idle on fuel-mv-2's identification drives: charge fraction p50 0.151
 #: (762 rpm, 3.46 g/s, baro 81 kPa; fuel_plant_mv2.yaml), MAP from the model.
-P_IDLE_MODEL = _point(
+P_IDLE_MODEL = mc_point(
     WOT,
     rpm=762.0,
     maf_gps=3.46,
@@ -891,7 +817,7 @@ def test_a_refusing_manifold_model_names_its_refusal_and_is_refused_where_a_draw
 
     kit, image = kit_and_image
     mv2, declared = _mv2(kit)
-    side = pair_side(mv2, image, _identity(image), 0.0, "base")
+    side = pair_side(mv2, image, paired_identity(image), 0.0, "base")
     stages = stage_order(mv2.model)
     for maf, reasons in ((150.0, ["plant:manifold_above_ambient"]), (20.0, [])):
         point = dataclasses.replace(P_MODEL, maf_gps=maf, conditioned={FILL_BYTE: 200.0})
@@ -901,8 +827,8 @@ def test_a_refusing_manifold_model_names_its_refusal_and_is_refused_where_a_draw
         assert out["reasons"] == reasons
         assert np.isnan(out["delivered_lambda"]) == bool(reasons)
 
-    template = _template(mv2, image, bytes(image))
-    model = _design(image, (P_MODEL, 200, 200))
+    template = mc_template(mv2, image, bytes(image))
+    model = mc_design(image, (P_MODEL, 200, 200))
     with pytest.raises(SimulationRefusalError) as refused:
         run_monte_carlo(mv2, template, model, image, bytes(image), declared, draws=2, seed=1)
     assert refused.value.reason == "manifold_refusal_varies_by_draw"
@@ -915,12 +841,12 @@ def test_a_refusing_manifold_model_names_its_refusal_and_is_refused_where_a_draw
     maf = 3.46 * (0.875 * 0.7 / 0.151) * (800.0 / 762.0)
     assert _map_at(mv2, 800.0, maf, {})[1] == ""
     assert _map_at(mv2, 800.0, maf, {"manifold_pressure": 0.4})[1] == "manifold_above_ambient"
-    lifted = _point(P_IDLE_MODEL, rpm=800.0, maf_gps=maf)
+    lifted = mc_point(P_IDLE_MODEL, rpm=800.0, maf_gps=maf)
     with pytest.raises(SimulationRefusalError) as refused:
         run_monte_carlo(
             mv2,
             template,
-            _design(image, (lifted, 120, 120)),
+            mc_design(image, (lifted, 120, 120)),
             image,
             bytes(image),
             declared,
@@ -930,7 +856,9 @@ def test_a_refusing_manifold_model_names_its_refusal_and_is_refused_where_a_draw
         )
     assert refused.value.reason == "manifold_refusal_varies_by_draw"
     # Stated MAP: the model refuses nothing, and the contract admits fuel-mv-2.
-    stated = _run(mv2, image, bytes(image), _design(image, (P_WOT, 200, 200)), declared, draws=2)
+    stated = mc_run(
+        mv2, image, bytes(image), mc_design(image, (P_WOT, 200, 200)), declared, draws=2
+    )
     assert stated.provenance["plant_version"] == "fuel-mv-2"
     assert stated.provenance["uncertainty_sha256"] == declared.sha256
 
@@ -946,11 +874,11 @@ def test_drawing_the_ve_floor_at_warm_idle_cannot_reach_ambient(
     mv2, declared = _mv2(kit)
     worst, refusal = _map_at(mv2, 762.0, 3.46, {"manifold_pressure": 0.4, "bank_air_split": 0.52})
     assert refusal == "" and worst < 0.45 * 81.0
-    result = _run(
+    result = mc_run(
         mv2,
         image,
         bytes(image),
-        _design(image, (P_IDLE_MODEL, 40, 60)),
+        mc_design(image, (P_IDLE_MODEL, 40, 60)),
         declared,
         draws=400,
         seed=11,
@@ -1109,7 +1037,7 @@ def test_a_default_draw_monte_carlo_on_a_built_fuel_mv_2_grid_never_refuses(
     mv2, declared = _mv2(kit)
     design = _built(image, rpm_edges, load_edges)
     assert len(design.points) == placed, label
-    result = _run(mv2, image, bytes(image), design, declared, draws=draws, seed=seed)
+    result = mc_run(mv2, image, bytes(image), design, declared, draws=draws, seed=seed)
     assert set(result.provenance["varied"]) >= {"manifold_pressure", "bank_air_split"}
     for name in OUTPUTS:
         ok = result.supported(name)
@@ -1129,16 +1057,16 @@ def test_run_paired_and_the_fast_path_run_the_twin_runners_one_ecu_path(
     from src.analysis import twin_runner
 
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
-    design = _design(image, (P_WOT, 190, 200), (P_CRUISE, 50, 70))
-    template = _template(kit, image, candidate)
+    candidate = paired_edit_all(image, kit, "fuel_compensation", 1, 3)
+    design = mc_design(image, (P_WOT, 190, 200), (P_CRUISE, 50, 70))
+    template = mc_template(kit, image, candidate)
     points = tuple(
         dataclasses.replace(dp.point, conditioned={FILL_BYTE: float(dp.fill_byte_lo)})
         for dp in design.points
     )
     scenario = dataclasses.replace(template, points=points)
     before = run_paired(kit, scenario, image, candidate)
-    mc_before = _run(kit, image, candidate, design, uncertainty, draws=4)
+    mc_before = mc_run(kit, image, candidate, design, uncertainty, draws=4)
 
     real_bfs, real_inputs = steady_bfs, plant_inputs
 
@@ -1153,7 +1081,7 @@ def test_run_paired_and_the_fast_path_run_the_twin_runners_one_ecu_path(
     monkeypatch.setattr(twin_runner, "steady_bfs", bfs_plus)
     monkeypatch.setattr(twin_runner, "plant_inputs", leaner)
     after = run_paired(kit, scenario, image, candidate)
-    mc_after = _run(kit, image, candidate, design, uncertainty, draws=4)
+    mc_after = mc_run(kit, image, candidate, design, uncertainty, draws=4)
     for i, (b, a) in enumerate(zip(before.points, after.points, strict=True)):
         bfs_b, bfs_a = b["outputs"]["base_fuel_schedule"], a["outputs"]["base_fuel_schedule"]
         assert bfs_a["base"] == bfs_b["base"] + 64
@@ -1192,9 +1120,9 @@ def test_run_paired_runs_each_ecu_side_once_per_point_and_reruns_only_the_plant(
     from src.analysis.twin_runner import stage_order
 
     kit, image = kit_and_image
-    candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
-    design = _design(image, (P_WOT, 190, 200), (P_SHORT, 120, 130), (P_MODEL, 190, 200))
-    scenario = _paired_scenario(_template(kit, image, candidate), design)
+    candidate = paired_edit_all(image, kit, "fuel_compensation", 1, 3)
+    design = mc_design(image, (P_WOT, 190, 200), (P_SHORT, 120, 130), (P_MODEL, 190, 200))
+    scenario = _paired_scenario(mc_template(kit, image, candidate), design)
     calls = dict.fromkeys(("stated_ecu", "stated_pulse", "plant_predict_inputs"), 0)
 
     def counted(name: str, real: Any) -> Any:
@@ -1274,8 +1202,8 @@ def test_both_paired_entry_points_refuse_a_plant_mismatch_in_the_same_words(
     other = dataclasses.replace(
         kit, plant=kit.plant.model_copy(update={"hardware_configuration": "other-rig"})
     )
-    design = _design(image, (P_WOT, 190, 200))
-    template = _template(kit, image, bytes(image))
+    design = mc_design(image, (P_WOT, 190, 200))
+    template = mc_template(kit, image, bytes(image))
     messages = []
     for call in (
         lambda: run_paired(other, _paired_scenario(template, design), image, bytes(image)),
@@ -1299,8 +1227,8 @@ def test_the_monte_carlo_learned_state_is_run_paireds(
     from src.analysis.paired_run import NEUTRAL_TRIM_PCT, check_run_inputs, learned_state
 
     kit, image = kit_and_image
-    design = _design(image, (P_WOT, 190, 200))
-    template = _template(kit, image, bytes(image), candidate_events=("ecu_reflash",))
+    design = mc_design(image, (P_WOT, 190, 200))
+    template = mc_template(kit, image, bytes(image), candidate_events=("ecu_reflash",))
     scenario = _paired_scenario(template, design)
     resets = check_run_inputs(kit, scenario, image, bytes(image))
     assert resets, "the reflash resets a learned trim"

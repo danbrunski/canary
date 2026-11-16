@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,7 @@ from src.analysis import air_charge_twin as twin
 from src.analysis.ecu_application import load_application_model
 from src.decode import air_charge as ac
 from src.yaml_load import load_yaml
+from tests.twin_builders import air_charge_calibration
 
 REPO = Path(__file__).resolve().parents[1]
 PROFILE = REPO / "data" / "nissan-xterra-2008"
@@ -229,25 +230,8 @@ def test_the_speed_word_spans_eight_w1204_counts() -> None:
 # -- the adapter ----------------------------------------------------------------------------
 
 
-def _calibration(**changes: object) -> twin.AirChargeCalibration:
-    cells = tuple(tuple(128 + ((r + c) % 5) - 2 for c in range(16)) for r in range(16))
-    base = twin.AirChargeCalibration(
-        image_sha256="0" * 64,
-        slot=1,
-        k=28715,
-        flow_multiplier=226,
-        speed_multiplier=3,
-        maf_scale=149,
-        fuel_comp=cells,
-        fuel_comp_rpm_axis=tuple(range(8, 136, 8)),
-        fuel_comp_load_axis=(16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 144),
-        ceiling=(255,) * 16,
-    )
-    return replace(base, **changes)  # type: ignore[arg-type]
-
-
 def test_the_steady_prediction_is_an_exact_interval_over_its_inputs() -> None:
-    cal = _calibration()
+    cal = air_charge_calibration()
     p = twin.predict_steady_bfs(cal, maf_word=1500, rpm_word=160)
     assert p.lo <= p.mid <= p.hi
     assert (p.speed_lo, p.speed_hi) == (1280, 1287)
@@ -300,7 +284,7 @@ def _rows(samples: list[tuple[float, int, int, int]]) -> pd.DataFrame:
 
 
 def test_the_evaluator_pairs_raw_reads_and_counts_every_exclusion() -> None:
-    cal = _calibration()
+    cal = air_charge_calibration()
     steady_bfs = twin.predict_steady_bfs(cal, maf_word=1500, rpm_word=160).mid
     samples = [(100.0 + 0.2 * i, steady_bfs, 1500, 160) for i in range(20)]
     samples += [(200.0 + 0.2 * i, 9000, 1500 + 60 * i, 160) for i in range(10)]  # MAF moving
@@ -319,7 +303,7 @@ def test_the_evaluator_pairs_raw_reads_and_counts_every_exclusion() -> None:
 
 
 def test_observed_bfs_is_scored_never_used() -> None:
-    cal = _calibration()
+    cal = air_charge_calibration()
     samples = [(100.0 + 0.2 * i, 7000, 1500, 160) for i in range(20)]
     first = twin.evaluate_steady_bfs(_rows(samples), cal)
     second = twin.evaluate_steady_bfs(_rows([(t, b * 3, m, r) for t, b, m, r in samples]), cal)
@@ -328,10 +312,12 @@ def test_observed_bfs_is_scored_never_used() -> None:
 
 def test_a_channel_without_a_raw_word_rule_is_refused() -> None:
     with pytest.raises(twin.AirChargeRefusalError) as refused:
-        twin.evaluate_steady_bfs(_rows([]), _calibration(), maf_channel="MAF_GPS_SMOOTHED")
+        twin.evaluate_steady_bfs(
+            _rows([]), air_charge_calibration(), maf_channel="MAF_GPS_SMOOTHED"
+        )
     assert refused.value.reason == "channel_unsupported"
     with pytest.raises(twin.AirChargeRefusalError):
-        twin.evaluate_steady_bfs(_rows([]), _calibration(), bfs_channel="DID_1209")
+        twin.evaluate_steady_bfs(_rows([]), air_charge_calibration(), bfs_channel="DID_1209")
 
 
 def test_the_calibration_offsets_read_are_the_manifests() -> None:
@@ -423,10 +409,10 @@ def test_a_calibration_that_breaks_a_zero_or_a_constant_refuses_by_name(
     offset: int, flip: int, node: str
 ) -> None:
     from src.analysis.ecu_application import ApplicationModelRefusalError, check_image
-    from tests.test_ecu_application_model import _synthetic
+    from tests.twin_builders import application_synthetic
 
     model, _ = load_application_model(PROFILE)
-    image, same = _synthetic(model)
+    image, same = application_synthetic(model)
     check_image(image, same)
     edited = bytearray(image)
     edited[offset] ^= flip

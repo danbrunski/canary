@@ -53,10 +53,9 @@ from src.evidence import (
 )
 from src.signals.afr import load_afr_calibration
 from src.vehicle.tune_revisions import TuneRevisionRegistry, load_tune_revisions
-from tests.test_target_phi import PROFILE, _definition, _model, _viewer
+from tests.target_phi_builders import PROFILE, phi_definition, phi_model, phi_viewer
+from tests.twin_builders import PATCH, SLUG, change_vehicle
 
-SLUG = "nissan-xterra-2008"
-PATCH = PROFILE / "rom-targets-known-edit.json"
 T0 = datetime(2026, 10, 1, 12, tzinfo=UTC)
 
 
@@ -73,12 +72,12 @@ def _image(revision: str) -> str:
 
 
 def _transcribed(revision: str) -> ResolvedTable:
-    definition, _ = _definition()
+    definition, _ = phi_definition()
     return table_from_calibration(
         load_afr_calibration(PROFILE / "afr_calibration.yaml"),
         definition,
-        viewer=_viewer(),
-        application_model=_model(),
+        viewer=phi_viewer(),
+        application_model=phi_model(),
         revision=revision,
         image_sha256=_image(revision),
         slot=1,
@@ -91,14 +90,8 @@ def _patch(**edit: Any) -> Patch:
     return Patch.model_validate(raw)
 
 
-def _vehicle(table: ResolvedTable) -> VehicleIdentity:
-    return VehicleIdentity(
-        profile=SLUG, vin=None, program_id=table.application.program_id, calibration=table.revision
-    )
-
-
 def _definition_only() -> TwinDefinition:
-    return _definition()[0]
+    return phi_definition()[0]
 
 
 def _with_cells(table: ResolvedTable, edits: dict[tuple[int, int], int]) -> ResolvedTable:
@@ -352,7 +345,7 @@ def test_a_what_if_is_a_labelled_prediction_recorded_before_the_flash(tmp_path: 
     k106, r920 = _transcribed("ZS44A-k106"), _transcribed("ZS44A-20260920")
     _flash(ledger, k106.image_sha256, T0 - timedelta(days=30), now=T0 - timedelta(minutes=1))
     (pid,) = record_command_change(
-        ledger, change_from_images(k106, r920), definition, vehicle=_vehicle(k106), now=T0
+        ledger, change_from_images(k106, r920), definition, vehicle=change_vehicle(k106), now=T0
     )
     prediction = ledger.get(pid)
     assert isinstance(prediction, Prediction) and prediction.what_if is not None
@@ -375,7 +368,7 @@ def test_a_what_if_is_a_labelled_prediction_recorded_before_the_flash(tmp_path: 
         ledger,
         change_from_images(k106, r920),
         definition,
-        vehicle=_vehicle(k106),
+        vehicle=change_vehicle(k106),
         now=T0 + timedelta(hours=4),
     )
     late_record = ledger.get(late)
@@ -395,7 +388,7 @@ def test_re_flashing_a_previous_image_is_not_that_flash_again(tmp_path: Path) ->
     restore = change_from_images(r1004, r920)
     investigation = ledger.append(
         Investigation(
-            vehicle=_vehicle(r1004),
+            vehicle=change_vehicle(r1004),
             provenance=Provenance(producer="operator", producer_kind="operator", version="1"),
             conditions=Conditions(regime="all conditions", vehicle_state=None),
             valid_from=T0,
@@ -408,7 +401,7 @@ def test_re_flashing_a_previous_image_is_not_that_flash_again(tmp_path: Path) ->
         ledger,
         restore,
         definition,
-        vehicle=_vehicle(r1004),
+        vehicle=change_vehicle(r1004),
         investigation=investigation.id,
         now=T0 + timedelta(days=5),
     )
@@ -445,7 +438,7 @@ def test_a_named_intervention_must_install_the_target(tmp_path: Path) -> None:
             ledger,
             change_from_images(k106, r920),
             definition,
-            vehicle=_vehicle(k106),
+            vehicle=change_vehicle(k106),
             intervention=other.id,
             now=T0 + timedelta(minutes=1),
         )
@@ -454,7 +447,7 @@ def test_a_named_intervention_must_install_the_target(tmp_path: Path) -> None:
         ledger,
         change_from_images(k106, r920),
         definition,
-        vehicle=_vehicle(k106),
+        vehicle=change_vehicle(k106),
         intervention=right.id,
         now=T0 + timedelta(minutes=1),
     )
@@ -466,7 +459,7 @@ def test_a_what_if_cannot_stand_where_measurements_go(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
     k106, r920 = _transcribed("ZS44A-k106"), _transcribed("ZS44A-20260920")
     (pid,) = record_command_change(
-        ledger, change_from_images(k106, r920), definition, vehicle=_vehicle(k106), now=T0
+        ledger, change_from_images(k106, r920), definition, vehicle=change_vehicle(k106), now=T0
     )
     prediction = ledger.get(pid)
     assert isinstance(prediction, Prediction)
@@ -548,7 +541,7 @@ def test_the_card_shows_a_what_if_as_one_with_every_value_from_the_record(
             definition=definition,
         ),
         definition,
-        vehicle=_vehicle(k106),
+        vehicle=change_vehicle(k106),
         investigation=investigation.id,
         now=T0 + timedelta(minutes=1),
     )
@@ -583,9 +576,8 @@ def test_computing_and_recording_a_what_if_requests_no_ecu_write(tmp_path: Path)
         f"""
         import json, sys
         from pathlib import Path
-        from tests.test_twin_command_change import (
-            _definition_only, _registry, _transcribed, _vehicle, PATCH, SLUG,
-        )
+        from tests.test_twin_command_change import _definition_only, _registry, _transcribed
+        from tests.twin_builders import PATCH, SLUG, change_vehicle as _vehicle
         from src.analysis.rom_targets import Patch
         from src.analysis.twin_command_change import (
             change_from_cell_edits, change_from_images, record_command_change,
@@ -634,8 +626,7 @@ def test_the_brain_memory_and_card_routes_serve_a_what_if_unchanged(tmp_path: Pa
     from src.dashboard.api import create_app
     from src.evidence import memory_ledger_for
     from src.mcp_server.tools import brain as brain_tool
-    from tests.test_brain_jobs import scoped_config
-    from tests.test_brain_routes import AUTH, TOKEN, _mcp_client
+    from tests.builders import AUTH, TOKEN, brain_mcp_client, scoped_config
 
     config = scoped_config(tmp_path)
     ledger = memory_ledger_for(config)
@@ -655,7 +646,7 @@ def test_the_brain_memory_and_card_routes_serve_a_what_if_unchanged(tmp_path: Pa
         ledger,
         change_from_images(k106, _transcribed("ZS44A-20260920")),
         definition,
-        vehicle=_vehicle(k106),
+        vehicle=change_vehicle(k106),
         investigation=investigation.id,
     )
     app = create_app(config, anomalies_dir=tmp_path / "an", control_token=TOKEN)
@@ -673,7 +664,7 @@ def test_the_brain_memory_and_card_routes_serve_a_what_if_unchanged(tmp_path: Pa
     assert refused.status_code == 400
 
     async def through_mcp() -> tuple[Any, Any]:
-        client = _mcp_client(app)
+        client = brain_mcp_client(app)
         try:
             return (
                 await brain_tool.query_memory(client, kind="prediction"),
@@ -690,7 +681,7 @@ def test_the_brain_memory_and_card_routes_serve_a_what_if_unchanged(tmp_path: Pa
 
 def test_the_cli_records_a_what_if_from_an_image_pair_or_a_patch(tmp_path: Path) -> None:
     from src.evidence import memory_ledger_for
-    from tests.test_brain_jobs import scoped_config
+    from tests.builders import scoped_config
     from tools.record_command_change import parse_args, record
 
     config = scoped_config(tmp_path)

@@ -43,6 +43,7 @@ from src.decode.dids import load_did_map
 from src.paths import DIDS_YAML
 from src.yaml_load import load_yaml
 from tests.app_context import bare_context
+from tests.twin_builders import application_synthetic
 
 REPO = Path(__file__).resolve().parents[1]
 PROFILE = REPO / "data" / "nissan-xterra-2008"
@@ -348,25 +349,9 @@ def test_the_model_refuses_an_intermediate_labelled_as_final_or_a_loose_referenc
 # -- identity: program plus full image, never the calibration ID ------------------------
 
 
-def _synthetic(model: ApplicationModel) -> tuple[bytes, ApplicationModel]:
-    image = bytearray(b"\xa5" * 0x100000)
-    for marker in model.program.patch.markers:
-        raw = bytes.fromhex(marker.bytes)
-        image[marker.offset : marker.offset + len(raw)] = raw
-    for node in model.nodes:
-        for c in node.calibration_conditions:
-            for k in range(c.count):
-                image[c.offset + k] = (image[c.offset + k] & ~c.mask & 0xFF) | c.equals
-    identity = model.program.identity.model_copy(
-        update={"sha256": program_sha256(bytes(image), model)}
-    )
-    program = model.program.model_copy(update={"identity": identity})
-    return bytes(image), model.model_copy(update={"program": program})
-
-
 def test_the_same_program_passes_and_each_mismatch_refuses_by_name() -> None:
     model, _ = _model()
-    image, same = _synthetic(model)
+    image, same = application_synthetic(model)
     check_image(image, same)
     cases = {
         # Code changed under an unchanged calibration ID: a different program.
@@ -377,7 +362,7 @@ def test_the_same_program_passes_and_each_mismatch_refuses_by_name() -> None:
     for reason, (offset, value, pinned) in cases.items():
         edited = bytearray(image)
         edited[offset] = value
-        against = pinned if pinned is not None else _synthetic(model)[1]
+        against = pinned if pinned is not None else application_synthetic(model)[1]
         if pinned is None:
             # Re-pin to the edited image's program so only the named check fails.
             identity = against.program.identity.model_copy(
@@ -404,7 +389,7 @@ def test_every_constant_a_reference_model_implements_is_checked_on_the_image() -
         for rom in node.rom:
             if rom.offset is not None and rom.width == 8:
                 assert (rom.offset, rom.value) in pinned, (node.id, hex(rom.offset))
-    image, same = _synthetic(model)
+    image, same = application_synthetic(model)
     for offset, node_id in [
         (0x8C98, "enrichment_state_request"),
         (0x879C, "enrichment_state_request"),
@@ -434,7 +419,7 @@ def test_the_calibration_region_does_not_change_the_program() -> None:
     ignores them, so a new calibration is the same program, identified by its
     own full-image hash."""
     model, _ = _model()
-    image, same = _synthetic(model)
+    image, same = application_synthetic(model)
     edited = bytearray(image)
     edited[0x8204:0x820F] = b"1ZS99Z00000"  # the calibration ID
     edited[0x0E0220] ^= 0xFF  # a Target AFR cell in slot 1

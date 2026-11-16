@@ -41,8 +41,13 @@ from src.storage.session_products import (
     trip_index,
     trip_key,
 )
-from tests.builders import RICH_SESSION_END, digest_config, write_rich_session
-from tests.test_trip_end_digest import _budgeted, _RefusingExecutor
+from tests.builders import (
+    RICH_SESSION_END,
+    RefusingExecutor,
+    budgeted,
+    digest_config,
+    write_rich_session,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -114,7 +119,7 @@ async def test_a_trip_end_that_fires_again_is_not_recomputed(tmp_path: Path) -> 
     trip = _trip(session, FIRST_START, FIRST_STOP)
     assert await handle_trip_end_off_loop(session, config, trip=trip, now=RICH_SESSION_END)
     again = await handle_trip_end_off_loop(
-        session, config, trip=trip, now=RICH_SESSION_END, executor=_RefusingExecutor()
+        session, config, trip=trip, now=RICH_SESSION_END, executor=RefusingExecutor()
     )
     assert again is None
     assert len(_files(session)) == 1
@@ -130,7 +135,7 @@ async def test_a_call_naming_no_trip_does_not_recompute_a_session_that_has_a_dig
     assert await handle_trip_end_off_loop(
         session, config, trip=_trip(session, FIRST_START, FIRST_STOP), now=RICH_SESSION_END
     )
-    tight = _budgeted(config, digest_span_budget_seconds=10)
+    tight = budgeted(config, digest_span_budget_seconds=10)
     assert (
         await handle_trip_end_off_loop(
             session, tight, trip=_trip(session, SECOND_START, SECOND_STOP), now=RICH_SESSION_END
@@ -140,7 +145,7 @@ async def test_a_call_naming_no_trip_does_not_recompute_a_session_that_has_a_dig
     assert read_digest(session) is None, "the newest trip was refused"
     assert (
         await handle_trip_end_off_loop(
-            session, config, now=RICH_SESSION_END, executor=_RefusingExecutor()
+            session, config, now=RICH_SESSION_END, executor=RefusingExecutor()
         )
         is None
     )
@@ -153,7 +158,7 @@ async def test_a_refused_second_trip_leaves_a_record_naming_why(tmp_path: Path) 
         session, config, trip=_trip(session, FIRST_START, FIRST_STOP), now=RICH_SESSION_END
     )
     assert first is not None
-    tight = _budgeted(config, digest_span_budget_seconds=10)
+    tight = budgeted(config, digest_span_budget_seconds=10)
     second_trip = _trip(session, SECOND_START, SECOND_STOP)
     assert (
         await handle_trip_end_off_loop(session, tight, trip=second_trip, now=RICH_SESSION_END)
@@ -547,7 +552,7 @@ async def test_a_refusal_that_removes_the_top_level_digest_reindexes_the_catalog
     with SessionCatalog(db) as catalog:
         row = catalog.get_session(session.name)
     assert row is not None and row.digest is not None
-    tight = _budgeted(config, digest_span_budget_seconds=10)
+    tight = budgeted(config, digest_span_budget_seconds=10)
     await handle_trip_end_off_loop(
         session,
         tight,

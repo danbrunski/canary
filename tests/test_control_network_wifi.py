@@ -29,9 +29,8 @@ from src.dashboard.api import create_app
 from src.provisioning import client
 from src.provisioning.netsock import NetworkControlServer
 from src.provisioning.network import profile_filename
-from tests.test_provisioning_network import FakeRunner
-from tests.test_provisioning_wifi import AP, HOTSPOT, PRECONFIGURED, STARLINK, WIRED
-from tests.test_provisioning_wifi import cli as wifi_cli
+from tests.provisioning_builders import AP, HOTSPOT, PRECONFIGURED, STARLINK, WIRED, FakeRunner
+from tests.provisioning_builders import cli as wifi_cli
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"

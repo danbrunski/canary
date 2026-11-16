@@ -64,18 +64,18 @@ from src.models.change_detection import (
     reference_fingerprint,
 )
 from src.vehicle.profiles import profile_dir
-from tests.test_adaptive_candidate import (
+from tests.builders import scheduler, scoped_config
+from tests.candidate_builders import (
     CHANNELS,
     DAY,
     PROFILE,
     T0,
-    _alarm,
-    _mixed,
-    _policy,
-    _reference,
-    _spec,
+    candidate_alarm,
+    candidate_mixed,
+    candidate_policy,
+    candidate_reference,
+    candidate_spec,
 )
-from tests.test_brain_jobs import scheduler, scoped_config
 
 RESIDUAL = "balance"
 DRIFT = 0.6
@@ -96,7 +96,7 @@ def _drives(
             (f"{prefix}{k}",),
             "REV",
             tuple(
-                _mixed(
+                candidate_mixed(
                     f"{prefix}{k}",
                     30,
                     seed=seed + k,
@@ -155,16 +155,16 @@ def _world(
         root / "memory.jsonl", vehicle=PROFILE, replay_id="e036-synthetic"
     )
     if alarm_before_learning:
-        _alarm(ledger)
+        candidate_alarm(ledger)
     store = CandidateStore(root / "candidates")
-    reference = _reference()
-    store.install_reference(RESIDUAL, reference, _policy(), now=_at(0))
+    reference = candidate_reference()
+    store.install_reference(RESIDUAL, reference, candidate_policy(), now=_at(0))
     learning = _drives("l", 4, first_day=0, offset=drift, seed=500)
     _traces, candidate = replay_candidate(
-        [(d.drive, list(d.blocks)) for d in learning], reference, _spec(), ledger=ledger,
+        [(d.drive, list(d.blocks)) for d in learning], reference, candidate_spec(), ledger=ledger,
         calibration="REV", channels=CHANNELS, now=_at(4.5),
     )  # fmt: skip
-    checkpoint = store.save_checkpoint(RESIDUAL, candidate.checkpoint(), _spec())
+    checkpoint = store.save_checkpoint(RESIDUAL, candidate.checkpoint(), candidate_spec())
     floor_path = _floor(root / "noise_floor.yaml")
     prediction = ""
     if candidate.checkpoint().valid_to is not None:  # a frozen lineage predicts nothing
@@ -267,9 +267,12 @@ def test_a_stale_decision_cannot_overwrite_a_newer_reference(tmp_path):
     other = world.store.reference(RESIDUAL, world.reference.fingerprint)
     with pytest.raises(StaleActivationError):
         world.store.activate(
-            RESIDUAL, _reference(seed=7), _policy(), expected_active=other.fingerprint,
+            RESIDUAL,
+            candidate_reference(seed=7),
+            candidate_policy(),
+            expected_active=other.fingerprint,
             decision="stale",
-        )  # fmt: skip
+        )
 
 
 def test_a_synthetic_decision_cannot_promote_in_live_memory(tmp_path):
@@ -362,7 +365,7 @@ def test_an_alarm_freezes_the_lineage_and_an_open_one_keeps_promotion_pending(tm
     world = _world(tmp_path / "open")
     # An observed alarm, raised after the candidate learned.
     scratch = MemoryLedger(tmp_path / "scratch.jsonl", vehicle=PROFILE)
-    alarm = scratch.get(_alarm(scratch))
+    alarm = scratch.get(candidate_alarm(scratch))
     world.ledger.append(alarm.model_copy(update={"id": "", "recorded_at": None}), now=_at(4.8))
     held = _evaluate(world, _independent())
     assert held.status == "pending" and held.reasons[0].startswith("unresolved_change_alarm")
@@ -374,7 +377,7 @@ def test_an_alarm_freezes_the_lineage_and_an_open_one_keeps_promotion_pending(tm
 def test_the_store_refuses_edited_files_and_a_second_installation(tmp_path):
     world = _world(tmp_path)
     with pytest.raises(CandidateStoreError, match="promotion"):
-        world.store.install_reference(RESIDUAL, _reference(seed=7), _policy())
+        world.store.install_reference(RESIDUAL, candidate_reference(seed=7), candidate_policy())
     path = tmp_path / "candidates" / RESIDUAL / "references" / f"{world.reference.fingerprint}.json"
     data = json.loads(path.read_text())
     data["reference"]["theta"][0] += 0.5
@@ -386,7 +389,7 @@ def test_the_store_refuses_edited_files_and_a_second_installation(tmp_path):
 
 
 def test_a_promoted_reference_names_its_lineage():
-    reference = _reference()
+    reference = candidate_reference()
     payload = reference.model_dump(mode="json")
     payload["lineage"] = "promoted_candidate"
     with pytest.raises(ValueError, match="promoted reference"):
@@ -400,7 +403,7 @@ def _stft_policy(config: CanaryConfig) -> tuple[ChangePolicy, CandidateSpec]:
     definition = load_change_residuals(profile_dir(config) / CHANGE_RESIDUALS_FILE)[0].residual(
         "stft_bank_balance"
     )
-    policy = _policy().model_copy(update={"residual": definition.name})
+    policy = candidate_policy().model_copy(update={"residual": definition.name})
     return ChangePolicy.model_validate(policy.model_dump(mode="json", by_alias=True)), (
         definition.candidate
     )
@@ -408,10 +411,16 @@ def _stft_policy(config: CanaryConfig) -> tuple[ChangePolicy, CandidateSpec]:
 
 def _stft_checkpoint(config: CanaryConfig, ledger: MemoryLedger) -> tuple[str, FrozenReference]:
     policy, spec = _stft_policy(config)
-    train = _mixed("t1", 30, seed=1, t0=T0 - 4 * DAY) + _mixed("t2", 30, seed=2, t0=T0 - 3 * DAY)
-    cal = _mixed("c1", 30, seed=3, t0=T0 - 2 * DAY) + _mixed("c2", 30, seed=4, t0=T0 - DAY)
+    train = candidate_mixed("t1", 30, seed=1, t0=T0 - 4 * DAY) + candidate_mixed(
+        "t2", 30, seed=2, t0=T0 - 3 * DAY
+    )
+    cal = candidate_mixed("c1", 30, seed=3, t0=T0 - 2 * DAY) + candidate_mixed(
+        "c2", 30, seed=4, t0=T0 - DAY
+    )
     reference = fit_reference(policy, train, cal, name="stft", calibration_revision="REV")
-    learning = [(f"l{k}", _mixed(f"l{k}", 30, seed=500 + k, t0=T0 + k * DAY)) for k in range(3)]
+    learning = [
+        (f"l{k}", candidate_mixed(f"l{k}", 30, seed=500 + k, t0=T0 + k * DAY)) for k in range(3)
+    ]
     _t, candidate = replay_candidate(
         learning, reference, spec, ledger=ledger, calibration="REV", channels=CHANNELS,
         now=_at(4),
@@ -440,7 +449,7 @@ def test_the_vehicle_job_stays_pending_until_independent_evidence_exists(tmp_pat
 
     # A reference exists, but no drive has been recorded since: the run
     # leaves the job pending, and it is not re-run until a new drive exists.
-    policy, _spec = _stft_policy(config)
+    policy, candidate_spec = _stft_policy(config)
     brain_jobs.candidate_store(config).install_reference("stft_bank_balance", reference, policy)
     calls: list[str] = []
 
@@ -466,7 +475,7 @@ def test_the_vehicle_job_stays_pending_until_independent_evidence_exists(tmp_pat
 
 def _observed_alarm(ledger: MemoryLedger, tmp_path: Path, now: datetime) -> str:
     scratch = MemoryLedger(tmp_path / "alarm-scratch.jsonl", vehicle=PROFILE)
-    alarm = scratch.get(_alarm(scratch))
+    alarm = scratch.get(candidate_alarm(scratch))
     return ledger.append(alarm.model_copy(update={"id": "", "recorded_at": None}), now=now).id
 
 
@@ -514,7 +523,7 @@ def test_a_held_out_fit_hashes_as_it_did_before_promotion_existed():
     differ in the last bits across machines (CI shard 3/4 on 798db53 gave
     fc80c781... where the laptop gives 36844796...). The property is pinned
     instead, on the reference's own payload."""
-    ref = _reference()
+    ref = candidate_reference()
     payload = ref.model_dump(mode="json")
     assert payload["promoted_from"] is None and payload["previous_reference"] is None
     pre_promotion = {

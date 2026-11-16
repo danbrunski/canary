@@ -19,14 +19,13 @@ import pandas as pd
 import pytest
 
 from src.analysis.channels import read_channels
-from src.analysis.ecu_application import ApplicationModel, load_application_model, program_sha256
+from src.analysis.ecu_application import load_application_model
 from src.analysis.operating_context import (
     ContextDefinition,
     ContextProvider,
     ContextRefusalError,
     ResolvedContext,
     image_tables,
-    load_context_definition,
     resolve_context,
 )
 from src.analysis.rom_map import RomMap
@@ -37,95 +36,23 @@ from src.decode.dids import load_did_map
 from src.decode.fuel_comp_load import LoadInputCurves, load_byte, rpm_reciprocal
 from src.paths import DIDS_YAML
 from src.vehicle.tune_revisions import load_tune_revisions
-from src.yaml_load import load_yaml
-from tests.rom_fixtures import PROFILE, load_byte_image, with_checksums, xterra_map
+from tests.rom_fixtures import PROFILE, xterra_map
+from tests.twin_builders import (
+    FUEL_FILL_AXIS,
+    FUEL_RPM_AXIS,
+    context_feed,
+    context_image,
+    context_long,
+    context_ram_study_frame,
+    definition,
+    fuel_cell,
+    resolve,
+    synthetic_program,
+    trim_a_cell,
+    trim_b_cell,
+)
 
-REPO = Path(__file__).resolve().parents[1]
-
-#: Known cells, asymmetric in row and column so a transposed read differs.
-FUEL_RPM_AXIS = tuple(range(8, 129, 8))  # 0xCACD: 400..6,400 rpm (x 50)
-FUEL_FILL_AXIS = (*range(16, 241, 16), 255)  # 0xCB29 restored: 16..255
 FUEL_FILL_AXIS_COMPRESSED = (*range(0x10, 0x88, 8), 0x90)  # as rom_fixtures: 16..144
-TRIM_RPM_AXIS = (8, 12, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120)  # 0xCC93
-TRIM_LOAD_AXIS = tuple(range(8, 129, 8))  # 0xCC83
-
-
-def fuel_cell(r: int, c: int) -> int:
-    return 100 + 4 * r + c
-
-
-def trim_a_cell(r: int, c: int) -> int:
-    """Rows 8 and up carry the bit-7 flag, as a contiguous block does in the ROM."""
-    return (40 + r + 2 * c) | (0x80 if r >= 8 else 0)
-
-
-def trim_b_cell(r: int, c: int) -> int:
-    return 30 + r + c
-
-
-def context_image(*, fill_axis: tuple[int, ...] = FUEL_FILL_AXIS) -> bytes:
-    model, _ = load_application_model(PROFILE)
-    image = bytearray(load_byte_image())
-    for marker in model.program.patch.markers:
-        raw = bytes.fromhex(marker.bytes)
-        image[marker.offset : marker.offset + len(raw)] = raw
-    for node in model.nodes:
-        for ref in node.rom:
-            if ref.offset is not None:
-                assert ref.width is not None and ref.value is not None
-                width = ref.width // 8
-                image[ref.offset : ref.offset + width] = ref.value.to_bytes(width, "big")
-        for c in node.calibration_conditions:
-            for k in range(c.count):
-                image[c.offset + k] = (image[c.offset + k] & ~c.mask & 0xFF) | c.equals
-    image[0xCACD : 0xCACD + 16] = bytes(FUEL_RPM_AXIS)
-    image[0xCB29 : 0xCB29 + 16] = bytes(fill_axis)
-    image[0xCC93 : 0xCC93 + 16] = bytes(TRIM_RPM_AXIS)
-    image[0xCC83 : 0xCC83 + 16] = bytes(TRIM_LOAD_AXIS)
-    rom_map = xterra_map()
-    slots = rom_map.map_slots
-    assert slots is not None
-    base = slots.slot_base(1)
-    image[base + 0x660 : base + 0x760] = bytes(
-        fuel_cell(r, c) for r in range(16) for c in range(16)
-    )
-    image[base + 0x020 : base + 0x120] = bytes(
-        trim_a_cell(r, c) for r in range(16) for c in range(16)
-    )
-    image[base + 0x120 : base + 0x220] = bytes(
-        trim_b_cell(r, c) for r in range(16) for c in range(16)
-    )
-    return with_checksums(bytes(image), rom_map)
-
-
-def synthetic_program(image: bytes) -> tuple[ApplicationModel, str]:
-    model, sha = load_application_model(PROFILE)
-    identity = model.program.identity.model_copy(update={"sha256": program_sha256(image, model)})
-    program = model.program.model_copy(update={"identity": identity})
-    return model.model_copy(update={"program": program}), sha
-
-
-def definition() -> ContextDefinition:
-    return load_context_definition(PROFILE)[0]
-
-
-def resolve(
-    image: bytes | None = None,
-    *,
-    defn: ContextDefinition | None = None,
-    rom_map: RomMap | None = None,
-    model: tuple[ApplicationModel, str] | None = None,
-    slot: int = 1,
-) -> ResolvedContext:
-    image = image if image is not None else context_image()
-    return resolve_context(
-        image,
-        rom_map or xterra_map(),
-        defn or definition(),
-        application_model=model or synthetic_program(image),
-        expected_sha256=hashlib.sha256(image).hexdigest(),
-        slot=slot,
-    )
 
 
 @pytest.fixture(scope="module")
@@ -229,50 +156,6 @@ TRIM_VECTORS = [
 ]
 
 
-def _flags(bit: int, on: bool) -> float:
-    return float(1 << bit) if on else 0.0
-
-
-def _feed(
-    stream: Any,
-    t: float,
-    *,
-    rpm_word: int = 128,
-    fill: int = 96,
-    x: int = 40,
-    coolant_raw: int = 200,
-    pedal: bool = False,
-    high_det: bool | None = False,
-    magic: int = 0xAA5555AA,
-    active: int = 0,
-    selector: int = 0,
-    command: bool = True,
-    skip: tuple[str, ...] = (),
-    basis: str = "acquired",
-) -> None:
-    """One read of every channel the context uses, all at ``t``."""
-    reads = {
-        "mem:ECM_ENGINE_SPEED_RAM": rpm_word * 12.5,
-        "mem:ECM_FUEL_COMP_X_INPUT": float(fill),
-        "mem:ECM_FUEL_TARGET_MAP_X_TRACE": x * 0.250859,
-        "mem:ECM_PEDAL_ENRICH_FLAGS": _flags(0, pedal),
-        "did:ECM_COOLANT_TEMP": coolant_raw - 50.0,
-        "mem:ECM_UPREV_MAGIC": float(magic),
-        "mem:ECM_ACTIVE_MAP": float(active),
-        "mem:ECM_UPREV_MAP_SELECTOR": float(selector),
-        "did:ECM_EVAP_PURGE_CMD": 10.0,
-    }
-    if high_det is not None:
-        reads["mem:ECM_HIGH_DET_FLAGS"] = _flags(6, high_det)
-    if command:
-        reads["mem:ECM_TARGET_EQUIV_RATIO"] = 14746 / 16384
-    else:
-        reads["mem:ECM_TARGET_EQUIV_RATIO_SENTINEL"] = float("nan")
-    for spec, value in reads.items():
-        if spec not in skip:
-            stream.observe(spec, value, t, basis=basis)
-
-
 @pytest.mark.parametrize(
     ("rpm", "x", "coolant", "pedal", "high_det", "table", "trim", "flag"), TRIM_VECTORS
 )
@@ -288,7 +171,9 @@ def test_timing_trim_reads_rpm_0xcc93_bfs_x_0xcc83_masked_and_selected_by_hi_det
     flag: bool,
 ) -> None:
     stream = provider.stream(role="serve", captured=None)
-    _feed(stream, 100.0, rpm_word=rpm, x=x, coolant_raw=coolant, pedal=pedal, high_det=high_det)
+    context_feed(
+        stream, 100.0, rpm_word=rpm, x=x, coolant_raw=coolant, pedal=pedal, high_det=high_det
+    )
     timing = stream.context_at(100.1)["timing_trim"]
     assert "refused" not in timing, timing
     assert (timing["table"], timing["trim"], timing["trim_flag"]) == (table, trim, flag)
@@ -472,9 +357,9 @@ def test_fill_ceiling_and_rpm_saturation_are_reported_separately(
 ) -> None:
     sat, ceiling = resolved.reciprocal_saturation_word, resolved.fill_ceiling
     stream = provider.stream(role="serve", captured=None)
-    _feed(stream, 10.0, rpm_word=sat - 20, fill=ceiling)
+    context_feed(stream, 10.0, rpm_word=sat - 20, fill=ceiling)
     low_rpm = stream.context_at(10.1)["fuel_comp"]
-    _feed(stream, 20.0, rpm_word=sat + 20, fill=ceiling - 40)
+    context_feed(stream, 20.0, rpm_word=sat + 20, fill=ceiling - 40)
     high_rpm = stream.context_at(20.1)["fuel_comp"]
     assert (low_rpm["fill_at_ceiling"], low_rpm["rpm_reciprocal_saturated"]) == (True, False)
     assert (high_rpm["fill_at_ceiling"], high_rpm["rpm_reciprocal_saturated"]) == (False, True)
@@ -488,7 +373,7 @@ def test_a_fresh_tuple_gives_the_cell_its_units_and_its_clamp_state(
     provider: ContextProvider,
 ) -> None:
     stream = provider.stream(role="serve", captured=None)
-    _feed(stream, 50.0, rpm_word=144, fill=104)
+    context_feed(stream, 50.0, rpm_word=144, fill=104)
     record = stream.context_at(50.2)
     fuel = record["fuel_comp"]
     assert fuel["value_raw"] == 119 and fuel["value"] == pytest.approx(119 * 0.78125)
@@ -510,7 +395,7 @@ def test_a_five_second_old_window_read_is_stale_not_fresh(provider: ContextProvi
     """The memory windows of a default-rate capture come every ~5 s; held over
     to the next sample they are refused, never carried forward as fresh."""
     stream = provider.stream(role="serve", captured=None)
-    _feed(stream, 0.0)
+    context_feed(stream, 0.0)
     record = stream.context_at(5.0)
     assert record["fuel_comp"]["refused"] == "stale:engine_speed_word"
     assert record["timing_trim"]["refused"] == "stale:engine_speed_word"
@@ -522,7 +407,7 @@ def test_a_five_second_old_window_read_is_stale_not_fresh(provider: ContextProvi
 
 def test_a_tuple_wider_than_the_skew_is_refused(provider: ContextProvider) -> None:
     stream = provider.stream(role="serve", captured=None)
-    _feed(stream, 0.0)
+    context_feed(stream, 0.0)
     stream.observe("mem:ECM_ENGINE_SPEED_RAM", 128 * 12.5, 0.4, basis="acquired")
     record = stream.context_at(0.45)
     assert record["fuel_comp"]["refused"] == "skew:fuel_comp"
@@ -545,7 +430,7 @@ def test_missing_or_unknown_state_is_refused_by_name(
     provider: ContextProvider, setup: dict[str, Any], item: str, reason: str | None
 ) -> None:
     stream = provider.stream(role="serve", captured=None)
-    _feed(stream, 0.0, **setup)
+    context_feed(stream, 0.0, **setup)
     got = stream.context_at(0.1)[item]
     if reason is None:
         assert got["active"] is True  # the sentinel: fuel cut is a state
@@ -555,7 +440,7 @@ def test_missing_or_unknown_state_is_refused_by_name(
 
 def test_a_stored_value_off_the_catalog_scale_is_wrong_units(provider: ContextProvider) -> None:
     stream = provider.stream(role="serve", captured=None)
-    _feed(stream, 0.0)
+    context_feed(stream, 0.0)
     stream.observe("mem:ECM_ENGINE_SPEED_RAM", 1000.3, 0.05, basis="acquired")
     assert stream.context_at(0.1)["fuel_comp"]["refused"] == "wrong_units:engine_speed_word"
 
@@ -563,11 +448,11 @@ def test_a_stored_value_off_the_catalog_scale_is_wrong_units(provider: ContextPr
 def test_a_channel_the_capture_does_not_carry_is_not_captured(provider: ContextProvider) -> None:
     captured = set(provider.channels()) - {"mem:ECM_HIGH_DET_FLAGS"}
     stream = provider.stream(role="fit", captured=captured)
-    _feed(stream, 0.0, high_det=None)
+    context_feed(stream, 0.0, high_det=None)
     assert stream.context_at(0.1)["timing_trim"]["refused"] == "not_captured:high_det_flags"
     # Cold, the latch is not read, so its absence does not refuse.
     cold = provider.stream(role="fit", captured=captured)
-    _feed(cold, 0.0, high_det=None, coolant_raw=90)
+    context_feed(cold, 0.0, high_det=None, coolant_raw=90)
     assert cold.context_at(0.1)["timing_trim"]["table"] == "timing_trim_a"
 
 
@@ -620,18 +505,6 @@ def test_the_contract_fingerprint_moves_with_freshness(provider: ContextProvider
     assert looser.contract("serve")["fingerprint"] != provider.contract("serve")["fingerprint"]
 
 
-def _long(reads: list[tuple[float, str, float]], basis: str = "acquired") -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "timestamp": pd.to_datetime([t for t, _s, _v in reads], unit="s", utc=True),
-            "spec": [s for _t, s, _v in reads],
-            "value": [v for _t, _s, v in reads],
-            "unit": [""] * len(reads),
-            "timestamp_basis": [basis] * len(reads),
-        }
-    )
-
-
 def test_the_stored_path_replays_through_the_live_stream(provider: ContextProvider) -> None:
     class Collect:
         def __init__(self) -> None:
@@ -641,10 +514,10 @@ def test_the_stored_path_replays_through_the_live_stream(provider: ContextProvid
             self.reads.append((t, spec, value))
 
     collect = Collect()
-    _feed(collect, 1.0, rpm_word=144, fill=104)
-    _feed(collect, 7.0, rpm_word=200, fill=150, high_det=True)
+    context_feed(collect, 1.0, rpm_word=144, fill=104)
+    context_feed(collect, 7.0, rpm_word=200, fill=150, high_det=True)
     times = [1.1, 4.0, 7.2]
-    fit = provider.evaluate_frame(_long(collect.reads), times)
+    fit = provider.evaluate_frame(context_long(collect.reads), times)
     serve = provider.stream(role="serve", captured=None)
     live = []
     for t in times:
@@ -668,7 +541,9 @@ def test_a_resampled_grid_is_refused(provider: ContextProvider) -> None:
     with pytest.raises(ContextRefusalError) as caught:
         provider.evaluate_frame(wide, [2.0])
     assert caught.value.reason == "not_acquisition_timed"
-    rounds = _long([(0.0, "mem:ECM_FUEL_COMP_X_INPUT", 96.0)]).drop(columns="timestamp_basis")
+    rounds = context_long([(0.0, "mem:ECM_FUEL_COMP_X_INPUT", 96.0)]).drop(
+        columns="timestamp_basis"
+    )
     with pytest.raises(ContextRefusalError) as caught:
         provider.evaluate_frame(rounds, [0.1])
     assert caught.value.reason == "clock_unacquired"
@@ -677,24 +552,12 @@ def test_a_resampled_grid_is_refused(provider: ContextProvider) -> None:
 # -- real captures: history does not carry these channels ------------------------------------
 
 
-def _ram_study_frame() -> pd.DataFrame:
-    expect = load_yaml((REPO / "tests/fixtures/ground_truth/target_phi.yaml").read_text())
-    frames = []
-    for part in expect["telemetry"]:
-        path = REPO / part["path"]
-        assert hashlib.sha256(path.read_bytes()).hexdigest() == part["sha256"]
-        frames.append(pd.read_parquet(path))
-    frame = pd.concat(frames, ignore_index=True)
-    frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
-    return frame
-
-
 def test_the_october_4_ram_study_slice_names_what_it_lacks(provider: ContextProvider) -> None:
     """The committed slice of _capture-ram-study-2026-10-04T204557 carries
     rpm, X, the pedal flags, the command and the map identity, but not the
     fill byte, HI DET or coolant: those items refuse by name, while fuel cut
     is read at every command read and is stale five seconds on."""
-    long = read_channels(_ram_study_frame(), provider.channels(), acquired_time=True)
+    long = read_channels(context_ram_study_frame(), provider.channels(), acquired_time=True)
     coverage = provider.coverage(long["spec"])
     assert set(coverage["not_captured"]) == {
         "fuel_comp_fill",
@@ -759,14 +622,14 @@ def test_a_refused_newer_command_read_is_not_covered_by_an_older_sentinel(
     """The newest read of either channel decides fuel cut. A newer command
     read that cannot be used refuses; the older sentinel never stands in."""
     stream = provider.stream(role="serve", captured=None)
-    _feed(stream, 0.0, command=False)
+    context_feed(stream, 0.0, command=False)
     stream.observe("mem:ECM_TARGET_EQUIV_RATIO", value, 0.3, basis=basis)
     assert stream.context_at(0.4)["fuel_cut"] == {"refused": reason}
 
 
 def test_a_query_before_a_held_read_is_refused(provider: ContextProvider) -> None:
     stream = provider.stream(role="serve", captured=None)
-    _feed(stream, 10.0)
+    context_feed(stream, 10.0)
     with pytest.raises(ContextRefusalError) as caught:
         stream.context_at(5.0)
     assert caught.value.reason == "query_before_reads"
@@ -781,9 +644,9 @@ def test_fit_and_serve_agree_at_an_instant_before_later_reads(provider: ContextP
             self.reads.append((t, spec, value))
 
     collect = Collect()
-    _feed(collect, 4.9)
-    _feed(collect, 10.0, rpm_word=300)
-    (fit,) = provider.evaluate_frame(_long(collect.reads), [5.0])
+    context_feed(collect, 4.9)
+    context_feed(collect, 10.0, rpm_word=300)
+    (fit,) = provider.evaluate_frame(context_long(collect.reads), [5.0])
     serve = provider.stream(role="serve", captured=None)
     for t, spec, value in collect.reads:
         if t <= 5.0:
@@ -803,10 +666,10 @@ def test_evaluate_frame_returns_records_in_the_callers_order(provider: ContextPr
             self.reads.append((t, spec, value))
 
     collect = Collect()
-    _feed(collect, 1.0, rpm_word=144, fill=104)
-    _feed(collect, 7.0, rpm_word=200, fill=150)
+    context_feed(collect, 1.0, rpm_word=144, fill=104)
+    context_feed(collect, 7.0, rpm_word=200, fill=150)
     times = [7.2, 1.1, 4.0]
-    records = provider.evaluate_frame(_long(collect.reads), times)
+    records = provider.evaluate_frame(context_long(collect.reads), times)
     assert [r["t"] for r in records] == times
     assert records[0]["fuel_comp"]["rpm_word"] == 200
     assert records[1]["fuel_comp"]["rpm_word"] == 144

@@ -39,12 +39,12 @@ from src.analysis.lambda_delivery import (
     load_lambda_delivery,
 )
 from src.analysis.rom_map import load_rom_map
-from src.decode.fuel_comp_load import LoadInputCurves
 from src.preprocessing.loader import read_session
 from src.signals.afr import AfrCalibration, load_afr_calibration
 from src.signals.derived import SHARED_ANOMALY_SIGNALS
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
 from tests.rom_fixtures import PROFILE, load_byte_image
+from tests.twin_builders import fuel_comp_calibration
 
 B06_SLICE = Path("tests/fixtures/lambda_delivery/_capture-tuning-2026-09-21T223734")
 T0 = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
@@ -69,37 +69,6 @@ def afr() -> AfrCalibration:
     return load_afr_calibration(PROFILE / "afr_calibration.yaml")
 
 
-def _calibration(name: str = "synthetic") -> FuelCompCalibration:
-    """Invented tables: rising curves, a flat Fuel Comp, the 20261004-shape axes."""
-    curves = LoadInputCurves(
-        area_breakpoints=tuple(100 * i for i in range(32)),
-        area_values=tuple(200 + 30 * i * i for i in range(32)),
-        # Steep first segment, as a fill curve is: small X spans many bytes.
-        fill_low=(0, *(16000 + 2400 * i for i in range(15))),
-        fill_high=tuple(49600 + 500 * i for i in range(16)),
-        rpm_multiplier=150,
-        reciprocal_numerator=10_000_000,
-        idle_air_cap=1000,
-        limp_home_area=700,
-    )
-    load_axis = tuple(range(16, 256, 16))
-    return FuelCompCalibration(
-        name=name,
-        image_sha256="0" * 64,
-        source_path=Path("synthetic.bin"),
-        image_format="plain",
-        slot=1,
-        fuel_comp=tuple((128,) * 16 for _ in range(16)),
-        rpm_axis_raw=tuple(range(8, 136, 8)),
-        load_axis_raw=(*load_axis, 255),
-        rpm_breakpoints=tuple(4 * b for b in range(8, 136, 8)),
-        k=28000,
-        purge_gain=128,
-        curves=curves,
-        table_ids={"fuel_comp": "synthetic"},
-    )
-
-
 def _registry(*flashes: tuple[str, datetime]) -> TuneRevisionRegistry:
     return TuneRevisionRegistry(
         revisions=[TuneRevision(revision=name, flashed_at=when) for name, when in flashes]
@@ -112,7 +81,7 @@ def _resolver(refuse: dict[str, str] | None = None) -> Callable[[str], FuelCompC
     def resolve(name: str) -> FuelCompCalibration:
         if name in refuse:
             raise FuelCompRomRefusalError(refuse[name], f"{name} refused for the test")
-        return _calibration(name)
+        return fuel_comp_calibration(name)
 
     return resolve
 

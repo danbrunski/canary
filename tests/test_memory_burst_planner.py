@@ -27,8 +27,8 @@ from src.collection.memory_burst import (
     MemoryBurstPlanner,
 )
 from src.collection.obd_scheduler.requests import PollRequest
+from tests.capture_builders import DIDS, LATENCY, SLOT, window_profile, window_spec
 from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock
-from tests.test_memory_window_burst import DIDS, LATENCY, SLOT, _profile, _spec
 
 COLLECTION = Path(__file__).resolve().parents[1] / "src" / "collection"
 PACKAGE = "src.collection"
@@ -193,11 +193,11 @@ def _memory_gaps(monkeypatch: pytest.MonkeyPatch, *, paced: bool) -> list[float]
     clock = FakeClock(monotonic=1000.0)
     install_clock(monkeypatch, clock)
     tuning_profile.configure_did_aliases(did_alias_table(DIDS))
-    tuning_profile.activate(_profile(), source="test")
+    tuning_profile.activate(window_profile(), source="test")
     bus = ScriptedEcu(clock, latency=LATENCY, session_gated=True)
     can_obd_loop.run_can_obd_loop(
         bus,  # type: ignore[arg-type]
-        _spec(),
+        window_spec(),
         on_frame=lambda _m: None,
         on_reading=lambda _r: None,
         stop_event=threading.Event(),

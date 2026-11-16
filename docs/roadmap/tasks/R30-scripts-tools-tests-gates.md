@@ -41,7 +41,7 @@ they started.
     and avahi). Verified it fails on `git show HEAD:scripts/deploy_truck.sh`
     (names the 2026-09-21 incident and `restart_canary.sh`) and passes now.
 
-- [ ] **R30.2 Tests import each other's private builders again.** R07.5
+- [x] **R30.2 Tests import each other's private builders again.** R07.5
   closed with zero `from tests.test_*` imports. There are now 112 in 58
   files: `test_sim_montecarlo` (`build_kit_and_image`, `_design`, `_run`,
   `_template`), `test_target_phi` (`PROFILE`, `IMAGE_SHA`, `_definition`,
@@ -56,11 +56,49 @@ they started.
     (AST: `from tests.test_x`, `from tests import test_x`, `import
     tests.test_x`, function-level included): 58 files / 118 import
     statements at HEAD, per-file counts, ratchet both ways.
-  - [ ] `tests/sim_builders.py`, `tests/target_phi_builders.py`,
+  - [x] `tests/sim_builders.py`, `tests/target_phi_builders.py`,
     `tests/evidence_builders.py`; `scheduler`, `write_session` and
     `submit_twin` into `tests/builders.py`, under public names. `LAYERS` gets
     an importable home outside a test module.
-
+    **Done 2026-11-15.** Every provider's shared names moved with their bodies
+    (and whatever module-level code they need) out of 45 test modules into 15
+    plain modules under `tests/`: `sim_builders` (montecarlo, paired scenarios,
+    editor requests, cells, design, effects, timing tables, rom_sim_cli),
+    `target_phi_builders`, `twin_builders`, `twin_live_builders`,
+    `evidence_builders`, `hypothesis_builders`, `candidate_builders`,
+    `provisioning_builders`, `kline_builders`, `imu_builders`, `dyno_builders`,
+    `capture_builders`, `sequence_builders`, `rom_editor_builders`, `layers`
+    (`LAYERS`), plus `scheduler`/`write_session`/`submit_twin`/`SESSION`/`SLUG`,
+    the brain routes' `AUTH`/`TOKEN`/`brain_mcp_client`, `state_dir_config` and
+    the trip-digest executor into `tests/builders.py`, and `FakeAdc` into
+    `tests/fakes.py`. Private names went public (`_session` -> `phi_session`,
+    `_design` -> `mc_design` / `cells_design`: where two providers shared a name
+    in one module the provider's topic prefixes it); fixtures kept their names
+    and are re-imported `as` themselves so pytest still finds them. Eight
+    importers used the module form (`from tests import test_dyno as td`,
+    `ordering._config`, `w09.request`, `kit_and_image = test_sim_montecarlo.
+    kit_and_image`): converted to named imports first. Three constants that
+    recomputed the repo root from `Path(__file__)` now use `REPO_ROOT`
+    (`tests-recompute-repo-root` saw them again after the move).
+    **Guard:** the `tests-import-other-tests` allowlist is gone (58 files -> 0)
+    and the rule also reads a script a test hands to a subprocess (six such
+    strings imported a provider: repointed, a test's own module is the one
+    thing allowed). **Two things the move had to respect.** The `imports
+    nothing that talks to the ECU` tests import a test module in a subprocess
+    and inspect `sys.modules`: `rom_editor_builders` (dashboard routes) and
+    `twin_live_builders` (`src.daemon.twin_live`) are separate modules so
+    `sim_builders` / `twin_builders` stay light (9 of those failed when they
+    shared a module). And a rename must skip keyword arguments and method
+    names, not only attributes: the first pass renamed a `calibration=` keyword
+    and a `Drives._session` method; `mypy` caught both.
+    Evidence: `pytest --collect-only -q tests`: 13712 ids before, 13727 after,
+    every old id present, the 15 added are `test_no_test_edits_sys_path[<new
+    module>.py]`; touched test files (86) plus `test_source_rules`,
+    `test_layering`, `test_script_imports`: 3498 passed, 1 xfailed (before the
+    two subprocess-split fixes, 9 failed and 119 errored on fixtures not
+    re-imported); `ruff check .`, `ruff format --check .`, bare `mypy`
+    ("no issues found in 1444 source files"). `grep` for `from tests.test_`
+    outside strings finds nothing.
 - [~] **R30.3 "Scope the config to the tooling profile" is spelled at about
   25 call sites.** `scripts/_cli.py` has `scoped_config` and
   `load_scoped_config`. `scripts/catalog.py`, `fingerprint.py` and

@@ -10,7 +10,6 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -20,15 +19,19 @@ from src.dashboard.api import create_app
 from src.dashboard.routes.control import brain as brain_routes
 from src.dashboard.routes.rom_maps import application_model_report
 from src.evidence import Hypothesis, memory_ledger_for
-from src.mcp_server.client import DaemonClient
 from src.mcp_server.tools import brain as brain_tool
 from src.vehicle.profiles import active_registry, profile_dir
-from tests.test_brain_jobs import SESSION, SLUG, scheduler, scoped_config, write_session
-from tests.test_evidence_cards import _investigation
-from tests.test_evidence_memory import _evidence, _vehicle
-
-TOKEN = "secret"
-AUTH = {"Authorization": f"Bearer {TOKEN}"}
+from tests.builders import (
+    AUTH,
+    SESSION,
+    SLUG,
+    TOKEN,
+    brain_mcp_client,
+    scheduler,
+    scoped_config,
+    write_session,
+)
+from tests.evidence_builders import cards_investigation, memory_evidence, memory_vehicle
 
 
 @pytest.fixture
@@ -48,10 +51,10 @@ def populated(tmp_path: Path) -> tuple[CanaryConfig, dict[str, str]]:
     assert done is not None and done.state == "completed" and done.result is not None
     (twin_id,) = done.result["evidence"]
     ledger = memory_ledger_for(config)
-    measured = ledger.append(_evidence(vehicle=_vehicle(SLUG)))
+    measured = ledger.append(memory_evidence(vehicle=memory_vehicle(SLUG)))
     investigation = ledger.append(
-        _investigation(
-            vehicle=_vehicle(SLUG),
+        cards_investigation(
+            vehicle=memory_vehicle(SLUG),
             observations=(measured.id,),
             hypotheses=(Hypothesis(label="the command is as decoded", supporting=(twin_id,)),),
             unknowns=("the commanded word under sustained enrichment",),
@@ -64,14 +67,6 @@ def populated(tmp_path: Path) -> tuple[CanaryConfig, dict[str, str]]:
         "investigation": investigation.id,
         "job": done.job_id,
     }
-
-
-def _mcp_client(app: Any) -> DaemonClient:
-    client = DaemonClient("http://daemon", TOKEN)
-    client._client = httpx.AsyncClient(
-        base_url="http://daemon", headers=AUTH, transport=httpx.ASGITransport(app=app)
-    )
-    return client
 
 
 def test_http_and_mcp_return_the_same_computed_facts(
@@ -139,7 +134,7 @@ def test_http_and_mcp_return_the_same_computed_facts(
     ]
 
     async def through_mcp() -> list[Any]:
-        client = _mcp_client(app)
+        client = brain_mcp_client(app)
         try:
             return [await tool(client, **kwargs) for _http, _direct, tool, kwargs in cases]
         finally:

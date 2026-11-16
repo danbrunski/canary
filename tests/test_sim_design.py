@@ -49,9 +49,9 @@ from src.decode.fuel_comp_load import LoadInputCurves
 from src.paths import REPO_ROOT
 from src.vehicle.tune_revisions import TuneRevisionRegistry, load_tune_revisions
 from tests.rom_fixtures import OPERATOR_ROMS, PROFILE
+from tests.sim_builders import BASE, GRID_ENV, design_grid
 
 FIXTURE = Path("tests/fixtures/fuel_plant/_capture-tuning-2026-09-23T142926")
-BASE = "ZS44A-20260920"
 _LOADED = load_tune_revisions(PROFILE / "tune_revisions.yaml")
 assert _LOADED is not None
 REGISTRY: TuneRevisionRegistry = _LOADED
@@ -64,15 +64,6 @@ def _image_sha(revision: str) -> str:
 
 
 BASE_SHA = _image_sha(BASE)
-GRID_ENV = dict(
-    baro_kpa=80.0,
-    iat_c=25.0,
-    coolant_c=88.0,
-    battery_v=14.0,
-    rail_kpa="working_assumption",
-    throttle_pct=20.0,
-    pedal_flag=0,
-)
 
 
 def _calibration(name: str, image_sha256: str = BASE_SHA) -> FuelCompCalibration:
@@ -198,18 +189,6 @@ def _drive(sessions: list[Path], **kw: object) -> SimDesign:
     return build_drive_design(sessions, PROFILE, BASE, **kw)  # type: ignore[arg-type]
 
 
-def _grid(**over: object) -> SimDesign:
-    kw: dict[str, object] = dict(
-        profile_dir=PROFILE,
-        base_revision=BASE,
-        load_basis="fill_fraction_as_manifold_ratio",
-        plant_version="fuel-mv-1",
-        **GRID_ENV,
-    )
-    kw.update(over)
-    return build_grid_design([800, 1600, 2400, 3200], [0, 25, 50, 75, 100], **kw)  # type: ignore[arg-type]
-
-
 @pytest.fixture(scope="module")
 def placed(tmp_path_factory: pytest.TempPathFactory) -> tuple[SimDesign, Path]:
     session = _augmented(tmp_path_factory.mktemp("placed"))
@@ -324,9 +303,9 @@ def test_the_hash_is_computed_stable_and_moves_with_one_point(
     reweighted = list(design.points)
     reweighted[-1] = reweighted[-1].model_copy(update={"weight": reweighted[-1].weight / 2})
     assert design.model_copy(update={"points": reweighted}).sha256() != design.sha256()
-    g = _grid()
-    assert _grid().sha256() == g.sha256()
-    assert _grid(iat_c=26.0).sha256() != g.sha256()
+    g = design_grid()
+    assert design_grid().sha256() == g.sha256()
+    assert design_grid(iat_c=26.0).sha256() != g.sha256()
 
 
 def test_a_drive_after_the_base_revisions_successor_flash_is_refused_by_name() -> None:
@@ -400,7 +379,7 @@ def test_without_the_image_every_point_is_unplaced_under_n02s_reason(tmp_path: P
 def test_the_grid_refuses_an_unstated_environment_by_name() -> None:
     for name in GRID_ENV:
         with pytest.raises(SimDesignRefusalError) as caught:
-            _grid(**{name: None})
+            design_grid(**{name: None})
         assert caught.value.reason == "environment_unstated"
         assert name in str(caught.value)
     with pytest.raises(SimDesignRefusalError) as caught:
@@ -409,7 +388,7 @@ def test_the_grid_refuses_an_unstated_environment_by_name() -> None:
     for name in ("baro_kpa", "iat_c"):
         assert name in str(caught.value)
     with pytest.raises(SimDesignRefusalError) as caught:
-        _grid(load_basis=None)
+        design_grid(load_basis=None)
     assert caught.value.reason == "load_basis_unstated"
 
 
@@ -436,7 +415,7 @@ def test_a_malformed_grid_is_refused_by_name(
 
 @pytest.mark.parametrize("plant_version", ["fuel-mv-1", "fuel-mv-3"])
 def test_grid_maf_is_solved_through_the_plants_own_manifold_model(plant_version: str) -> None:
-    design = _grid(plant_version=plant_version)
+    design = design_grid(plant_version=plant_version)
     assert design.plant_version == plant_version
     assert len(design.points) == 3 * 4 and design.placement == {"placed": 12}
     plant, _ = load_fuel_plant(PROFILE, plant_version)
@@ -487,7 +466,7 @@ def test_a_grid_outside_the_fitted_ve_range_is_refused_by_name_or_counted(versio
         ({"iat_c": 15.0}, "iat_c 15 (fit 23-50)"),
     ):
         with pytest.raises(SimDesignRefusalError) as refused:
-            _grid(plant_version=version, **env)
+            design_grid(plant_version=version, **env)
         assert refused.value.reason == "outside_ve_fit"
         assert named in str(refused.value)
     edges = {"rpm": [6000, 6400, 7000], "load": [0, 50, 100]}
@@ -504,7 +483,7 @@ def test_a_grid_outside_the_fitted_ve_range_is_refused_by_name_or_counted(versio
     assert design.placement == {"outside_ve_fit": 2, "placed": 2}
     assert {p.cell_row for p in design.points} == {0}
     # fuel-mv-1 runs one working VE and has no fit range to be outside.
-    assert _grid(baro_kpa=63.0).placement == {"placed": 12}
+    assert design_grid(baro_kpa=63.0).placement == {"placed": 12}
 
 
 def test_designs_default_to_the_simulators_declared_plant() -> None:
@@ -516,7 +495,7 @@ def test_designs_default_to_the_simulators_declared_plant() -> None:
     from src.analysis.sim_kit import sim_plant_version
 
     assert sim_plant_version(PROFILE) == "fuel-mv-2"
-    grid = _grid(plant_version=None)
+    grid = design_grid(plant_version=None)
     assert (grid.plant_version, grid.manifold_model) == ("fuel-mv-2", "speed_density_refusing")
     assert any("VE(rpm)" in a and "na-stock-2026-10-08.mv2" in a for a in grid.assumptions)
     drive = _drive([FIXTURE], plant_version=None)
@@ -535,7 +514,7 @@ def test_designs_default_to_the_simulators_declared_plant() -> None:
 def test_a_design_round_trips_byte_identical(
     tmp_path: Path, kind: str, placed: tuple[SimDesign, Path]
 ) -> None:
-    design = placed[0] if kind == "drive" else _grid()
+    design = placed[0] if kind == "drive" else design_grid()
     directory = write_design(design, tmp_path / "a")
     assert directory.name == design.sha256()
     assert sorted(p.name for p in directory.iterdir()) == ["design.json", "design.parquet"]
@@ -551,7 +530,7 @@ def test_a_design_round_trips_byte_identical(
 def test_writing_is_refused_inside_the_checkout_and_a_tampered_design_on_load(
     tmp_path: Path,
 ) -> None:
-    design = _grid()
+    design = design_grid()
     for root in (REPO_ROOT / "data" / "_sim_designs", REPO_ROOT, REPO_ROOT.parent):
         with pytest.raises(SimDesignRefusalError) as caught:
             write_design(design, root)
@@ -602,7 +581,7 @@ def test_design_sources_pass_the_recording_guard_and_a_session_source_is_still_r
     assert {p.source for p in points} == {f"design:{design.sha256()}"}
     assert points[0].conditioned == {"fuel_comp_load_byte": float(design.points[0].fill_byte_lo)}
     refuse_recorded_sources(_scenario(tuple(points)))  # the E07.6 guard, unchanged
-    grid = _grid()
+    grid = design_grid()
     refuse_recorded_sources(
         _scenario(tuple(grid.operating_points([p.fill_byte_hi for p in grid.points])))
     )
@@ -626,7 +605,7 @@ def test_a_fill_byte_outside_the_points_interval_is_refused(placed: tuple[SimDes
 
 
 def test_a_run_on_another_base_image_is_refused() -> None:
-    design = _grid()
+    design = design_grid()
     require_base(design, BASE_SHA)
     other = _image_sha("ZS44A-20261004")
     with pytest.raises(SimDesignRefusalError) as caught:
@@ -716,10 +695,10 @@ def test_design_points_run_through_the_paired_comparison_unchanged() -> None:
     """The contract and E07.6's guards accept a design's points as they are."""
     from src.analysis.ecu_application import program_sha256
     from src.analysis.paired_scenarios import load_kit, run_paired
-    from tests.test_paired_scenarios import LEARNED, _identity, _image
+    from tests.sim_builders import LEARNED, paired_identity, paired_image
 
     kit = load_kit(PROFILE)
-    image = _image(kit.model, kit.plant)
+    image = paired_image(kit.model, kit.plant)
     identity = kit.model.program.identity.model_copy(
         update={"sha256": program_sha256(image, kit.model)}
     )
@@ -740,8 +719,8 @@ def test_design_points_run_through_the_paired_comparison_unchanged() -> None:
     points = tuple(grid.operating_points([p.fill_byte_lo for p in grid.points]))
     scenario = PairedScenario(
         mode="conditional_rom_comparison",
-        base=_identity(image),
-        candidate=_identity(image),
+        base=paired_identity(image),
+        candidate=paired_identity(image),
         plant=PlantIdentity(
             version=kit.plant.plant_version,
             hardware_configuration=kit.plant.hardware_configuration,

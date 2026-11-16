@@ -22,6 +22,7 @@ import httpx
 import pandas as pd
 
 from src.analysis.digest import SessionDigest
+from src.collection import ads1015
 from src.collection import lsm6dsox as lsm
 from src.config import CanaryConfig
 from src.mcp_server.client import DaemonClient
@@ -141,11 +142,6 @@ def lstm_result(**overrides: Any) -> SequenceInferenceResult:
     return SequenceInferenceResult(**fields)
 
 
-# ---------------------------------------------------------------------------
-# CAN buses
-# ---------------------------------------------------------------------------
-
-
 class CannedResponseBus:
     """Replays canned ISO-TP frames from ``0x7E8``, whatever is sent.
 
@@ -170,11 +166,6 @@ class CannedResponseBus:
         pass
 
 
-# ---------------------------------------------------------------------------
-# processes and clients
-# ---------------------------------------------------------------------------
-
-
 def completed_process(
     stdout: str = "", stderr: str = "", returncode: int = 0
 ) -> subprocess.CompletedProcess[str]:
@@ -194,11 +185,6 @@ async def daemon_client_with_handler(handler: Any) -> DaemonClient:
         base_url="http://daemon", transport=httpx.MockTransport(handler)
     )
     return client
-
-
-# ---------------------------------------------------------------------------
-# trip-end digest
-# ---------------------------------------------------------------------------
 
 
 def slow_digest(seconds: float, calls: list[bool]) -> Callable[..., SessionDigest]:
@@ -226,11 +212,6 @@ def slow_digest(seconds: float, calls: list[bool]) -> Callable[..., SessionDiges
         )
 
     return fake
-
-
-# ---------------------------------------------------------------------------
-# LSM6DSOX IMU (src.collection.lsm6dsox)
-# ---------------------------------------------------------------------------
 
 
 def lsm_fifo_word(tag: int, counter: int, data: bytes) -> bytes:
@@ -296,6 +277,34 @@ class FakeLsmBus:
     def write_block(self, register: int, data: bytes) -> None:
         for offset, value in enumerate(data):
             self.write(register + offset, value)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeAdc:
+    """Config/conversion registers; the conversion finishes after ``busy_reads``."""
+
+    def __init__(self, code: int, *, busy_reads: int = 1) -> None:
+        self.code = code
+        self.busy_reads = busy_reads
+        self.config_writes: list[int] = []
+        self.closed = False
+
+    def read(self, register: int, length: int) -> bytes:
+        if register == ads1015.REG_CONFIG:
+            if self.busy_reads > 0:
+                self.busy_reads -= 1
+                return (0).to_bytes(2, "big")
+            return ads1015.CONFIG_OS_START.to_bytes(2, "big")
+        return ((self.code << 4) & 0xFFFF).to_bytes(2, "big")
+
+    def write(self, register: int, value: int) -> None:
+        raise AssertionError("the ADS1015 has only 16-bit registers")
+
+    def write_block(self, register: int, data: bytes) -> None:
+        assert register == ads1015.REG_CONFIG
+        self.config_writes.append(int.from_bytes(data, "big"))
 
     def close(self) -> None:
         self.closed = True

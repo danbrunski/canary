@@ -149,7 +149,7 @@ def test_one_shot_supply_read_notes_the_reading() -> None:
     from src.collection.supply_voltage_collector import read_supply_once
     from src.collection.vehicle_power import VEHICLE_POWER
     from src.config import SupplyVoltageConfig
-    from tests.test_supply_voltage import FakeAdc
+    from tests.fakes import FakeAdc
 
     VEHICLE_POWER.reset()
     adc = FakeAdc(1143)  # 12.68 V through the HAT's divider

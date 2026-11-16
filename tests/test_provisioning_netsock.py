@@ -39,7 +39,7 @@ from src.provisioning.network import (
     WifiState,
     profile_filename,
 )
-from tests.test_provisioning_wifi import PRECONFIGURED, STARLINK, cli
+from tests.provisioning_builders import PRECONFIGURED, STARLINK, cli
 
 SECRET = "S3cretPassphrase!"
 OWN_GROUP = grp.getgrgid(os.getgid()).gr_name

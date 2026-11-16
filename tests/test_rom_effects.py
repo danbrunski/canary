@@ -32,7 +32,8 @@ from src.analysis.rom_effects import (
 )
 from src.analysis.rom_map import RomMap
 from src.analysis.sim_contract import load_contract
-from tests.rom_fixtures import PROFILE, synthetic_image, xterra_map
+from tests.rom_fixtures import PROFILE, xterra_map
+from tests.sim_builders import effects_bump, modelled_image
 
 OUTPUTS = (
     "target_equiv_ratio",
@@ -42,24 +43,6 @@ OUTPUTS = (
 )
 
 Setup = tuple[bytes, RomMap, ApplicationModel, str]
-
-
-def modelled_image(model: ApplicationModel) -> bytes:
-    """A synthetic image that every node's decode describes."""
-    image = bytearray(synthetic_image())
-    for marker in model.program.patch.markers:
-        raw = bytes.fromhex(marker.bytes)
-        image[marker.offset : marker.offset + len(raw)] = raw
-    for node in model.nodes:
-        for ref in node.rom:
-            if ref.offset is not None:
-                assert ref.width is not None and ref.value is not None
-                width = ref.width // 8
-                image[ref.offset : ref.offset + width] = ref.value.to_bytes(width, "big")
-        for c in node.calibration_conditions:
-            for k in range(c.count):
-                image[c.offset + k] = (image[c.offset + k] & ~c.mask & 0xFF) | c.equals
-    return bytes(image)
 
 
 @pytest.fixture(scope="module")
@@ -96,14 +79,6 @@ def _compare(
 def _edit(setup: Setup, *edits: CellEdit) -> bytes:
     image, rom_map, _, _ = setup
     return make_candidate(image, rom_map, list(edits), base_label="synthetic").image
-
-
-def _bump(
-    image: bytes, rom_map: RomMap, table_id: str, slot: int | None, row: int, col: int
-) -> CellEdit:
-    table = rom_map.table(table_id)
-    address = rom_map.table_address(table, slot) + (row * table.cols + col)
-    return CellEdit(table_id, row, col, image[address] ^ 0x01, slot=slot)
 
 
 # -- loading --------------------------------------------------------------------------------
@@ -209,7 +184,7 @@ def test_a_fuel_comp_edit_reaches_bfs_x_target_afr_and_the_timing_trims(setup: S
     predicted while the fill dynamics are references only (E05.2) and X is
     only observed."""
     image, rom_map, _, _ = setup
-    candidate = _edit(setup, _bump(image, rom_map, "fuel_compensation", 1, 9, 12))
+    candidate = _edit(setup, effects_bump(image, rom_map, "fuel_compensation", 1, 9, 12))
     report = _compare(setup, candidate)
     assert report.changed_nodes == ("fuel_comp_lookup",)
     consumed = [r for r in report.ranges if r.byte_class == "consumed"]
@@ -232,7 +207,7 @@ def test_a_fuel_comp_edit_reaches_bfs_x_target_afr_and_the_timing_trims(setup: S
 
 def test_a_fuel_comp_axis_edit_is_the_same_path(setup: Setup) -> None:
     image, rom_map, _, _ = setup
-    candidate = _edit(setup, _bump(image, rom_map, "fuel_comp_flow_axis", None, 0, 7))
+    candidate = _edit(setup, effects_bump(image, rom_map, "fuel_comp_flow_axis", None, 0, 7))
     report = _compare(setup, candidate)
     assert report.changed_nodes == ("fuel_comp_lookup",)
     assert [r.what for r in report.ranges] == [("fuel_comp_flow_axis",)]
@@ -243,7 +218,7 @@ def test_a_target_afr_cell_edit_reaches_the_command_and_spark_through_the_charge
     setup: Setup,
 ) -> None:
     image, rom_map, _, _ = setup
-    candidate = _edit(setup, _bump(image, rom_map, "fuel_targets", 1, 6, 7))
+    candidate = _edit(setup, effects_bump(image, rom_map, "fuel_targets", 1, 6, 7))
     report = _compare(setup, candidate)
     assert report.changed_nodes == ("target_afr_lookup",)
     # The command moves the enrichment multiplier 26C0, which scales the charge
@@ -264,7 +239,7 @@ def test_a_target_afr_cell_edit_reaches_the_command_and_spark_through_the_charge
 
 def test_another_slots_copy_is_inactive_unless_it_is_the_active_slot(setup: Setup) -> None:
     image, rom_map, _, _ = setup
-    candidate = _edit(setup, _bump(image, rom_map, "fuel_targets_maps_2_5", 3, 2, 2))
+    candidate = _edit(setup, effects_bump(image, rom_map, "fuel_targets_maps_2_5", 3, 2, 2))
     on_slot_1 = _compare(setup, candidate)
     assert [r.byte_class for r in on_slot_1.ranges] == ["inactive_for_scenario"]
     assert {o.status for o in on_slot_1.outputs} == {"unchanged"}
@@ -285,7 +260,7 @@ def test_unknown_bytes_are_never_assumed_to_have_no_effect(setup: Setup) -> None
     assert all("unknown_bytes_changed" in o.reasons for o in report.outputs)
     assert report.outcome == "unevaluable"
     # Mixed with a modelled edit, the modelled path is no longer evaluable either.
-    mixed = bytearray(_edit(setup, _bump(image, rom_map, "fuel_targets", 1, 0, 0)))
+    mixed = bytearray(_edit(setup, effects_bump(image, rom_map, "fuel_targets", 1, 0, 0)))
     mixed[0x8100] ^= 0xFF
     command = _compare(setup, bytes(mixed)).output("target_equiv_ratio")
     assert command.twin_node is not None and not command.twin_node["evaluable_at_equal_inputs"]
@@ -336,7 +311,7 @@ def test_a_mode_that_holds_a_changed_node_fixed_is_named(setup: Setup) -> None:
 
 def test_a_candidate_changes_only_its_cells_and_stays_unflashable(setup: Setup) -> None:
     image, rom_map, _, _ = setup
-    edit = _bump(image, rom_map, "fuel_compensation", 1, 3, 4)
+    edit = effects_bump(image, rom_map, "fuel_compensation", 1, 3, 4)
     candidate = make_candidate(image, rom_map, [edit], base_label="synthetic")
     diff = [i for i, (a, b) in enumerate(zip(image, candidate.image, strict=True)) if a != b]
     table = rom_map.table("fuel_compensation")
@@ -376,7 +351,7 @@ def test_candidates_are_written_apart_from_git_and_the_rom_library(
 ) -> None:
     image, rom_map, _, _ = setup
     candidate = make_candidate(
-        image, rom_map, [_bump(image, rom_map, "fuel_targets", 1, 1, 1)], base_label="s"
+        image, rom_map, [effects_bump(image, rom_map, "fuel_targets", 1, 1, 1)], base_label="s"
     )
     library = tmp_path / "rom_library"
     with pytest.raises(RomEffectRefusalError) as refused:
@@ -406,7 +381,7 @@ def test_loading_tracing_and_writing_candidates_requests_no_ecu_write(tmp_path: 
         f"""
         import json, sys
         from pathlib import Path
-        from tests.test_rom_effects import modelled_image, _bump
+        from tests.sim_builders import modelled_image, effects_bump as _bump
         from src.analysis.ecu_application import load_application_model, program_sha256
         from src.analysis.rom_effects import compare_roms, make_candidate, write_candidate
         from src.analysis.sim_contract import load_contract
