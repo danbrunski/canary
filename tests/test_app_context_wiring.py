@@ -260,7 +260,7 @@ def _wired_components(tmp_path: Path, config: CanaryConfig) -> DaemonComponents:
     components.capture_autostart = CaptureAutostart(
         components.profile_capture,
         components.live_source,
-        components.replay_controller,
+        lambda: components.replay_controller,
         tick_seconds=lambda: 2.0,
     )
     return components
@@ -347,8 +347,8 @@ def test_the_daemons_routes_act_on_the_live_components(
     client = TestClient(app)
 
     # catalog_reads (public): the cached DTC/monitor state and the behavior overlay.
-    components.dtc_state.snapshot = lambda: {"marker": "dtc"}  # type: ignore[method-assign]
-    components.monitor_state.snapshot = lambda: {"marker": "monitors"}  # type: ignore[method-assign]
+    components.dtc_state.snapshot = lambda **_k: {"marker": "dtc"}  # type: ignore[method-assign]
+    components.monitor_state.snapshot = lambda **_k: {"marker": "monitors"}  # type: ignore[method-assign]
     components.behavior_live.snapshot = lambda **_k: {"marker": "behavior"}  # type: ignore[method-assign]
     assert client.get("/obd/dtc").json() == {"marker": "dtc"}
     assert client.get("/obd/monitors").json() == {"marker": "monitors"}
