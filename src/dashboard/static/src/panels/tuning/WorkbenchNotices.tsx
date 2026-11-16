@@ -11,6 +11,7 @@ import type {
 } from "../../types/workbench";
 import { gateSentence } from "../../lib/workbenchApi";
 import { divergingAround0, sequentialIn } from "../../lib/colorScale";
+import { extent } from "../../lib/framePlot";
 import { cn } from "../../styles";
 
 /** A refused request, in the words its kind demands. */
@@ -188,8 +189,7 @@ export function CellGrid({
   const values = cells
     .filter((c) => !c.sparse && typeof c[valueKey] === "number")
     .map((c) => c[valueKey] as number);
-  const lo = values.length ? Math.min(...values) : 0;
-  const hi = values.length ? Math.max(...values) : 1;
+  const [lo, hi] = extent(values) ?? [0, 1];
   const maxAbs = Math.max(Math.abs(lo), Math.abs(hi));
   const shade = (value: number) =>
     scale === "diverging" ? divergingAround0(value, maxAbs) : sequentialIn(value, lo, hi);

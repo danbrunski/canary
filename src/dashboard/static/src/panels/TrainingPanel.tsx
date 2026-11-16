@@ -5,6 +5,7 @@ import { Notice } from "../components/Notice";
 import { MetricTile } from "../components/MetricTile";
 import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
+import { fraction, type Extent } from "../lib/framePlot";
 import { TRAINING_JOB_KINDS } from "../lib/jobKinds";
 import { Sparkline } from "../components/Sparkline";
 import { reloaded } from "../hooks/followUpRead";
@@ -370,9 +371,9 @@ function ScoreDistributionStrip({
   distribution: DistributionView;
   threshold: number | null;
 }) {
-  const span = distribution.max - distribution.min || 1;
+  const range: Extent = [distribution.min, distribution.max];
   const pct = (value: number | null) =>
-    value === null ? null : Math.max(0, Math.min(100, ((value - distribution.min) / span) * 100));
+    value === null ? null : Math.max(0, Math.min(100, fraction(value, range) * 100));
   const median = pct(distribution.median);
   const p95 = pct(distribution.p95);
   const thresh = pct(threshold ?? distribution.threshold);

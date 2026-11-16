@@ -4,6 +4,7 @@ import { severityToken } from "../lib/behaviorOverlay";
 import { fitWidth, useContainerWidth } from "../hooks/useContainerWidth";
 import { prepareCanvas } from "../lib/canvas";
 import { cssColor, useThemeVersion, withAlpha } from "../lib/chartTheme";
+import { extent, fraction, rangeSpan, type Extent } from "../lib/framePlot";
 import type {
   BehaviorSeverity,
   DeviationConfig,
@@ -67,7 +68,7 @@ export function Curve({
     if (!ctx) return;
 
     const [xLo, xHi] = domain;
-    const xSpan = xHi - xLo || 1;
+    const xSpan = rangeSpan(domain);
     const samples = 96;
     const xs: number[] = [];
     const ys: number[] = [];
@@ -101,17 +102,15 @@ export function Curve({
     if (live?.expected !== null && live?.expected !== undefined) {
       yCandidates.push(live.expected);
     }
-    let yLo = Math.min(...yCandidates);
-    let yHi = Math.max(...yCandidates);
-    const margin = (yHi - yLo || 1) * 0.06;
-    yLo -= margin;
-    yHi += margin;
-    const ySpan = yHi - yLo || 1;
+    const data = extent(yCandidates) ?? ([0, 0] as const);
+    const margin = rangeSpan(data) * 0.06;
+    const yRange: Extent = [data[0] - margin, data[1] + margin];
+    const [yLo, yHi] = yRange;
     const pad = 4;
     const usableH = height - pad * 2;
 
-    const xToPx = (x: number) => ((x - xLo) / xSpan) * width;
-    const yToPy = (v: number) => pad + (1 - (v - yLo) / ySpan) * usableH;
+    const xToPx = (x: number) => fraction(x, domain) * width;
+    const yToPy = (v: number) => pad + (1 - fraction(v, yRange)) * usableH;
 
     const band = (delta: number, fill: string) => {
       ctx.fillStyle = fill;

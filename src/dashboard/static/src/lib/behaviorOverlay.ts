@@ -4,7 +4,6 @@
 // the chip, or between the heatmap outline and the "n=" caption).
 
 import type { BehaviorSeverity } from "../types";
-import { formatReading } from "../util/format";
 import type { ColorToken } from "./chartTheme";
 
 /** Theme token per severity, for canvas marks (`cssColor(token)`) and SVG
@@ -46,9 +45,4 @@ export function binIndex(value: number, edges: number[]): number | null {
     if (value >= edges[k] && value <= edges[k + 1]) return k;
   }
   return n - 2;
-}
-
-/** Compact numeric formatter for the readout row; ``"—"`` for null/NaN. */
-export function fmt(value: number | null | undefined, digits = 1): string {
-  return formatReading(value, { digits });
 }

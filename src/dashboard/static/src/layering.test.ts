@@ -10,6 +10,11 @@
  *   The page files keep the old import paths as direct re-exports, so a view
  *   importing its own page would put a cycle back; and the plot-data helpers
  *   in `lib/` stay free of React so they stay testable as numbers.
+ * - R28.7: a formatter that `util/` already names is defined only there (a
+ *   local `fmt` or a second `formatDuration` is how five copies came about), and
+ *   range math goes through `lib/framePlot` (`extent`, `fraction`, `rangeSpan`,
+ *   `coverageMax`), not a spread into `Math.max` (a RangeError past ~100k
+ *   values) or a hand-written "hi - lo || 1".
  * - R28.4: `test/` holds the shared test support (`controlRoutes` routes the
  *   mocked `controlJson`), so it may name `controlJson`; nothing that ships
  *   may import it.
@@ -66,5 +71,19 @@ describe("dashboard layering", () => {
     // A renamed helper would silently stop being checked.
     expect(helpers.filter((path) => !(path in sources))).toEqual([]);
     expect(impure).toEqual([]);
+  });
+
+  it("defines the shared formatters only in util/", () => {
+    const definition =
+      /\b(?:function|const)\s+(?:fmt|formatNumber|formatPercent|formatReading|formatMs|formatVolts|formatDuration|formatDateTime|formatTimestamp|formatTimeOfDay|formatClockTime|formatClockDuration)\b/;
+    expect(offenders(definition, (p) => p.startsWith("./util/"))).toEqual([]);
+  });
+
+  it("does range math through lib/framePlot", () => {
+    // A spread over a flattened grid, and "hi - lo || 1" written out.
+    const flatSpread = /Math\.(?:min|max)\([^;]*\.\.\.[^;]*\.flat\(\)/;
+    const spanSpelledOut = /-\s*[\w.[\]]+\s*\|\|\s*1\b/;
+    expect(offenders(flatSpread, (p) => p === "./lib/framePlot.ts")).toEqual([]);
+    expect(offenders(spanSpelledOut, (p) => p === "./lib/framePlot.ts")).toEqual([]);
   });
 });

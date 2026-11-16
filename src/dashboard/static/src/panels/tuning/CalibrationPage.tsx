@@ -17,6 +17,7 @@ import { buttonClass, inputClass } from "../../styles";
 import type { StatusResponse } from "../../types";
 import type { MemoryChannel, MemoryState, VerifyMemoryResponse } from "../../types/workbench";
 import { TokenRequired } from "../../components/TokenRequired";
+import { formatDateTime } from "../../util/time";
 
 const stateClass: Record<MemoryState, string> = {
   verified: "text-ok",
@@ -141,7 +142,7 @@ export function CalibrationPage({
                   {item.revision === calibration.running_revision ? " · running" : ""}
                 </div>
                 <div className="text-xs text-fg-dim">
-                  {new Date(item.flashed_at).toLocaleString()} · K {item.k ?? "unknown"} ·{" "}
+                  {formatDateTime(item.flashed_at)} · K {item.k ?? "unknown"} ·{" "}
                   {item.rom_file ?? "ROM file unrecorded"}
                 </div>
                 {item.notes && <p className="mt-1 whitespace-pre-wrap text-sm">{item.notes}</p>}

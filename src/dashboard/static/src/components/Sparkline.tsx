@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { fitWidth, useContainerWidth } from "../hooks/useContainerWidth";
 import { prepareCanvas } from "../lib/canvas";
 import { cssColor, useThemeVersion, withAlpha, type ColorToken } from "../lib/chartTheme";
+import { extent, fraction, type Extent } from "../lib/framePlot";
 
 interface SparklineProps {
   values: number[];
@@ -44,15 +45,15 @@ export function Sparkline({
     if (!ctx) return;
     if (values.length < 2) return;
 
-    const lo = min ?? Math.min(...values);
-    const hi = max ?? Math.max(...values);
-    const span = hi - lo || 1;
+    const auto = extent(values) ?? ([0, 0] as const);
+    const range: Extent = [min ?? auto[0], max ?? auto[1]];
+    const [lo, hi] = range;
     const stepX = width / (values.length - 1);
     const pad = 2;
     const usableH = height - pad * 2;
 
     if (baseline !== undefined && baseline >= lo && baseline <= hi) {
-      const by = pad + (1 - (baseline - lo) / span) * usableH;
+      const by = pad + (1 - fraction(baseline, range)) * usableH;
       ctx.save();
       ctx.lineWidth = 1;
       ctx.strokeStyle = withAlpha(cssColor("fg-dim"), 0.45);
@@ -69,7 +70,7 @@ export function Sparkline({
     ctx.beginPath();
     values.forEach((v, i) => {
       const x = i * stepX;
-      const y = pad + (1 - (v - lo) / span) * usableH;
+      const y = pad + (1 - fraction(v, range)) * usableH;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     });

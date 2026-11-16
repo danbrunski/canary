@@ -17,14 +17,15 @@ import {
   severityTone,
 } from "../lib/evidence";
 import { MeterBar } from "../components/MetricTile";
+import { extent, rangeSpan } from "../lib/framePlot";
 import { badgeClass, cn, placeholderClass } from "../styles";
 import type { AnomalyEvent } from "../types";
-import { formatNumber as formatNum } from "../util/format";
+import { formatNumber } from "../util/format";
 import { formatTimestamp } from "../util/time";
 import { RescoreControl } from "./RescoreControl";
 
 /** Evidence cards show three decimals on sub-10 scores/residuals. */
-const formatNumber = (value: number): string => formatNum(value, 3);
+const EVIDENCE_DIGITS = 3;
 
 interface ModelEvidencePanelProps {
   event: AnomalyEvent | null;
@@ -125,10 +126,12 @@ function SourceEvidenceCard({
         <>
           <dl className="m-0 grid grid-cols-2 gap-x-3 gap-y-1 text-[0.74rem]">
             <dt className="text-fg-faint">score</dt>
-            <dd className="m-0 text-right font-num tabular-nums">{formatNumber(event.score)}</dd>
+            <dd className="m-0 text-right font-num tabular-nums">
+              {formatNumber(event.score, EVIDENCE_DIGITS)}
+            </dd>
             <dt className="text-fg-faint">threshold</dt>
             <dd className="m-0 text-right font-num tabular-nums">
-              {event.threshold === null ? "-" : formatNumber(event.threshold)}
+              {event.threshold === null ? "-" : formatNumber(event.threshold, EVIDENCE_DIGITS)}
             </dd>
             <dt className="text-fg-faint">latency</dt>
             <dd className="m-0 text-right font-num tabular-nums">
@@ -209,9 +212,13 @@ function ResidualEvidenceCard({ residuals }: { residuals: ResidualEvidence[] }) 
                 )}
               </div>
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-fg-dim">
-                {r.actual !== null && <span>actual {formatNumber(r.actual)}</span>}
-                {r.expected !== null && <span>expected {formatNumber(r.expected)}</span>}
-                {r.deviation !== null && <span>dev {formatNumber(r.deviation)}</span>}
+                {r.actual !== null && <span>actual {formatNumber(r.actual, EVIDENCE_DIGITS)}</span>}
+                {r.expected !== null && (
+                  <span>expected {formatNumber(r.expected, EVIDENCE_DIGITS)}</span>
+                )}
+                {r.deviation !== null && (
+                  <span>dev {formatNumber(r.deviation, EVIDENCE_DIGITS)}</span>
+                )}
               </div>
             </div>
           ))}
@@ -268,7 +275,7 @@ function ChannelBars({ channels }: { channels: ChannelEvidence[] }) {
               />
             </div>
             <div className="self-end text-right font-num text-[0.68rem] tabular-nums text-fg-dim">
-              {c.ratio === null ? formatNumber(c.score) : `${c.ratio.toFixed(2)}x`}
+              {c.ratio === null ? formatNumber(c.score, EVIDENCE_DIGITS) : `${c.ratio.toFixed(2)}x`}
             </div>
           </div>
         );
@@ -303,7 +310,7 @@ function ChannelHeatmap({ heatmap }: { heatmap: HeatmapData }) {
               key={`${rowIndex}-${colIndex}`}
               className="h-4 min-w-2 rounded-[3px]"
               style={{ backgroundColor: heatColor(value, heatmap.max) }}
-              title={`${heatmap.channels[rowIndex]} ${formatNumber(value)}`}
+              title={`${heatmap.channels[rowIndex]} ${formatNumber(value, EVIDENCE_DIGITS)}`}
             />
           )),
         )}
@@ -314,9 +321,9 @@ function ChannelHeatmap({ heatmap }: { heatmap: HeatmapData }) {
 
 function OverlayChart({ overlay }: { overlay: OverlaySeries }) {
   const values = [...overlay.actual, ...overlay.reconstructed].filter(Number.isFinite);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = max - min || 1;
+  const range = extent(values) ?? ([0, 0] as const);
+  const min = range[0];
+  const span = rangeSpan(range);
   const width = 160;
   const height = 44;
   const path = (series: number[]) =>

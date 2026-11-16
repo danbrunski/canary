@@ -4,6 +4,7 @@
 // no React dependency and the panel is just presentation.
 
 import type { AnomalyEvent } from "../types";
+import { coverageMax } from "./framePlot";
 import {
   numberArray,
   numberMap,
@@ -155,7 +156,7 @@ export function extractHeatmap(
   if (trace) {
     const channels = Object.keys(trace).sort((a, b) => maxOf(trace[b]) - maxOf(trace[a]));
     const values = channels.map((channel) => trace[channel]);
-    return { channels, values, max: Math.max(1, ...values.flat()) };
+    return { channels, values, max: Math.max(1, coverageMax(values)) };
   }
 
   const rows = fallback.map((channel) => {

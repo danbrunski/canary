@@ -5,6 +5,7 @@ import { fitWidth, useContainerWidth } from "../hooks/useContainerWidth";
 import { prepareCanvas } from "../lib/canvas";
 import { cssColor, useThemeVersion } from "../lib/chartTheme";
 import { sequential } from "../lib/colorScale";
+import { extent, fraction } from "../lib/framePlot";
 import type { BehaviorSeverity, GridCell } from "../types";
 
 /** Live operating point for a 2D surface. ``x`` is the axes[0] (row /
@@ -80,9 +81,7 @@ export function Heatmap({
     }
 
     const values = populated.map((c) => (value === "count" ? c.count : c.mean));
-    const lo = Math.min(...values);
-    const hi = Math.max(...values);
-    const span = hi - lo || 1;
+    const range = extent(values) ?? ([0, 0] as const);
 
     const cellW = width / cols;
     const cellH = height / rows;
@@ -98,8 +97,7 @@ export function Heatmap({
         ctx.fillStyle = cssColor("elev-2"); // visible-but-empty
       } else {
         const v = value === "count" ? cell.count : cell.mean;
-        const t = (v - lo) / span;
-        ctx.fillStyle = sequential(t);
+        ctx.fillStyle = sequential(fraction(v, range));
       }
       ctx.fillRect(x, y, cellW + 0.5, cellH + 0.5);
     });

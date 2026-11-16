@@ -15,6 +15,7 @@ import {
   slotRegionName,
   tableSlots,
 } from "../../lib/romLibrary";
+import { extent } from "../../lib/framePlot";
 import { mapColor } from "../../lib/romMaps";
 import { cn, inputClass, mapCellClass, mapGridClass } from "../../styles";
 import type {
@@ -188,8 +189,7 @@ function ValuesGrid({ table }: { table: RomTableValues }) {
     );
   }
   const flat = values.flat().filter((value): value is number => value !== null);
-  const min = Math.min(...flat);
-  const max = Math.max(...flat);
+  const [min, max] = extent(flat) ?? [0, 0];
   const rowAxis = table.axes.rows;
   const colAxis = table.axes.cols;
   const rowShown = rowAxis ? axisBreakpoints(rowAxis) : null;

@@ -24,14 +24,41 @@ export function formatTimeOfDay(value: string): string {
   });
 }
 
-/** Locale-default time-of-day; unparseable input falls back to the raw
- *  string (anomaly & evidence timelines). */
-export function formatTimestamp(ts: string): string {
-  try {
-    return new Date(ts).toLocaleTimeString();
-  } catch {
-    return ts;
-  }
+/** Locale-default time-of-day. A string is an ISO/parseable stamp; a number is
+ *  epoch *milliseconds* (a `Date` argument). Unparseable input falls back to
+ *  the raw value as text (anomaly & evidence timelines, the alarm log). The
+ *  fallback used to sit in a `catch` that never ran, since an invalid `Date`
+ *  formats as "Invalid Date" rather than throwing. */
+export function formatTimestamp(ts: string | number): string {
+  const date = new Date(ts);
+  return Number.isNaN(date.getTime()) ? String(ts) : date.toLocaleTimeString();
+}
+
+export interface DateTimeOptions {
+  /** What a number means: epoch "seconds" (the daemon's Unix stamps) or
+   *  "milliseconds". A string is always an ISO/parseable stamp. Default
+   *  "seconds". */
+  unit?: "seconds" | "milliseconds";
+  /** "default" is the locale's full date and time; "medium" is the short
+   *  paired-device form ("Nov 15, 2026, 3:04 PM"). Default "default". */
+  style?: "default" | "medium";
+  /** Text for null, undefined or an empty string. Default "—". */
+  missing?: string;
+}
+
+/** A local date and time. Null/empty reads `missing`; an unparseable value
+ *  reads as its own text rather than "Invalid Date" (the bare
+ *  `toLocaleString()` copies printed that, the Pi-link card alone fell back). */
+export function formatDateTime(
+  value: string | number | null | undefined,
+  { unit = "seconds", style = "default", missing = "—" }: DateTimeOptions = {},
+): string {
+  if (value === null || value === undefined || value === "") return missing;
+  const date = new Date(typeof value === "number" && unit === "seconds" ? value * 1000 : value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return style === "medium"
+    ? date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })
+    : date.toLocaleString();
 }
 
 export interface ClockDurationOptions {
@@ -96,7 +123,7 @@ export function formatDuration(
   { collapseZero = false }: { collapseZero?: boolean } = {},
 ): string {
   if (collapseZero) {
-    if (seconds == null || seconds <= 0) return "0s";
+    if (seconds == null || !(seconds > 0)) return "0s"; // also NaN, which was "NaNs"
     const total = Math.round(seconds);
     const m = Math.floor(total / 60);
     const s = total % 60;

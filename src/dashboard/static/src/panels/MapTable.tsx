@@ -1,4 +1,5 @@
 import { TableScroll } from "../components/TableScroll";
+import { coverageMax, extent } from "../lib/framePlot";
 import { mapColor } from "../lib/romMaps";
 import type { RomTable } from "../lib/romMaps";
 import type { CellPosition, CoverageGrid } from "../lib/romTrace";
@@ -36,9 +37,8 @@ export function MapTable({
   large: boolean;
 }) {
   const values = table.values.flat();
-  const min = Math.min(...values),
-    max = Math.max(...values);
-  const maxCount = coverage ? Math.max(0, ...coverage.flat()) : 0;
+  const [min, max] = extent(values) ?? [0, 0];
+  const maxCount = coverageMax(coverage);
   return (
     <div className="space-y-3">
       <p className="text-xs text-fg-dim">

@@ -38,6 +38,22 @@ export function formatReading(
   return trimZeros && text.includes(".") ? text.replace(/\.?0+$/, "") : text;
 }
 
+/** Milliseconds, one decimal. `missing` reads for null, undefined or non-finite
+ *  ("—" by default; the model-health latency tiles pass "idle", a model that
+ *  has not scored yet). */
+export function formatMs(value: number | null | undefined, missing = "—"): string {
+  return value === null || value === undefined || !Number.isFinite(value)
+    ? missing
+    : `${value.toFixed(1)} ms`;
+}
+
+/** Volts, two decimals; "—" for null, undefined or non-finite. */
+export function formatVolts(value: number | null | undefined): string {
+  return value === null || value === undefined || !Number.isFinite(value)
+    ? "—"
+    : `${value.toFixed(2)} V`;
+}
+
 /** Fraction → percent. `null`/`undefined` → "-". `digits` defaults to 1
  *  (Training); ModelHealth passes 0. */
 export function formatPercent(value: number | null | undefined, digits = 1): string {

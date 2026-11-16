@@ -4,7 +4,8 @@ import { Panel } from "../components/Panel";
 import { Curve } from "../components/Curve";
 import { Heatmap } from "../components/Heatmap";
 import { Sparkline } from "../components/Sparkline";
-import { binIndex, fmt, severityText, severityToken } from "../lib/behaviorOverlay";
+import { formatReading, type ReadingOptions } from "../util/format";
+import { binIndex, severityText, severityToken } from "../lib/behaviorOverlay";
 import { cn, placeholderClass, panelCountClass } from "../styles";
 import type {
   BehaviorLifecycle,
@@ -15,6 +16,9 @@ import type {
   BehaviorModel2D,
   BehaviorModelsResponse,
 } from "../types";
+
+/** The readout row: one decimal, "—" for a missing value. */
+const READOUT: ReadingOptions = { digits: 1 };
 
 interface BehaviorModelsPanelProps {
   data: BehaviorModelsResponse | null;
@@ -339,16 +343,16 @@ function LiveReadout({
     <div className="mt-2 flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-num text-[0.74rem] tabular-nums">
         <span className="text-fg-dim">
-          exp <span className="text-fg">{fmt(live.expected)}</span>
+          exp <span className="text-fg">{formatReading(live.expected, READOUT)}</span>
         </span>
         <span className="text-fg-dim">
-          act <span className="text-fg">{fmt(live.actual)}</span>
+          act <span className="text-fg">{formatReading(live.actual, READOUT)}</span>
         </span>
         <span className="text-fg-dim">
           Δ{" "}
           <span className={severityText(live.severity)}>
             {live.deviation !== null && live.deviation > 0 ? "+" : ""}
-            {fmt(live.deviation)}
+            {formatReading(live.deviation, READOUT)}
             {u}
           </span>
         </span>

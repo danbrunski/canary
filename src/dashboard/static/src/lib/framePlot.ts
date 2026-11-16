@@ -20,10 +20,25 @@ export function extent(values: ReadonlyArray<number | null>): [number, number] |
   return Number.isFinite(lo) ? [lo, hi] : null;
 }
 
+/** The width of `range`, or 1 when it has none (a constant channel), so a
+ *  divisor built from it is never zero. The one spelling of "hi − lo || 1". */
+export function rangeSpan(range: Extent): number {
+  return range[1] - range[0] || 1;
+}
+
 /** Where `value` sits in `range`, 0 at the minimum and 1 at the maximum. A
  *  range with no width (a constant channel) puts everything at 0. */
 export function fraction(value: number, range: Extent): number {
-  return (value - range[0]) / (range[1] - range[0] || 1);
+  return (value - range[0]) / rangeSpan(range);
+}
+
+/** The largest count in a coverage grid, floored at 0 (an empty or null grid
+ *  reads 0). A loop, not `Math.max(...grid.flat())`, which throws a RangeError
+ *  once a spread passes roughly 100k arguments. */
+export function coverageMax(grid: ReadonlyArray<ReadonlyArray<number>> | null | undefined): number {
+  let max = 0;
+  for (const row of grid ?? []) for (const count of row) if (count > max) max = count;
+  return max;
 }
 
 // ---------------------------------------------------------------- strips

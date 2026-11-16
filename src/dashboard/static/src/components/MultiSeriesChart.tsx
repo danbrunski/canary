@@ -3,8 +3,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { fitWidth, useContainerWidth } from "../hooks/useContainerWidth";
 import { prepareCanvas } from "../lib/canvas";
 import { cssColor, useThemeVersion, withAlpha } from "../lib/chartTheme";
+import { extent, fraction } from "../lib/framePlot";
 import { buttonClass, cn } from "../styles";
 import { downloadText } from "../util/browser";
+import { formatTimeOfDay } from "../util/time";
 
 export interface ChartSeries {
   key: string;
@@ -45,23 +47,6 @@ interface MultiSeriesChartProps {
  *  jsdom, which has no ResizeObserver). */
 const DEFAULT_WIDTH = 640;
 
-function seriesExtent(values: number[]): [number, number] | null {
-  let lo = Infinity;
-  let hi = -Infinity;
-  for (const v of values) {
-    if (!Number.isFinite(v)) continue;
-    if (v < lo) lo = v;
-    if (v > hi) hi = v;
-  }
-  return Number.isFinite(lo) && Number.isFinite(hi) ? [lo, hi] : null;
-}
-
-function formatTimeLabel(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
 /** Multi-channel trend chart on a single canvas (Task 6.10; ergonomics —
  *  shared/dual Y axis, hover cursor, time labels, PNG/CSV export — Task
  *  5.5). One canvas, no chart-lib dep, consistent with the Sparkline
@@ -94,18 +79,10 @@ export function MultiSeriesChart({
 
   const sampleCount = useMemo(() => Math.max(0, ...series.map((s) => s.values.length)), [series]);
 
-  const sharedExtent = useMemo(() => {
-    if (yAxisMode !== "shared") return null;
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (const s of series) {
-      const extent = seriesExtent(s.values);
-      if (!extent) continue;
-      if (extent[0] < lo) lo = extent[0];
-      if (extent[1] > hi) hi = extent[1];
-    }
-    return Number.isFinite(lo) && Number.isFinite(hi) ? ([lo, hi] as [number, number]) : null;
-  }, [series, yAxisMode]);
+  const sharedExtent = useMemo(
+    () => (yAxisMode === "shared" ? extent(series.flatMap((s) => s.values)) : null),
+    [series, yAxisMode],
+  );
 
   useEffect(() => {
     const canvas = ref.current;
@@ -131,10 +108,8 @@ export function MultiSeriesChart({
     for (const s of series) {
       const vals = s.values;
       if (vals.length < 2) continue;
-      const extent = yAxisMode === "shared" ? sharedExtent : seriesExtent(vals);
-      if (!extent) continue;
-      const [lo, hi] = extent;
-      const span = hi - lo || 1;
+      const range = yAxisMode === "shared" ? sharedExtent : extent(vals);
+      if (!range) continue;
       ctx.strokeStyle = s.color;
       ctx.lineWidth = 2;
       ctx.lineJoin = "round";
@@ -142,7 +117,7 @@ export function MultiSeriesChart({
       ctx.beginPath();
       vals.forEach((v, i) => {
         const x = (width * i) / (vals.length - 1);
-        const norm = (v - lo) / span; // 0..1
+        const norm = fraction(v, range); // 0..1
         const y = pad + (1 - norm) * (height - pad * 2);
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
@@ -170,7 +145,7 @@ export function MultiSeriesChart({
       for (let i = 0; i <= ticks; i++) {
         const idx = Math.round((i / ticks) * (timestamps.length - 1));
         const x = (width * idx) / (timestamps.length - 1);
-        const label = formatTimeLabel(timestamps[idx]);
+        const label = formatTimeOfDay(timestamps[idx]);
         const align = i === 0 ? "left" : i === ticks ? "right" : "center";
         ctx.textAlign = align;
         ctx.fillText(label, x, height - 4);
@@ -261,7 +236,7 @@ export function MultiSeriesChart({
               </button>
             )}
             {timestamps?.[hoverIndex] && (
-              <div className="mb-0.5 text-fg">{formatTimeLabel(timestamps[hoverIndex])}</div>
+              <div className="mb-0.5 text-fg">{formatTimeOfDay(timestamps[hoverIndex])}</div>
             )}
             {series.map((s) => (
               <div key={s.key} className="flex items-center gap-1.5">

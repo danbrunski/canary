@@ -15,6 +15,7 @@ import {
 import { buttonClass } from "../../styles";
 import type { FrameResponse } from "../../types/workbench";
 import { downloadText } from "../../util/browser";
+import { formatTimestamp } from "../../util/time";
 
 /** A frame as a sortable table of every row, rendering only the window in
  *  view (rows are a fixed height; spacer rows stand in for the rest), with a
@@ -86,7 +87,7 @@ export function FrameTable({ frame }: { frame: FrameResponse }) {
                 style={{ height: ROW_HEIGHT }}
                 className="border-t border-border-soft"
               >
-                <td>{new Date(frame.timestamps[i]).toLocaleTimeString()}</td>
+                <td>{formatTimestamp(frame.timestamps[i])}</td>
                 {specs.map((spec) => (
                   <td key={spec}>{formatFrameValue(frame.values[spec]?.[i])}</td>
                 ))}

@@ -2,6 +2,7 @@
 
 import type { PairedDevice } from "../api/pairedDevices";
 import type { ControlEvent } from "../types";
+import { formatDateTime } from "../util/time";
 
 const APPROVED_BY = "approved-by:";
 
@@ -19,11 +20,7 @@ export function methodLabel(method: string, devices: readonly PairedDevice[]): s
 
 /** A Unix-seconds stamp as local date and time; `never` when missing. */
 export function formatWhen(unixSeconds: number | null): string {
-  if (unixSeconds === null) return "never";
-  return new Date(unixSeconds * 1000).toLocaleString([], {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  return formatDateTime(unixSeconds, { style: "medium", missing: "never" });
 }
 
 /** Events that change who is waiting to pair: requested, approved, paired,

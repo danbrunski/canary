@@ -49,6 +49,7 @@ import {
   checksumWords,
 } from "./romLibraryParts";
 import { TokenRequired } from "../../components/TokenRequired";
+import { formatDateTime } from "../../util/time";
 
 /** Engine Tuning ▸ ROM Library (W08.6, W08.8): stored ROM images, the memory
  *  map of the selected one, its tables, compare, and the ECU backup.
@@ -371,7 +372,7 @@ function EntryRow({
           <ChecksumChip checksum={entry.checksum} />
         </td>
         <td className="whitespace-nowrap py-2 pr-3 text-fg-dim">
-          {new Date(entry.added_at).toLocaleString()}
+          {formatDateTime(entry.added_at)}
         </td>
         <td className="py-2">
           <span className="flex flex-wrap gap-1">
@@ -507,7 +508,7 @@ function RomImageView({ token, entry }: { token: string; entry: RomLibraryEntry 
               .join(", ")}
             {entry.filename ? ` · ${entry.filename}` : ""}
           </Fact>
-          <Fact term="Added">{new Date(entry.added_at).toLocaleString()}</Fact>
+          <Fact term="Added">{formatDateTime(entry.added_at)}</Fact>
           {meta && (
             <Fact term="ECU read">
               {[

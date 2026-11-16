@@ -8,6 +8,7 @@ import {
   moveSelection,
   selectionContains,
 } from "../../../lib/romEditor";
+import { coverageMax, extent } from "../../../lib/framePlot";
 import { axisBreakpoints, formatCell } from "../../../lib/romLibrary";
 import { mapColor } from "../../../lib/romMaps";
 import { cn, mapCellClass, mapGridClass } from "../../../styles";
@@ -110,11 +111,10 @@ export function CellGrid({
   const numbers = table.raw
     .flatMap((row, r) => row.map((_, c) => shown(table, r, c)))
     .filter((value): value is number => value !== null);
-  const min = numbers.length ? Math.min(...numbers) : 0;
-  const max = numbers.length ? Math.max(...numbers) : 0;
+  const [min, max] = extent(numbers) ?? [0, 0];
   const shaded = max > min;
   const coverage = overlay?.coverage ?? null;
-  const maxCount = coverage ? Math.max(0, ...coverage.flat()) : 0;
+  const maxCount = coverageMax(coverage);
 
   return (
     <div className="space-y-2">

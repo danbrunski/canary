@@ -5,7 +5,7 @@ import { TableScroll } from "../../components/TableScroll";
 import { useLogs } from "../../hooks/useWorkbench";
 import { cn } from "../../styles";
 import type { LogSummary } from "../../types/workbench";
-import { formatClockDuration } from "../../util/time";
+import { formatClockDuration, formatDateTime } from "../../util/time";
 import { RefusalNotice } from "./WorkbenchNotices";
 import { TokenRequired } from "../../components/TokenRequired";
 
@@ -97,9 +97,7 @@ function LogRow({
       onClick={() => onSelect(log.session_id)}
     >
       <td className="py-1">{log.profile ?? (log.is_capture ? "unknown" : "session")}</td>
-      <td title={log.session_id}>
-        {log.started_at ? new Date(log.started_at).toLocaleString() : log.session_id}
-      </td>
+      <td title={log.session_id}>{formatDateTime(log.started_at, { missing: log.session_id })}</td>
       <td title={log.duration_source ?? "unknown"}>
         {formatClockDuration(log.duration_s, {
           rounding: "round",

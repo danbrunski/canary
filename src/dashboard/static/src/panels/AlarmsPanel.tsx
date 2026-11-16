@@ -5,6 +5,7 @@ import { useLocalStorageJson } from "../hooks/useLocalStorage";
 import { useNow } from "../hooks/useNow";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { buttonClass, cn, dangerButtonClass, inputClass, placeholderClass } from "../styles";
+import { formatTimestamp } from "../util/time";
 
 interface AlarmsPanelProps {
   channels: Map<string, ChannelSnapshot>;
@@ -290,7 +291,7 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
                 key={`${e.ruleId}-${e.at}-${i}`}
                 className="flex gap-2 border-b border-border-soft pb-0.5 last:border-0"
               >
-                <time className="font-num text-fg-dim">{new Date(e.at).toLocaleTimeString()}</time>
+                <time className="font-num text-fg-dim">{formatTimestamp(e.at)}</time>
                 <span className={e.severity === "critical" ? "text-bad" : "text-warn"}>
                   {e.channel}
                 </span>

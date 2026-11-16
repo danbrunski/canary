@@ -11,7 +11,7 @@ import {
   placeholderClass,
 } from "../styles";
 import type { StatusHealth, StatusResponse } from "../types";
-import { formatPercent, toneClass } from "../util/format";
+import { formatMs, formatPercent, formatReading, toneClass } from "../util/format";
 import { numberMap, numberOr, numberOrNull, stringArray } from "../util/json";
 
 interface ModelHealthPanelProps {
@@ -51,12 +51,12 @@ function HealthBody({ health }: { health: StatusHealth }) {
       <div className="grid grid-cols-4 gap-2 max-[1200px]:grid-cols-2 max-[700px]:grid-cols-1">
         <MetricTile
           label="latency mean"
-          value={formatMs(health.inference_latency_ms.mean)}
+          value={formatMs(health.inference_latency_ms.mean, "idle")}
           tone={latencyTone(health.inference_latency_ms.mean)}
         />
         <MetricTile
           label="latency p95"
-          value={formatMs(health.inference_latency_ms.p95)}
+          value={formatMs(health.inference_latency_ms.p95, "idle")}
           tone={latencyTone(health.inference_latency_ms.p95)}
         />
         <MetricTile
@@ -265,12 +265,8 @@ function reconstructionDriftView(
   };
 }
 
-function formatMs(value: number | null): string {
-  return value === null ? "idle" : `${value.toFixed(1)} ms`;
-}
-
 function formatNumberOrDash(value: number | null): string {
-  return value === null ? "-" : value.toFixed(4);
+  return formatReading(value, { digits: 4, missing: "-" });
 }
 
 function latencyTone(value: number | null): "ok" | "warn" | "bad" {

@@ -1,6 +1,6 @@
 import { useNow } from "../../../hooks/useNow";
 import { FAILURE_TITLE, DEFERRED_ADVICE } from "../../../lib/romSim";
-import { SERVER_JOB_LIMIT_S, cancelWording, formatDuration } from "../../../lib/romSimSize";
+import { SERVER_JOB_LIMIT_S, cancelWording, formatRunTime } from "../../../lib/romSimSize";
 import { buttonClass } from "../../../styles";
 import type { SimFailure } from "../../../types/romEditor";
 
@@ -74,8 +74,8 @@ export function SimCancelled({
 function remainingSeconds(startedAt: number, expectedS: number, now: number): string {
   const left = expectedS - (now - startedAt) / 1000;
   if (left > 1)
-    return `About ${formatDuration(left)} more (estimated ${formatDuration(expectedS)} in all).`;
-  return `Its estimate (${formatDuration(expectedS)}) has passed, so it may be about to finish; the daemon stops any such job at ${SERVER_JOB_LIMIT_S} s.`;
+    return `About ${formatRunTime(left)} more (estimated ${formatRunTime(expectedS)} in all).`;
+  return `Its estimate (${formatRunTime(expectedS)}) has passed, so it may be about to finish; the daemon stops any such job at ${SERVER_JOB_LIMIT_S} s.`;
 }
 
 /** A failed run by its reason: a refusal names the reason, a deferred run says

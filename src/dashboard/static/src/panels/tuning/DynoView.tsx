@@ -7,6 +7,7 @@ import { getDyno } from "../../api/workbench";
 import { getProfiles } from "../../api/http";
 import { useControlResource } from "../../hooks/useControlResource";
 import { useAnalysisRun } from "../../hooks/useWorkbench";
+import { extent, fraction, type Extent } from "../../lib/framePlot";
 import type {
   DynoCurve,
   DynoFloor,
@@ -114,11 +115,12 @@ export function DynoChart({ runs, quantity }: { runs: DynoRunOk[]; quantity: Dyn
     ...finite(run.curve[quantity]),
     ...Object.values(run.per_heading).flatMap((c) => finite(c[quantity])),
   ]);
-  if (!allRpm.length || !allValues.length) return null;
-  const [rLo, rHi] = [Math.min(...allRpm), Math.max(...allRpm)];
-  const [vLo, vHi] = [Math.min(0, ...allValues), Math.max(...allValues) * 1.1];
-  const x = (r: number) => pad + ((r - rLo) / (rHi - rLo || 1)) * (W - 2 * pad);
-  const y = (v: number) => H - pad - ((v - vLo) / (vHi - vLo || 1)) * (H - 2 * pad);
+  const rpmRange = extent(allRpm);
+  const valueRange = extent(allValues);
+  if (!rpmRange || !valueRange) return null;
+  const vRange: Extent = [Math.min(0, valueRange[0]), valueRange[1] * 1.1];
+  const x = (r: number) => pad + fraction(r, rpmRange) * (W - 2 * pad);
+  const y = (v: number) => H - pad - fraction(v, vRange) * (H - 2 * pad);
   return (
     <svg
       aria-label={`Dyno ${quantity === "wheel_power_kw" ? "power" : "torque"} against rpm`}
@@ -128,13 +130,13 @@ export function DynoChart({ runs, quantity }: { runs: DynoRunOk[]; quantity: Dyn
     >
       <line x1={pad} x2={W - pad} y1={y(0)} y2={y(0)} className="stroke-fg-dim" />
       <text x={pad} y={H - 8} fontSize={10} className="fill-fg-dim">
-        {rLo.toFixed(0)} rpm
+        {rpmRange[0].toFixed(0)} rpm
       </text>
       <text x={W - pad} y={H - 8} fontSize={10} textAnchor="end" className="fill-fg-dim">
-        {rHi.toFixed(0)} rpm
+        {rpmRange[1].toFixed(0)} rpm
       </text>
       <text x={4} y={pad - 8} fontSize={10} className="fill-fg-dim">
-        {vHi.toFixed(0)} {UNIT[quantity]}
+        {vRange[1].toFixed(0)} {UNIT[quantity]}
       </text>
       {runs.map((run, index) => {
         const stroke = RUN_STROKES[index % RUN_STROKES.length];

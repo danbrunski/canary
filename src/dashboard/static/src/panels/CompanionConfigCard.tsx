@@ -9,6 +9,7 @@ import { usePolling } from "../hooks/usePolling";
 import { PI_SOURCE_LABEL, piDisplayName } from "../lib/piLink";
 import { badgeClass, buttonClass, inputClass, type NoticeState } from "../styles";
 import type { CompanionStatusResponse, DiscoveredPi } from "../types";
+import { formatDateTime } from "../util/time";
 import { TokenRequired } from "../components/TokenRequired";
 
 interface CompanionConfigCardProps {
@@ -29,11 +30,6 @@ async function loadStatus(signal: AbortSignal): Promise<StatusResult> {
     if (err instanceof HttpError && err.status === 404) return { kind: "off" };
     throw err;
   }
-}
-
-function formatRanAt(ranAt: string): string {
-  const parsed = new Date(ranAt);
-  return Number.isNaN(parsed.getTime()) ? ranAt : parsed.toLocaleString();
 }
 
 /** The Pi-link card: which Pi a companion-mode daemon is linked to, finding
@@ -147,7 +143,7 @@ export function CompanionConfigCard({ companion, token }: CompanionConfigCardPro
                 {searching
                   ? "Searching the network…"
                   : status.discovery.ran_at
-                    ? `Last search ${formatRanAt(status.discovery.ran_at)}: ${list.length} found`
+                    ? `Last search ${formatDateTime(status.discovery.ran_at)}: ${list.length} found`
                     : "No search yet"}
               </span>
             </div>

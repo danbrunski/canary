@@ -16,6 +16,7 @@ import {
   expectedRun,
   fineReference,
   fitCost,
+  formatRunTime,
   hostScale,
   laptopSeconds,
   loadTimings,
@@ -363,5 +364,19 @@ describe("simFormReadout (R28.5)", () => {
     expect(readoutOf(filled, fill).mode).toBe("fine");
     expect(readoutOf({ ...filled, draws: "999" }, fill).mode).toBe("custom");
     expect(readoutOf(filled, fill).sizeVerdict?.coarse).toBe(false);
+  });
+});
+
+describe("formatRunTime (R28.7)", () => {
+  it("reads in seconds under two minutes and minutes after, a decimal only under 10 s", () => {
+    expect(formatRunTime(4.26)).toBe("4.3 s");
+    expect(formatRunTime(95.4)).toBe("95 s");
+    expect(formatRunTime(119.4)).toBe("119 s");
+    expect(formatRunTime(180)).toBe("3 min");
+  });
+
+  it("says unknown, not a dash, for a non-finite estimate", () => {
+    expect(formatRunTime(Number.NaN)).toBe("unknown");
+    expect(formatRunTime(Number.POSITIVE_INFINITY)).toBe("unknown");
   });
 });

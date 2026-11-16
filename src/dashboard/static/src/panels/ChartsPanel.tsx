@@ -11,8 +11,9 @@ import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { buttonClass, cn, inputClass, placeholderClass } from "../styles";
 import type { SessionChartResponse } from "../types";
 import { seriesColor, useThemeVersion } from "../lib/chartTheme";
+import { extent } from "../lib/framePlot";
 import { downloadBlob } from "../util/browser";
-import { formatReading } from "../util/format";
+import { formatReading, type ReadingOptions } from "../util/format";
 import { TOKEN_FIRST } from "../lib/tokenMessages";
 
 interface ChartsPanelProps {
@@ -23,6 +24,8 @@ interface ChartsPanelProps {
   token?: string;
 }
 
+/** Live readouts: two decimals, whole numbers from 1000 up. */
+const CHART_READING: ReadingOptions = { digits: 2, bigAt: 1000 };
 const MAX_SERIES = 6;
 const WINDOWS = [60, 120, 300] as const;
 const SELECTION_STORAGE_KEY = "canary.charts.selected";
@@ -303,7 +306,10 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
                     />
                     <b className="truncate font-num">{s.key}</b>
                     <span className="ml-auto font-num tabular-nums text-fg-dim">
-                      {fmt(s.values.filter((x) => Number.isFinite(x)).at(-1))}
+                      {formatReading(
+                        s.values.filter((x) => Number.isFinite(x)).at(-1),
+                        CHART_READING,
+                      )}
                     </span>
                   </div>
                   <MultiSeriesChart
@@ -336,8 +342,9 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
             {series.map((s) => {
               const v = s.values.filter((x) => Number.isFinite(x));
               const last = v.at(-1);
-              const min = v.length ? Math.min(...v) : null;
-              const max = v.length ? Math.max(...v) : null;
+              const range = extent(v);
+              const min = range ? range[0] : null;
+              const max = range ? range[1] : null;
               const avg = v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
               return (
                 <span key={s.key} className="inline-flex items-center gap-1.5">
@@ -347,7 +354,9 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
                   />
                   <b className="font-num">{s.key}</b>
                   <span className="font-num tabular-nums text-fg-dim">
-                    {fmt(last)} (min {fmt(min)} / avg {fmt(avg)} / max {fmt(max)})
+                    {formatReading(last, CHART_READING)} (min {formatReading(min, CHART_READING)} /
+                    avg {formatReading(avg, CHART_READING)} / max{" "}
+                    {formatReading(max, CHART_READING)})
                   </span>
                 </span>
               );
@@ -391,8 +400,4 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
       )}
     </Panel>
   );
-}
-
-function fmt(v: number | null | undefined): string {
-  return formatReading(v, { digits: 2, bigAt: 1000 });
 }

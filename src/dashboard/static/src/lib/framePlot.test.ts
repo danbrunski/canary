@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import { frame } from "../test/workbenchFixtures";
 import {
   HEAT_BINS,
+  coverageMax,
   extent,
   fraction,
   heatCells,
   heatShade,
+  rangeSpan,
   scatterPoints,
   stripMarkers,
   stripPoints,
@@ -43,6 +45,52 @@ describe("fraction", () => {
   it("puts everything at 0 on a range with no width, never NaN", () => {
     expect(fraction(5, [5, 5])).toBe(0);
     expect(Number.isNaN(fraction(6, [5, 5]))).toBe(false);
+  });
+});
+
+describe("extent on a long series", () => {
+  it("does not throw where Math.max(...values) does (a spread passes ~100k arguments)", () => {
+    const history = Array.from({ length: 500_000 }, (_, i) => i);
+    expect(extent(history)).toEqual([0, 499_999]);
+  });
+
+  it("skips a NaN that would poison Math.min(...values)", () => {
+    expect(Math.min(1, Number.NaN, 4)).toBeNaN();
+    expect(extent([1, Number.NaN, 4])).toEqual([1, 4]);
+  });
+});
+
+describe("rangeSpan", () => {
+  it("is the width, or 1 for a range with none, so a divisor is never zero", () => {
+    expect(rangeSpan([10, 25])).toBe(15);
+    expect(rangeSpan([5, 5])).toBe(1);
+  });
+});
+
+describe("coverageMax", () => {
+  it("is the largest count in the grid", () => {
+    expect(
+      coverageMax([
+        [0, 3],
+        [7, 2],
+      ]),
+    ).toBe(7);
+  });
+
+  it("reads 0 for no grid, an empty grid or empty rows", () => {
+    expect(coverageMax(null)).toBe(0);
+    expect(coverageMax(undefined)).toBe(0);
+    expect(coverageMax([])).toBe(0);
+    expect(coverageMax([[], []])).toBe(0);
+  });
+
+  it("is floored at 0, as Math.max(0, ...grid) was", () => {
+    expect(coverageMax([[-4, -1]])).toBe(0);
+  });
+
+  it("does not throw on a grid past the spread limit", () => {
+    const row = Array.from({ length: 300_000 }, (_, i) => i);
+    expect(coverageMax([row])).toBe(299_999);
   });
 });
 

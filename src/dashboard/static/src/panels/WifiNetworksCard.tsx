@@ -17,6 +17,7 @@ import { describeError, useControlResource } from "../hooks/useControlResource";
 import { buttonClass, cn, definitionTermClass, inputClass, placeholderClass } from "../styles";
 import type { NetworkSummary, WifiNetwork, WifiScanEntry, WifiState } from "../types/network";
 import { toneClass } from "../util/format";
+import { formatTimestamp } from "../util/time";
 
 /** Where the Pi is always reachable once it has left the WiFi this page is on. */
 const CABLE_ADDRESS = "192.168.137.2";
@@ -419,7 +420,7 @@ export function WifiNetworksCard({
                 </button>
                 {wifi.scanned_at !== null && (
                   <span className="text-xs text-fg-faint">
-                    scanned {new Date(wifi.scanned_at * 1000).toLocaleTimeString()}
+                    scanned {formatTimestamp(wifi.scanned_at * 1000)}
                   </span>
                 )}
               </div>

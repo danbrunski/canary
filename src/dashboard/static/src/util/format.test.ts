@@ -5,10 +5,12 @@ import {
   formatCoords,
   formatGpsSpeed,
   formatHeading,
+  formatMs,
   formatNumber,
   formatPercent,
   formatReading,
   formatTemp,
+  formatVolts,
   toneClass,
 } from "./format";
 import { numberArray, numberMap, record } from "./json";
@@ -115,5 +117,29 @@ describe("formatReading (R08.5)", () => {
 
   it("does not trim the zeros of a whole number", () => {
     expect(formatReading(100, { digits: 0, trimZeros: true })).toBe("100");
+  });
+});
+
+describe("formatMs and formatVolts (R28.7)", () => {
+  it("formatMs is one decimal with the unit", () => {
+    expect(formatMs(12.345)).toBe("12.3 ms");
+    expect(formatMs(0)).toBe("0.0 ms");
+  });
+
+  it('formatMs says what missing means: a dash by default, "idle" for model latency', () => {
+    expect(formatMs(null)).toBe("—");
+    expect(formatMs(undefined)).toBe("—");
+    expect(formatMs(null, "idle")).toBe("idle");
+    // ModelHealthPanel's copy printed "NaN ms" for a non-finite value.
+    expect(formatMs(Number.NaN)).toBe("—");
+    expect(formatMs(Number.POSITIVE_INFINITY, "idle")).toBe("idle");
+  });
+
+  it("formatVolts is two decimals; null, undefined and non-finite are a dash", () => {
+    expect(formatVolts(12.6)).toBe("12.60 V");
+    expect(formatVolts(0)).toBe("0.00 V");
+    expect(formatVolts(null)).toBe("—");
+    expect(formatVolts(undefined)).toBe("—");
+    expect(formatVolts(Number.NaN)).toBe("—");
   });
 });

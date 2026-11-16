@@ -1,4 +1,5 @@
 import type { FrameResponse } from "../../types/workbench";
+import { formatDateTime } from "../../util/time";
 
 /** What a frame says about itself above its rows: revision and grid, a flash
  *  inside the log, channels never polled, the regime filter's outcome, the
@@ -22,7 +23,7 @@ export function FrameNotes({
         <p role="alert" className="m-0 text-warn">
           A flash falls inside this log (
           {frame.revision_boundaries
-            .map((b) => `${b.revision} at ${new Date(b.flashed_at).toLocaleString()}`)
+            .map((b) => `${b.revision} at ${formatDateTime(b.flashed_at)}`)
             .join(", ")}
           ). The registry labels the whole log by its start, so figures across the marker mix two
           calibrations.

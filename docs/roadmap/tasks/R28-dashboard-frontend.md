@@ -425,7 +425,7 @@ neither earlier review covered.
     `public/sw.js` still precaches every chunk (the dashboard must work with
     no network beyond the Pi) and `e2e/phone.spec.ts`.
 
-- [ ] **R28.7 Formatters and range math outside `util/` and `lib/`.**
+- [x] **R28.7 Formatters and range math outside `util/` and `lib/`.**
   - Two exported `formatDuration` with different output (`util/time.ts`,
     `lib/romSimSize.ts`); `ModelEvidencePanel` shadows `formatNumber`; `fmt`
     twice; nine sites format a timestamp four different ways.
@@ -434,10 +434,43 @@ neither earlier review covered.
     `lib/framePlot.ts` already has `extent()` and `fraction()`.
     `ChartsPanel.tsx` spreads a per-channel history into `Math.max`, which
     throws past roughly 100k values.
-  - [ ] `formatDateTime` in `util/time`; rename the ROM one `formatRunTime`;
-    `formatMs` / `formatVolts` into `util/format`.
-  - [ ] Route the renderers through `extent` / `fraction`; one
-    `coverageMax(grid)`.
+  - [x] `formatDateTime` in `util/time`; rename the ROM one `formatRunTime`;
+    `formatMs` / `formatVolts` into `util/format`. Done 2026-11-15.
+    `formatDateTime(value, {unit, style, missing})` replaces the bare
+    `toLocaleString()` copies (`FrameNotes`, `CalibrationPage`,
+    `RomLibraryPage` x2), `LogBrowser`, `CompanionConfigCard.formatRanAt` and
+    the body of `pairedDevices.formatWhen` (now a one-line named call);
+    `MultiSeriesChart.formatTimeLabel` was `formatTimeOfDay` verbatim and is
+    deleted; `AlarmsPanel`, `FrameTable` and `WifiNetworksCard` use
+    `formatTimestamp` (now also takes epoch ms). `romSimSize.formatDuration` is
+    `formatRunTime`. `formatMs(value, missing)` / `formatVolts` moved to
+    `util/format` (`ModelHealthPanel` passes `"idle"`); `formatNumberOrDash`
+    is `formatReading`; the `ModelEvidencePanel` `formatNumber` shadow is
+    `formatNumber(x, EVIDENCE_DIGITS)`; both `fmt` copies are
+    `formatReading` with a named options constant. Output differences found
+    are recorded in the dispatch report: a bare copy printed "Invalid Date"
+    for an unparseable stamp (now the raw text), `formatTimestamp`'s fallback
+    sat in a `catch` that never ran (now works), `formatMs` printed "NaN ms",
+    `formatDuration({collapseZero})` printed "NaNs". Tests: `time.test.ts`
+    (`formatDateTime`, `formatTimestamp`, both `formatDuration` variants),
+    `format.test.ts` (`formatMs`, `formatVolts`), `romSimSize.test.ts`
+    (`formatRunTime`).
+  - [x] Route the renderers through `extent` / `fraction`; one
+    `coverageMax(grid)`. Done 2026-11-15. `lib/framePlot` gains `rangeSpan`
+    (the one "hi - lo || 1") and `coverageMax`; `Heatmap`, `Sparkline`,
+    `Curve`, `MultiSeriesChart` (its own `seriesExtent` deleted), `MapTable`,
+    `CellGrid`, `RomTablesView`, `WorkbenchNotices`, `DynoView`,
+    `ModelEvidencePanel.OverlayChart`, `TrainingPanel` and `ChartsPanel`
+    (the per-channel history spread) use them; `MapTable` and `CellGrid` use
+    `coverageMax`. `framePlot.test.ts` covers `rangeSpan`, `coverageMax` and a
+    500k-value `extent`. `layering.test.ts` now fails on a shared formatter
+    defined outside `util/`, a `Math.min/max(...x.flat())` and a hand-written
+    "hi - lo || 1". Left as bounded spreads (a handful of channels or
+    cylinders, never a history): `statusDemand`, `PairingApprovalPrompt`,
+    `MonitorsPanel`, `ExplorePanel`, `ModelHealthPanel`, `TrendsPanel`,
+    `evidence.maxOf`. Gate: `pnpm typecheck`, `pnpm format:check`,
+    `pnpm lint` clean, no new suppressions, `pnpm test` 152 files / 1588
+    passed.
   - The renderers themselves stay separate (R08, "looked at and fine").
 
 - [ ] **R28.8 The type scale is ad hoc.** 392 arbitrary `text-[0.NNrem]`

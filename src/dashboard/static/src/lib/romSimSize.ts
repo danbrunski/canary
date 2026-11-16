@@ -273,7 +273,10 @@ export function nearestTiming(points: number, draws: number): TimedRun {
   return best;
 }
 
-export function formatDuration(seconds: number): string {
+/** A run's length for the ROM simulator's cost lines: "4.2 s", "95 s", "3 min";
+ *  "unknown" for a non-finite estimate. Not `util/time`'s `formatDuration`
+ *  ("Ym Zs" for a trip or a keepalive), which reads a different clock. */
+export function formatRunTime(seconds: number): string {
   if (!Number.isFinite(seconds)) return "unknown";
   if (seconds < 10) return `${seconds.toFixed(1)} s`;
   if (seconds < 120) return `${Math.round(seconds)} s`;
@@ -287,7 +290,7 @@ export function formatCount(count: number): string {
 /** The laptop reference sentence: a measured row, labelled as a reference. */
 export function referenceLine(points: number, draws: number): string {
   const row = nearestTiming(points, draws);
-  return `Reference, not a prediction: the dev laptop took ${row.seconds} s for ${formatCount(row.points)} points × ${formatCount(row.draws)} draws (W09.13); its fit gives about ${formatDuration(laptopSeconds(points, draws))} for ${formatCount(points)} × ${formatCount(draws)}.`;
+  return `Reference, not a prediction: the dev laptop took ${row.seconds} s for ${formatCount(row.points)} points × ${formatCount(row.draws)} draws (W09.13); its fit gives about ${formatRunTime(laptopSeconds(points, draws))} for ${formatCount(points)} × ${formatCount(draws)}.`;
 }
 
 // -- this browser's own timings -------------------------------------------------------------
@@ -403,7 +406,7 @@ export function costText(estimate: CostEstimate): { headline: string; detail: st
   if (estimate.measured) {
     const m = estimate.measured;
     return {
-      headline: `${work}. About ${formatDuration(m.seconds)} from your last ${m.runs} ${m.runs === 1 ? "run" : "runs"} on this server.`,
+      headline: `${work}. About ${formatRunTime(m.seconds)} from your last ${m.runs} ${m.runs === 1 ? "run" : "runs"} on this server.`,
       detail: `This server ran ${m.scale.toFixed(2)}× the dev-laptop fit (median of those runs). Fit: ${fit}.`,
     };
   }
@@ -436,7 +439,7 @@ export function cancelWording(expected: { seconds: number; measured: boolean }):
   const basis = expected.measured
     ? "from your earlier runs here"
     : "the dev-laptop fit; not yet measured on this server";
-  return `Cancel only stops waiting: the server finishes this run (about ${formatDuration(expected.seconds)}, ${basis}) before another can start. No route stops it sooner, and it is bounded at ${SERVER_JOB_LIMIT_S} s.`;
+  return `Cancel only stops waiting: the server finishes this run (about ${formatRunTime(expected.seconds)}, ${basis}) before another can start. No route stops it sooner, and it is bounded at ${SERVER_JOB_LIMIT_S} s.`;
 }
 
 // -- what the form says about itself --------------------------------------------------------

@@ -18,7 +18,7 @@ import {
   placeholderClass,
 } from "../styles";
 import type { PowerCountdownReason, PowerSnapshot } from "../types";
-import { type Tone, toneClass } from "../util/format";
+import { type Tone, formatVolts, toneClass } from "../util/format";
 import { formatDuration } from "../util/time";
 
 interface PowerPanelProps {
@@ -26,7 +26,6 @@ interface PowerPanelProps {
 }
 
 const formatPct = (v: number | null): string => (v == null ? "—" : `${v.toFixed(1)}%`);
-const formatVolts = (v: number | null): string => (v == null ? "—" : `${v.toFixed(2)} V`);
 
 const COUNTDOWN_REASON: Record<PowerCountdownReason, string> = {
   input_lost_discharging: "input lost, battery discharging",
