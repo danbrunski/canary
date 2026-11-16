@@ -142,8 +142,16 @@ export interface FeedbackRecord {
   anomaly_key: string;
   label: "true_positive" | "false_positive" | "ignored" | "needs_review";
   reason: string | null;
+  /** Free-form context the operator or UI attached (operating mode, road, ...). */
+  driving_context: Record<string, unknown>;
+  labeled_by: string | null;
   labeled_at: string;
   event: Record<string, unknown>;
+  /** The operator's guess at what is going on (S.3); `null` for an ordinary verdict. */
+  hypothesis: string | null;
+  /** The review flow's clarifying question and its answer: both set or both `null`. */
+  clarifying_question: string | null;
+  clarifying_answer: string | null;
 }
 
 export interface FeedbackResponse {

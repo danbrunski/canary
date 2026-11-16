@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { openReconnectingSocket } from "../api/websocket";
-import type { ConnectionState, ScoreMessage } from "../types";
+import type { ConnectionState, ScoreMessage, ScoreSource } from "../types";
 
-export type ScoreSource = ScoreMessage["source"];
 export type ScoresBySource = Partial<Record<ScoreSource, ScoreMessage[]>>;
 
 /** Per-source ring length. The live readout needs the latest value plus a

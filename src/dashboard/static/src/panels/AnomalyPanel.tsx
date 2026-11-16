@@ -16,7 +16,7 @@ import {
   selectClass,
   type NoticeState,
 } from "../styles";
-import type { AnomalyEvent } from "../types";
+import { ANOMALY_SOURCES, type AnomalyEvent, type AnomalySource } from "../types";
 import { formatTimestamp } from "../util/time";
 import { LiveModelScores } from "./LiveModelScores";
 import { channelRankingCaption, noveltyScreen, relatedEventsFor } from "../lib/evidence";
@@ -55,7 +55,7 @@ function eventKey(e: AnomalyEvent): string {
  *  events on the right — so an operator at a glance can see "are we
  *  trending hotter?" without parsing timestamps. */
 export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
-  const [sourceFilter, setSourceFilter] = useState<AnomalyEvent["source"] | "all">("all");
+  const [sourceFilter, setSourceFilter] = useState<AnomalySource | "all">("all");
   const [modeFilter, setModeFilter] = useState<string>("all");
   // The live readout up top now answers "what's it doing right now", so the
   // historical list shows everything by default (operators didn't want events
@@ -194,10 +194,11 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
               onChange={(e) => setSourceFilter(e.target.value as typeof sourceFilter)}
             >
               <option value="all">all</option>
-              <option value="fused">fused</option>
-              <option value="behavior">behavior</option>
-              <option value="isolation_forest">isolation_forest</option>
-              <option value="lstm_autoencoder">lstm_autoencoder</option>
+              {ANOMALY_SOURCES.map((source) => (
+                <option key={source} value={source}>
+                  {source}
+                </option>
+              ))}
             </select>
           </label>
           {modes.length > 0 && (

@@ -2,8 +2,9 @@ import { createElement } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { ANOMALY_SOURCES } from "../types";
 import type { AcceptedBaselineOverrideSummary, AnomalyEvent, StatusResponse } from "../types";
-import { StatusStrip } from "./StatusStrip";
+import { ANOMALY_SOURCE_LABEL, StatusStrip } from "./StatusStrip";
 
 function status(overrides: StatusResponse["accepted_baseline_overrides"]): StatusResponse {
   return {
@@ -226,5 +227,35 @@ describe("StatusStrip — detector roles (A06.5)", () => {
       }),
     );
     expect(screen.getByText(/active · LSTM/)).toBeInTheDocument();
+  });
+});
+
+describe("StatusStrip — every anomaly source has a name", () => {
+  // The strip used to name every source it had no arm for "IF", a trouble code
+  // included. `ANOMALY_SOURCE_LABEL` is a `Record` over `AnomalySource`, so a new
+  // source fails typecheck until it has a label; this pins the labels.
+  it.each([
+    ["isolation_forest", "IF"],
+    ["lstm_autoencoder", "LSTM"],
+    ["fused", "Fused"],
+    ["behavior", "Behavior"],
+    ["dtc", "DTC"],
+    ["trend", "Trend"],
+    ["misfire", "Misfire"],
+    ["plausibility", "Plausibility"],
+    ["committee", "Committee"],
+  ] as const)("names a %s event %s", (source, label) => {
+    render(
+      createElement(StatusStrip, {
+        status: status({ active: 0, overrides: [] }),
+        channels: new Map(),
+        events: [anomaly({ source })],
+      }),
+    );
+    expect(screen.getByText(new RegExp(`active · ${label} \\(city\\)`))).toBeInTheDocument();
+  });
+
+  it("names every source the dashboard lists", () => {
+    expect(Object.keys(ANOMALY_SOURCE_LABEL)).toEqual([...ANOMALY_SOURCES]);
   });
 });

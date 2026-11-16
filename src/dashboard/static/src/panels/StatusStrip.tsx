@@ -8,7 +8,12 @@ import {
   statusStripClass,
   statusValueClass,
 } from "../styles";
-import type { AcceptedBaselineOverrideSummary, AnomalyEvent, StatusResponse } from "../types";
+import type {
+  AcceptedBaselineOverrideSummary,
+  AnomalyEvent,
+  AnomalySource,
+  StatusResponse,
+} from "../types";
 import { STALE_THRESHOLD_MS, computeFreshness } from "../util/freshness";
 import { useLocalStorageJson } from "../hooks/useLocalStorage";
 import { useNow } from "../hooks/useNow";
@@ -251,6 +256,22 @@ const ANOMALY_ACTIVE_MS = 60_000;
 //: quiet (and, on a fresh page load, a day-old event from the log history).
 const ANOMALY_RECENT_MS = 5 * 60_000;
 
+/** How the strip names each source. A `Record` over every `AnomalySource`, so a
+ *  source added in `types/live.ts` fails typecheck until it has a label here (the
+ *  old ternary showed "IF" for every source it had no arm for, including a
+ *  trouble code). */
+export const ANOMALY_SOURCE_LABEL: Record<AnomalySource, string> = {
+  isolation_forest: "IF",
+  lstm_autoencoder: "LSTM",
+  fused: "Fused",
+  behavior: "Behavior",
+  dtc: "DTC",
+  trend: "Trend",
+  misfire: "Misfire",
+  plausibility: "Plausibility",
+  committee: "Committee",
+};
+
 /** The freshest *alert* + whether it's "active" (last 60 s) vs just recent.
  *  Evidence-role events (A06.5) are skipped.
  *  Returns null once the freshest event is older than the recent window, so the
@@ -265,14 +286,7 @@ function mostRecentEvent(events: AnomalyEvent[], now: number): RecentAnomaly | n
     if (Number.isNaN(t)) continue;
     const ageMs = now - t;
     if (ageMs >= ANOMALY_RECENT_MS) return null;
-    const src =
-      e.source === "lstm_autoencoder"
-        ? "LSTM"
-        : e.source === "fused"
-          ? "Fused"
-          : e.source === "behavior"
-            ? "Behavior"
-            : "IF";
+    const src = ANOMALY_SOURCE_LABEL[e.source] ?? e.source;
     const mode = e.operating_mode ? ` (${e.operating_mode})` : "";
     return { fresh: ageMs >= 0 && ageMs < ANOMALY_ACTIVE_MS, label: `${src}${mode}` };
   }

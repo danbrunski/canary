@@ -10,6 +10,7 @@ import {
   status,
   WINDOWED_DID_SCHEDULER,
 } from "../test/captureFixtures";
+import { hostSystem } from "../test/healthFixtures";
 import { mockHttp } from "../test/harness";
 
 const mocks = mockHttp(CAPTURE_API);
@@ -120,7 +121,7 @@ describe("CaptureRunner — Engine Tuning → Logging (capture-profiles.md 3.2)"
       data_freshness_seconds: 0.1,
       model_swaps: {},
       active_model_version: null,
-      system: {},
+      system: hostSystem(),
       obd_scheduler: {
         achieved_hz_capture: { RPM: 3.95 },
         capture_max_gap_seconds: { RPM: 0.31 },
@@ -166,7 +167,7 @@ describe("CaptureRunner — Engine Tuning → Logging (capture-profiles.md 3.2)"
       data_freshness_seconds: 0.1,
       model_swaps: {},
       active_model_version: null,
-      system: {},
+      system: hostSystem(),
       obd_scheduler: {
         requests: scenario.requests.map((row) => ({ ...row, capture_selected: true })),
         did_profile: {
@@ -199,7 +200,7 @@ describe("CaptureRunner — Engine Tuning → Logging (capture-profiles.md 3.2)"
       data_freshness_seconds: 0.1,
       model_swaps: {},
       active_model_version: null,
-      system: {},
+      system: hostSystem(),
       obd_scheduler: {
         did_profile: {
           phase: "lapse",

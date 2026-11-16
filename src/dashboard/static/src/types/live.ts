@@ -7,6 +7,7 @@
 // explicit nulls when they have a None default.
 
 import type { CaptureProfileState, ObdSchedulerStatus, ReplayStatus } from "./control";
+import type { FeedbackRecord } from "./coverage";
 import type { NetworkSummary } from "./network";
 
 /** One row from `/telemetry/latest` or one message on `/ws/telemetry`. */
@@ -18,6 +19,38 @@ export interface TelemetryRow {
   unit: string | null;
 }
 
+/** Every `AnomalyEvent.source`, in the order of `src/alerts/events.py`
+ *  `AnomalySource` (`tests/test_dashboard_ts_contracts.py` fails when the two
+ *  differ). The first four are the per-tick detectors; the rest are
+ *  low-frequency events from the diagnostic, trend, plausibility and committee
+ *  checks. */
+export const ANOMALY_SOURCES = [
+  "isolation_forest",
+  "lstm_autoencoder",
+  "fused",
+  "behavior",
+  "dtc",
+  "trend",
+  "misfire",
+  "plausibility",
+  "committee",
+] as const;
+
+export type AnomalySource = (typeof ANOMALY_SOURCES)[number];
+
+/** The sources `/ws/scores` carries: one frame per inference tick for each of
+ *  the four per-tick detectors (`_publish_score` in
+ *  `src/daemon/detectors/`). A subset of `ANOMALY_SOURCES`, so a source that
+ *  is renamed there cannot survive here. */
+export const SCORE_SOURCES = [
+  "isolation_forest",
+  "lstm_autoencoder",
+  "fused",
+  "behavior",
+] as const satisfies readonly AnomalySource[];
+
+export type ScoreSource = (typeof SCORE_SOURCES)[number];
+
 /** One event from `/anomalies` or `/ws/anomalies` — `AnomalyEvent.to_dict()`. */
 export interface AnomalyEvent {
   timestamp: string;
@@ -25,8 +58,9 @@ export interface AnomalyEvent {
   // per-tick sources. `behavior` (Phase 7.4): a behavior/physics-model
   // residual as a first-class detector — `detail.cause` is a human-readable
   // physical explanation and `detail.behavior_residuals` the expected/actual.
-  // Both are emitted alongside the per-source events.
-  source: "isolation_forest" | "lstm_autoencoder" | "fused" | "behavior";
+  // Both are emitted alongside the per-source events. The rest are the
+  // non-per-tick sources (`ANOMALY_SOURCES`).
+  source: AnomalySource;
   model_version: string;
   score: number;
   threshold: number | null;
@@ -41,6 +75,15 @@ export interface AnomalyEvent {
    *  non-alerting (`models.roles`): stored and listed, never an active
    *  alert. Absent on records written before A06.5, which are alerts. */
   role?: "alert" | "evidence";
+  /** 6.4 — the emitter's dedupe identity when it differs from
+   *  `(source, model_version)`: `"fused"`, `"dtc:<code>:<status>"`,
+   *  `"trend:<stat>"`, ... `null` (every per-detector event) falls back to
+   *  `model_version`. Absent on records written before it existed. */
+  dedupe_key?: string | null;
+  /** The operator's verdict, joined on by `GET /anomalies` when a feedback
+   *  store is wired (Task 6.24): `null` is "unlabelled". Absent on a `/ws`
+   *  frame and on a daemon without a store. */
+  feedback?: FeedbackRecord | null;
 }
 
 /** One `/ws/scores` frame. Emitted every inference tick for *both* models
@@ -49,7 +92,7 @@ export interface AnomalyEvent {
  *  trustworthy value, distinct from a real 0. */
 export interface ScoreMessage {
   type: "score";
-  source: "isolation_forest" | "lstm_autoencoder" | "fused" | "behavior";
+  source: ScoreSource;
   score: number | null;
   threshold: number | null;
   operating_mode: string | null;
@@ -186,6 +229,15 @@ export interface StatusResponse {
    *  session owner and the last foreign tester heard. Null when unwired. */
   passive?: PassiveGateStatus | null;
   capture_profile?: CaptureProfileState | null;
+  /** The active capture profile again (`tuning_profile.snapshot()`), kept for
+   *  older clients; `capture_profile` is the one to read. */
+  tuning_mode?: CaptureProfileState | null;
+  /** The OBD request-rate override (`bus_budget.snapshot()`): an armed one
+   *  silently changes every channel's achieved rate. */
+  bus_budget?: BusBudgetStatus | null;
+  /** Seconds from process start to each startup stage (S01.1); `null` when no
+   *  health monitor is wired. */
+  startup?: StatusStartup | null;
   last_capture?: {
     name: string;
     session_dir: string;
@@ -213,6 +265,28 @@ export interface StatusResponse {
   /** The address a phone should bookmark (P2.3); a cached read, null until
    *  the first one. Absent on an older daemon. */
   network?: NetworkSummary | null;
+}
+
+/** `/status.bus_budget` — `bus_budget.snapshot()`. */
+export interface BusBudgetStatus {
+  override_requests_per_second: number | null;
+  source: string;
+  ttl_remaining_seconds: number | null;
+  max_requests_per_second: number;
+}
+
+/** `/status.startup` — `StartupTimeline.snapshot()`. Stage values are seconds
+ *  from the process start, `null` for a stage not yet reached. */
+export interface StatusStartup {
+  clock: string;
+  process_start: { at: string; source: string };
+  stages: Record<string, number | null>;
+  first_record_stored_by_source: Record<string, number>;
+  first_record_timestamp_by_source: Record<string, string>;
+  model_loaded: Record<string, number>;
+  skipped: Record<string, string>;
+  pending: string[];
+  complete: boolean;
 }
 
 /** Response from `GET /status?view=compact` (`compact_status`): the pollable
@@ -430,8 +504,49 @@ export interface StatusHealth {
   data_freshness_seconds: number | null;
   model_swaps: Record<string, number>;
   active_model_version: string | null;
-  system: Record<string, number | null>;
+  /** Host load, memory and temperature (`HostMetrics.system()`), then the
+   *  cgroup ceiling (`memory_limit_status`). Not a number map: the ceiling
+   *  carries a flag and the path it was read from. `null` is "the platform
+   *  does not say", never zero. */
+  system: {
+    load_1m: number | null;
+    cpu_count: number | null;
+    load_per_cpu: number | null;
+    mem_used_fraction: number | null;
+    mem_total_mb: number | null;
+    cpu_temp_c: number | null;
+    /** `true`: a byte ceiling is set. `false`: the controller is there and the
+     *  ceiling is `max`. `null`: unknown (no cgroup file), neither reassurance
+     *  nor alarm. */
+    memory_limits_enforced: boolean | null;
+    memory_max_bytes: number | null;
+    memory_max_source: string | null;
+    /** Busy fraction (0..1) over the sampler's trailing window; `null` until
+     *  it has two samples. */
+    cpu_percent: number | null;
+  };
   power?: PowerStatus | null;
+  /** Per model manager: what it serves against what its manifest sidecar
+   *  claims, present only while they disagree (a partial deploy: the manifest
+   *  landed, the binary did not). Absent when every manager agrees. */
+  model_version_mismatches?: Record<string, VersionMismatch>;
+  /** The serving sequence engine's suppress list against its artifact's (A01.5);
+   *  absent while no engine is built. */
+  sequence_suppression?: SequenceSuppression;
+  /** Why the sequence detector is not served: its alert level was chosen at
+   *  another forward cadence (A06.6). Absent while it serves. */
+  sequence_cadence_refusal?: string;
+  /** Each learned detector's configured and effective role, by source (A06.5). */
+  detector_roles?: Record<string, DetectorRoleStatus>;
+  /** Arm-to-now statistics for the active capture (C03.2), beside the
+   *  scheduler's trailing 60 s numbers. Absent with no capture active. The
+   *  per-channel and per-request tables are typed loosely. */
+  capture_lifetime?: CaptureLifetimeStatus;
+  /** Per telemetry sink (`ingest`, `storage`, `can_receive`, `obd_collect`):
+   *  queue depth, high-water mark, drops and errors. Absent before any sink
+   *  has reported. Each sink's state is typed loosely: the receive-path and
+   *  hand-off counters differ by sink. */
+  telemetry_sinks?: Record<string, Record<string, unknown>>;
   feature_drift?: Record<string, unknown>;
   reconstruction_error_drift?: Record<string, unknown>;
   obd_scheduler?: ObdSchedulerStatus;
@@ -441,6 +556,56 @@ export interface StatusHealth {
    *  intended trigger to revisit the capture architecture — this is a
    *  passive counter, not an alert. */
   can0?: Can0Counters;
+}
+
+/** One `/status.health.model_version_mismatches` entry. */
+export interface VersionMismatch {
+  serving: string;
+  manifest: string;
+}
+
+/** `/status.health.sequence_suppression` — `SuppressionComparison.to_dict()`.
+ *  `training` and the two `*_at_serve` lists are `null` when the manifest
+ *  predates the record. */
+export interface SequenceSuppression {
+  model_version: string;
+  recorded_at_training: boolean;
+  training: string[] | null;
+  serving: string[];
+  differs: boolean;
+  added_at_serve: string[] | null;
+  dropped_at_serve: string[] | null;
+  trained_columns_suppressed_at_serve: string[];
+}
+
+/** One `/status.health.detector_roles` entry — `RoleResolution.to_dict()`, or
+ *  just `configured`, `effective: null` and `reason` before it is resolved. */
+export interface DetectorRoleStatus {
+  configured: "alert" | "evidence";
+  effective: "alert" | "evidence" | null;
+  reason: string;
+  artifact_path?: string | null;
+  artifact_sha256?: string | null;
+  model_version?: string | null;
+  verdict_path?: string | null;
+  verdict?: Record<string, unknown> | null;
+}
+
+/** `/status.health.capture_lifetime` — `CaptureLifetime.to_dict(events=False)`. */
+export interface CaptureLifetimeStatus {
+  source: string;
+  profile: string;
+  generation_at_start: number;
+  started_monotonic: number;
+  started_wall: number;
+  elapsed_s: number;
+  paused_s: number;
+  intended_active_s: number;
+  pause_windows: unknown[];
+  pause_reasons: string[];
+  channels: Record<string, Record<string, unknown>>;
+  requests: Record<string, Record<string, unknown>>;
+  request_event_capacity: number;
 }
 
 /** `/status.health.can0` (Task 6.8). Raw counters read at this poll, plus

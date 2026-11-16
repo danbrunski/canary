@@ -1,13 +1,16 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { createElement } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { CAPTURE_API, installCaptureMocks, status } from "../test/captureFixtures";
+import { CAPTURE_API, FUEL_MAP, installCaptureMocks, status } from "../test/captureFixtures";
 import { mockHttp } from "../test/harness";
 
 const mocks = mockHttp(CAPTURE_API);
 
-const { CaptureProfileEditor } = await import("./CaptureProfileEditor");
+const { CaptureProfileEditor, blankProfile } = await import("./CaptureProfileEditor");
 
 function renderPanel(activeName: string | null = null, extra: Record<string, unknown> = {}) {
   installCaptureMocks(mocks);
@@ -208,5 +211,58 @@ describe("CaptureProfileEditor — System → Capture profiles (capture-profiles
 
     fireEvent.click(screen.getByRole("button", { name: "New profile" }));
     expect(screen.getByText(/new, unsaved profile/)).toBeInTheDocument();
+  });
+
+  it("keeps the fields it has no control for through an edit and a save", async () => {
+    // `kline`, `did_cycle_seconds` and `max_tuple_skew_s` have no widget: the draft
+    // is cloned and spread, so they ride along. A save that dropped them would
+    // silently turn a K-line capture into a CAN-only one.
+    const carrying = {
+      ...FUEL_MAP,
+      name: "kline-capture",
+      storage_prefix: "_capture-kline-capture",
+      kline: ["KLINE_ECM_RPM", "KLINE_ECM_TPS"],
+      did_cycle_seconds: 0.5,
+      max_tuple_skew_s: 0.125,
+    };
+    installCaptureMocks(mocks);
+    mocks.getCaptureProfiles.mockResolvedValue({
+      schema_version: 1,
+      profiles: [carrying],
+      resolved_plans: {},
+    });
+    render(createElement(CaptureProfileEditor, { token: "secret", status: status(null) }));
+    fireEvent.change(await screen.findByRole("combobox"), { target: { value: "kline-capture" } });
+    await screen.findByText(/editing .kline-capture./);
+    fireEvent.change(screen.getByLabelText("Target rate"), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+
+    await waitFor(() => expect(mocks.saveCaptureProfile).toHaveBeenCalled());
+    const saved = mocks.saveCaptureProfile.mock.calls.at(-1)?.[1];
+    expect(saved.target_rate_hz).toBe(8);
+    expect(saved.kline).toEqual(["KLINE_ECM_RPM", "KLINE_ECM_TPS"]);
+    expect(saved.did_cycle_seconds).toBe(0.5);
+    expect(saved.max_tuple_skew_s).toBe(0.125);
+  });
+});
+
+describe("blankProfile — the model's defaults, not the editor's own", () => {
+  // `captureProfileDefaults.fixture.json` is `CaptureProfile`'s defaults; the
+  // Python contract test (`tests/test_dashboard_ts_contracts.py`) fails when it
+  // stops matching the model. `round_timestamps` was `true` here while the
+  // model's default is `false`, and the editor has no control for it.
+  const defaults = JSON.parse(
+    readFileSync(resolve(process.cwd(), "src/test/captureProfileDefaults.fixture.json"), "utf8"),
+  ) as Record<string, unknown>;
+
+  it("carries every field the model defaults, at the model's value", () => {
+    const blank: Record<string, unknown> = { ...blankProfile() };
+    for (const own of ["name", "storage_prefix"]) delete blank[own];
+    expect(blank).toEqual(defaults);
+  });
+
+  it("derives the storage prefix from the name", () => {
+    const blank = blankProfile();
+    expect(blank.storage_prefix).toBe(`_capture-${blank.name}`);
   });
 });

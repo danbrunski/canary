@@ -1,8 +1,8 @@
 import { scoreView, windowReference, type AnomalyLevel } from "../anomalyScore";
 import { Sparkline } from "../components/Sparkline";
-import type { ScoreSource, ScoresBySource } from "../hooks/useScoreStream";
+import type { ScoresBySource } from "../hooks/useScoreStream";
 import { cn } from "../styles";
-import type { ScoreMessage } from "../types";
+import { SCORE_SOURCES, type ScoreMessage, type ScoreSource } from "../types";
 
 const LEVEL_TONE: Record<AnomalyLevel, string> = {
   low: "text-fg-dim",
@@ -16,8 +16,6 @@ const SOURCE_LABEL: Record<ScoreSource, string> = {
   fused: "fused severity",
   behavior: "behavior residual",
 };
-
-const SOURCES: ScoreSource[] = ["isolation_forest", "lstm_autoencoder", "fused", "behavior"];
 
 /** One model's live readout: current normalized index + level + raw value,
  *  and a fixed-scale (0–100, threshold ref at 50) sparkline of recent ticks.
@@ -94,7 +92,7 @@ function ModelCard({ source, msgs }: { source: ScoreSource; msgs: ScoreMessage[]
 export function LiveModelScores({ scores }: { scores: ScoresBySource }) {
   return (
     <div className="mb-3 flex flex-col gap-2 sm:flex-row">
-      {SOURCES.map((s) => (
+      {SCORE_SOURCES.map((s) => (
         <ModelCard key={s} source={s} msgs={scores[s]} />
       ))}
     </div>

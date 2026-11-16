@@ -113,7 +113,7 @@ neither earlier review covered.
     50 ms for 5 s and expects a fired event. It fails on the old effect and
     passes on the new one.
 
-- [ ] **R28.2 API response types are hand-copied from Python and have
+- [x] **R28.2 API response types are hand-copied from Python and have
   drifted.** `src/types/*.ts` holds 402 exported types in 4,906 lines;
   `api/http.ts` has 97 route functions and `fetchJson<T>` is an unchecked
   cast, so drift is silent. The backend declares no `response_model`, so there
@@ -133,18 +133,92 @@ neither earlier review covered.
 
   `model_version_mismatches` is the field that says a detector is serving
   against the wrong manifest, and the dashboard cannot show it.
-  - [ ] Fix `AnomalyEvent.source` first: one exported const for the source
+  - [x] Fix `AnomalyEvent.source` first: one exported const for the source
     list, used by the type, the `AnomalyPanel` select and `StatusStrip`.
-  - [ ] Add a key-set contract test in the shape of
+    `types/live.ts` exports `ANOMALY_SOURCES` (the nine, in `AnomalySource`
+    order) and `SCORE_SOURCES` (the four `_publish_score` callers, typed
+    `as const satisfies readonly AnomalySource[]`); `AnomalyEvent.source` is
+    `AnomalySource`, `ScoreMessage.source` is `ScoreSource`, `dedupe_key?` is
+    added. `AnomalyPanel`'s select maps `ANOMALY_SOURCES`; `LiveModelScores`
+    maps `SCORE_SOURCES`; `StatusStrip`'s ternary (which showed "IF" for a
+    trouble code) is `ANOMALY_SOURCE_LABEL: Record<AnomalySource, string>`, so
+    a new source fails typecheck until it has a label. Pinned by
+    `StatusStrip.test.ts` "every anomaly source has a name" (10 cases) and
+    `test_the_dashboard_lists_every_anomaly_source_in_order`,
+    `test_the_score_sources_are_the_ones_the_daemon_publishes`.
+  - [x] Add a key-set contract test in the shape of
     `test_brain_job_kinds_ts.py`: build the real payload in Python
     (`StatusSnapshot.to_dict`, `HealthMonitor.snapshot`,
     `CaptureProfile().model_dump()`, `get_args(AnomalySource)`), parse the
     interface's field names and literal unions out of the `.ts` file, assert
     equal sets (a `?` field may be absent). Start with the rows above, then
     widen one type at a time.
-  - [ ] Decide `blankProfile()`'s `round_timestamps` on purpose and pin it.
-  - [ ] Confirm a saved profile that carries `kline` round-trips through
+    `tests/test_dashboard_ts_contracts.py` (20 tests) with the reader in
+    `tests/ts_interfaces.py` (comments, `?`, `readonly`, nested braces; raises
+    on what it cannot read). `compare` names each key and the side it is
+    missing from, and also fails on a value whose JSON kind the type rules out
+    (`bool` under `number | null`), so the `health.system` row is a kind check
+    as well as a key check. `StatusResponse`, `StatusHealth` and
+    `CaptureLifetimeStatus` are compared against the body of a real `GET
+    /status` (TestClient over `create_app` with a fully set `HealthMonitor`, a
+    capture active, and the real `ReplayController` and
+    `SequenceDetectorController`, so the route-added `replay`,
+    `sequence_detector`, `accepted_baseline_overrides` and `network` are in
+    the body; no source scrape, no allow-list). Adding `payload.update({"zzz_new":
+    1})` to `status_routes.py` fails `test_the_status_response_type_matches_the_route`
+    naming `zzz_new`. Every table row is fixed: `StatusHealth` (the six
+    blocks; new `VersionMismatch`, `SequenceSuppression`, `DetectorRoleStatus`,
+    `CaptureLifetimeStatus`), `StatusResponse` (`tuning_mode`, `bus_budget`,
+    `startup`; new `BusBudgetStatus`, `StatusStartup`), `health.system` (an
+    inline ten-member object: `memory_limits_enforced: boolean | null`,
+    `memory_max_source: string | null`), `CaptureProfile` (`kline`,
+    `did_cycle_seconds`, `max_tuple_skew_s`), and `MAX_GRID_POINTS` /
+    `MAX_DRAWS` against `rom_editor` (parametrized test). Widened because it
+    was cheap and each had drifted: `AnomalyEvent` (+ the route-joined
+    `feedback`), `FeedbackRecord` (`driving_context`, `labeled_by`,
+    `hypothesis`, `clarifying_*` were missing), `ScoreMessage`,
+    `CaptureProfileState` (`kline`, `did_cycle_seconds`, `priority_channels`,
+    `store_every_frame`, `analog_full_rate`, `storage_prefix`, `achieved_hz`,
+    ...). A mutation check (drop `dedupe_key`, retype
+    `memory_limits_enforced`, drop `startup`, drop a source) fails four tests
+    and each names the key. Not covered: the ~380 other exported types,
+    `CompactStatusResponse`, `health.power` (needs `vcgencmd`), the inner
+    shapes of `capture_lifetime` / `telemetry_sinks` / `obd_scheduler`,
+    `detectors`, `model_provenance`, `gps` / `imu` / `trip`. Callers adjusted:
+    `health.system` is no longer `Record<string, number | null>`; two test
+    fixtures that wrote `system: {}` / a three-member object now use
+    `test/healthFixtures.ts` `hostSystem()`.
+  - [x] `model_version_mismatches` on the dashboard: `ModelHealthPanel`
+    ("Drift & Inference Health") shows a `role="alert"` notice naming each
+    manager's serving and manifest version, only while one disagrees.
+    `ModelEvidenceHealth.test.ts` (2 new): shown with a mismatch, absent
+    without. Not measured on a Pi serving a real partial deploy.
+  - [x] Decide `blankProfile()`'s `round_timestamps` on purpose and pin it.
+    It is `false`, the model's default, and `blankProfile()` now carries every
+    model field at its default (it had no `kline`, `did_cycle_seconds`,
+    `max_tuple_skew_s`, `notes`, `mode01_batch_groups`, `store_every_frame`,
+    `analog_full_rate`). `test/captureProfileDefaults.fixture.json` is
+    `CaptureProfile`'s defaults, checked against the model by
+    `test_the_editors_blank_profile_is_the_models_defaults` (regenerate with
+    `CANARY_UPDATE_CONTRACT_FIXTURES=1`), and `CaptureProfileEditor.test.ts`
+    "blankProfile" compares the whole default set to it (fails with
+    `round_timestamps: true` restored). Considered and not chosen: 2 of the 5
+    starters in `data/capture_profiles.yaml` (`fuel-map`, `tuning-did`) set
+    `true` and 3 (`default`, `broadcast-every-frame`, `fuel-pulsation`) set
+    `false`, and the editor has no control for the flag, so a new profile
+    made there is round-stamped only if blank says so. Operator may want
+    `true` for tuning-style profiles; a blank profile is not one.
+  - [x] Confirm a saved profile that carries `kline` round-trips through
     `CaptureProfileEditor` (it clones and spreads, so it should; unverified).
+    `CaptureProfileEditor.test.ts` "keeps the fields it has no control for
+    through an edit and a save": loads a profile with `kline`,
+    `did_cycle_seconds` and `max_tuple_skew_s`, edits Target rate, saves, and
+    the posted body keeps all three. Fails when the save drops `kline`.
+    Gate: `pnpm typecheck`, `format:check`, `lint` clean (no new
+    suppressions), `pnpm test` 153 files / 1608 tests; `ruff check .`,
+    `ruff format --check .`, `mypy` clean; `pytest
+    tests/test_dashboard_ts_contracts.py tests/test_brain_job_kinds_ts.py
+    tests/test_layering.py tests/test_source_rules.py` 67 passed.
 
 - [~] **R28.3 Hand-rolled `setInterval` polling has regrown beside
   `usePolling` (R08.9).** `panels/SessionsPanel.tsx` and

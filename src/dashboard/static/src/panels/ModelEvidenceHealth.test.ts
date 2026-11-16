@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { NetworkError } from "../api/core";
 import { noveltyScreen } from "../lib/evidence";
+import { hostSystem } from "../test/healthFixtures";
 import type { AnomalyEvent, StatusResponse } from "../types";
 import { ModelEvidencePanel } from "./ModelEvidencePanel";
 import { ModelHealthPanel } from "./ModelHealthPanel";
@@ -41,7 +42,7 @@ const STATUS: StatusResponse = {
     data_freshness_seconds: 1.5,
     model_swaps: { swapped: 1, rejected: 0, unchanged: 3, error: 0 },
     active_model_version: "lstm_v1",
-    system: { load_per_cpu: 0.2, mem_used_fraction: 0.4, mem_total_mb: 4096 },
+    system: hostSystem({ load_per_cpu: 0.2, mem_used_fraction: 0.4, mem_total_mb: 4096 }),
     feature_drift: {
       per_feature_sigma: { "obd:RPM": 3.2, "obd:MAF": 0.4 },
       max_sigma: 3.2,
@@ -143,6 +144,27 @@ describe("ModelHealthPanel", () => {
     expect(screen.getByText("18.0 ms")).toBeInTheDocument();
     expect(screen.getByText("obd:RPM")).toBeInTheDocument();
     expect(screen.getByText("1.20x")).toBeInTheDocument();
+  });
+
+  it("says when a detector serves against the wrong manifest", () => {
+    const withMismatch: StatusResponse = {
+      ...STATUS,
+      health: {
+        ...STATUS.health!,
+        model_version_mismatches: {
+          isolation_forest: { serving: "if_v1", manifest: "if_v2" },
+        },
+      },
+    };
+    render(createElement(ModelHealthPanel, { status: withMismatch, statusError: null }));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "isolation_forest: serving if_v1, manifest if_v2",
+    );
+  });
+
+  it("shows no mismatch notice while every manager agrees", () => {
+    render(createElement(ModelHealthPanel, { status: STATUS, statusError: null }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("describes an unreachable daemon instead of the raw transport error (R08.9)", () => {

@@ -229,9 +229,15 @@ export interface CaptureProfile {
    * One read serves a whole window, so it runs at its members' largest weight.
    */
   memory_rate_weights?: Record<string, number>;
+  /** K-line channels (service 0x21 on the ECM's K-line port) this profile
+   *  reads; empty reads none. */
+  kline?: string[];
   mode01_enabled: boolean;
   mode22_enabled: boolean;
   did_interval_seconds: number | null;
+  /** Start-to-start period of one Mode 01 + Mode 22 cycle (C04.3); `null` leaves
+   *  the profile on `did_interval_seconds`. Ignored by `did_continuous`. */
+  did_cycle_seconds?: number | null;
   round_timestamps: boolean;
   /** Absolute requested cadence per selected channel. */
   target_rate_hz: number | null;
@@ -250,6 +256,9 @@ export interface CaptureProfile {
   required_tuple: string[];
   /** Per-channel floor the capture contract enforces; null promises nothing. */
   min_achieved_rate_hz: number | null;
+  /** Largest spread (seconds) between the members of a required tuple that
+   *  still counts as one sample; `null` promises nothing. */
+  max_tuple_skew_s?: number | null;
   /** Refuse to arm without a named calibration. */
   requires_tune_revision: boolean;
   corpus_eligible: boolean;
@@ -282,18 +291,28 @@ export interface CaptureProfileState {
   mode01: Record<string, number>;
   mode22: string[];
   memory?: string[];
+  mode01_batch_groups?: string[][];
   mode22_rate_weights: Record<string, number>;
   memory_rate_weights?: Record<string, number>;
+  kline?: string[];
   mode01_enabled: boolean;
   mode22_enabled: boolean;
   did_interval_seconds: number | null;
+  did_cycle_seconds?: number | null;
   round_timestamps: boolean;
   target_rate_hz: number | null;
   did_continuous: boolean;
+  priority_channels?: string[] | null;
+  store_every_frame?: boolean;
+  analog_full_rate?: boolean;
+  storage_prefix?: string;
+  /** Achieved rate per channel, when the caller measured it. */
+  achieved_hz?: Record<string, number>;
   expected_total_demand_hz: number | null;
   capacity_evidence: string;
   required_tuple: string[];
   min_achieved_rate_hz: number | null;
+  max_tuple_skew_s?: number | null;
   requires_tune_revision: boolean;
   paused: boolean;
   running_tune_revision?: string | null;

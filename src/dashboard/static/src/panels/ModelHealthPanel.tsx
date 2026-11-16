@@ -46,8 +46,26 @@ function HealthBody({ health }: { health: StatusHealth }) {
   const featureDrift = featureDriftView(health.feature_drift);
   const reconDrift = reconstructionDriftView(health.reconstruction_error_drift);
 
+  const mismatches = Object.entries(health.model_version_mismatches ?? {});
+
   return (
     <div className="flex flex-col gap-3">
+      {mismatches.length > 0 && (
+        <div
+          role="alert"
+          className="rounded-[8px] border border-bad/40 bg-bad/10 px-2.5 py-1.5 text-[0.82rem] text-bad"
+        >
+          <strong>Serving a different model than its manifest names.</strong> A partial deploy: the
+          manifest landed and the binary did not (or the reverse).
+          <ul className="m-0 mt-1 list-none p-0 font-num text-[0.78rem]">
+            {mismatches.map(([manager, pair]) => (
+              <li key={manager}>
+                {manager}: serving {pair.serving}, manifest {pair.manifest}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="grid grid-cols-4 gap-2 max-[1200px]:grid-cols-2 max-[700px]:grid-cols-1">
         <MetricTile
           label="latency mean"

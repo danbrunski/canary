@@ -30,21 +30,33 @@ function timestampSlug(now = new Date()): string {
   ].join("-");
 }
 
+/** A new profile: the model's own defaults (`CaptureProfile` in
+ *  `src/collection/capture_profile_model.py`) for every field but the two the
+ *  editor fills in itself, the timestamp name and the prefix derived from it.
+ *  `CaptureProfileEditor.test.tsx` compares it to
+ *  `captureProfileDefaults.fixture.json`, which
+ *  `tests/test_dashboard_ts_contracts.py` checks against the model, so a
+ *  default changed there (or here) fails a test instead of reaching a saved
+ *  profile. */
 export const blankProfile = (): CaptureProfile => {
   const name = timestampSlug();
   return {
     name,
     description: "",
+    notes: "",
     experimental: false,
     mode01: {},
+    mode01_batch_groups: [],
     mode22: [],
-    memory: [],
     mode22_rate_weights: {},
+    memory: [],
     memory_rate_weights: {},
+    kline: [],
     mode01_enabled: true,
     mode22_enabled: true,
     did_interval_seconds: null,
-    round_timestamps: true,
+    did_cycle_seconds: null,
+    round_timestamps: false,
     target_rate_hz: null,
     did_continuous: false,
     bus_budget_override: null,
@@ -53,10 +65,13 @@ export const blankProfile = (): CaptureProfile => {
     capacity_evidence: "",
     required_tuple: [],
     min_achieved_rate_hz: null,
+    max_tuple_skew_s: null,
     requires_tune_revision: false,
     corpus_eligible: false,
     behavior_model_recipes: [],
     storage_prefix: `_capture-${name}`,
+    store_every_frame: false,
+    analog_full_rate: false,
   };
 };
 
