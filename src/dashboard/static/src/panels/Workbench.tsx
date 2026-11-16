@@ -80,22 +80,35 @@ import { VehicleLedgerPage } from "./VehicleLedgerPage";
 import { TuningContextBar } from "./tuning/TuningContextBar";
 
 // Engine Tuning's pages (with the ROM and log code only they use) are about a
-// third of the dashboard and are opened only from that area, so they load on
-// first visit instead of with the Drive screen (R28.6). Each is its own chunk
-// behind the Suspense in `Workbench`; the memoised ones are memoised once, at
-// load. Page facades stay importable from this file only (`layering.test.ts`).
-const LoggingPage = lazyChunk(() => import("./tuning/LoggingPage"), "LoggingPage");
-const RomEditorPage = lazyChunk(() => import("./tuning/RomEditorPage"), "RomEditorPage");
-const LogsPage = lazyChunk(() => import("./tuning/LogsPage"), "LogsPage", { memoised: true });
-const AnalysisPage = lazyChunk(() => import("./tuning/AnalysisPage"), "AnalysisPage", {
-  memoised: true,
-});
-const RomLibraryPage = lazyChunk(() => import("./tuning/RomLibraryPage"), "RomLibraryPage", {
-  memoised: true,
-});
-const CalibrationPage = lazyChunk(() => import("./tuning/CalibrationPage"), "CalibrationPage", {
-  memoised: true,
-});
+// third of the dashboard and are opened only from that area, so they are not
+// part of the Drive screen's load (R28.6). Each is its own chunk behind the
+// Suspense in `Workbench`; the memoised ones are memoised once, at load. Page
+// facades stay importable from this file only (`layering.test.ts`).
+const loadTuning = {
+  logging: () => import("./tuning/LoggingPage"),
+  romEditor: () => import("./tuning/RomEditorPage"),
+  logs: () => import("./tuning/LogsPage"),
+  analysis: () => import("./tuning/AnalysisPage"),
+  romLibrary: () => import("./tuning/RomLibraryPage"),
+  calibration: () => import("./tuning/CalibrationPage"),
+};
+const LoggingPage = lazyChunk(loadTuning.logging, "LoggingPage");
+const RomEditorPage = lazyChunk(loadTuning.romEditor, "RomEditorPage");
+const LogsPage = lazyChunk(loadTuning.logs, "LogsPage", { memoised: true });
+const AnalysisPage = lazyChunk(loadTuning.analysis, "AnalysisPage", { memoised: true });
+const RomLibraryPage = lazyChunk(loadTuning.romLibrary, "RomLibraryPage", { memoised: true });
+const CalibrationPage = lazyChunk(loadTuning.calibration, "CalibrationPage", { memoised: true });
+
+/** Fetch every Engine Tuning chunk, one after another, so the service worker
+ *  caches them and the pages open while the Pi is unreachable (operator,
+ *  2026-11-15: ~80 kB gzip of background Wi-Fi, after the Drive screen is up).
+ *  A failed fetch is skipped, never thrown: the page then loads on first visit
+ *  as before. `App` calls this from its idle prefetch. */
+export async function prefetchTuningPages(): Promise<void> {
+  for (const load of Object.values(loadTuning)) {
+    await load().catch(() => undefined);
+  }
+}
 
 export interface DashboardData {
   mode: AppMode;

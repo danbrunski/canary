@@ -430,8 +430,11 @@ neither earlier review covered.
     `AnalysisPage`, `RomLibraryPage`, `CalibrationPage` and `RomEditorPage`
     lazily, each inside the existing `PanelErrorBoundary` plus a `Suspense`
     whose fallback is the new `components/PageLoading` (a quiet
-    "Loading…" status line). Idle-time prefetch of the Workbench chunk after
-    `load` (production only) so the service worker has it cached.
+    "Loading…" status line). Idle-time prefetch after `load` (production
+    only) of the Workbench chunk and then, one at a time, every Engine Tuning
+    chunk (`Workbench.prefetchTuningPages`, operator 2026-11-15) so the
+    service worker has them all cached; a failed fetch is skipped and that
+    page loads on first visit instead.
     Measured, vite build raw / gzip (vite's kB = 1000 B):
     before, one chunk `index` 789.37 / 235.37 kB plus css 66.55 / 11.71 kB;
     after, the default (Drive) route loads `index` 228.02 / 72.81 kB plus the
@@ -464,14 +467,18 @@ neither earlier review covered.
     and icons); hashed JS/CSS are cache-first on first fetch and `sw.js` is
     unchanged. `e2e/offlineChunks.spec.ts` runs the production bundle
     (`vite preview`) with the real worker registered: it waits for the worker
-    to control the page and for the idle Workbench prefetch to appear in the
-    Cache Storage, then `context.setOffline(true)`. Offline, the Workbench
-    opens (served from the worker's cache) and an Engine Tuning page never
-    opened online (`#wb/tuning-calibration`) shows the "could not be loaded"
-    alert with a Reload button inside the intact shell, not a blank page.
-    Passed (chromium). The six tuning chunks stay on-demand: prefetching them
-    at idle (~100 kB gzip of background Wi-Fi) so they open offline too is an
-    open operator choice, deferred to the operator, not an unfinished task.
+    to control the page and for the idle prefetch to land the Workbench,
+    `LoggingPage`, `RomEditorPage` and `CalibrationPage` chunks in the Cache
+    Storage, then `context.setOffline(true)`. Offline, the Workbench opens and
+    an Engine Tuning page never opened online (`#wb/tuning-calibration`)
+    renders, both served from the worker's cache. Passed (chromium); it fails
+    with the Workbench prefetch removed and, separately, with the tuning
+    prefetch removed. Operator decision 2026-11-15: prefetch the tuning chunks
+    too (~90 kB gzip of background Wi-Fi after the Drive screen is up; the
+    entry budget is unaffected). A chunk that is genuinely missing (a stale
+    tab after a Pi update) still ends in the Reload notice:
+    `lib/lazyChunk.test.tsx` and
+    `tests/test_dashboard_api.py::test_a_vanished_asset_is_a_404_not_the_index`.
 
 - [x] **R28.7 Formatters and range math outside `util/` and `lib/`.**
   - Two exported `formatDuration` with different output (`util/time.ts`,

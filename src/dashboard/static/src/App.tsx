@@ -31,11 +31,15 @@ import type { WorkbenchItem } from "./types";
 const loadWorkbench = () => import("./panels/Workbench");
 const Workbench = lazyChunk(loadWorkbench, "Workbench");
 
-// Once Drive is up and the browser is idle, fetch the Workbench chunk so the
-// service worker has it cached: the dashboard has to keep opening its pages
-// when the Pi is rebooting mid-drive, and a chunk nobody opened would not be.
+// Once Drive is up and the browser is idle, fetch the Workbench chunk and then
+// the Engine Tuning chunks so the service worker has them cached: the
+// dashboard has to keep opening its pages when the Pi is rebooting mid-drive,
+// and a chunk nobody opened would not be (operator, 2026-11-15).
 if (import.meta.env.PROD && typeof window !== "undefined") {
-  const prefetch = () => void loadWorkbench().catch(() => undefined);
+  const prefetch = () =>
+    void loadWorkbench()
+      .then((workbench) => workbench.prefetchTuningPages())
+      .catch(() => undefined);
   window.addEventListener("load", () => {
     if ("requestIdleCallback" in window) window.requestIdleCallback(prefetch, { timeout: 10_000 });
     else setTimeout(prefetch, 3_000);
