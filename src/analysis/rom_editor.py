@@ -17,7 +17,13 @@ code:
   Carlo draws (E08.3) and per-cell aggregation (E08.4), base vs candidate.
 * :func:`simulate_cells` and :func:`scenario_template` -- that pipeline on a
   built design, the one copy this module and ``tools/rom_sim.py run`` both
-  drive (R25.3); each assembles its own result document.
+  drive (R25.3); each assembles its own result document. The pieces the two
+  drivers share around it are here once too (R30.5): the comparison
+  (:func:`compare_images`), the candidate's trace identity
+  (:func:`spec_candidate`, :func:`file_candidate`) and the learned state
+  (:func:`learned_state`), which differs only by where its values come from
+  (:data:`LEARNED_SOURCES`). The CLI's loader is
+  :mod:`src.analysis.rom_sim_world`.
 * :func:`run_job` -- the workbench child's entry point.
 
 What it makes impossible rather than documented:
@@ -113,9 +119,10 @@ from src.analysis.rom_edit_spec import (
     EditSpecRefusalError,
     build_candidate,
     build_untraced_candidate,
+    load_candidate_file,
     parse_edit_spec,
 )
-from src.analysis.rom_effects import EffectReport, RomEffectRefusalError, compare_roms
+from src.analysis.rom_effects import Candidate, EffectReport, RomEffectRefusalError, compare_roms
 from src.analysis.rom_image import (
     ImageFormatError,
     checksum_verdict,
@@ -175,9 +182,27 @@ MAX_DRAWS = 2000
 STFT_LIMIT = PHYSICAL_LIMITS["obd:SHORT_FUEL_TRIM_1"]
 LTFT_LIMIT = PHYSICAL_LIMITS["obd:LONG_FUEL_TRIM_1"]
 
-#: Every :class:`LearnedState` the editor builds says where it came from.
-LEARNED_SOURCE = "stated: ROM Editor"
-#: So does the :class:`TimingState` (``tools/rom_sim.py`` says ``cli: ...``).
+#: Where a run's learned state comes from: the ROM Editor's request states all
+#: five quantities; ``tools/rom_sim.py run`` states the two trims by flag and
+#: holds the rest (:data:`LEARNED_HELD`).
+LearnedOrigin = Literal["rom_editor", "cli"]
+#: The ``source`` every :class:`LearnedState` names, by where it came from: the
+#: one way the two drivers' paired scenarios differ (R30.5).
+LEARNED_SOURCES: dict[LearnedOrigin, str] = {
+    "rom_editor": "stated: ROM Editor",
+    "cli": "cli: trims stated by --stft-pct and --ltft-pct",
+}
+#: The learned state a CLI run starts from, besides the trims it states: held
+#: equal under both ROMs (the contract's own wording for the closed throttle
+#: position and idle air) and purge off (the contract's: purge scheduling is not
+#: modelled). ``tools/rom_sim.py`` records it in result.json.
+LEARNED_HELD: dict[str, float] = {
+    "throttle_closed_learned": 0.0,
+    "idle_air_learned": 0.0,
+    "evap_purge_area": 0.0,
+}
+#: The :class:`TimingState` says where it came from too (``tools/rom_sim.py``
+#: says ``cli: ...``).
 TIMING_SOURCE = "stated: ROM Editor"
 #: Why a base that is not a flashed revision cannot be simulated.
 BASE_NOT_RECORDED = "base_not_a_recorded_revision"
@@ -433,10 +458,18 @@ def _preview_kit(profile_dir: Path, kit: SimKit | None) -> tuple[SimKit | None, 
         return None, SIM_KIT_UNDECLARED
 
 
-def _effects(base_image: bytes, candidate_image: bytes, kit: SimKit, *, slot: int) -> EffectReport:
-    """``compare_roms`` on the two images under the run's contract mode, as the
-    simulator's ``rom_report`` has it. Where a quantity the mode holds fixed
-    makes an output ``unevaluable``, this is the report that says so."""
+def compare_images(
+    base_image: bytes, candidate_image: bytes, kit: SimKit, *, slot: int, in_mode: bool
+) -> EffectReport:
+    """``compare_roms`` on the two images on ``slot``, named :data:`SLOT_SOURCE`.
+
+    With ``in_mode``, under the run's contract mode, as the simulator's
+    ``rom_report`` has it: where a quantity the mode holds fixed makes an output
+    ``unevaluable``, this is the report that says so (the preview's levers, the
+    cell table's effects, ``tools/rom_sim.py inspect``'s ``in_run_mode``).
+    Without, the plain structural reach (``inspect``'s ``reached``). The one
+    comparison both drivers make (R30.5)."""
+    in_run_mode: dict[str, Any] = {"contract": kit.contract, "mode": MODE} if in_mode else {}
     return compare_roms(
         base_image,
         candidate_image,
@@ -446,23 +479,38 @@ def _effects(base_image: bytes, candidate_image: bytes, kit: SimKit, *, slot: in
         base_slot=slot,
         candidate_slot=slot,
         slot_source=SLOT_SOURCE,
-        contract=kit.contract,
-        mode=MODE,
+        **in_run_mode,
     )
+
+
+def _traced_on(ctx: SimKit | _EditContext, slot: int) -> dict[str, Any]:
+    """What a candidate is traced through: the kit's application model, on
+    ``slot``, named :data:`SLOT_SOURCE` (an edit spec and an edited image alike)."""
+    return {
+        "model": ctx.model,
+        "model_sha256": ctx.model_sha256,
+        "slot": slot,
+        "slot_source": SLOT_SOURCE,
+    }
+
+
+def spec_candidate(
+    spec: EditSpec, ctx: SimKit | _EditContext, base: BaseImage, *, slot: int
+) -> Candidate:
+    """The candidate an E08.1 edit spec makes on ``base``, traced on ``slot``."""
+    return build_candidate(spec, ctx.rom_map, base, **_traced_on(ctx, slot))
+
+
+def file_candidate(path: Path, kit: SimKit, base: BaseImage, *, slot: int) -> Candidate:
+    """An already edited image (e.g. saved from UpRev) as the candidate on
+    ``base``, traced on ``slot`` as :func:`spec_candidate` traces a spec's."""
+    return load_candidate_file(path, kit.rom_map, base=base, **_traced_on(kit, slot))
 
 
 def _candidate(
     base: BaseImage, spec: EditSpec, ctx: _EditContext, *, slot: int
 ) -> tuple[bytes, dict[str, Any]]:
-    made = build_candidate(
-        spec,
-        ctx.rom_map,
-        base,
-        model=ctx.model,
-        model_sha256=ctx.model_sha256,
-        slot=slot,
-        slot_source=SLOT_SOURCE,
-    )
+    made = spec_candidate(spec, ctx, base, slot=slot)
     return made.image, made.provenance
 
 
@@ -507,7 +555,7 @@ def preview_edits(
     else:
         candidate_image, provenance = _candidate(base, spec, _EditContext.of(kit), slot=slot)
         levers = classify_edit(
-            _effects(base.image, candidate_image, kit, slot=slot),
+            compare_images(base.image, candidate_image, kit, slot=slot, in_mode=True),
             rom_map=kit.rom_map,
             model=kit.model,
             contract=kit.contract,
@@ -728,14 +776,55 @@ def _uncertainty(profile_dir: Path, kit: SimKit) -> LoadedUncertainty:
     return load_sim_kit(profile_dir, kit.plant.plant_version).uncertainty
 
 
-def _learned(request: SimRequest) -> LearnedState:
+@dataclasses.dataclass(frozen=True)
+class LearnedValues:
+    """A run's learned quantities before :func:`learned_state` names their
+    source: :class:`LearnedState` minus ``source``. A :class:`SimRequest` states
+    the same five fields itself."""
+
+    stft_pct: float
+    ltft_pct: float
+    throttle_closed_learned: float
+    idle_air_learned: float
+    evap_purge_area: float
+
+
+def cli_learned(stft_pct: float, ltft_pct: float) -> LearnedValues:
+    """The CLI's learned values: the two trims it states, the rest :data:`LEARNED_HELD`."""
+    return LearnedValues(float(stft_pct), float(ltft_pct), **LEARNED_HELD)
+
+
+#: The trims every driver states; every other :class:`LearnedValues` field is
+#: one the CLI holds at :data:`LEARNED_HELD`.
+_STATED_TRIMS = frozenset({"stft_pct", "ltft_pct"})
+
+
+def _check_learned_held() -> None:
+    """Refuse, at import, a :class:`LearnedValues` field the CLI would not hold
+    (or a held key that names no field). Without it the mismatch surfaces only
+    as a TypeError at the first :func:`cli_learned` call (R30.5)."""
+    fields = {f.name for f in dataclasses.fields(LearnedValues)}
+    if set(LEARNED_HELD) != fields - _STATED_TRIMS:
+        raise TypeError(
+            "LEARNED_HELD and LearnedValues name different fields: "
+            f"held {sorted(LEARNED_HELD)}, fields {sorted(fields - _STATED_TRIMS)} (R30.5)"
+        )
+
+
+_check_learned_held()
+
+
+def learned_state(values: LearnedValues | SimRequest, *, origin: LearnedOrigin) -> LearnedState:
+    """The :class:`LearnedState` both drivers' paired scenarios start from, with
+    the ``source`` of its ``origin`` (:data:`LEARNED_SOURCES`): the editor passes
+    its request, the CLI :func:`cli_learned`."""
     return LearnedState(
-        stft_pct=request.stft_pct,
-        ltft_pct=request.ltft_pct,
-        throttle_closed_learned=request.throttle_closed_learned,
-        idle_air_learned=request.idle_air_learned,
-        evap_purge_area=request.evap_purge_area,
-        source=LEARNED_SOURCE,
+        stft_pct=values.stft_pct,
+        ltft_pct=values.ltft_pct,
+        throttle_closed_learned=values.throttle_closed_learned,
+        idle_air_learned=values.idle_air_learned,
+        evap_purge_area=values.evap_purge_area,
+        source=LEARNED_SOURCES[origin],
     )
 
 
@@ -868,7 +957,7 @@ def simulate_cells(
         draws=draws,
         seed=seed,
     )
-    effects = _effects(base_image, candidate_image, kit, slot=slot)
+    effects = compare_images(base_image, candidate_image, kit, slot=slot, in_mode=True)
     axes = (
         fuel_comp_axes(kit, base_image, slot=slot)
         if grid == "fuel_comp"
@@ -930,7 +1019,7 @@ def _simulate(
         base.image_sha256,
         sha256_hex(candidate_image),
         slot=slot,
-        learned=_learned(request),
+        learned=learned_state(request, origin="rom_editor"),
         candidate_events=request.events,
     )
     # The request states the HI DET latch and knock control (module docstring),
@@ -1323,7 +1412,8 @@ __all__ = [
     "BASE_NOT_RECORDED",
     "CALIBRATION_NOT_MAPPED",
     "JOB_KINDS",
-    "LEARNED_SOURCE",
+    "LEARNED_HELD",
+    "LEARNED_SOURCES",
     "LTFT_LIMIT",
     "MAX_DRAWS",
     "MAX_GRID_POINTS",
@@ -1340,14 +1430,20 @@ __all__ = [
     "TYPICAL_KINDS",
     "TYPICAL_VALUES_FILE",
     "ExportedImage",
+    "LearnedOrigin",
+    "LearnedValues",
     "SimRequest",
     "SimulatedCells",
+    "cli_learned",
+    "compare_images",
     "declared_slot",
     "editor_slot",
     "editor_spec",
     "with_sim_slot",
     "export_edits",
     "export_refusal",
+    "file_candidate",
+    "learned_state",
     "library_base",
     "preview_edits",
     "refusal_kind",
@@ -1356,6 +1452,7 @@ __all__ = [
     "sim_base",
     "simulate_cells",
     "simulate_edits",
+    "spec_candidate",
     "spec_export",
     "spec_yaml",
     "typical_values",

@@ -157,6 +157,12 @@ did not change.
       2/5/11/31/42/77).
     - Single-fault refusals are unchanged.
     - Mutating either side's seed or trim fails the new test.
+  - [x] The rest of the duplication, seen from the tool (R30.5, done
+    2026-11-15): the CLI's loader, compare/trace, `LEARNED_HELD`, both
+    `LEARNED_SOURCE`s and the learned-state builder now live once in
+    `src/analysis/` (`rom_editor.learned_state` / `compare_images` /
+    `spec_candidate` / `file_candidate`, `rom_sim_world.SimWorld`). Evidence in
+    `R30-scripts-tools-tests-gates.md` R30.5.
   - [x] Follow-up (pre-existing, found verifying R25.3): the slot can split.
     The editor simulates the constant `SIM_SLOT = 1`, and its `_editable`
     refusal hard-codes it too. The CLI uses the profile's

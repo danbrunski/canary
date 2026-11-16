@@ -6,6 +6,12 @@ prints JSON, and writes artifacts under a caller-given ``--out`` that is never
 inside the checkout (``inside_checkout``: images, designs and traces stay out
 of Git). Nothing here talks to the ECU, and no image is copied anywhere.
 
+What it loads and compares (the kit, slot, base and candidate, the comparison
+and its trace, the paired scenario and its learned state) is library code the
+ROM Editor shares: ``src.analysis.rom_sim_world`` and
+``src.analysis.rom_editor`` (R30.5). This file keeps the arguments and their
+refusals, the output policy and its own result document.
+
 Subcommands::
 
     design drives  pre-change drives -> a frozen, hashed point design (E08.2)
@@ -61,6 +67,7 @@ import json
 import math
 import time
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, get_args
 
@@ -68,52 +75,29 @@ import pandas as pd
 from pydantic import ValidationError
 
 from src.analysis.ecu_application import ApplicationModelRefusalError, OverrideRegime
-from src.analysis.fuel_comp_inputs import load_fuel_comp_declaration
 from src.analysis.fuel_comp_rom import (
     ROM_DIRS_ENV,
     FuelCompRomRefusalError,
-    RevisionImageResolver,
     rom_dirs_from_env,
 )
 from src.analysis.fuel_plant import FuelPlantRefusalError, plant_qualification
-from src.analysis.paired_scenarios import (
-    LearnedState,
-    SimKit,
-    TimingState,
-)
-from src.analysis.rom_edit_spec import (
-    BaseImage,
-    BaseRef,
-    Edit,
-    EditSpec,
-    build_candidate,
-    load_candidate_file,
-    load_edit_spec,
-    resolve_base,
-)
+from src.analysis.paired_scenarios import LearnedState, TimingState
+from src.analysis.rom_edit_spec import BaseImage, BaseRef, Edit, EditSpec
 from src.analysis.rom_editor import (
+    LEARNED_HELD,
     LTFT_LIMIT,
+    SLOT_SOURCE,
     STFT_LIMIT,
-    scenario_template,
+    cli_learned,
+    learned_state,
     simulate_cells,
 )
-from src.analysis.rom_editor import SLOT_SOURCE as EDITOR_SLOT_SOURCE
-from src.analysis.rom_effects import (
-    Candidate,
-    EffectReport,
-    RomEffectRefusalError,
-    compare_roms,
-)
+from src.analysis.rom_effects import Candidate, RomEffectRefusalError
 from src.analysis.rom_levers import classify_edit
-from src.analysis.sim_cells import (
-    TOOL_VERSION as CELLS_TOOL_VERSION,
-)
-from src.analysis.sim_cells import (
-    ignition_timing_block,
-)
-from src.analysis.sim_contract import (
-    SimulationRefusalError,
-)
+from src.analysis.rom_sim_world import SimWorld, load_spec
+from src.analysis.sim_cells import TOOL_VERSION as CELLS_TOOL_VERSION
+from src.analysis.sim_cells import ignition_timing_block
+from src.analysis.sim_contract import SimulationRefusalError
 from src.analysis.sim_design import (
     SimDesign,
     SimDesignRefusalError,
@@ -124,16 +108,10 @@ from src.analysis.sim_design import (
     summary,
     write_design,
 )
-from src.analysis.sim_montecarlo import (
-    MODE,
-    LoadedUncertainty,
-    load_sim_kit,
-)
 from src.analysis.sim_montecarlo import TOOL_VERSION as MONTECARLO_TOOL_VERSION
 from src.analysis.sim_report import TOOL_VERSION as REPORT_TOOL_VERSION
 from src.analysis.sim_report import render_report
 from src.paths import REPO_ROOT
-from src.vehicle.tune_revisions import load_tune_revisions
 
 TOOL = "rom_sim"
 #: Bump when the result file's shape or meaning changes. 2: runs the
@@ -153,16 +131,10 @@ RESULT_JSON = "result.json"
 TRACES_PARQUET = "traces.parquet"
 REPORT_HTML = "report.html"
 
-#: The learned state a run starts from, besides the trims the caller states:
-#: held equal under both ROMs (the contract's own wording for the closed
-#: throttle position and idle air) and purge off (the contract's: purge
-#: scheduling is not modelled). Recorded in result.json.
-LEARNED_HELD = {"throttle_closed_learned": 0.0, "idle_air_learned": 0.0, "evap_purge_area": 0.0}
-#: The source string of the learned state; it names no recording.
-LEARNED_SOURCE = "cli: trims stated by --stft-pct and --ltft-pct"
-#: The slot the profile declares as the one the ECM runs (fuel_comp_fit.yaml),
-#: named as the library names it: the run's template takes it from there too.
-SLOT_SOURCE = EDITOR_SLOT_SOURCE
+# The learned state's source (``rom_editor.LEARNED_SOURCES["cli"]``: it names
+# no recording), what a run holds besides the two trims
+# (``rom_editor.LEARNED_HELD``) and the slot source (``rom_editor.SLOT_SOURCE``)
+# are the library's, one copy each beside the ROM Editor's (R30.5).
 
 GRIDS = ("fuel_comp", "target_afr")
 #: The source a command-line timing state carries.
@@ -324,78 +296,55 @@ def _add_candidate(parser: argparse.ArgumentParser) -> None:
 # -- resolution ----------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
 class _World:
-    """Everything the subcommands load once: the kit, the slot, the base and the candidate."""
+    """What a subcommand resolves from its arguments: the library's
+    :class:`~src.analysis.rom_sim_world.SimWorld` (kit, slot, resolver), the
+    edit spec when one is given, the base and the candidate."""
 
-    def __init__(self, args: argparse.Namespace, *, need_candidate: bool = True) -> None:
-        self.profile = _profile(args)
-        # The simulator's own declared plant (sim_kit.yaml, E08.11), never the
-        # contract's default, with that plant's uncertainty declaration.
-        loaded = load_sim_kit(self.profile, args.plant_version)
-        self.kit: SimKit = loaded.kit
-        self.uncertainty: LoadedUncertainty = loaded.uncertainty
-        declaration = load_fuel_comp_declaration(self.profile)
-        self.slot = declaration.program.map_slot
-        registry = load_tune_revisions(self.profile / "tune_revisions.yaml")
-        if registry is None:
-            raise CliRefusalError("no_tune_registry", f"{self.profile} has no tune_revisions.yaml")
-        self.resolver = RevisionImageResolver(
-            registry,
-            self.kit.rom_map,
-            declaration.rom,
-            rom_dirs=_rom_dirs(args),
-            slot=self.slot,
-        )
-        if (args.edits is None) == (args.candidate_rom is None):
-            raise CliRefusalError(
-                "candidate_unstated",
-                "give exactly one of --edits (an edit spec) and --candidate-rom (an edited image)",
-            )
-        self.spec: EditSpec | None = None
-        spec_dir = Path.cwd()
-        if args.edits is not None:
-            if not Path(args.edits).is_file():
-                raise RomEffectRefusalError("edit_spec_not_found", f"{args.edits}")
-            self.spec = load_edit_spec(args.edits)
-            spec_dir = Path(args.edits).resolve().parent
-        self.base: BaseImage = resolve_base(
-            self._base_ref(args), self.kit.rom_map, spec_dir=spec_dir, resolver=self.resolver
-        )
-        self.candidate: Candidate | None = None
-        if need_candidate:
-            self.candidate = self._candidate(args)
+    sim: SimWorld
+    spec: EditSpec | None
+    base: BaseImage
+    candidate: Candidate
 
-    def _base_ref(self, args: argparse.Namespace) -> BaseRef:
-        if args.revision is not None and args.rom is not None:
-            raise CliRefusalError("base_ambiguous", "give --revision or --rom, not both")
-        if args.rom is not None:
-            if args.sha256 is None:
-                raise CliRefusalError(
-                    "argument_missing", "--rom needs --sha256, the plain image's hash"
-                )
-            return BaseRef(file=str(Path(args.rom).expanduser().resolve()), sha256=args.sha256)
-        if args.sha256 is not None:
-            raise CliRefusalError("argument_missing", "--sha256 goes with --rom")
-        if args.revision is not None:
-            return BaseRef(revision=args.revision)
-        if self.spec is not None:
-            return self.spec.base
+
+def _world(args: argparse.Namespace) -> _World:
+    """Load the world, refusing in the order the arguments are read: the
+    profile, the kit, then which candidate, the spec, the base, the candidate."""
+    sim = SimWorld.load(_profile(args), plant_version=args.plant_version, rom_dirs=_rom_dirs(args))
+    if (args.edits is None) == (args.candidate_rom is None):
         raise CliRefusalError(
-            "base_unstated", "give --revision R or --rom PATH --sha256 H (a spec names its own)"
+            "candidate_unstated",
+            "give exactly one of --edits (an edit spec) and --candidate-rom (an edited image)",
         )
+    spec: EditSpec | None = None
+    spec_dir = Path.cwd()
+    if args.edits is not None:
+        spec = load_spec(args.edits)
+        spec_dir = Path(args.edits).resolve().parent
+    base = sim.load_base(_base_ref(args, spec), spec_dir=spec_dir)
+    candidate = sim.candidate(base, spec=spec, candidate_rom=args.candidate_rom)
+    return _World(sim=sim, spec=spec, base=base, candidate=candidate)
 
-    def _candidate(self, args: argparse.Namespace) -> Candidate:
-        common: dict[str, Any] = dict(
-            model=self.kit.model,
-            model_sha256=self.kit.model_sha256,
-            slot=self.slot,
-            slot_source=SLOT_SOURCE,
-        )
-        if self.spec is not None:
-            return build_candidate(self.spec, self.kit.rom_map, self.base, **common)
-        return load_candidate_file(
-            Path(args.candidate_rom).expanduser(), self.kit.rom_map, base=self.base, **common
-        )
+
+def _base_ref(args: argparse.Namespace, spec: EditSpec | None) -> BaseRef:
+    if args.revision is not None and args.rom is not None:
+        raise CliRefusalError("base_ambiguous", "give --revision or --rom, not both")
+    if args.rom is not None:
+        if args.sha256 is None:
+            raise CliRefusalError(
+                "argument_missing", "--rom needs --sha256, the plain image's hash"
+            )
+        return BaseRef(file=str(Path(args.rom).expanduser().resolve()), sha256=args.sha256)
+    if args.sha256 is not None:
+        raise CliRefusalError("argument_missing", "--sha256 goes with --rom")
+    if args.revision is not None:
+        return BaseRef(revision=args.revision)
+    if spec is not None:
+        return spec.base
+    raise CliRefusalError(
+        "base_unstated", "give --revision R or --rom PATH --sha256 H (a spec names its own)"
+    )
 
 
 # -- design ---------------------------------------------------------------------------------
@@ -462,10 +411,9 @@ def _cell_rows(world: _World) -> list[dict[str, Any]]:
     """The changed cells, old -> new raw with the change in percent of the old
     value. A masked cell (the timing trims' flag bit) is judged on the bits
     that carry the value, as the ECM reads it."""
-    assert world.candidate is not None
     rows: list[dict[str, Any]] = []
     for cell in world.candidate.provenance["cells"]:
-        decode = world.kit.rom_map.table(cell["table"]).decode
+        decode = world.sim.kit.rom_map.table(cell["table"]).decode
         mask = None if decode is None else decode.mask
         old, new = int(cell["old"]), int(cell["new"])
         old_v, new_v = (old, new) if mask is None else (old & mask, new & mask)
@@ -486,45 +434,6 @@ def _cell_rows(world: _World) -> list[dict[str, Any]]:
     return rows
 
 
-def _compare(world: _World, candidate: Candidate, *, in_mode: bool) -> EffectReport:
-    """``compare_roms`` on the two images: with ``in_mode`` under the run's
-    contract mode (where a quantity the mode holds fixed makes an output
-    ``unevaluable``), else the plain structural reach."""
-    extra: dict[str, Any] = {"contract": world.kit.contract, "mode": MODE} if in_mode else {}
-    return compare_roms(
-        world.base.image,
-        candidate.image,
-        world.kit.rom_map,
-        world.kit.model,
-        world.kit.model_sha256,
-        base_slot=world.slot,
-        candidate_slot=world.slot,
-        slot_source=SLOT_SOURCE,
-        **extra,
-    )
-
-
-def _trace(world: _World, candidate: Candidate, *, in_mode: bool) -> dict[str, Any]:
-    plain = _compare(world, candidate, in_mode=in_mode).to_dict()
-    return {
-        "mode": MODE if in_mode else None,
-        "outcome": plain["outcome"],
-        "reason": plain["reason"],
-        "changed_nodes": plain["changed_nodes"],
-        "moved_lookups": plain["moved_lookups"],
-        "outputs": [
-            {
-                "output": o["output"],
-                "status": o["status"],
-                "reasons": o["reasons"],
-                "model_status": o["model_status"],
-                "path": o["path"],
-            }
-            for o in plain["outputs"]
-        ],
-    }
-
-
 # -- ignition timing (E09.7) ----------------------------------------------------------------
 
 
@@ -543,20 +452,19 @@ def _timing_state(args: argparse.Namespace) -> TimingState | None:
 
 
 def cmd_inspect(args: argparse.Namespace) -> dict[str, Any]:
-    world = _World(args)
-    candidate = world.candidate
-    assert candidate is not None
+    world = _world(args)
+    sim, base, candidate = world.sim, world.base, world.candidate
     prov = candidate.provenance
     cells = _cell_rows(world)
     # The lever and what blocks a number: classified once, in
     # src.analysis.rom_levers, on the report a run would use. The ROM Editor
     # shows the same ``messages`` (E09.14).
     levers = classify_edit(
-        _compare(world, candidate, in_mode=True),
-        rom_map=world.kit.rom_map,
-        model=world.kit.model,
-        contract=world.kit.contract,
-        qualification=plant_qualification(world.kit.plant),
+        sim.compare(base, candidate, in_mode=True),
+        rom_map=sim.kit.rom_map,
+        model=sim.kit.model,
+        contract=sim.kit.contract,
+        qualification=plant_qualification(sim.kit.plant),
         regime=args.regime,
         cells=prov["cells"],
     )
@@ -573,15 +481,15 @@ def cmd_inspect(args: argparse.Namespace) -> dict[str, Any]:
         "cells_changed": len(cells),
         "cells": cells,
         "ranges": prov["ranges"],
-        "reached": _trace(world, candidate, in_mode=False),
-        "in_run_mode": _trace(world, candidate, in_mode=True),
+        "reached": sim.trace(base, candidate, in_mode=False),
+        "in_run_mode": sim.trace(base, candidate, in_mode=True),
         "levers": levers.to_dict(),
         "ignition_timing": ignition_timing_block(
-            world.kit,
-            world.base.image,
+            sim.kit,
+            base.image,
             candidate.image,
             _timing_state(args),
-            slot=world.slot,
+            slot=sim.slot,
             coolant_c=args.timing_coolant_c,
             all_cells=False,
         ),
@@ -700,15 +608,8 @@ def _candidate_events(args: argparse.Namespace) -> tuple[str, ...]:
 
 
 def _learned(args: argparse.Namespace) -> LearnedState:
-    """The trims the caller states; the rest held (:data:`LEARNED_HELD`)."""
-    return LearnedState(
-        stft_pct=float(args.stft_pct),
-        ltft_pct=float(args.ltft_pct),
-        throttle_closed_learned=LEARNED_HELD["throttle_closed_learned"],
-        idle_air_learned=LEARNED_HELD["idle_air_learned"],
-        evap_purge_area=LEARNED_HELD["evap_purge_area"],
-        source=LEARNED_SOURCE,
-    )
+    """The trims the caller states; the rest held (``rom_editor.LEARNED_HELD``)."""
+    return learned_state(cli_learned(args.stft_pct, args.ltft_pct), origin="cli")
 
 
 def _publish(out: Path, texts: Mapping[str, str], traces: pd.DataFrame) -> None:
@@ -740,33 +641,24 @@ def cmd_run(args: argparse.Namespace) -> dict[str, Any]:
     events = _candidate_events(args)
     out = _out_dir(args.out, _all_rom_dirs(args))
     started = time.monotonic()
-    world = _World(args)
-    candidate = world.candidate
-    assert candidate is not None
-    kit, base = world.kit, world.base
+    world = _world(args)
+    sim, base, candidate = world.sim, world.base, world.candidate
     design = load_design(args.design)
     require_base(design, base.image_sha256)
-    template = scenario_template(
-        kit,
-        base.image_sha256,
-        candidate.image_sha256,
-        slot=world.slot,
-        learned=_learned(args),
-        candidate_events=events,
-    )
+    template = sim.template(base, candidate, learned=_learned(args), candidate_events=events)
     # The pipeline the ROM Editor runs too (R25.3). The trim cells are read at
     # the design's coldest point: every point the plant accepts is warm, and a
     # design with a point in the trims' blend band shows it per cell.
     simulated = simulate_cells(
-        kit,
+        sim.kit,
         template,
         design,
         base.image,
         candidate.image,
-        world.uncertainty,
-        profile_dir=world.profile,
+        sim.uncertainty,
+        profile_dir=sim.profile,
         grid=args.grid,
-        slot=world.slot,
+        slot=sim.slot,
         timing_state=_timing_state(args),
         timing_coolant_c=min(p.coolant_c for p in design.points),
         all_timing_cells=True,
@@ -803,7 +695,7 @@ def cmd_run(args: argparse.Namespace) -> dict[str, Any]:
         "traces_session": result.session,
         "files": {"result": RESULT_JSON, "traces": TRACES_PARQUET, "report": REPORT_HTML},
         "inputs": {
-            "profile": world.profile.name,
+            "profile": sim.profile.name,
             "base": prov["base"],
             "candidate_sha256": candidate.image_sha256,
             "design_sha256": design.sha256(),
@@ -813,13 +705,13 @@ def cmd_run(args: argparse.Namespace) -> dict[str, Any]:
             "seed": args.seed,
             "draws": args.draws,
             "grid": args.grid,
-            "slot": world.slot,
+            "slot": sim.slot,
             "slot_source": SLOT_SOURCE,
             "candidate_events": list(events),
             "learned": {
                 "stft_pct": args.stft_pct,
                 "ltft_pct": args.ltft_pct,
-                "source": LEARNED_SOURCE,
+                "source": template.learned.source,
                 "held": LEARNED_HELD,
             },
         },

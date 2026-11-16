@@ -252,7 +252,7 @@ they started.
     sessions root from the config or `--sessions`. No default slug.
   - Regenerate the CLI snapshot on purpose.
 
-- [ ] **R30.5 `tools/rom_sim.py` runs a second copy of the ROM-edit
+- [x] **R30.5 `tools/rom_sim.py` runs a second copy of the ROM-edit
   simulation.** 1,080 lines: `_World`, `_template`, `_compare`, `_trace`,
   `cmd_run` (153 lines), `edit_rows`, and `SLOT_SOURCE`, `LEARNED_SOURCE`,
   `LEARNED_HELD`. `src/analysis/rom_editor.py` has `_simulate`, its own
@@ -263,9 +263,81 @@ they started.
   `test_rom_sim_cli.py` pins the tool's copy while the dashboard exercises
   the other. This is the same finding as R25's "two simulate drivers", seen
   from the tool; do them as one change.
-  - [ ] Lift the template builder, the kit / base / candidate loader and
+  - [x] Lift the template builder, the kit / base / candidate loader and
     compare / trace into `src/analysis/`. The tool keeps argparse, thin
     `cmd_*` adapters and its "never write inside the checkout" policy.
+    **Done 2026-11-15.** R25.3 had already shared `scenario_template` and
+    `simulate_cells`; what was still doubled moved like this:
+    - **`rom_editor`** holds the shared pieces. `compare_images(…, in_mode=)`
+      replaces the editor's `_effects` and the tool's `_compare`.
+      `spec_candidate` / `file_candidate` give one trace identity (model,
+      slot, `SLOT_SOURCE`) for the editor's `_candidate` and both CLI routes.
+      `learned_state(values, origin=)` is the one `LearnedState` builder.
+      `LEARNED_SOURCES` holds both drivers' source strings.
+      `LEARNED_HELD` (moved from the tool) feeds `cli_learned`, and
+      `rom_editor._check_learned_held()` runs at module level and refuses the
+      import (TypeError) if a `LearnedValues` field is added without a
+      `LEARNED_HELD` key or the reverse; verification found the first draft
+      only failed at the first `cli_learned` call, so the check was added
+      (`tests/test_rom_sim_world.py::test_a_learned_field_the_cli_does_not_hold_is_refused_at_import`).
+      The template is now parameterized only by `origin`.
+    - **New `src/analysis/rom_sim_world.py`.** `SimWorld.load` brings up the
+      declared kit, the uncertainty, the slot and the resolver
+      (`no_tune_registry`). `load_base`, `candidate`, `compare`, `trace` and
+      `template` sit on it, beside `load_spec` (`edit_spec_not_found`).
+    - **The tool** keeps argparse, the flag-naming refusals (`_base_ref`,
+      `candidate_unstated`, `_need`, `_run_bounds`, `_finite`), `_out_dir`,
+      `_publish`, `edit_rows` and its own result document. Its
+      `LEARNED_HELD` / `LEARNED_SOURCE` / `SLOT_SOURCE` copies are gone, and
+      result.json records `template.learned.source`. 1,060 → 952 lines.
+    - **Refusal order is unchanged,** the same as `_World`: profile, kit,
+      registry, which candidate, spec, base, candidate.
+    - **New `tests/test_rom_sim_world.py`, 5 tests.** An AST check that the
+      tool calls none of `LearnedState` / `compare_roms` / `build_candidate` /
+      `load_sim_kit` / … and assigns none of the three constants, plus its
+      non-vacuity twin. The two drivers' learned states differ only by
+      `source`. `SimWorld` traces and templates on the declared slot and
+      refuses by name.
+    - **`tests/test_rom_editor.py` `_PLUMBING`:** the rom_editor string count
+      goes 1 → 2, because `LEARNED_HELD`'s keys now live in `src/`. It is a
+      stated 0.0, not a read.
+    - **The CLI's output is identical to HEAD dcdd1bc3,** run from a scratch
+      worktree. Stdout was compared byte for byte with `wall_seconds`
+      dropped; it was already `sort_keys` JSON. Output files were compared by
+      sha256.
+      - *Every `rom_sim.main` call the tests make:* a logging plugin over
+        `test_rom_sim_cli`, `test_ignition_timing`, `test_rom_levers_parity`,
+        `test_rom_editor_api`, `test_sim_assumptions`, `test_sim_montecarlo`,
+        `test_paired_refusals`, `test_rom_editor`, `test_rom_sim_private_rom`,
+        `test_rom_sim_known_answers` and `test_rom_editor_private_rom`, with
+        the same `--basetemp`. That is 139 calls: 31 `design grid`, 13
+        `design drives`, 46 `inspect` and 49 `run`; 58 exit 0, 81 exit 2. All
+        139 have the same exit code and stdout, and all 78 hashed output
+        files match. 8 calls differ only in argv, by the tree's own fixture
+        path.
+      - *30 real invocations:* the Xterra profile, the operator's
+        ZS44A-20260920/20261004/20261110 images and the
+        `_capture-tuning-2026-09-23T142926` drive. They cover `design grid` ×2
+        and `design drives`, 5 `inspect`s (edit spec ± timing/regime, K ×1.05,
+        two `--candidate-rom`), 6 `run`s (seeds 1/3/5/11/42, fuel_comp and
+        target_afr grids, ecu_reflash, HI DET set/fallback and clear/active,
+        a drive design) and 16 refusals. 29/30 stdouts match, and so do all
+        24 files (designs, result.json, traces.parquet, report.html). The
+        30th is `inside_checkout`, whose message names each tree's own
+        checkout path.
+    - **ROM Editor answers are identical to HEAD.** On the 20261004 image, 6
+      answers match after `sort_keys`: `preview_edits` (Fuel Comp add_raw;
+      K ×1.05), `simulate_edits` (Fuel Comp; K ×1.05 ecu_reflash
+      clear/active; Target AFR +4 on the target_afr grid) and `_simulate`
+      with the 20260920 image.
+    - **Gate.** The targeted tests pass, 638 plus 1 xfailed: the `test_sim_*`,
+      `test_paired_*`, `test_rom_edit_spec`, `test_rom_editor*`,
+      `test_rom_levers*` and `test_rom_sim_*` files, `test_rom_sim_world`,
+      `test_ignition_timing`, `test_mcp_rom_editor` and
+      `test_rom_library_api`. `test_layering`, `test_source_rules`,
+      `test_script_cli_snapshot` and `test_exceptions_pickle` pass, 369.
+      `test_rom_sim_cli.py` and `test_script_cli_snapshot.py` are unchanged.
+      No touched path is in `scripts/ml_paths.txt`.
   - Must not change: the CLI's JSON output. After R30.2.
 
 - [ ] **R30.6 mypy never loads 31 of the 113 `scripts/` and `tools/`
