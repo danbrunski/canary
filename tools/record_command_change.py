@@ -254,7 +254,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from src.analysis.target_phi import TwinRefusalError
     from src.analysis.twin_command_change import CommandChangeRefusalError
 
-    config = load_scoped(args)
+    config = load_scoped(args, per_vehicle=True)
     try:
         rows = record(
             config,

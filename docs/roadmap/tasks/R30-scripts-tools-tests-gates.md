@@ -153,10 +153,22 @@ they started.
     where they used to scope under the default slug; `memory_ledger_for`
     refuses an unscoped config. `record_command_change` refuses too, with a
     bare `AssertionError` ("scope the config to a vehicle profile",
-    `record()`'s `assert config.scoped_profile is not None`). Operator
-    decision owed: keep the refusals (recommended; every real config has
-    profiles on) or give these tools a per-vehicle scope regardless of
-    `profiles.enabled`. Also new: on a profiles-disabled config
+    `record()`'s `assert config.scoped_profile is not None`).
+    **Operator, 2026-11-15: keep the refusals** (profiles default on and no
+    shipped config disables them; the old "scope under the default slug"
+    read a directory nothing writes and printed "0 record(s)"), **and make
+    them clean.** Done: `tools._cli.load_scoped(args, per_vehicle=True)`
+    exits with one line (`refused: <config> has profiles.enabled: false, and
+    this tool reads the per-vehicle memory ledger ...`, exit 1, no traceback);
+    all five tools pass it. Pinned by `tests/test_tooling_config_scope.py`:
+    `::test_a_per_vehicle_tool_refuses_a_profiles_disabled_config_in_one_line`,
+    `::test_a_per_vehicle_tool_runs_on_a_profiles_enabled_config`,
+    `::test_the_memory_tool_refuses_without_a_traceback` (runs the tool as a
+    file), and `::test_every_memory_ledger_tool_loads_its_config_per_vehicle`,
+    which finds every `tools/*.py` that calls `memory_ledger_for` and fails if
+    any `load_scoped` call there omits `per_vehicle=True` (fails on
+    `mint_comparison` with the flag removed). `record()`'s assert stays as an
+    internal invariant; the CLI refuses before reaching it. Also new: on a profiles-disabled config
     `scripts/analyze_session.py` reads base paths while its MCP twin
     (`mcp_server/tools/behavior.py`, and `tuning_analysis._scoped`) still
     nests under the default slug.

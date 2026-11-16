@@ -49,7 +49,7 @@ def add_config_profile_args(
     parser.add_argument("--profile", default=None, help=profile_help)
 
 
-def load_scoped(args: argparse.Namespace) -> CanaryConfig:
+def load_scoped(args: argparse.Namespace, *, per_vehicle: bool = False) -> CanaryConfig:
     """``args.config`` loaded and scoped to ``args.profile``'s vehicle.
 
     The one way a tool scopes its config
@@ -57,10 +57,30 @@ def load_scoped(args: argparse.Namespace) -> CanaryConfig:
     enabled the result is always profile-scoped, so a vehicle-data reader never
     meets the unscoped path (P02.11). A tool without ``--profile`` (it has no
     ``args.profile``) gets the ``vehicle:`` block's profile.
+
+    ``per_vehicle`` is for a tool whose data exists only per vehicle (the
+    memory ledger): a profiles-disabled config has no vehicle to scope to, so
+    the tool exits with one line naming why instead of a traceback. Before
+    R30.3 these tools scoped such a config under the default slug anyway and
+    read a directory nothing writes ("0 record(s)"); refusing is the operator's
+    decision of 2026-11-15. ``tests/test_tooling_config_scope.py`` finds every
+    tool that reads the memory ledger and holds it to this.
     """
-    return scoped_config_for_tooling(
+    config = scoped_config_for_tooling(
         CanaryConfig.from_yaml(args.config), getattr(args, "profile", None)
+    )
+    if per_vehicle and config.scoped_profile is None:
+        raise SystemExit(refusal_for_unscoped(args.config))
+    return config
+
+
+def refusal_for_unscoped(config_path: Path | str) -> str:
+    """The one line a per-vehicle tool exits with on a profiles-disabled config."""
+    return (
+        f"refused: {config_path} has profiles.enabled: false, and this tool reads "
+        "the per-vehicle memory ledger (it lives under <state>/<vehicle>/, so a "
+        "config with no vehicle has none). Use a config with profiles enabled."
     )
 
 
-__all__ = ["add_config_profile_args", "load_scoped"]
+__all__ = ["add_config_profile_args", "load_scoped", "refusal_for_unscoped"]

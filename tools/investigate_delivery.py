@@ -80,7 +80,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from src.storage.sessions import resolve_session
     from src.vehicle.profiles import profile_dir
 
-    config = load_scoped(args)
+    config = load_scoped(args, per_vehicle=True)
     session = resolve_session(config.collection.storage_path, args.session)
     ledger = memory_ledger_for(config)
     context = TuningContext.from_config(config)

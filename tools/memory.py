@@ -76,7 +76,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         render_text,
     )
 
-    config = load_scoped(args)
+    config = load_scoped(args, per_vehicle=True)
     ledger = memory_ledger_for(config, replay_id=args.replay_id)
     if args.command == "card":
         built = investigation_card(ledger, args.investigation, as_of=args.as_of)

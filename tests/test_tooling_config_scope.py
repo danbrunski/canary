@@ -153,6 +153,84 @@ def test_load_scoped_leaves_a_profiles_disabled_config_unscoped(tmp_path: Path) 
     assert loaded.collection.storage_path == CanaryConfig.from_yaml(path).collection.storage_path
 
 
+def test_a_per_vehicle_tool_refuses_a_profiles_disabled_config_in_one_line(
+    tmp_path: Path,
+) -> None:
+    """Operator decision 2026-11-15: the memory-ledger tools refuse a
+    profiles-disabled config. Before R30.3 they scoped it under the default
+    slug and read a directory nothing writes ("0 record(s)"); after it they
+    died with a traceback. Now: one line naming the cause."""
+    from tools._cli import load_scoped
+
+    path = write_isolated_config(tmp_path, "example", profiles={"enabled": False})
+    with pytest.raises(SystemExit) as refused:
+        load_scoped(argparse.Namespace(config=path, profile=None), per_vehicle=True)
+    message = str(refused.value.code)
+    assert message.startswith("refused: ") and "profiles.enabled: false" in message
+    assert str(path) in message
+
+
+def test_a_per_vehicle_tool_runs_on_a_profiles_enabled_config(tmp_path: Path) -> None:
+    from tools._cli import load_scoped
+
+    path = write_isolated_config(tmp_path, "example")
+    loaded = load_scoped(argparse.Namespace(config=path, profile=None), per_vehicle=True)
+    assert loaded.scoped_profile is not None
+
+
+def _memory_ledger_tools() -> list[str]:
+    """Every tool that opens the per-vehicle memory ledger, found, not listed."""
+    return sorted(
+        path.stem
+        for path in (REPO_ROOT / "tools").glob("*.py")
+        if "memory_ledger_for" in path.read_text(encoding="utf-8")
+    )
+
+
+def test_every_memory_ledger_tool_loads_its_config_per_vehicle() -> None:
+    """A new tool that reads the ledger cannot forget the refusal: each
+    ``load_scoped(...)`` call in such a tool passes ``per_vehicle=True``."""
+    tools = _memory_ledger_tools()
+    assert {"memory", "mint_comparison", "investigate_delivery"} <= set(tools)
+    missing: list[str] = []
+    for name in tools:
+        tree = ast.parse((REPO_ROOT / "tools" / f"{name}.py").read_text(encoding="utf-8"))
+        calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "load_scoped"
+        ]
+        per_vehicle = [
+            call
+            for call in calls
+            if any(
+                kw.arg == "per_vehicle"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is True
+                for kw in call.keywords
+            )
+        ]
+        if not calls or len(per_vehicle) != len(calls):
+            missing.append(name)
+    assert missing == []
+
+
+def test_the_memory_tool_refuses_without_a_traceback(tmp_path: Path) -> None:
+    path = write_isolated_config(tmp_path, "example", profiles={"enabled": False})
+    run = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "tools" / "memory.py"), "--config", str(path), "query"],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        timeout=120,
+    )
+    assert run.returncode == 1
+    assert "Traceback" not in run.stderr
+    assert run.stderr.strip().startswith("refused: ")
+
+
 #: Run as a file with no path edit of their own: ``src`` is installed (editable).
 NO_PATH_EDIT_TOOLS = ("audit_artifact_lineage", "make_investigation_cases")
 

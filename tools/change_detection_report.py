@@ -137,7 +137,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.config is not None:
         from src.evidence.ledger import memory_ledger_for
 
-        ledger = memory_ledger_for(load_scoped(args))
+        ledger = memory_ledger_for(load_scoped(args, per_vehicle=True))
     else:
         print(
             json.dumps(
