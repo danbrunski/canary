@@ -1623,7 +1623,12 @@ def test_capture_autostart_starts_warm_and_stops_with_the_engine(
     )
     headers = {"Authorization": "Bearer secret"}
 
-    def _await(predicate: Callable[[], bool], timeout: float = 5.0) -> bool:
+    # The patch must actually land on the tick the app runs: with the default
+    # 2 s tick every wait below still passed inside its timeout, so a hardcoded
+    # interval in create_app went unnoticed.
+    assert app.state.app_context.autostart._tick_seconds() == 0.02
+
+    def _await(predicate: Callable[[], bool], timeout: float = 1.5) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if predicate():

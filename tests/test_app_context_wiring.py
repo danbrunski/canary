@@ -260,7 +260,7 @@ def _wired_components(tmp_path: Path, config: CanaryConfig) -> DaemonComponents:
     components.capture_autostart = CaptureAutostart(
         components.profile_capture,
         components.live_source,
-        components.replay_controller,
+        lambda: components.replay_controller,
         tick_seconds=lambda: 2.0,
     )
     return components

@@ -865,6 +865,55 @@ async def test_run_daemon_starts_retention_sweeper_and_protects_active_session(
     assert active.exists()
 
 
+async def test_run_daemon_capture_autostart_sees_the_live_replay_controller(
+    config: CanaryConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The autostart tick classifies the vehicle with the daemon's own
+    ``ReplayController``, not the ``None`` it was built beside (2026-11-15).
+
+    ``run_daemon`` builds ``CaptureAutostart`` before the ``ReplayController``
+    (which needs the live source). The controller was passed by value, so it
+    held ``None`` for the daemon's whole life: the state never read ``replay``,
+    a replay of an engine-running session armed a ``tuning`` capture, and a
+    running capture never got its debounced stop. Through the real
+    ``run_daemon`` wiring, with a replay running, the tick must report the
+    replay state and start nothing.
+    """
+    from src.collection import tuning_profile
+    from src.control.capture_autostart import CaptureAutostartDecider, CaptureAutostartRule
+    from src.daemon import run_daemon
+
+    components = build_components(config)
+    stop = asyncio.Event()
+    daemon_task = asyncio.create_task(
+        run_daemon(config, stop, collectors=[], components=components)
+    )
+    try:
+        await wait_until(
+            lambda: (
+                components.replay_controller is not None
+                and components.capture_autostart is not None
+            ),
+            what="run_daemon wiring the replay controller and the autostart",
+        )
+        controller, autostart = components.replay_controller, components.capture_autostart
+        assert controller is not None and autostart is not None
+        monkeypatch.setattr(
+            controller, "status", lambda: SimpleNamespace(running=True, replay_id="replay-x")
+        )
+        assert not tuning_profile.is_active()
+        autostart.decider = CaptureAutostartDecider(
+            rule=CaptureAutostartRule(profile="fuel-map", coolant_min_c=None)
+        )
+        for _ in range(3):  # past start_after_ticks: an engine-running state would start
+            await autostart.tick()
+        assert autostart.decider.reason == "waiting for the engine to run (state replay)"
+        assert not tuning_profile.is_active()
+    finally:
+        stop.set()
+        await settle(daemon_task)
+
+
 async def test_run_daemon_fires_trip_end_fallback_on_shutdown(
     config: CanaryConfig,
     no_trip_end_digest_child: list[Path],

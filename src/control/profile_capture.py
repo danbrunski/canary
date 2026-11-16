@@ -412,19 +412,26 @@ class CaptureAutostart:
     one started by hand (quality sidecar, budget override, the drive window
     it supersedes). ``tick_seconds`` is read on every tick, so a test can
     shorten it.
+
+    ``replay_controller`` is an accessor, read on every tick, never the
+    controller itself: the daemon builds this object before its
+    ``ReplayController`` exists (the controller needs the live source), and a
+    controller captured at construction was ``None`` for the daemon's whole
+    life, so a replay of an engine-running session armed a capture. With an
+    accessor there is no construction order that can go stale.
     """
 
     def __init__(
         self,
         session: ProfileCaptureSession,
         live_source: Any,
-        replay_controller: ReplayStatusSource | None,
+        replay_controller: Callable[[], ReplayStatusSource | None],
         *,
         tick_seconds: Callable[[], float],
     ) -> None:
         self.session = session
         self.live_source = live_source
-        self.replay_controller = replay_controller
+        self._replay_controller = replay_controller
         self._tick_seconds = tick_seconds
         self.decider: CaptureAutostartDecider | None = None
         self._task: asyncio.Task[None] | None = None
@@ -481,7 +488,7 @@ class CaptureAutostart:
             return
         try:
             vehicle = derive_from_live_source(
-                self.live_source, replay_controller=self.replay_controller
+                self.live_source, replay_controller=self._replay_controller()
             )
             action = decider.update(
                 state=vehicle.state,

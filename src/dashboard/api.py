@@ -243,7 +243,7 @@ def create_app(
     autostart = capture_autostart or CaptureAutostart(
         session,
         live_source,
-        replay_controller,
+        lambda: replay_controller,
         # Read per tick, so a test can shorten the module constant.
         tick_seconds=lambda: control_routes.AUTOSTART_TICK_SECONDS,
     )

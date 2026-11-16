@@ -504,6 +504,36 @@ it; go after that work lands.
     `ruff check .`, `ruff format --check .`, `mypy src` clean.
   - Must not change: `create_app`'s keyword signature (52 files call it), the
     route table snapshot.
+  - [x] **Found verifying R29.6: the daemon's capture autostart held a `None`
+    replay controller for its whole life.** `run_daemon` built
+    `CaptureAutostart(..., components.replay_controller, ...)` before it
+    assigned `components.replay_controller` (the controller needs the live
+    source, so it is built after it), so the tick classified with
+    `derive_from_live_source(..., replay_controller=None)`: the state never read
+    `replay`, a replay of an engine-running session armed a `tuning` capture,
+    and a running capture never got its debounced stop. Introduced by 93bf6ef7
+    (R03.5); before it the tick used `create_app`'s real controller.
+    **Done 2026-11-15.** `CaptureAutostart` takes `replay_controller` as an
+    accessor, `Callable[[], ReplayStatusSource | None]`, read on every tick
+    (`src/control/profile_capture.py`), the way `tick_seconds` already was. Chosen
+    over moving the construction below the `ReplayController`: that fixes this
+    order but leaves a value that any later reordering, or any new builder
+    (`create_app`, `tests/app_context.py`, the wiring fixture), can again capture
+    too early; with an accessor no construction order can be stale. `run_daemon`
+    passes `lambda: components.replay_controller`; the other three builders pass
+    `lambda: replay_controller`. Same shape elsewhere: none. The other readers of
+    `components.replay_controller` in `src/daemon/` (`_run_brain_scheduler`'s
+    `activity` lambda, `inference.py`, `plausibility_live.py`, `retention.py`,
+    `twin_live.py`) read it off `components` at call time.
+    **Tests:** `tests/test_daemon.py::test_run_daemon_capture_autostart_sees_the_live_replay_controller`
+    (real `run_daemon`, replay status stubbed running; the tick must say
+    `waiting for the engine to run (state replay)` and start nothing) fails at
+    HEAD with `... (state no_data)` and passes now.
+    `test_capture_profiles.py::test_capture_autostart_starts_warm_and_stops_with_the_engine`
+    now asserts `autostart._tick_seconds() == 0.02` (the patch lands) and its
+    waits are 1.5 s, not 5 s, below the 2 s default tick; with
+    `create_app`'s tick hardcoded to `lambda: 2.0` it fails
+    `assert 2.0 == 0.02` (it passed before).
 
 - [~] **R29.7 Route modules hold domain logic in closures.**
   `register_public_routes` is one 383-line function with 17 closures covering

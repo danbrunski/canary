@@ -746,7 +746,7 @@ async def run_daemon(
             components.capture_autostart = CaptureAutostart(
                 components.profile_capture,
                 live_source,
-                components.replay_controller,
+                lambda: components.replay_controller,
                 tick_seconds=lambda: AUTOSTART_TICK_SECONDS,
             )
             if live_source_ready is not None:

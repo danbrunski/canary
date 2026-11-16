@@ -78,7 +78,7 @@ def bare_context(
         "autostart": CaptureAutostart(
             session,
             fields.get("live_source"),
-            fields.get("replay_controller"),
+            lambda: fields.get("replay_controller"),
             tick_seconds=lambda: AUTOSTART_TICK_SECONDS,
         ),
         "paired_devices": paired_devices,
