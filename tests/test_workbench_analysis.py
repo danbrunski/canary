@@ -53,6 +53,7 @@ from src.storage.capture_manifest import CAPTURE_MANIFEST_FILENAME, CAPTURE_QUAL
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
+from tests.app_context import bare_context
 
 BINDINGS = Path("data/bindings.yaml")
 #: The dev vehicle's mode01_wot.rpm_bands (profile data since R05.13).
@@ -613,11 +614,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     config = _config(tmp_path)
     app = FastAPI()
     workbench_routes.register_workbench_routes(
-        app,
-        config=config,
-        bindings_path=BINDINGS,
-        dids_path=DIDS,
-        resolved_control_token="secret",
+        app, bare_context(config, bindings_path=BINDINGS, dids_path=DIDS)
     )
     # A thread pool stands in for the spawn child so the test stays fast; the
     # spawn path itself is exercised by test_run_off_loop_in_a_real_child.

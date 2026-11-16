@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from src.config import CanaryConfig
 from src.dashboard.routes.rom_library import register_rom_library_routes
 from tests import repo_guard
+from tests.app_context import bare_context
 from tests.configs import isolated_config
 from tests.rom_fixtures import (
     PROFILE,
@@ -38,7 +39,7 @@ def config(tmp_path: Path) -> CanaryConfig:
 @pytest.fixture
 def client(config: CanaryConfig) -> Iterator[TestClient]:
     app = FastAPI()
-    register_rom_library_routes(app, config=config, resolved_control_token="secret")
+    register_rom_library_routes(app, bare_context(config))
     with TestClient(app) as test_client:
         yield test_client
 
@@ -268,7 +269,7 @@ def test_trace_context_is_409_for_a_vehicle_without_a_viewer_definition(tmp_path
         (profile / name).write_text((PROFILE / name).read_text())
     config = isolated_config(tmp_path, daemon={"afr_calibration": profile / "afr_calibration.yaml"})
     app = FastAPI()
-    register_rom_library_routes(app, config=config, resolved_control_token="secret")
+    register_rom_library_routes(app, bare_context(config))
     with TestClient(app) as client:
         sha = _upload(client, synthetic_image(k=27089), "a.bin").json()["sha256"]
         response = client.get(f"/control/rom/library/{sha}/trace", headers=AUTH)
@@ -280,7 +281,7 @@ def test_nothing_is_written_under_the_repo(tmp_path: Path) -> None:
     before = repo_guard.snapshot()
     config = _config(tmp_path)
     app = FastAPI()
-    register_rom_library_routes(app, config=config, resolved_control_token="secret")
+    register_rom_library_routes(app, bare_context(config))
     with TestClient(app) as client:
         sha = _upload(client, synthetic_image(seed=5)).json()["sha256"]
         client.patch(f"/control/rom/library/{sha}", json={"label": "x"}, headers=AUTH)
@@ -312,7 +313,7 @@ def test_a_vehicle_without_a_map_still_keeps_lists_describes_and_compares(
     profile.mkdir()
     config = isolated_config(tmp_path, daemon={"afr_calibration": profile / "afr_calibration.yaml"})
     app = FastAPI()
-    register_rom_library_routes(app, config=config, resolved_control_token="secret")
+    register_rom_library_routes(app, bare_context(config))
     with TestClient(app) as client:
         plain = _upload(client, synthetic_image())
         assert plain.status_code == 422
@@ -379,7 +380,7 @@ def test_the_route_answers_422_for_disagreeing_map_slot_declarations(tmp_path: P
         (profile / name).write_text((PROFILE / name).read_text())
     config = isolated_config(tmp_path, daemon={"afr_calibration": profile / "afr_calibration.yaml"})
     app = FastAPI()
-    register_rom_library_routes(app, config=config, resolved_control_token="secret")
+    register_rom_library_routes(app, bare_context(config))
     with TestClient(app) as client:
         sha = _upload(client, synthetic_image(k=27089), "a.bin").json()["sha256"]
         response = client.get(f"/control/rom/library/{sha}/trace", headers=AUTH)

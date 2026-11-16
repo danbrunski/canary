@@ -8,10 +8,10 @@ from typing import Any
 from fastapi import APIRouter
 
 from src.control.tires import tire_status
-from src.dashboard.routes.control.context import ControlContext, _require
+from src.dashboard.app_context import AppContext, _require
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
 
     @router.get("/control/tires")

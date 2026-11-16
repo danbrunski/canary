@@ -69,6 +69,7 @@ from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from src.vehicle.tune_revisions import load_tune_revisions
 from src.yaml_load import load_yaml
+from tests.app_context import bare_context
 
 BINDINGS = Path("data/bindings.yaml")
 DIDS = Path("data/dids.yaml")
@@ -659,11 +660,7 @@ def _config(tmp_path: Path, *, verified: bool) -> CanaryConfig:
 def _client(config: CanaryConfig, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     app = FastAPI()
     workbench_routes.register_workbench_routes(
-        app,
-        config=config,
-        bindings_path=BINDINGS,
-        dids_path=DIDS,
-        resolved_control_token="secret",
+        app, bare_context(config, bindings_path=BINDINGS, dids_path=DIDS)
     )
     monkeypatch.setattr(child_pool, "spawn_pool", lambda: ThreadPoolExecutor(max_workers=1))
     monkeypatch.setattr(workbench_jobs, "limit_address_space", lambda nbytes: (nbytes, nbytes))

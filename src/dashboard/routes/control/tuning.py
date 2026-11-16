@@ -17,15 +17,15 @@ from src.alerts.tuning import (
     load_tuning_version,
     save_tuning_config,
 )
+from src.dashboard.app_context import AppContext, _require
 from src.dashboard.readers import read_anomalies_since
-from src.dashboard.routes.control.context import ControlContext, _require
 from src.dashboard.schemas import (
     TuningRevertRequest,
     TuningUpdateRequest,
 )
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     alert_tuner = ctx.alert_tuner
     anomalies_dir = ctx.anomalies_dir

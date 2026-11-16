@@ -13,17 +13,15 @@ from __future__ import annotations
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict
 from starlette.concurrency import run_in_threadpool
 
 from src.collection import tuning_profile
 from src.collection.can_bus import bus_factory
-from src.config import CanaryConfig
 from src.control.capture import CaptureController
 from src.control.rom_backup import (
     ROM_BACKUP_FILE,
@@ -37,10 +35,9 @@ from src.control.rom_library import (
     RomNotFoundError,
     valid_sha,
 )
+from src.dashboard.app_context import AppContext
 from src.dashboard.readers import read_vehicle_reading
 from src.dashboard.routes.rom_maps import library_trace_context, read_rom_upload
-from src.dashboard.security import control_auth_dependency
-from src.paths import DIDS_YAML
 from src.vehicle.platforms import VehicleDataFile, config_data_file
 from src.vehicle.profiles import active_registry
 from src.vehicle.profiles import profile_dir as vehicle_profile_dir
@@ -76,19 +73,10 @@ def _download_name(entry: dict[str, Any]) -> str:
     return f"{stem}-{entry['sha256'][:8]}.bin"
 
 
-def register_rom_library_routes(
-    app: FastAPI,
-    *,
-    config: CanaryConfig,
-    resolved_control_token: str | None,
-    live_source: Any = None,
-    replay_controller: Any = None,
-    capture_controller: CaptureController | None = None,
-    publish_control_event: Any = None,
-    dids_path: Path = DIDS_YAML,
-) -> RomBackupJob:
+def register_rom_library_routes(app: FastAPI, ctx: AppContext) -> RomBackupJob:
     """Register the library, compare and backup routes; returns the job."""
-    authorize = control_auth_dependency(resolved_control_token)
+    config, dids_path = ctx.config, ctx.dids_path
+    router = ctx.router()
     profile = vehicle_profile_dir(config)
 
     def registry() -> TuneRevisionRegistry | None:
@@ -111,12 +99,12 @@ def register_rom_library_routes(
         library=library,
         open_bus=lambda: bus_factory(config.hardware.can),
         vehicle=lambda: read_vehicle_reading(
-            config, live_source=live_source, replay_controller=replay_controller
+            config, live_source=ctx.live_source, replay_controller=ctx.replay_controller
         ),
-        capture_active=lambda: capture_activity(capture_controller),
+        capture_active=lambda: capture_activity(ctx.capture_controller),
         ecu_calibration_id=lambda: tuning_profile.calibration_snapshot()["ecu_calibration_id"],
         obd_source=config.collection.obd_source,
-        publish=publish_control_event,
+        publish=ctx.publish_control_event,
     )
     app.state.rom_library = library
     app.state.rom_backup_job = job
@@ -154,7 +142,7 @@ def register_rom_library_routes(
         except (RomLibraryError, ValueError) as exc:
             raise HTTPException(422, str(exc)) from exc
 
-    @app.post("/control/rom/library", dependencies=[Depends(authorize)])
+    @router.post("/control/rom/library")
     async def post_rom_library(
         request: Request, filename: str = Query(min_length=1, max_length=255)
     ) -> dict[str, Any]:
@@ -168,17 +156,17 @@ def register_rom_library_routes(
         entry, created = await _call(library.add_upload, body, filename)
         return {**entry, "created": created}
 
-    @app.get("/control/rom/library", dependencies=[Depends(authorize)])
+    @router.get("/control/rom/library")
     async def get_rom_library() -> dict[str, Any]:
         entries = await _call(library.entries)
         return {"entries": entries, "count": len(entries)}
 
-    @app.get("/control/rom/library/{sha}", dependencies=[Depends(authorize)])
+    @router.get("/control/rom/library/{sha}")
     async def get_rom_library_entry(sha: str) -> dict[str, Any]:
         result: dict[str, Any] = await _call(library.describe, _sha(sha))
         return result
 
-    @app.get("/control/rom/library/{sha}/download", dependencies=[Depends(authorize)])
+    @router.get("/control/rom/library/{sha}/download")
     async def get_rom_library_download(sha: str) -> Response:
         image = await _call(library.image, _sha(sha))
         entry = await _call(library.entry, sha)
@@ -188,12 +176,12 @@ def register_rom_library_routes(
             headers={"Content-Disposition": f'attachment; filename="{_download_name(entry)}"'},
         )
 
-    @app.get("/control/rom/library/{sha}/tables", dependencies=[Depends(authorize)])
+    @router.get("/control/rom/library/{sha}/tables")
     async def get_rom_library_tables(sha: str) -> dict[str, Any]:
         result: dict[str, Any] = await _call(library.tables, _sha(sha))
         return result
 
-    @app.get("/control/rom/library/{sha}/trace", dependencies=[Depends(authorize)])
+    @router.get("/control/rom/library/{sha}/trace")
     async def get_rom_library_trace(sha: str) -> dict[str, Any]:
         """The live overlay's inputs for one image (ROM Editor): the vehicle's
         trace definitions per table kind, the live providers, and whether this
@@ -208,29 +196,29 @@ def register_rom_library_routes(
         )
         return result
 
-    @app.patch("/control/rom/library/{sha}", dependencies=[Depends(authorize)])
+    @router.patch("/control/rom/library/{sha}")
     async def patch_rom_library_entry(sha: str, request: RomLabelRequest) -> dict[str, Any]:
         result: dict[str, Any] = await _call(library.set_label, _sha(sha), request.label)
         return result
 
-    @app.delete("/control/rom/library/{sha}", dependencies=[Depends(authorize)])
+    @router.delete("/control/rom/library/{sha}")
     async def delete_rom_library_entry(sha: str) -> dict[str, Any]:
         await _call(library.delete, _sha(sha))
         return {"deleted": sha}
 
-    @app.get("/control/rom/compare", dependencies=[Depends(authorize)])
+    @router.get("/control/rom/compare")
     async def get_rom_compare(
         a: str = Query(min_length=64, max_length=64), b: str = Query(min_length=64, max_length=64)
     ) -> dict[str, Any]:
         result: dict[str, Any] = await _call(library.compare, _sha(a), _sha(b))
         return result
 
-    @app.get("/control/rom/backup", dependencies=[Depends(authorize)])
+    @router.get("/control/rom/backup")
     async def get_rom_backup() -> dict[str, Any]:
         result: dict[str, Any] = await run_in_threadpool(job.state)
         return result
 
-    @app.post("/control/rom/backup", status_code=202, dependencies=[Depends(authorize)])
+    @router.post("/control/rom/backup", status_code=202)
     async def post_rom_backup() -> dict[str, Any]:
         """Start the read. 409 names every precondition that refused it."""
         try:
@@ -239,7 +227,7 @@ def register_rom_library_routes(
             raise HTTPException(409, str(exc)) from exc
         return result
 
-    @app.post("/control/rom/backup/cancel", dependencies=[Depends(authorize)])
+    @router.post("/control/rom/backup/cancel")
     async def post_rom_backup_cancel() -> dict[str, Any]:
         try:
             result: dict[str, Any] = await run_in_threadpool(job.cancel)
@@ -247,6 +235,7 @@ def register_rom_library_routes(
             raise HTTPException(409, str(exc)) from exc
         return result
 
+    app.include_router(router)
     return job
 
 

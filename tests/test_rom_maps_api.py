@@ -11,13 +11,14 @@ from src.analysis.rom_targets import TargetEditor
 from src.config import CanaryConfig
 from src.control.rom_library import MAX_ROM_UPLOAD
 from src.dashboard.routes import rom_maps
+from tests.app_context import bare_context
 
 
 @pytest.fixture
 def client(monkeypatch):
     app = FastAPI()
     config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
-    rom_maps.register_rom_routes(app, config=config, resolved_control_token="secret")
+    rom_maps.register_rom_routes(app, bare_context(config))
     monkeypatch.setattr(
         rom_maps, "inspect_rom", lambda data, path, dids=None, **_kw: {"bytes": len(data)}
     )

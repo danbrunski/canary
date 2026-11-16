@@ -17,7 +17,7 @@ from src.collection.discovery import registry_snapshot, reset_discovery
 from src.control.can_activity import CanActivityBusError, capture_can_activity
 from src.control.obd_request import AdHocRequestBusError, execute_ad_hoc_request
 from src.control.tuning_mode import set_tuning_mode
-from src.dashboard.routes.control.context import ControlContext
+from src.dashboard.app_context import AppContext
 from src.dashboard.schemas import (
     BusBudgetRequest,
     CanActivityRequest,
@@ -28,7 +28,7 @@ from src.dashboard.schemas import (
 )
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     config = ctx.config
     force_poll_trigger = ctx.force_poll_trigger

@@ -33,7 +33,7 @@ from src.collection.kline.profile import (
     load_kline_profile,
 )
 from src.collection.kline.sessions import MODULE_SESSIONS
-from src.dashboard.routes.control.context import ControlContext
+from src.dashboard.app_context import AppContext
 from src.dashboard.schemas import ClearCodesRequest, ReadCodesRequest
 
 #: How long the route waits for the collector: its next check (≤0.5 s), a
@@ -81,7 +81,7 @@ def _action(kind: ActionKind, label: str, address: int, module: KlineModule | No
     )
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     config = ctx.config
     publish_control_event = ctx.publish_control_event

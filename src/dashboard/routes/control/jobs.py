@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from src.dashboard.routes.control.context import ControlContext
+from src.dashboard.app_context import AppContext
 from src.dashboard.routes.control.responses import (
     cancel_job_response,
     get_job_response,
@@ -24,7 +24,7 @@ from src.dashboard.schemas import (
 )
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     _jobs = ctx.require_job_controller
     publish_control_event = ctx.publish_control_event

@@ -18,14 +18,14 @@ from src.control.replay_control import (
     ReplayNotRunningError,
     ReplayRefusedError,
 )
-from src.dashboard.routes.control.context import ControlContext, _require
+from src.dashboard.app_context import AppContext, _require
 from src.dashboard.schemas import (
     ReplayStartRequest,
 )
 from src.dashboard.status import active_session_dir, derive_vehicle_state_from_storage
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     config = ctx.config
     publish_control_event = ctx.publish_control_event

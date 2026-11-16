@@ -17,14 +17,14 @@ from src.collection.custom_pids import (
     save_custom_pids,
     torque_csv_to_custom_pids,
 )
-from src.dashboard.routes.control.context import ControlContext
+from src.dashboard.app_context import AppContext
 from src.dashboard.schemas import (
     CustomPidCreateRequest,
     CustomPidCsvImportRequest,
 )
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     config = ctx.config
     publish_control_event = ctx.publish_control_event

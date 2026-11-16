@@ -26,8 +26,8 @@ from src.daemon.ups import (
     read_watchdog_status,
     write_keepalive,
 )
+from src.dashboard.app_context import AppContext, _require
 from src.dashboard.readers import read_vehicle_reading
-from src.dashboard.routes.control.context import ControlContext, _require
 from src.dashboard.schemas import (
     ProfileNameUpdateRequest,
     ProfileRevertRequest,
@@ -59,7 +59,7 @@ from src.vehicle.vin import inspect_vin
 VIN_PICKUP_SECONDS = 5.0
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     capture_controller = ctx.capture_controller
     config = ctx.config

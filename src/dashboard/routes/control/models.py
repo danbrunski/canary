@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from src.control.models import publish_model_artifact
-from src.dashboard.routes.control.context import ControlContext
+from src.dashboard.app_context import AppContext
 from src.dashboard.routes.control.responses import (
     dataset_health_response,
     get_model_manifest_response,
@@ -27,7 +27,7 @@ from src.models.manifest import manifest_path_for
 from src.preprocessing.loader import discover_sessions
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     config = ctx.config
     publish_control_event = ctx.publish_control_event

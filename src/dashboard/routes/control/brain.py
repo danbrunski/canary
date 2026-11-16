@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.control import brain_reads
 from src.control.brain_jobs import BrainJobStore, canonical_params
-from src.dashboard.routes.control.context import ControlContext
+from src.dashboard.app_context import AppContext
 from src.evidence.ledger import UnscopedMemoryError
 
 #: When this app was built: the brain's transient state is unknown since then.
@@ -35,7 +35,7 @@ class BrainJobRequest(BaseModel):
     rerun: bool = False
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     config = ctx.config
 

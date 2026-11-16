@@ -285,8 +285,8 @@ async def test_an_http_started_capture_ended_by_daemon_shutdown_reports_its_epoc
     try:
         await wait_until(lambda: bool(apps), what="the daemon's app built")
         app = apps[0]
-        assert app.state.control_context.session is components.profile_capture
-        assert app.state.control_context.autostart is components.capture_autostart
+        assert app.state.app_context.session is components.profile_capture
+        assert app.state.app_context.autostart is components.capture_autostart
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://daemon") as client:
             started = await client.post(

@@ -16,7 +16,7 @@ from src.control.capture import (
     NoActiveCaptureError,
     no_active_capture_detail,
 )
-from src.dashboard.routes.control.context import ControlContext
+from src.dashboard.app_context import AppContext
 from src.dashboard.schemas import (
     CaptureStartRequest,
     CaptureStopRequest,
@@ -24,7 +24,7 @@ from src.dashboard.schemas import (
 )
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     _controller = ctx.require_capture_controller
     publish_control_event = ctx.publish_control_event

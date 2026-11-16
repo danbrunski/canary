@@ -42,6 +42,7 @@ from src.dashboard.routes import rom_maps
 from src.decode.dids import load_did_map
 from src.paths import DIDS_YAML
 from src.yaml_load import load_yaml
+from tests.app_context import bare_context
 
 REPO = Path(__file__).resolve().parents[1]
 PROFILE = REPO / "data" / "nissan-xterra-2008"
@@ -489,7 +490,7 @@ def test_the_route_serves_the_report_behind_the_control_token(
     monkeypatch.setattr(rom_maps, "active_registry", lambda _config: None)
     app = FastAPI()
     config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
-    rom_maps.register_rom_routes(app, config=config, resolved_control_token="secret")
+    rom_maps.register_rom_routes(app, bare_context(config))
     with TestClient(app) as client:
         assert client.get("/control/ecu/application-model").status_code == 401
         response = client.get(

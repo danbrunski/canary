@@ -8,19 +8,11 @@ R29.7 moved these out of that one 383-line function; ``/status`` has its own pay
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 
-from src.alerts.emitter import AnomalyEventEmitter
-from src.analysis.gps_tracker import GpsTracker
-from src.behavior.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
-from src.collection.imu_collector import ImuHealth
-from src.config import CanaryConfig
-from src.control.replay_control import ReplayController
-from src.control.sequence_detector import SequenceDetectorController
-from src.daemon.ups import DEFAULT_UPS_STATUS_PATH
+from src.dashboard.app_context import AppContext
 from src.dashboard.identity import identity_payload
 from src.dashboard.readers import (
     decoded_did_rows,
@@ -37,35 +29,11 @@ from src.dashboard.status import (
     compact_status,
     gather_status_sources,
 )
-from src.models.feedback import FeedbackStore, annotate_events_with_feedback
-from src.provisioning.reader import NetworkStatusReader
-
-if TYPE_CHECKING:
-    from src.daemon.health import HealthMonitor
-    from src.daemon.inference_metrics import InferenceTimingRecorder
+from src.models.feedback import annotate_events_with_feedback
 
 
-def register_status_routes(
-    app: FastAPI,
-    *,
-    config: CanaryConfig,
-    anomalies_dir: Path,
-    models_dir: Path | None,
-    emitter: AnomalyEventEmitter | None,
-    feedback_store: FeedbackStore | None,
-    dids_path: Path,
-    replay_controller: ReplayController | None,
-    health_monitor: HealthMonitor | None,
-    gps_tracker: GpsTracker | None = None,
-    imu_health: ImuHealth | None = None,
-    sequence_detector_controller: SequenceDetectorController | None = None,
-    accepted_baselines_path: Path = DEFAULT_ACCEPTED_BASELINES_PATH,
-    storage_writer: Any = None,
-    inference_timing: InferenceTimingRecorder | None = None,
-    live_source: Any = None,
-    ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
-    network_reader: NetworkStatusReader | None = None,
-) -> None:
+def register_status_routes(app: FastAPI, ctx: AppContext) -> None:
+    config = ctx.config
     # Owned here rather than passed in, so the vehicle-state derivation is
     # shared by both /status views of every app without any caller having to
     # remember to wire it (and never shared *between* apps, which would leak
@@ -98,45 +66,47 @@ def register_status_routes(
         """
         sources = gather_status_sources(
             config,
-            emitter=emitter,
-            health_monitor=health_monitor,
-            replay_controller=replay_controller,
-            storage_writer=storage_writer,
-            inference_timing=inference_timing,
+            emitter=ctx.emitter,
+            health_monitor=ctx.health_monitor,
+            replay_controller=ctx.replay_controller,
+            storage_writer=ctx.storage_writer,
+            inference_timing=ctx.inference_timing,
             vehicle_state_cache=vehicle_state_cache,
-            live_source=live_source,
-            imu_health=imu_health,
+            live_source=ctx.live_source,
+            imu_health=ctx.imu_health,
         )
         if view == "compact":
             return compact_status(sources)
         payload = build_status(
             config,
-            models_dir=models_dir,
-            emitter=emitter,
-            health_monitor=health_monitor,
-            replay_controller=replay_controller,
-            gps_tracker=gps_tracker,
-            storage_writer=storage_writer,
-            inference_timing=inference_timing,
+            models_dir=ctx.models_dir,
+            emitter=ctx.emitter,
+            health_monitor=ctx.health_monitor,
+            replay_controller=ctx.replay_controller,
+            gps_tracker=ctx.gps_tracker,
+            storage_writer=ctx.storage_writer,
+            inference_timing=ctx.inference_timing,
             sources=sources,
-            ups_status_path=ups_status_path,
-            dids_path=dids_path,
+            ups_status_path=ctx.ups_status_path,
+            dids_path=ctx.dids_path,
         ).to_dict()
-        if replay_controller is not None:
-            payload["replay"] = replay_controller.status().to_dict()
-        if sequence_detector_controller is not None:
-            payload["sequence_detector"] = sequence_detector_controller.status().to_dict()
+        if ctx.replay_controller is not None:
+            payload["replay"] = ctx.replay_controller.status().to_dict()
+        if ctx.sequence_detector_controller is not None:
+            payload["sequence_detector"] = ctx.sequence_detector_controller.status().to_dict()
         # 2.3 — "N accepted-baseline overrides active", always visible; the
         # StatusStrip reads `.active`, the expandable detail reads
         # `.overrides` (each with provenance + `review_by` + `expired`).
         # Re-read every request, same posture as /models/behavior — the
         # file is tiny and an operator's edit should show up without a
         # daemon restart.
-        payload["accepted_baseline_overrides"] = read_accepted_baselines(accepted_baselines_path)
+        payload["accepted_baseline_overrides"] = read_accepted_baselines(
+            ctx.accepted_baselines_path
+        )
         # P2.3 — the address a phone should bookmark. ``peek`` never waits on
         # nmcli: a stale copy (its ``age_s`` says how stale) is served while a
         # background refresh replaces it, at most every STATUS_MAX_AGE_S.
-        reading = network_reader.peek() if network_reader is not None else None
+        reading = ctx.network_reader.peek() if ctx.network_reader is not None else None
         payload["network"] = (
             None if reading is None else reading.to_dict(dashboard_port=config.dashboard.port)
         )
@@ -155,14 +125,14 @@ def register_status_routes(
     ) -> dict[str, Any]:
         try:
             events = read_anomalies_since(
-                anomalies_dir, since=since, source=source, mode=mode, limit=limit
+                ctx.anomalies_dir, since=since, source=source, mode=mode, limit=limit
             )
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=400, detail=f"bad `since`: {exc}") from exc
         # Join the operator's verdict onto each event so the timeline can
         # show "you marked this" without a second round-trip (Task 6.24).
-        if feedback_store is not None:
-            events = annotate_events_with_feedback(events, feedback_store)
+        if ctx.feedback_store is not None:
+            events = annotate_events_with_feedback(events, ctx.feedback_store)
         return {"events": events, "count": len(events)}
 
     @app.get("/telemetry/latest")
@@ -181,5 +151,5 @@ def register_status_routes(
         # until the next poll window — up to a minute of blank gauges,
         # since the DID session is mutually exclusive with Mode 01 and so
         # runs in windows rather than continuously.
-        rows = rows + decoded_did_rows(rows, dids_path)
+        rows = rows + decoded_did_rows(rows, ctx.dids_path)
         return {"rows": rows, "count": len(rows)}

@@ -45,6 +45,7 @@ from src.decode.memory_relations import (
 )
 from src.paths import DIDS_YAML
 from src.yaml_load import load_yaml
+from tests.app_context import bare_context
 
 REPO = Path(__file__).resolve().parents[1]
 CATALOG = load_did_map(DIDS_YAML)
@@ -987,7 +988,7 @@ def verify_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     tx_gate.reset_ecm_session_claims()
     app = FastAPI()
     routes.register_calibration_routes(
-        app, config=_route_config(tmp_path), dids_path=DIDS_YAML, resolved_control_token="t"
+        app, bare_context(_route_config(tmp_path), dids_path=DIDS_YAML, token="t")
     )
     yield TestClient(app, headers={"Authorization": "Bearer t"}), seen
     tx_gate.reset_ecm_session_claims()

@@ -16,28 +16,20 @@ for the new device instead of the key, and is recorded as its approver.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
+from fastapi import APIRouter, FastAPI, Header, HTTPException, Request
 
-from src.control.key_cycle_pairing import KeyCyclePairing
-from src.control.paired_devices import PairedDevices
+from src.dashboard.app_context import AppContext
 from src.dashboard.schemas import PairedDeviceRename, PairingRequestCreate
-from src.dashboard.security import control_auth_dependency, control_caller
+from src.dashboard.security import control_caller
 
 #: Sent as a header, not a query string, so access logs never record it.
 SECRET_HEADER = "X-Pairing-Secret"
 
 
-def register_pairing_routes(
-    app: FastAPI,
-    *,
-    devices: PairedDevices,
-    pairing: KeyCyclePairing,
-    resolved_control_token: str | None,
-    publish_control_event: Callable[[str, str, dict[str, Any]], None],
-) -> None:
+def register_pairing_routes(app: FastAPI, ctx: AppContext) -> None:
+    devices, pairing = ctx.paired_devices, ctx.pairing
     public = APIRouter()
 
     @public.post("/pair/request", status_code=201)
@@ -71,7 +63,7 @@ def register_pairing_routes(
             raise HTTPException(status_code=404, detail="no such pairing request")
         return {"cancelled": request_id}
 
-    guarded = APIRouter(dependencies=[Depends(control_auth_dependency(resolved_control_token))])
+    guarded = ctx.router()
 
     @guarded.get("/control/devices")
     def get_devices() -> dict[str, Any]:
@@ -97,7 +89,7 @@ def register_pairing_routes(
             ) from exc
         if renamed is None:
             raise HTTPException(status_code=404, detail=f"no paired device {device_id!r}")
-        publish_control_event("pairing.renamed", "ok", {"device": renamed.public()})
+        ctx.publish_control_event("pairing.renamed", "ok", {"device": renamed.public()})
         return {"device": renamed.public()}
 
     @guarded.delete("/control/devices/{device_id}")
@@ -111,7 +103,7 @@ def register_pairing_routes(
             ) from exc
         if removed is None:
             raise HTTPException(status_code=404, detail=f"no paired device {device_id!r}")
-        publish_control_event("pairing.removed", "ok", {"device": removed.public()})
+        ctx.publish_control_event("pairing.removed", "ok", {"device": removed.public()})
         return {"removed": removed.public()}
 
     @guarded.get("/control/pairing/requests")

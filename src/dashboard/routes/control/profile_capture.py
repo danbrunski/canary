@@ -20,7 +20,8 @@ from src.control.capture_finalize import (
 from src.control.profile_capture import (
     ProfileCaptureStart,
 )
-from src.dashboard.routes.control.context import ControlContext, SessionDir
+from src.dashboard.app_context import AppContext
+from src.dashboard.routes.control.context import SessionDir
 from src.dashboard.schemas import (
     CaptureAutostartArmRequest,
     CapturePauseRequest,
@@ -30,7 +31,7 @@ from src.dashboard.schemas import (
 from src.features.capture_inputs import model_input_warnings
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     _resolve_session = ctx.resolve_session
     autostart = ctx.autostart

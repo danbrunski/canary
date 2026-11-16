@@ -421,7 +421,7 @@ it; go after that work lands.
     test_vehicle_ledger test_route_table_snapshot test_script_cli_snapshot`:
     462 passed; `ruff check .`, `ruff format --check .`, `mypy src` clean.
 
-- [ ] **R29.6 `create_app` threads about 45 daemon objects through four
+- [x] **R29.6 `create_app` threads about 45 daemon objects through four
   layers.** The same names are spelled out in `create_app`'s signature, the
   `register_public_routes(...)` call, the `register_control_routes(...)` call,
   `ControlContext(...)` and `daemon/server._build_app`. `ControlContext`
@@ -429,8 +429,79 @@ it; go after that work lands.
   at router level "so no route can be registered without it". Five non-control
   modules (`calibration`, `rom_editor`, `rom_library`, `rom_maps`,
   `workbench`: 30 routes) each build the dependency and attach it per route.
-  - [ ] One frozen app context built in `create_app` and passed to every
+  - [x] One frozen app context built in `create_app` and passed to every
     `register_*`; non-control modules use its `router()`.
+    **Done 2026-11-15.** `src/dashboard/app_context.py::AppContext` is
+    `ControlContext` renamed, moved out of `routes/control/` and widened from 29
+    to the 45 fields `create_app` resolves (one per `create_app` argument bar
+    `static_dir`/`enable_dev_cors`, plus the derived `require_auth` and
+    `publish_control_event`, and the three objects `create_app` used to build
+    below it: the capture `session`, its `autostart`, and the `pairing`).
+    `create_app` resolves its arguments once, builds the one `AppContext(...)`,
+    stores it at `app.state.app_context` (was `control_context`), and every
+    registrar is now `register_*(app, ctx)`: `register_public_routes`,
+    `register_status_routes`, `register_catalog_read_routes`,
+    `register_analysis_read_routes`, `register_control_routes` (it only includes
+    the routers now; the capture session/autostart it built moved into
+    `create_app`, which reads `control.AUTOSTART_TICK_SECONDS` per tick so
+    `test_capture_profiles.py`'s patch still lands), `register_rom_routes`,
+    `register_rom_library_routes`, `register_rom_editor_routes`,
+    `register_calibration_routes`, `register_workbench_routes`,
+    `register_pairing_routes`, `register_stream_routes`, and
+    `register_companion_link_routes` (plus its Pi-round-trip test seams, which
+    are collaborators, not daemon objects). The five non-control modules and
+    pairing's guarded router use `ctx.router()` (`@router.get`, one
+    `app.include_router(router)`); no route module calls
+    `control_auth_dependency` any more. `register_companion_link_routes` takes
+    `ctx.require_auth` for its per-route `Depends` because `/companion/status`
+    is public and the handlers declare `_auth`, so it is the one module still
+    attaching per route (the same dependency object). `/ws/control` keeps
+    `websocket_control_auth_dependency(ctx.resolved_control_token)`.
+    `require_auth` is `field(init=False)` built in `__post_init__` from
+    `resolved_control_token`, so a context cannot carry a token and a guard that
+    disagree (`dataclasses.replace` rebuilds it). The public read modules read
+    `ctx.<name>` inline in the closures; `_require` moved with the class
+    (`routes/control/context.py` keeps `SessionDir` and the routes' logger).
+    Names spelled out now: `create_app`'s signature (the contract), one
+    `AppContext(...)` call, the dataclass, and `daemon/server._build_app`
+    (the daemon-side mapping of components onto `create_app`'s keywords, which
+    cannot go while the signature stays); the `register_public_routes` /
+    `register_control_routes` / `ControlContext(...)` / per-module keyword calls
+    are gone (`git diff --stat`: 32 route/API files, +280/-696).
+    **Must not change, held:** `create_app`'s keyword signature is untouched
+    (`test_every_create_app_argument_is_accounted_for` pins its parameter set);
+    `tests/test_route_table_snapshot.py` passes without regenerating
+    `tests/fixtures/route_table_snapshot.json` (every method/path/auth/status/
+    query/body row equal, no route shadowed).
+    **No dependency lost (new, `tests/test_app_context_wiring.py`, 12 tests):**
+    every `create_app` argument is passed as a distinct sentinel and must land on
+    `ctx.<field>` by identity (the mapping table is complete in both directions:
+    a new `create_app` keyword or `AppContext` field with no row fails);
+    `server._build_app` over a fully wired `DaemonComponents` must hand each of
+    the 24 live components to its field by identity, and no field is `None` bar
+    `network_socket_path` (`None` is the root service's default socket by
+    design); handlers, not just fields: the public `/obd/dtc`,
+    `/obd/monitors`, `/models/behavior/live` answer from the daemon's own
+    `dtc_state`/`monitor_state`/`behavior_live`, and a capture started through
+    the control package's `POST /control/captures` is the one
+    `/control/rom/backup` (a moved non-control module) refuses on, with the
+    `capture.start` event arriving on the daemon's own `control_broadcaster`;
+    every `register_*` takes exactly `(app, ctx)` (companion adds its seams) and
+    no route module builds `control_auth_dependency`. **Mutation check:**
+    deleting `monitor_state=monitor_state` from `create_app`'s `AppContext(...)`
+    fails 4 of them, and deleting `monitor_state=components.monitor_state` from
+    `_build_app` fails 3; mypy cannot see either (the field defaults to `None`),
+    which is the failure the item describes. `tests/app_context.py::bare_context`
+    is the test-side builder for a context without an app (the ~25 direct
+    `register_*(app, config=..., resolved_control_token=...)` calls in 13 test
+    files now call it; `app.state.control_context` in `test_profile_capture.py`
+    is `app_context`).
+    **Gate:** `pytest -n 4 -m "not integration and not ml_training"` over the 76
+    test files that name `create_app`, the route modules, `_build_app` or
+    `control_context`, plus `test_app_context_wiring`, `test_route_table_snapshot`,
+    `test_layering`, `test_source_rules`, `test_state_dir`,
+    `test_mcp_tool_snapshot`, `test_cold_start_imports`: 1732 passed, 1 xfailed;
+    `ruff check .`, `ruff format --check .`, `mypy src` clean.
   - Must not change: `create_app`'s keyword signature (52 files call it), the
     route table snapshot.
 

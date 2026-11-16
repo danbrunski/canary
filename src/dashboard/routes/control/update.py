@@ -29,7 +29,7 @@ from src.control.updater import (
     read_status,
     write_request,
 )
-from src.dashboard.routes.control.context import ControlContext
+from src.dashboard.app_context import AppContext
 from src.dashboard.version import _canary_version, _git_sha
 
 
@@ -89,7 +89,7 @@ def _refusal(paths: UpdatePaths, action: str, now: float) -> tuple[int, str] | N
     return None
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     paths = ctx.update_paths
 

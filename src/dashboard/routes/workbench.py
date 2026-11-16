@@ -17,7 +17,7 @@ import asyncio
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query
 
 from src.analysis.channels import ChannelSpecError
 from src.analysis.dyno_workbench import DynoRequest
@@ -31,7 +31,6 @@ from src.analysis.workbench import (
     RPM_SPEC,
     TIMING_SPEC,
 )
-from src.config import CanaryConfig
 from src.control.calibration import profile_dir
 from src.control.logs import DEFAULT_LOG_LIMIT, list_logs
 from src.control.workbench_jobs import (
@@ -42,9 +41,7 @@ from src.control.workbench_jobs import (
     run_off_loop,
     select_sessions,
 )
-from src.dashboard.security import (
-    control_auth_dependency,
-)
+from src.dashboard.app_context import AppContext
 from src.dashboard.status_errors import register_status_error_handler
 
 DEFAULT_MEASURED = "obd:O2_WR_LAMBDA_S1"
@@ -63,17 +60,11 @@ def _optional_float(raw: str | None) -> float | None:
         raise HTTPException(400, f"not a number: {raw!r}") from exc
 
 
-def register_workbench_routes(
-    app: FastAPI,
-    *,
-    config: CanaryConfig,
-    bindings_path: Path,
-    dids_path: Path,
-    resolved_control_token: str | None,
-) -> None:
+def register_workbench_routes(app: FastAPI, ctx: AppContext) -> None:
+    config, bindings_path, dids_path = ctx.config, ctx.bindings_path, ctx.dids_path
     # A refusal any of these routes lets escape answers with its own status and body.
     register_status_error_handler(app)
-    authorize = control_auth_dependency(resolved_control_token)
+    router = ctx.router()
 
     async def run(kind: str, params: dict[str, Any], names: list[str]) -> dict[str, Any]:
         try:
@@ -105,14 +96,14 @@ def register_workbench_routes(
         result = await run(kind, params, [p.name for p in selection.usable])
         return {**result, "selection": selection.as_dict()}
 
-    @app.get("/control/logs", dependencies=[Depends(authorize)])
+    @router.get("/control/logs")
     def get_logs(
         include_sessions: bool = False,
         limit: int = Query(default=DEFAULT_LOG_LIMIT, ge=1, le=1000),
     ) -> dict[str, Any]:
         return list_logs(config, include_sessions=include_sessions, limit=limit)
 
-    @app.get("/control/sessions/{session_id}/frame", dependencies=[Depends(authorize)])
+    @router.get("/control/sessions/{session_id}/frame")
     async def get_session_frame(
         session_id: str,
         specs: str = Query(..., description="Comma-separated channel specs"),
@@ -140,7 +131,7 @@ def register_workbench_routes(
         }
         return await run("frame", params, [session_id])
 
-    @app.get("/control/sessions/{session_id}/cell-residency", dependencies=[Depends(authorize)])
+    @router.get("/control/sessions/{session_id}/cell-residency")
     async def get_cell_residency(
         session_id: str,
         table: str = Query(..., description="ROM table kind, e.g. fuel_targets"),
@@ -175,7 +166,7 @@ def register_workbench_routes(
         session = prepared.session
         return await run("cell_residency", {"session": str(session), "table": table}, [session_id])
 
-    @app.get("/analysis/delivery-error", dependencies=[Depends(authorize)])
+    @router.get("/analysis/delivery-error")
     async def get_delivery_error(
         sessions: str | None = None,
         revision: str | None = None,
@@ -192,7 +183,7 @@ def register_workbench_routes(
             {"measured": measured, "min_load": floor},
         )
 
-    @app.get("/analysis/trim-surface", dependencies=[Depends(authorize)])
+    @router.get("/analysis/trim-surface")
     async def get_trim_surface(
         sessions: str | None = None,
         revision: str | None = None,
@@ -206,7 +197,7 @@ def register_workbench_routes(
             {"rpm": rpm, "airflow": airflow, "min_n": min_n},
         )
 
-    @app.get("/analysis/timing", dependencies=[Depends(authorize)])
+    @router.get("/analysis/timing")
     async def get_timing(
         sessions: str | None = None,
         revision: str | None = None,
@@ -221,7 +212,7 @@ def register_workbench_routes(
             {"timing": timing, "rpm": rpm, "airflow": airflow, "min_n": min_n},
         )
 
-    @app.get("/analysis/dyno", dependencies=[Depends(authorize)])
+    @router.get("/analysis/dyno")
     async def get_dyno(
         sessions: str | None = None,
         revision: str | None = None,
@@ -261,7 +252,7 @@ def register_workbench_routes(
         await asyncio.to_thread(dyno_preflight, config, selection)
         return await run_pooled("dyno", selection, {"request": request.as_dict()})
 
-    @app.get("/analysis/pull-comparison", dependencies=[Depends(authorize)])
+    @router.get("/analysis/pull-comparison")
     async def get_pull_comparison(
         revision_a: str,
         revision_b: str,
@@ -302,6 +293,8 @@ def register_workbench_routes(
             [p.name for side in sides.values() for p in side.usable],
         )
         return {**result, "selection": {k: v.as_dict() for k, v in sides.items()}}
+
+    app.include_router(router)
 
 
 __all__ = ["register_workbench_routes"]

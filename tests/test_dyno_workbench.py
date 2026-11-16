@@ -45,6 +45,7 @@ from src.paths import REPO_ROOT
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
+from tests.app_context import bare_context
 from tests.test_dyno_power import (
     MOUNT_OFFSET_DEG,
     PAIR,
@@ -707,10 +708,9 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     app = FastAPI()
     workbench_routes.register_workbench_routes(
         app,
-        config=config,
-        bindings_path=Path("data/bindings.yaml"),
-        dids_path=Path("data/dids.yaml"),
-        resolved_control_token="secret",
+        bare_context(
+            config, bindings_path=Path("data/bindings.yaml"), dids_path=Path("data/dids.yaml")
+        ),
     )
     monkeypatch.setattr(child_pool, "spawn_pool", lambda: ThreadPoolExecutor(max_workers=1))
     monkeypatch.setattr(workbench_jobs, "limit_address_space", lambda nbytes: (nbytes, nbytes))

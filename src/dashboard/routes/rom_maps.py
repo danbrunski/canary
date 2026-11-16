@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 from src.analysis.ecu_application import coverage_report, load_application_model
@@ -18,11 +18,8 @@ from src.analysis.rom_trace import (
     trace_payload,
 )
 from src.analysis.tuning_frame import load_provider_registry
-from src.config import CanaryConfig
 from src.control.rom_library import MAX_ROM_UPLOAD
-from src.dashboard.security import (
-    control_auth_dependency,
-)
+from src.dashboard.app_context import AppContext
 from src.paths import DIDS_YAML
 from src.vehicle.profiles import active_registry
 from src.vehicle.profiles import profile_dir as vehicle_profile_dir
@@ -202,16 +199,11 @@ def application_model_report(
     return coverage_report(model, model_sha, image_sha256=image)
 
 
-def register_rom_routes(
-    app: FastAPI,
-    *,
-    config: CanaryConfig,
-    resolved_control_token: str | None,
-    dids_path: Path = DIDS_YAML,
-) -> None:
-    authorize = control_auth_dependency(resolved_control_token)
+def register_rom_routes(app: FastAPI, ctx: AppContext) -> None:
+    config, dids_path = ctx.config, ctx.dids_path
+    router = ctx.router()
 
-    @app.get("/control/ecu/application-model", dependencies=[Depends(authorize)])
+    @router.get("/control/ecu/application-model")
     def get_application_model() -> dict[str, Any]:
         """Read-only coverage of the ECM application twin (E05.1)."""
         try:
@@ -221,7 +213,7 @@ def register_rom_routes(
         except FileNotFoundError as exc:
             raise HTTPException(404, "No ECU application model for this vehicle") from exc
 
-    @app.post("/control/rom/inspect", dependencies=[Depends(authorize)])
+    @router.post("/control/rom/inspect")
     async def post_rom_inspect(request: Request) -> dict[str, Any]:
         """Raw octet-stream upload. Decode only; never select a tune or flash."""
         body = await read_rom_upload(
@@ -241,3 +233,5 @@ def register_rom_routes(
             raise HTTPException(409, "ROM map definitions unavailable for this vehicle") from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+
+    app.include_router(router)

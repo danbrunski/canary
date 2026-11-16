@@ -5,11 +5,10 @@ from __future__ import annotations
 import threading
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 import can
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from src.analysis.memory_verification import (
@@ -21,7 +20,6 @@ from src.analysis.memory_verification import (
 from src.collection import tuning_profile, tx_gate
 from src.collection.can_collector import bus_factory
 from src.collection.can_obd_client import CanObdClient
-from src.config import CanaryConfig
 from src.control.calibration import (
     active_registry,
     append_flash,
@@ -30,9 +28,7 @@ from src.control.calibration import (
     record_verify_results,
     seed_operational_memory,
 )
-from src.dashboard.security import (
-    control_auth_dependency,
-)
+from src.dashboard.app_context import AppContext
 from src.decode.dids import load_did_map
 from src.vehicle.tune_revisions import TuneRevision
 
@@ -125,24 +121,19 @@ class FlashRequest(BaseModel):
     notes: str = ""
 
 
-def register_calibration_routes(
-    app: FastAPI,
-    *,
-    config: CanaryConfig,
-    dids_path: Path,
-    resolved_control_token: str | None,
-) -> None:
-    authorize = control_auth_dependency(resolved_control_token)
+def register_calibration_routes(app: FastAPI, ctx: AppContext) -> None:
+    config, dids_path = ctx.config, ctx.dids_path
+    router = ctx.router()
 
-    @app.get("/control/calibration", dependencies=[Depends(authorize)])
+    @router.get("/control/calibration")
     def get_calibration() -> dict[str, Any]:
         return calibration_payload(config)
 
-    @app.get("/control/memory-channels", dependencies=[Depends(authorize)])
+    @router.get("/control/memory-channels")
     def get_memory_channels() -> dict[str, Any]:
         return memory_channels_payload(config, dids_path)
 
-    @app.post("/control/calibration", dependencies=[Depends(authorize)], status_code=201)
+    @router.post("/control/calibration", status_code=201)
     def post_calibration(body: FlashRequest) -> dict[str, Any]:
         try:
             append_flash(config, TuneRevision.model_validate(body.model_dump()))
@@ -150,7 +141,7 @@ def register_calibration_routes(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return calibration_payload(config)
 
-    @app.post("/control/memory-channels/verify", dependencies=[Depends(authorize)])
+    @router.post("/control/memory-channels/verify")
     def post_verify(body: VerifyRequest) -> dict[str, Any]:
         if not _VERIFY_LOCK.acquire(blocking=False):
             raise HTTPException(
@@ -268,6 +259,8 @@ def register_calibration_routes(
             "notes": notes,
             "catalog": str(catalog_path),
         }
+
+    app.include_router(router)
 
 
 __all__ = ["register_calibration_routes"]

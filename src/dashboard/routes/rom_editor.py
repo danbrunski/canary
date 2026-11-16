@@ -56,7 +56,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict
 from starlette.concurrency import run_in_threadpool
 
@@ -64,10 +64,9 @@ from src.analysis import rom_editor
 from src.analysis.rom_editor import SimRequest
 from src.analysis.rom_map import ROM_MAP_FILE
 from src.analysis.sim_contract import SimulationRefusalError
-from src.config import CanaryConfig
 from src.control.rom_library import RomLibrary, RomMapLookupError, RomNotFoundError, valid_sha
 from src.control.workbench_jobs import WorkbenchRefusedError, capture_deferral, run_off_loop
-from src.dashboard.security import control_auth_dependency
+from src.dashboard.app_context import AppContext
 from src.dashboard.status_errors import register_status_error_handler
 
 #: The job kind the simulate route runs in the workbench child.
@@ -120,12 +119,7 @@ def _laptop_path(sha: str) -> str:
     )
 
 
-def register_rom_editor_routes(
-    app: FastAPI,
-    *,
-    config: CanaryConfig,
-    resolved_control_token: str | None,
-) -> None:
+def register_rom_editor_routes(app: FastAPI, ctx: AppContext) -> None:
     """Register the preview and simulate routes on ``app``.
 
     ``register_rom_library_routes`` must have run: the images are its."""
@@ -137,7 +131,8 @@ def register_rom_editor_routes(
             "register_rom_editor_routes needs app.state.rom_library: "
             "call register_rom_library_routes first"
         )
-    authorize = control_auth_dependency(resolved_control_token)
+    config = ctx.config
+    router = ctx.router()
 
     def image_profile(sha: str) -> Path:
         """The profile whose map reads the entry (``RomLibrary.map_for``): its
@@ -229,7 +224,7 @@ def register_rom_editor_routes(
             )
         return job_params(sha, state, request=body.model_dump(mode="json"))
 
-    @app.get("/control/rom/editor/typical-values", dependencies=[Depends(authorize)])
+    @router.get("/control/rom/editor/typical-values")
     async def get_rom_typical_values(sha: str | None = None) -> dict[str, Any]:
         """The vehicle's typical stated values, each with its source, and the
         fillable fields it leaves empty with the reason. Fills nothing by itself.
@@ -243,20 +238,20 @@ def register_rom_editor_routes(
         except SimulationRefusalError as exc:
             raise HTTPException(409, {"error": exc.reason, "message": exc.message}) from exc
 
-    @app.post("/control/rom/library/{sha}/edits/preview", dependencies=[Depends(authorize)])
+    @router.post("/control/rom/library/{sha}/edits/preview")
     async def post_rom_edit_preview(sha: str, body: PreviewRequest) -> dict[str, Any]:
         """The spec, its YAML and hash, the candidate's provenance (cells old
         -> new, ranges, reach) and the edited tables' after values."""
         return await run_in_threadpool(preview, sha, body)
 
-    @app.post("/control/rom/library/{sha}/edits/export", dependencies=[Depends(authorize)])
+    @router.post("/control/rom/library/{sha}/edits/export")
     async def post_rom_edit_export(sha: str, body: PreviewRequest) -> dict[str, Any]:
         """The edited, checksummed image as a new library entry: ``entry`` (its
         ``export_meta`` the provenance), ``created`` (false when the library
         already held these bytes) and ``provenance``."""
         return await run_in_threadpool(export, sha, body)
 
-    @app.post("/control/rom/library/{sha}/simulate", dependencies=[Depends(authorize)])
+    @router.post("/control/rom/library/{sha}/simulate")
     async def post_rom_simulate(sha: str, body: SimRequest) -> dict[str, Any]:
         """The edits on a recorded base, over a stated grid. Every field of the
         body is required: nothing is defaulted (422 names what is missing)."""
@@ -275,6 +270,8 @@ def register_rom_editor_routes(
         if refused is not None:
             raise HTTPException(400, {"error": "sim_refused", **refused})
         return result
+
+    app.include_router(router)
 
 
 __all__ = ["JOB_KIND", "PreviewRequest", "register_rom_editor_routes"]

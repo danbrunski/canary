@@ -13,13 +13,14 @@ from typing import Any, cast
 from fastapi import FastAPI, HTTPException, Query
 
 from src.analysis.llm_assist import LlmAssistCardStore, resolve_card
-from src.config import CanaryConfig
 from src.control.workbench_jobs import capture_deferral
+from src.dashboard.app_context import AppContext
 from src.dashboard.status_errors import register_status_error_handler
 from src.evidence import MemoryLedger, UnscopedMemoryError, memory_ledger_for
 
 
-def register_analysis_read_routes(app: FastAPI, *, config: CanaryConfig) -> None:
+def register_analysis_read_routes(app: FastAPI, ctx: AppContext) -> None:
+    config = ctx.config
     # A refusal any of these routes lets escape answers with its own status and body.
     register_status_error_handler(app)
 

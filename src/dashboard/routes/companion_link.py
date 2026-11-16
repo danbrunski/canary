@@ -69,10 +69,9 @@ from src.companion.services import (
     import_session_archive,
     run_queued_action,
 )
-from src.config import CanaryConfig
 from src.control.models import MODEL_TYPES
+from src.dashboard.app_context import AppContext
 from src.dashboard.routes.control.responses import http_artifact_path
-from src.dashboard.security import control_auth_dependency
 from src.models.manifest import compatibility_report, manifest_path_for
 
 DiscoverFn = Callable[..., list[DiscoveredPi]]
@@ -181,9 +180,8 @@ class CompanionLink:
 
 def register_companion_link_routes(
     app: FastAPI,
+    ctx: AppContext,
     *,
-    config: CanaryConfig,
-    resolved_control_token: str | None,
     lib: CanaryLibrary | None = None,
     discover_fn: DiscoverFn = discover,
     probe_fn: ProbeFn = probe,
@@ -193,6 +191,7 @@ def register_companion_link_routes(
     environ: dict[str, str] | None = None,
 ) -> CompanionLink:
     """Mount the link routes; returns the link, also kept at ``app.state.companion_link``."""
+    config = ctx.config
     settings = config.companion
     root = settings.library_root
     if root is None:  # the config validator fills it when enabled; be plain if not
@@ -209,7 +208,7 @@ def register_companion_link_routes(
     )
     app.state.companion_link = link
     app.state.companion_library = library
-    authorize = control_auth_dependency(resolved_control_token)
+    authorize = ctx.require_auth
 
     def default_pi_token(token: str | None) -> str | None:
         return token or pi_token

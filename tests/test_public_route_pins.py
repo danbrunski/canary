@@ -24,6 +24,7 @@ from src.dashboard.readers import read_can_coverage
 from src.dashboard.routes import register_public_routes
 from src.paths import REPO_ROOT
 from src.yaml_load import load_yaml
+from tests.app_context import bare_context
 from tests.configs import isolated_config
 
 _DIDS_YAML = """
@@ -194,18 +195,14 @@ def _bare_public_app(config: CanaryConfig, tmp_path: Path) -> FastAPI:
     app = FastAPI()
     register_public_routes(
         app,
-        config=config,
-        anomalies_dir=tmp_path / "an",
-        models_dir=None,
-        emitter=None,
-        feedback_store=None,
-        behavior_models_path=tmp_path / "behavior_models.yaml",
-        bindings_path=tmp_path / "bindings.yaml",
-        dids_path=tmp_path / "dids.yaml",
-        test_profiles_dir=tmp_path / "test-profiles",
-        replay_controller=None,
-        health_monitor=None,
-        behavior_live=None,
+        bare_context(
+            config,
+            anomalies_dir=tmp_path / "an",
+            behavior_models_path=tmp_path / "behavior_models.yaml",
+            bindings_path=tmp_path / "bindings.yaml",
+            dids_path=tmp_path / "dids.yaml",
+            test_profiles_dir=tmp_path / "test-profiles",
+        ),
     )
     return app
 
@@ -239,7 +236,7 @@ def test_the_analysis_registrar_installs_the_handler_when_called_on_its_own(
 
     monkeypatch.setattr(analysis_reads, "capture_deferral", _refuse)
     app = FastAPI()
-    analysis_reads.register_analysis_read_routes(app, config=config)
+    analysis_reads.register_analysis_read_routes(app, bare_context(config))
     response = TestClient(app).get("/analysis/binned", params={"value": "a", "x": "b"})
     assert (response.status_code, response.json()) == (
         409,

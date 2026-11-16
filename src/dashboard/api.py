@@ -37,12 +37,14 @@ from src.control.key_cycle_pairing import KeyCyclePairing
 from src.control.monitor_state import MonitorState
 from src.control.paired_devices import PairedDevices
 from src.control.paired_devices import default_path as paired_devices_default_path
+from src.control.profile_capture import CaptureAutostart, ProfileCaptureSession
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
 from src.control.updater import DEFAULT_UPDATE_PATHS, UpdatePaths
 from src.daemon.behavior_live import BehaviorLiveState
 from src.daemon.broadcast import Broadcaster
 from src.daemon.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PATH
+from src.dashboard.app_context import AppContext
 from src.dashboard.paths import (
     DEFAULT_BINDINGS_PATH,
     DEFAULT_DIDS_PATH,
@@ -59,6 +61,7 @@ from src.dashboard.readers import (
     read_latest_per_channel,
     read_latest_telemetry_rows,
 )
+from src.dashboard.routes import control as control_routes
 from src.dashboard.routes import (
     register_control_routes,
     register_public_routes,
@@ -91,7 +94,6 @@ from src.vehicle_state import derive_from_live_source
 
 if TYPE_CHECKING:  # annotation only — src.daemon's package __init__ imports this module
     # Annotation only: importing it at runtime loads the whole src.daemon package (R04.8).
-    from src.control.profile_capture import CaptureAutostart, ProfileCaptureSession
     from src.daemon.health import HealthMonitor
     from src.daemon.inference_metrics import InferenceTimingRecorder
 
@@ -219,10 +221,6 @@ def create_app(
             allow_methods=["*"],
             allow_headers=["*"],
         )
-    telemetry_bus = telemetry_broadcaster or Broadcaster()
-    anomalies_bus = anomalies_broadcaster or Broadcaster()
-    scores_bus = scores_broadcaster or Broadcaster()
-    control_bus = control_broadcaster or Broadcaster()
     resolved_control_token = (
         os.environ.get(config.daemon.control_token_env) if control_token is None else control_token
     )
@@ -236,6 +234,23 @@ def create_app(
         custom_pids_path=config.daemon.custom_pids,
         kline_catalog=KlineCatalog.from_config(config),
     )
+    session = profile_capture or ProfileCaptureSession(
+        storage_writer=storage_writer,
+        capture_controller=capture_controller,
+        profile_store=resolved_capture_profile_store,
+        health_monitor=health_monitor,
+    )
+    autostart = capture_autostart or CaptureAutostart(
+        session,
+        live_source,
+        replay_controller,
+        # Read per tick, so a test can shorten the module constant.
+        tick_seconds=lambda: control_routes.AUTOSTART_TICK_SECONDS,
+    )
+    telemetry_bus = telemetry_broadcaster or Broadcaster()
+    anomalies_bus = anomalies_broadcaster or Broadcaster()
+    scores_bus = scores_broadcaster or Broadcaster()
+    control_bus = control_broadcaster or Broadcaster()
     # Stash them on app.state so producer threads / app extensions can reach
     # the same instances after construction.
     app.state.telemetry_broadcaster = telemetry_bus
@@ -261,99 +276,6 @@ def create_app(
         )
         _publish_on_app_loop(control_bus, event, getattr(app.state, "control_loop", None))
 
-    register_public_routes(
-        app,
-        config=config,
-        anomalies_dir=anomalies_dir,
-        models_dir=models_dir,
-        emitter=emitter,
-        feedback_store=feedback_store,
-        behavior_models_path=behavior_models_path,
-        accepted_baselines_path=accepted_baselines_path,
-        storage_writer=storage_writer,
-        bindings_path=bindings_path,
-        dids_path=dids_path,
-        test_profiles_dir=test_profiles_dir,
-        replay_controller=replay_controller,
-        health_monitor=health_monitor,
-        behavior_live=behavior_live,
-        dtc_state=dtc_state,
-        monitor_state=monitor_state,
-        gps_tracker=gps_tracker,
-        imu_health=imu_health,
-        sequence_detector_controller=sequence_detector_controller,
-        inference_timing=inference_timing,
-        live_source=live_source,
-        ups_status_path=ups_status_path,
-        network_reader=network_reader,
-    )
-    register_control_routes(
-        app,
-        config=config,
-        anomalies_dir=anomalies_dir,
-        resolved_control_token=resolved_control_token,
-        capture_controller=capture_controller,
-        job_controller=job_controller,
-        replay_controller=replay_controller,
-        control_bus=control_bus,
-        audit_logger=audit_logger,
-        feedback_store=feedback_store,
-        vehicle_ledger_store=vehicle_ledger_store,
-        alert_tuner=alert_tuner,
-        sequence_detector_controller=sequence_detector_controller,
-        force_poll_trigger=force_poll_trigger,
-        storage_writer=storage_writer,
-        capture_profile_store=resolved_capture_profile_store,
-        health_monitor=health_monitor,
-        ups_status_path=ups_status_path,
-        ups_keepalive_path=ups_keepalive_path,
-        provision_window_path=provision_window_path,
-        network_reader=network_reader,
-        network_socket_path=network_socket_path,
-        update_paths=update_paths,
-        emitter=emitter,
-        live_source=live_source,
-        profile_capture=profile_capture,
-        capture_autostart=capture_autostart,
-        publish_control_event=publish_control_event,
-        inference_timing=inference_timing,
-    )
-    register_rom_routes(
-        app, config=config, resolved_control_token=resolved_control_token, dids_path=dids_path
-    )
-    register_rom_library_routes(
-        app,
-        config=config,
-        resolved_control_token=resolved_control_token,
-        live_source=live_source,
-        replay_controller=replay_controller,
-        capture_controller=capture_controller,
-        publish_control_event=publish_control_event,
-        dids_path=dids_path,
-    )
-    # After the library: the editor's images are its (app.state.rom_library).
-    register_rom_editor_routes(app, config=config, resolved_control_token=resolved_control_token)
-    if config.companion.enabled:
-        # Companion mode (a laptop linked to a Pi): the library's sessions are
-        # this daemon's session store (config validator), and /companion/*
-        # syncs, publishes and names the linked Pi.
-        register_companion_link_routes(
-            app, config=config, resolved_control_token=resolved_control_token
-        )
-    register_calibration_routes(
-        app,
-        config=config,
-        dids_path=dids_path,
-        resolved_control_token=resolved_control_token,
-    )
-    register_workbench_routes(
-        app,
-        config=config,
-        bindings_path=bindings_path,
-        dids_path=dids_path,
-        resolved_control_token=resolved_control_token,
-    )
-
     def live_vehicle_state() -> str | None:
         if live_source is None:
             return None
@@ -368,21 +290,72 @@ def create_app(
         window_path=provision_window_path,
         publish=publish_control_event,
     )
-    register_pairing_routes(
-        app,
-        devices=app.state.paired_devices,
-        pairing=app.state.pairing,
+    # The one record every register_* below reads (R29.6): each argument above
+    # is spelled out here once, and a route takes what it needs as ``ctx.<name>``.
+    ctx = AppContext(
+        config=config,
+        anomalies_dir=anomalies_dir,
+        behavior_models_path=behavior_models_path,
+        accepted_baselines_path=accepted_baselines_path,
+        bindings_path=bindings_path,
+        dids_path=dids_path,
+        test_profiles_dir=test_profiles_dir,
+        ups_status_path=ups_status_path,
+        ups_keepalive_path=ups_keepalive_path,
+        provision_window_path=provision_window_path,
+        update_paths=update_paths,
         resolved_control_token=resolved_control_token,
         publish_control_event=publish_control_event,
-    )
-    register_stream_routes(
-        app,
         telemetry_bus=telemetry_bus,
         anomalies_bus=anomalies_bus,
         scores_bus=scores_bus,
         control_bus=control_bus,
-        resolved_control_token=resolved_control_token,
+        profile_store=resolved_capture_profile_store,
+        session=session,
+        autostart=autostart,
+        paired_devices=app.state.paired_devices,
+        pairing=app.state.pairing,
+        models_dir=models_dir,
+        emitter=emitter,
+        capture_controller=capture_controller,
+        job_controller=job_controller,
+        replay_controller=replay_controller,
+        audit_logger=audit_logger,
+        feedback_store=feedback_store,
+        alert_tuner=alert_tuner,
+        vehicle_ledger_store=vehicle_ledger_store,
+        sequence_detector_controller=sequence_detector_controller,
+        force_poll_trigger=force_poll_trigger,
+        storage_writer=storage_writer,
+        health_monitor=health_monitor,
+        behavior_live=behavior_live,
+        dtc_state=dtc_state,
+        monitor_state=monitor_state,
+        gps_tracker=gps_tracker,
+        imu_health=imu_health,
+        live_source=live_source,
+        inference_timing=inference_timing,
+        network_reader=network_reader,
+        network_socket_path=network_socket_path,
     )
+    # `SessionDir` resolves against the app's context.
+    app.state.app_context = ctx
+
+    register_public_routes(app, ctx)
+    register_control_routes(app, ctx)
+    register_rom_routes(app, ctx)
+    register_rom_library_routes(app, ctx)
+    # After the library: the editor's images are its (app.state.rom_library).
+    register_rom_editor_routes(app, ctx)
+    if config.companion.enabled:
+        # Companion mode (a laptop linked to a Pi): the library's sessions are
+        # this daemon's session store (config validator), and /companion/*
+        # syncs, publishes and names the linked Pi.
+        register_companion_link_routes(app, ctx)
+    register_calibration_routes(app, ctx)
+    register_workbench_routes(app, ctx)
+    register_pairing_routes(app, ctx)
+    register_stream_routes(app, ctx)
 
     # Serve the built SPA from /, with SPA fall-through on 404 (the React
     # router could later own client-side paths like /diagnostics).

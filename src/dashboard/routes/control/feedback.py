@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import ValidationError as PydanticValidationError
 
-from src.dashboard.routes.control.context import ControlContext, _require
+from src.dashboard.app_context import AppContext, _require
 from src.dashboard.schemas import (
     FeedbackRequest,
     VehicleEventRequest,
@@ -20,7 +20,7 @@ from src.models.feedback import FeedbackStore
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     feedback_store = ctx.feedback_store
     publish_control_event = ctx.publish_control_event

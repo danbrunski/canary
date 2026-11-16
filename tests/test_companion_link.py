@@ -23,6 +23,7 @@ from src.config import CanaryConfig
 from src.dashboard.api import create_app
 from src.dashboard.identity import host_kind
 from src.dashboard.routes import companion_link
+from tests.app_context import bare_context
 from tests.configs import isolated_config
 
 AUTH = {"Authorization": "Bearer secret"}
@@ -83,7 +84,7 @@ def app_for(
         if probe_fn is not None:
             kwargs["probe_fn"] = probe_fn
         link = companion_link.register_companion_link_routes(
-            fresh, config=config, resolved_control_token="secret", lib=link.lib, **kwargs
+            fresh, bare_context(config), lib=link.lib, **kwargs
         )
         app = fresh
     return TestClient(app), link.lib
@@ -205,7 +206,7 @@ def test_a_lone_pi_found_at_startup_is_linked_several_are_listed(tmp_path: Path)
 
     app = FastAPI()
     link = companion_link.register_companion_link_routes(
-        app, config=config, resolved_control_token="secret", discover_fn=lambda **_k: one
+        app, bare_context(config), discover_fn=lambda **_k: one
     )
     link.wait(10)
     status = TestClient(app).get("/companion/status").json()
@@ -215,7 +216,7 @@ def test_a_lone_pi_found_at_startup_is_linked_several_are_listed(tmp_path: Path)
     # Remembered: a second daemon on the same library starts linked and does not search.
     again = FastAPI()
     second = companion_link.register_companion_link_routes(
-        again, config=config, resolved_control_token="secret", discover_fn=lambda **_k: []
+        again, bare_context(config), discover_fn=lambda **_k: []
     )
     second_pi = second.pi()
     assert second_pi is not None
@@ -225,8 +226,7 @@ def test_a_lone_pi_found_at_startup_is_linked_several_are_listed(tmp_path: Path)
     other = FastAPI()
     link = companion_link.register_companion_link_routes(
         other,
-        config=config_for(tmp_path / "other", discover=True),
-        resolved_control_token="secret",
+        bare_context(config_for(tmp_path / "other", discover=True)),
         discover_fn=lambda **_k: two,
     )
     link.wait(10)

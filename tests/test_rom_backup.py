@@ -49,6 +49,7 @@ from src.paths import REPO_ROOT
 from src.vehicle.platforms import vehicle_data_file
 from src.vehicle.profiles import read_registry_file
 from src.yaml_load import load_yaml
+from tests.app_context import bare_context
 from tests.configs import isolated_config
 from tests.rom_fixtures import PROFILE, xterra_map
 
@@ -1328,7 +1329,7 @@ def test_polling_that_does_not_resume_is_reported(rig_factory: Callable[..., Rig
 def test_backup_routes(tmp_path: Path) -> None:
     config = isolated_config(tmp_path, daemon={"afr_calibration": PROFILE / "afr_calibration.yaml"})
     app = FastAPI()
-    register_rom_library_routes(app, config=config, resolved_control_token="secret")
+    register_rom_library_routes(app, bare_context(config))
     auth = {"Authorization": "Bearer secret"}
     with TestClient(app) as client:
         idle = client.get("/control/rom/backup", headers=auth).json()
@@ -1358,7 +1359,7 @@ def test_a_2013_xterra_with_no_profile_data_is_offered_a_backup(tmp_path: Path) 
         vehicle={"make": "Nissan", "model": "Xterra", "year": 2013},
     )
     app = FastAPI()
-    register_rom_library_routes(app, config=config, resolved_control_token="secret")
+    register_rom_library_routes(app, bare_context(config))
     auth = {"Authorization": "Bearer secret"}
     with TestClient(app) as client:
         checks = {
@@ -1563,7 +1564,7 @@ def test_daemon_shutdown_cancels_the_read_cleanly(rig_factory: Callable[..., Rig
 def test_the_app_lifespan_shuts_the_job_down(tmp_path: Path) -> None:
     config = isolated_config(tmp_path, daemon={"afr_calibration": PROFILE / "afr_calibration.yaml"})
     app = FastAPI()
-    job = register_rom_library_routes(app, config=config, resolved_control_token="secret")
+    job = register_rom_library_routes(app, bare_context(config))
     calls: list[str] = []
 
     def shutdown(timeout: float = 5.0) -> bool:

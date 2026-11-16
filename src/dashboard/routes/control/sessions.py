@@ -18,7 +18,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from src.dashboard.routes.control.context import ControlContext
+from src.dashboard.app_context import AppContext
 from src.dashboard.routes.stored_sessions import (
     SessionStore,
     build_stored_session_router,
@@ -27,7 +27,7 @@ from src.dashboard.routes.stored_sessions import (
 from src.storage.sessions import list_sessions, summarize_session
 
 
-def _guard_active_capture(ctx: ControlContext, session_id: str) -> None:
+def _guard_active_capture(ctx: AppContext, session_id: str) -> None:
     capture_controller = ctx.capture_controller
     active = capture_controller.current_capture() if capture_controller is not None else None
     if active is not None and active.session_id == session_id:
@@ -40,7 +40,7 @@ def _guard_active_capture(ctx: ControlContext, session_id: str) -> None:
         raise HTTPException(status_code=409, detail="cannot delete the session being written")
 
 
-def daemon_session_store(ctx: ControlContext) -> SessionStore:
+def daemon_session_store(ctx: AppContext) -> SessionStore:
     """The daemon's :class:`SessionStore`: its storage root, the
     active-capture delete guard and the audit publish."""
     return SessionStore(
@@ -53,13 +53,13 @@ def daemon_session_store(ctx: ControlContext) -> SessionStore:
     )
 
 
-def build_store_router(ctx: ControlContext) -> APIRouter:
+def build_store_router(ctx: AppContext) -> APIRouter:
     """One session's read/metadata/pin/unpin/delete/export: the routes the
     companion also serves, over this daemon's storage root (R03.7)."""
     return build_stored_session_router(daemon_session_store(ctx), ctx.require_auth)
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     config = ctx.config
 

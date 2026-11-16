@@ -26,6 +26,7 @@ from src.dashboard.routes.rom_editor import register_rom_editor_routes
 from src.dashboard.routes.rom_library import register_rom_library_routes
 from src.paths import DATA_DIR
 from src.yaml_load import load_yaml
+from tests.app_context import bare_context
 from tests.configs import isolated_config
 from tests.rom_fixtures import IMAGE_SIZE, PROFILE, synthetic_image
 
@@ -172,8 +173,8 @@ def _client(tmp_path: Path, lookup: str) -> TestClient:
         daemon={"afr_calibration": PROFILE / "afr_calibration.yaml", "rom_map_lookup": lookup},
     )
     app = FastAPI()
-    register_rom_library_routes(app, config=config, resolved_control_token="secret")
-    register_rom_editor_routes(app, config=config, resolved_control_token="secret")
+    register_rom_library_routes(app, bare_context(config))
+    register_rom_editor_routes(app, bare_context(config))
     return TestClient(app)
 
 

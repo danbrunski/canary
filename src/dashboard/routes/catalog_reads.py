@@ -8,15 +8,11 @@ request so a hand edit shows up without a restart.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Query
 
-from src.config import CanaryConfig
-from src.control.dtc_state import DtcState
-from src.control.monitor_state import MonitorState
-from src.daemon.behavior_live import BehaviorLiveState
+from src.dashboard.app_context import AppContext
 from src.dashboard.readers import (
     polled_did_names,
     read_behavior_models,
@@ -26,24 +22,15 @@ from src.dashboard.readers import (
 )
 
 
-def register_catalog_read_routes(
-    app: FastAPI,
-    *,
-    config: CanaryConfig,
-    behavior_models_path: Path,
-    bindings_path: Path,
-    dids_path: Path,
-    test_profiles_dir: Path,
-    behavior_live: BehaviorLiveState | None,
-    dtc_state: DtcState | None = None,
-    monitor_state: MonitorState | None = None,
-) -> None:
+def register_catalog_read_routes(app: FastAPI, ctx: AppContext) -> None:
+    config = ctx.config
+
     @app.get("/models/behavior")
     def get_behavior_models() -> dict[str, Any]:
         # Re-read on every request so a `scripts/refit_behavior_models.py`
         # run lands in the dashboard without a daemon restart. Cheap — the
         # file is < 100 KB even with a full surface catalog.
-        return read_behavior_models(behavior_models_path)
+        return read_behavior_models(ctx.behavior_models_path)
 
     @app.get("/models/behavior/live")
     def get_behavior_live(
@@ -55,15 +42,15 @@ def register_catalog_read_routes(
         # daemon is wired — the static surfaces still render standalone.
         # series=false drops the rolling trail (the bulk of the payload) for
         # callers that only need the latest snapshot.
-        if behavior_live is None:
+        if ctx.behavior_live is None:
             return {"observed": 0, "timestamp": None, "operating_mode": None, "models": {}}
-        return behavior_live.snapshot(include_series=series)
+        return ctx.behavior_live.snapshot(include_series=series)
 
     @app.get("/bindings")
     def get_bindings() -> dict[str, Any]:
         # Re-read per request so a hand-edit to bindings.yaml (during RE)
         # surfaces in the dashboard immediately. The file is small.
-        return read_bindings_for_display(bindings_path)
+        return read_bindings_for_display(ctx.bindings_path)
 
     @app.get("/dids")
     def get_dids() -> dict[str, Any]:
@@ -72,9 +59,9 @@ def register_catalog_read_routes(
         # up immediately; empty doc when the file is absent.
         from src.decode.dids import load_did_map
 
-        if not dids_path.exists():
+        if not ctx.dids_path.exists():
             return {"schema_version": None, "vehicle": {}, "access": None, "dids": [], "polled": []}
-        did_map = load_did_map(dids_path)
+        did_map = load_did_map(ctx.dids_path)
         payload = did_map.model_dump(mode="json")
         # Which catalogued DIDs the daemon actually polls (`obd_dids`). The
         # catalog is the whole RE record, so most entries are characterized
@@ -92,7 +79,7 @@ def register_catalog_read_routes(
         # listing profiles must work before the control token is entered).
         from src.control.test_profiles import load_test_profiles
 
-        return load_test_profiles(test_profiles_dir).model_dump(mode="json")
+        return load_test_profiles(ctx.test_profiles_dir).model_dump(mode="json")
 
     @app.get("/obd/coverage")
     def get_obd_coverage() -> dict[str, Any]:
@@ -110,7 +97,7 @@ def register_catalog_read_routes(
         # Static catalog of decodable broadcast-CAN signals (bindings + DBC)
         # with their source CAN IDs. The CAN tab overlays live values and
         # discovered/undecoded IDs from the telemetry stream client-side.
-        return read_can_coverage(bindings_path)
+        return read_can_coverage(ctx.bindings_path)
 
     @app.get("/obd/dtc")
     def get_obd_dtc() -> dict[str, Any]:
@@ -118,7 +105,7 @@ def register_catalog_read_routes(
         # 03/07/0A poll (Task 1.3) keeps current — stored/pending/permanent
         # codes, MIL state, and staleness. Empty-but-shaped when no poll has
         # landed yet (daemon just started, or DTC polling is disabled).
-        if dtc_state is None:
+        if ctx.dtc_state is None:
             return {
                 "captured_at": None,
                 "stored": [],
@@ -129,7 +116,7 @@ def register_catalog_read_routes(
                 "freeze_frame": None,
                 "stale": True,
             }
-        return dtc_state.snapshot()
+        return ctx.dtc_state.snapshot()
 
     @app.get("/obd/monitors")
     def get_obd_monitors() -> dict[str, Any]:
@@ -137,11 +124,11 @@ def register_catalog_read_routes(
         # results — misfire counts + monitor value/min/max margins) the
         # periodic Mode 06 poll keeps current. Empty-but-shaped when no poll
         # has landed yet, same convention as /obd/dtc above.
-        if monitor_state is None:
+        if ctx.monitor_state is None:
             return {
                 "captured_at": None,
                 "misfire_counts": {},
                 "results": [],
                 "stale": True,
             }
-        return monitor_state.snapshot()
+        return ctx.monitor_state.snapshot()

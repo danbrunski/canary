@@ -19,12 +19,12 @@ from src.control.classification import (
 )
 from src.control.trends import corpus_trend_summary
 from src.control.workbench_jobs import prepare_single_session_job, run_off_loop
-from src.dashboard.routes.control.context import ControlContext
+from src.dashboard.app_context import AppContext
 from src.session import SessionKind, session_kind
 from src.storage.sessions import resolve_session
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     config = ctx.config
     emitter = ctx.emitter

@@ -42,6 +42,7 @@ from src.dashboard.routes.control import brain as brain_routes
 from src.dashboard.routes.control import classification as classification_routes
 from src.dashboard.status_errors import register_status_error_handler
 from src.paths import REPO_ROOT
+from tests.app_context import bare_context
 from tests.configs import isolated_config
 
 TOKEN = "secret"
@@ -452,10 +453,12 @@ def test_a_bare_app_with_the_workbench_routes_answers_a_refusal(
     app = FastAPI()
     workbench_routes.register_workbench_routes(
         app,
-        config=config,
-        bindings_path=Path("data/bindings.yaml"),
-        dids_path=Path("data/dids.yaml"),
-        resolved_control_token=TOKEN,
+        bare_context(
+            config,
+            bindings_path=Path("data/bindings.yaml"),
+            dids_path=Path("data/dids.yaml"),
+            token=TOKEN,
+        ),
     )
     monkeypatch.setattr(workbench_routes, "capture_deferral", _wb(409, "bare-app"))
     response = TestClient(app).get("/analysis/trim-surface?sessions=s", headers=AUTH)

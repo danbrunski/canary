@@ -33,7 +33,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Path
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from src.dashboard.routes.control.context import ControlContext
+from src.dashboard.app_context import AppContext
 from src.dashboard.schemas import ProvisioningWindowRequest
 from src.provisioning.client import (
     KIND_BAD_REPLY,
@@ -118,7 +118,7 @@ def _add_request(body: Annotated[dict[str, Any], Body()]) -> WifiAddRequest:
         ) from None
 
 
-def build_router(ctx: ControlContext) -> APIRouter:
+def build_router(ctx: AppContext) -> APIRouter:
     router = ctx.router()
     window_path = ctx.provision_window_path
 

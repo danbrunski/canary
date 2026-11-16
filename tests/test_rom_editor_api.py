@@ -42,6 +42,7 @@ from src.vehicle.profiles import operational_dir
 from src.vehicle.tune_revisions import load_tune_revisions
 from src.yaml_load import load_yaml
 from tests import repo_guard
+from tests.app_context import bare_context
 from tests.configs import isolated_config
 from tests.rom_fixtures import PROFILE, synthetic_image
 from tests.test_rom_editor import FC_EDIT
@@ -99,8 +100,8 @@ def config(tmp_path: Path, profile: Path) -> CanaryConfig:
 
 def make_app(config: CanaryConfig) -> FastAPI:
     app = FastAPI()
-    register_rom_library_routes(app, config=config, resolved_control_token="secret")
-    register_rom_editor_routes(app, config=config, resolved_control_token="secret")
+    register_rom_library_routes(app, bare_context(config))
+    register_rom_editor_routes(app, bare_context(config))
     return app
 
 
@@ -211,7 +212,7 @@ def test_both_routes_require_the_token(client: TestClient, sha: str) -> None:
 
 def test_the_editor_registers_only_after_the_library(config: CanaryConfig) -> None:
     with pytest.raises(RuntimeError, match="register_rom_library_routes first"):
-        register_rom_editor_routes(FastAPI(), config=config, resolved_control_token="secret")
+        register_rom_editor_routes(FastAPI(), bare_context(config))
 
 
 # -- typical values (W09.11) --------------------------------------------------------------------
