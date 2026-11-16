@@ -575,6 +575,24 @@ def test_create_app_mounts_static_when_dist_exists(
     assert "canary-test" in response.text
 
 
+def test_a_vanished_asset_is_a_404_not_the_index(
+    config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
+) -> None:
+    """A tab left open across a Pi update asks for a chunk hash that no longer
+    exists. It must get a 404 so the dynamic import rejects and the dashboard
+    shows its Reload notice (R28.6, lib/lazyChunk); index.html served as
+    JavaScript would fail as a syntax error instead."""
+    static_dir = tmp_path / "static"
+    (static_dir / "assets").mkdir(parents=True)
+    (static_dir / "index.html").write_text("<!doctype html><title>canary-test</title>")
+    (static_dir / "assets" / "Workbench-new.js").write_text("export {};")
+    client = TestClient(create_app(config, anomalies_dir=anomalies_dir, static_dir=static_dir))
+    assert client.get("/assets/Workbench-new.js").status_code == 200
+    gone = client.get("/assets/Workbench-old.js")
+    assert gone.status_code == 404
+    assert "canary-test" not in gone.text
+
+
 def test_create_app_skips_static_when_dist_missing(
     config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
 ) -> None:

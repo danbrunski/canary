@@ -357,11 +357,14 @@ def create_app(
     register_pairing_routes(app, ctx)
     register_stream_routes(app, ctx)
 
-    # Serve the built SPA from /, with SPA fall-through on 404 (the React
-    # router could later own client-side paths like /diagnostics).
-    # The mount is added last so the API routes above always win when their
-    # paths overlap. ``html=True`` makes ``index.html`` the fallback for
-    # any unmatched path, exactly what an SPA wants.
+    # Serve the built SPA from /. The mount is added last so the API routes
+    # above always win when their paths overlap. ``html=True`` serves
+    # ``index.html`` for ``/`` (and any directory); it is NOT a fallback for
+    # unmatched paths: an unknown path is a 404. The dashboard relies on that:
+    # a stale tab's vanished chunk hash must 404 so its dynamic import
+    # rejects into the Reload notice (R28.6), and the client routes by hash
+    # (#wb/...), so it needs no path fall-through.
+    # tests/test_dashboard_api.py::test_a_vanished_asset_is_a_404_not_the_index
     chosen_static = static_dir if static_dir is not None else DEFAULT_STATIC_DIR
     if chosen_static.exists():
         app.mount("/", StaticFiles(directory=str(chosen_static), html=True), name="spa")
