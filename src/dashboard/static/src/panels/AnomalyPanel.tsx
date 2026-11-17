@@ -102,15 +102,11 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
     setLocalLabels((prev) => ({ ...prev, [key]: label }));
     setFeedbackNotice(null);
     try {
-      await postFeedback(
-        token,
-        e as unknown as Record<string, unknown>,
-        label,
-        null,
-        hypothesis.trim() || null,
-        hasQuestion ? clarifyingQuestion.trim() : null,
-        hasAnswer ? clarifyingAnswer.trim() : null,
-      );
+      await postFeedback(token, e, label, {
+        hypothesis: hypothesis.trim() || null,
+        clarifyingQuestion: hasQuestion ? clarifyingQuestion.trim() : null,
+        clarifyingAnswer: hasAnswer ? clarifyingAnswer.trim() : null,
+      });
       const lost = followUpFailureText(await feedback.refresh());
       if (lost) setFeedbackNotice({ kind: "error", text: lost });
       // Enrichment is per-verdict, not per-draft — clear it once it's landed.
@@ -179,7 +175,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
       title="Anomalies"
       centerHeader
       actions={
-        <div className="flex flex-wrap items-center gap-3 font-num text-[0.78rem] tabular-nums text-fg-dim">
+        <div className="flex flex-wrap items-center gap-3 font-num text-body-sm tabular-nums text-fg-dim">
           {token && feedback.data && (
             <span title="operator verdicts on file">
               fb: {feedback.data.summary.false_positive ?? 0} FP /{" "}
@@ -223,7 +219,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
     >
       <>
         <LiveModelScores scores={liveScores ?? {}} />
-        <p className="mb-2 mt-0 text-[0.72rem] text-fg-faint">
+        <p className="mb-2 mt-0 text-small text-fg-faint">
           By default the Isolation Forest and the sequence model (LSTM) are evidence, not alarms:
           their events are stored and tagged{" "}
           <span className="uppercase tracking-[0.08em]">evidence</span>, never pushed. A sequence
@@ -241,7 +237,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
         ) : (
           <>
             <div className="mb-2 flex gap-2">
-              <div className="flex flex-col justify-between py-0.5 text-[0.6rem] tabular-nums text-fg-faint">
+              <div className="flex flex-col justify-between py-0.5 text-micro tabular-nums text-fg-faint">
                 <span>100</span>
                 <span>50</span>
                 <span>0</span>
@@ -256,7 +252,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                   max={100}
                   baseline={50}
                 />
-                <div className="flex justify-between text-[0.65rem] text-fg-faint">
+                <div className="flex justify-between text-caption text-fg-faint">
                   <span>← older</span>
                   <span>50 ≈ model threshold · last {indexSeries.length}</span>
                   <span>newest →</span>
@@ -266,7 +262,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
             {hiddenCount > 0 && (
               <button
                 type="button"
-                className="mb-1 text-[0.72rem] text-accent hover:underline"
+                className="mb-1 text-small text-accent hover:underline"
                 onClick={() => setShowAll((v) => !v)}
               >
                 {showAll
@@ -279,28 +275,28 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
             {token && (
               <div className="mb-2 flex flex-wrap items-center gap-1.5">
                 <input
-                  className={cn(inputClass, "min-h-0 flex-1 basis-40 py-0.5 text-[0.78rem]")}
+                  className={cn(inputClass, "min-h-0 flex-1 basis-40 py-0.5 text-body-sm")}
                   value={hypothesis}
                   onChange={(e) => setHypothesis(e.target.value)}
                   placeholder="hypothesis (optional) — attaches to the next verdict"
                   aria-label="hypothesis"
                 />
                 <input
-                  className={cn(inputClass, "min-h-0 flex-1 basis-32 py-0.5 text-[0.78rem]")}
+                  className={cn(inputClass, "min-h-0 flex-1 basis-32 py-0.5 text-body-sm")}
                   value={clarifyingQuestion}
                   onChange={(e) => setClarifyingQuestion(e.target.value)}
                   placeholder="clarifying question (optional)"
                   aria-label="clarifying question"
                 />
                 <input
-                  className={cn(inputClass, "min-h-0 flex-1 basis-32 py-0.5 text-[0.78rem]")}
+                  className={cn(inputClass, "min-h-0 flex-1 basis-32 py-0.5 text-body-sm")}
                   value={clarifyingAnswer}
                   onChange={(e) => setClarifyingAnswer(e.target.value)}
                   placeholder="clarifying answer (optional)"
                   aria-label="clarifying answer"
                 />
                 {clarifyingPairIncomplete && (
-                  <span className="basis-full text-[0.72rem] text-bad">
+                  <span className="basis-full text-small text-bad">
                     clarifying question and answer must both be filled (or both left empty) before
                     marking a verdict.
                   </span>
@@ -312,7 +308,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                 <li
                   key={`${e.timestamp}-${e.source}-${e.model_version}`}
                   className={cn(
-                    "flex flex-wrap items-baseline gap-2 border-b border-border py-1.5 text-[0.85rem] last:border-b-0",
+                    "flex flex-wrap items-baseline gap-2 border-b border-border py-1.5 text-lead last:border-b-0",
                     selectedEvent !== null &&
                       eventKey(e) === eventKey(selectedEvent) &&
                       "bg-accent/5",
@@ -323,7 +319,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                   </time>
                   <span
                     className={cn(
-                      "rounded bg-elev-2 px-1.5 py-0.5 text-[0.7rem] uppercase tracking-[0.08em]",
+                      "rounded bg-elev-2 px-1.5 py-0.5 text-small uppercase tracking-[0.08em]",
                       e.source === "isolation_forest" && "text-accent",
                       e.source === "lstm_autoencoder" && "text-ok",
                       e.source === "fused" && "text-warn",
@@ -334,19 +330,19 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                   </span>
                   {e.role === "evidence" && (
                     <span
-                      className="rounded border border-border px-1.5 py-0.5 text-[0.7rem] uppercase tracking-[0.08em] text-fg-dim"
+                      className="rounded border border-border px-1.5 py-0.5 text-small uppercase tracking-[0.08em] text-fg-dim"
                       title="From a detector configured as non-alerting (models.roles, A06.5): stored as low-weight evidence, never pushed or shown as an active alert."
                     >
                       evidence
                     </span>
                   )}
                   {e.operating_mode && (
-                    <span className="text-[0.75rem] text-fg-dim">{e.operating_mode}</span>
+                    <span className="text-body-sm text-fg-dim">{e.operating_mode}</span>
                   )}
                   {noveltyScreen(e) && (
                     <span
                       className={cn(
-                        "rounded border border-border px-1.5 py-0.5 text-[0.7rem]",
+                        "rounded border border-border px-1.5 py-0.5 text-small",
                         noveltyScreen(e)?.outside ? "text-warn" : "text-fg-dim",
                       )}
                       title={noveltyScreen(e)?.sentence}
@@ -362,13 +358,13 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                   >
                     idx {view.index}
                   </span>
-                  <span className="font-num text-[0.72rem] tabular-nums text-fg-faint">
+                  <span className="font-num text-small tabular-nums text-fg-faint">
                     raw {e.score.toFixed(3)}
                     {e.threshold !== null && ` / ${e.threshold.toFixed(3)}`}
                   </span>
                   {e.affected_channels.length > 0 && (
                     <span
-                      className="text-[0.78rem] text-fg-dim"
+                      className="text-body-sm text-fg-dim"
                       title={
                         channelRankingCaption(e)?.title ??
                         `Channels whose reconstruction error exceeded its calibrated band (${e.affected_channels.length}). Click the row for the full per-channel breakdown.`
@@ -387,7 +383,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                   )}
                   <button
                     type="button"
-                    className="ml-auto rounded border border-border-soft px-1.5 py-0.5 text-[0.66rem] uppercase tracking-[0.04em] text-accent hover:border-border"
+                    className="ml-auto rounded border border-border-soft px-1.5 py-0.5 text-caption uppercase tracking-[0.04em] text-accent hover:border-border"
                     onClick={() => setSelectedKey(eventKey(e))}
                   >
                     inspect
@@ -398,7 +394,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                       return (
                         <span className="flex items-center gap-1">
                           {current ? (
-                            <span className="text-[0.7rem] uppercase tracking-[0.06em] text-accent-2">
+                            <span className="text-small uppercase tracking-[0.06em] text-accent-2">
                               {current.replace("_", " ")}
                             </span>
                           ) : (
@@ -408,7 +404,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                                 type="button"
                                 disabled={clarifyingPairIncomplete}
                                 className={cn(
-                                  "rounded border border-border-soft px-1.5 py-0.5 text-[0.66rem] uppercase tracking-[0.04em] hover:border-border disabled:cursor-default disabled:opacity-50",
+                                  "rounded border border-border-soft px-1.5 py-0.5 text-caption uppercase tracking-[0.04em] hover:border-border disabled:cursor-default disabled:opacity-50",
                                   fb.tone,
                                 )}
                                 title={`mark ${fb.id.replace("_", " ")}`}

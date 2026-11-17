@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 
-import { getJob, getJobResult, submitJob } from "../api/http";
+import { getJob, getJobResult, submitJob } from "../api/jobs";
 import { describeError } from "../hooks/useControlResource";
 import { usePolling } from "../hooks/usePolling";
 import { badgeClass, buttonClass, cn, placeholderClass } from "../styles";
@@ -117,9 +117,7 @@ export function RescoreControl({ token, event }: RescoreControlProps) {
             ? "re-scoring…"
             : "re-score this window"}
         </button>
-        {state.status === "failed" && (
-          <span className="text-[0.78rem] text-bad">{state.error}</span>
-        )}
+        {state.status === "failed" && <span className="text-body-sm text-bad">{state.error}</span>}
       </div>
       {state.status === "succeeded" && state.report && <RescoreReport report={state.report} />}
     </div>
@@ -131,7 +129,7 @@ function RescoreReport({ report }: { report: ReplayWindowReport }) {
   const lastIf = ifBlock.scores.at(-1) ?? null;
   const lastLstm = lstmBlock.windows.at(-1) ?? null;
   return (
-    <div className="rounded-[8px] border border-border-soft bg-black/20 p-2.5 text-[0.78rem]">
+    <div className="rounded-[8px] border border-border-soft bg-black/20 p-2.5 text-body-sm">
       {report.warnings.length > 0 && (
         <p className="m-0 mb-2 text-warn">{report.warnings.join(" · ")}</p>
       )}

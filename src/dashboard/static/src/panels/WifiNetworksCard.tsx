@@ -1,15 +1,7 @@
 import { useCallback, useState } from "react";
 
-import {
-  addWifi,
-  connectWifi,
-  forgetWifi,
-  getWifi,
-  HttpError,
-  NetworkError,
-  orderWifi,
-  scanWifi,
-} from "../api/http";
+import { HttpError, NetworkError } from "../api/http";
+import { addWifi, connectWifi, forgetWifi, getWifi, orderWifi, scanWifi } from "../api/network";
 import { Notice } from "../components/Notice";
 import { TokenRequired } from "../components/TokenRequired";
 import { useAsyncAction } from "../hooks/useAsyncAction";
@@ -183,7 +175,7 @@ function ScanList({
 }) {
   if (scan.length === 0) {
     return (
-      <p className={cn(placeholderClass, "text-[0.82rem]")}>
+      <p className={cn(placeholderClass, "text-body")}>
         {scannedAt === null ? "Not scanned yet." : "No networks seen in the last scan."}
       </p>
     );
@@ -196,7 +188,7 @@ function ScanList({
             type="button"
             className={cn(
               buttonClass,
-              "flex w-full flex-wrap items-baseline gap-x-2 text-left text-[0.88rem]",
+              "flex w-full flex-wrap items-baseline gap-x-2 text-left text-lead",
               entry.ssid === selected && "border-accent",
             )}
             aria-pressed={entry.ssid === selected}
@@ -381,7 +373,7 @@ export function WifiNetworksCard({
         <>
           <Notice notice={notice} className="mb-2" />
           {progress && (
-            <p role="status" className="m-0 mb-2 text-[0.85rem]">
+            <p role="status" className="m-0 mb-2 text-lead">
               {progress}
             </p>
           )}
@@ -389,7 +381,7 @@ export function WifiNetworksCard({
             <p className={placeholderClass}>{error ?? "loading saved networks…"}</p>
           ) : (
             <>
-              {error && <p className={cn("mb-2 text-[0.82rem]", toneClass("warn"))}>{error}</p>}
+              {error && <p className={cn("mb-2 text-body", toneClass("warn"))}>{error}</p>}
               {wifi.networks.length === 0 ? (
                 <p className={placeholderClass}>No saved WiFi networks.</p>
               ) : (
@@ -408,7 +400,7 @@ export function WifiNetworksCard({
                   ))}
                 </ul>
               )}
-              <p className={cn(placeholderClass, "mt-1 text-[0.78rem]")}>
+              <p className={cn(placeholderClass, "mt-1 text-body-sm")}>
                 The Pi joins the first one in range. Order decides which wins when several are here.
                 {activeSsid ? "" : " It is not connected to a saved network now."}
               </p>
@@ -438,7 +430,7 @@ export function WifiNetworksCard({
                 }}
                 autoComplete="off"
               >
-                <label className="flex flex-col gap-1 text-[0.85rem]">
+                <label className="flex flex-col gap-1 text-lead">
                   Network name
                   <input
                     className={cn(inputClass, "w-full")}
@@ -452,7 +444,7 @@ export function WifiNetworksCard({
                     disabled={working}
                   />
                 </label>
-                <label className="flex items-center gap-2 text-[0.85rem]">
+                <label className="flex items-center gap-2 text-lead">
                   <input
                     type="checkbox"
                     checked={hidden}
@@ -462,11 +454,9 @@ export function WifiNetworksCard({
                   Hidden network
                 </label>
                 {openChoice ? (
-                  <p className={cn(placeholderClass, "text-[0.82rem]")}>
-                    Open network: no passphrase.
-                  </p>
+                  <p className={cn(placeholderClass, "text-body")}>Open network: no passphrase.</p>
                 ) : (
-                  <div className="flex flex-col gap-1 text-[0.85rem]">
+                  <div className="flex flex-col gap-1 text-lead">
                     <label htmlFor="wifi-passphrase">Passphrase</label>
                     <div className="flex items-center gap-2">
                       <input

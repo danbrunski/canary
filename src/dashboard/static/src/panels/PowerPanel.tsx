@@ -240,7 +240,7 @@ export function PowerPanel({ token }: PowerPanelProps) {
                   </button>
                 )}
               </div>
-              <p className={cn(placeholderClass, "mt-2 text-[0.72rem]")}>
+              <p className={cn(placeholderClass, "mt-2 text-small")}>
                 Before a bench move longer than the watchdog's grace window (
                 {formatDuration(power.grace_s, { collapseZero: true })}
                 ), set a keep-alive hold so it doesn't power off mid-transition.

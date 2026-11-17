@@ -28,6 +28,21 @@
     ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", "Courier New", ui-serif, Georgia,
     serif;
 
+  /* The type scale. Every font size in the UI is one of these (`text-body`)
+   * or a listed exception in themeClasses.test.ts; an arbitrary
+   * `text-[0.74rem]` fails that test. Chosen from the sizes the UI used
+   * (R28.8): each old size moved to the nearest token, at most 0.02rem away.
+   * Tailwind names its own sizes `text-xs`..`text-9xl`, so these are named by
+   * role. No line-height is paired with a token: text keeps the inherited one,
+   * as it did with the arbitrary sizes. */
+  --text-micro: 0.62rem;
+  --text-caption: 0.66rem;
+  --text-small: 0.72rem;
+  --text-body-sm: 0.76rem;
+  --text-body: 0.82rem;
+  --text-lead: 0.86rem;
+  --text-title: 1.05rem;
+
   --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.7);
 }
 

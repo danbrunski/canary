@@ -147,7 +147,7 @@ function OutputView({ output }: { output: ApplicationOutput }) {
 function ReportView({ report }: { report: ApplicationModelReport }) {
   const { model, program, image } = report;
   return (
-    <div className="flex flex-col gap-3 text-[0.86rem]">
+    <div className="flex flex-col gap-3 text-lead">
       <dl className={definitionListClass}>
         <Row term="Model" value={`${model.name} v${model.model_version}`} />
         <Row term="Program" value={`${program.id} · patch ${program.patch}`} />

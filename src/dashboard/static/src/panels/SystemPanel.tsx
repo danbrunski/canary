@@ -124,7 +124,7 @@ export function SystemPanel({ status, channels, statusError, onNavigate }: Syste
   return (
     <Panel title="System">
       {statusError && (
-        <div className="mb-2 rounded-md bg-bad/12 px-2 py-1.5 text-[0.82rem] text-bad">
+        <div className="mb-2 rounded-md bg-bad/12 px-2 py-1.5 text-body text-bad">
           /status unreachable: {statusError.message}
         </div>
       )}

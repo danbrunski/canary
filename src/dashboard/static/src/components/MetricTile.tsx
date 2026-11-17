@@ -10,8 +10,8 @@ import { cn } from "../styles";
 import { type Tone, toneClass } from "../util/format";
 
 const TILE_SIZE = {
-  lg: { box: "bg-elev/70 p-2.5", label: "text-[0.62rem]", value: "text-[1.25rem]" },
-  sm: { box: "bg-black/20 p-2", label: "text-[0.6rem]", value: "text-[0.9rem]" },
+  lg: { box: "bg-elev/70 p-2.5", label: "text-micro", value: "text-[1.25rem]" },
+  sm: { box: "bg-black/20 p-2", label: "text-micro", value: "text-[0.9rem]" },
 } as const;
 
 export function MetricTile({

@@ -67,7 +67,7 @@ export function ModelPanel({ status, events }: ModelPanelProps) {
         )}
       </dl>
       {counters && (
-        <div className="mt-3 flex flex-wrap gap-4 text-[0.78rem] text-fg-dim">
+        <div className="mt-3 flex flex-wrap gap-4 text-body-sm text-fg-dim">
           <span title="anomaly events emitted to the logger + ws">
             emitted: <b className="text-fg">{counters.emitted}</b>
           </span>

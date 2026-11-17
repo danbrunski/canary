@@ -120,7 +120,7 @@ export function ScatterView({ frame }: { frame: FrameResponse }) {
           );
         })}
       </svg>
-      <figcaption className="text-[0.65rem] text-fg-faint">
+      <figcaption className="text-caption text-fg-faint">
         {y} against {x}
         {z
           ? `, ${mode === "heat" ? "cell mean of" : "coloured by"} ${z}`

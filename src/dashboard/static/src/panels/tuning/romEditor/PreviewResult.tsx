@@ -1,7 +1,7 @@
 import { TableScroll } from "../../../components/TableScroll";
 import type { ExportState } from "../../../hooks/usePreviewExport";
 import { formatDecoded } from "../../../lib/romEditor";
-import { buttonClass } from "../../../styles";
+import { buttonClass, smallLabelClass } from "../../../styles";
 import type { RomEditPreview, RomLevers } from "../../../types/romEditor";
 import type { RomTableValues } from "../../../types/romLibrary";
 import { CellGrid } from "./CellGrid";
@@ -164,7 +164,7 @@ export function PreviewResult({
         <h3 className="text-base font-semibold">Changed cells</h3>
         <TableScroll className="rounded-lg border border-border">
           <table className="w-full min-w-[32rem] text-left text-sm" aria-label="Changed cells list">
-            <thead className="text-[0.7rem] uppercase tracking-[0.08em] text-fg-faint">
+            <thead className={smallLabelClass}>
               <tr>
                 <th className="px-3 py-2">Table</th>
                 <th className="px-3 py-2">Cell</th>

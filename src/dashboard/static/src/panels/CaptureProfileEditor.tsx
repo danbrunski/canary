@@ -5,7 +5,7 @@
 
 import { useMemo, useState } from "react";
 
-import { deleteCaptureProfile, saveCaptureProfile } from "../api/http";
+import { deleteCaptureProfile, saveCaptureProfile } from "../api/captures";
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { useAsyncAction } from "../hooks/useAsyncAction";
@@ -603,7 +603,7 @@ function ChannelPicker({
           {title}
         </label>
       </legend>
-      {hint && <p className="mt-0 mb-1 px-1 text-[0.72rem] text-fg-dim">{hint}</p>}
+      {hint && <p className="mt-0 mb-1 px-1 text-small text-fg-dim">{hint}</p>}
       {items.map((item) => (
         <label
           key={item}

@@ -1,7 +1,7 @@
 import { TableScroll } from "../../../components/TableScroll";
 import { simulateReason } from "../../../lib/romEditor";
 import { entryTitle } from "../../../lib/romLibrary";
-import { buttonClass, cn } from "../../../styles";
+import { buttonClass, cn, smallLabelClass } from "../../../styles";
 import type { RomLibraryEntry } from "../../../types/romLibrary";
 import { Chip, RevisionChip } from "../romLibraryParts";
 
@@ -32,7 +32,7 @@ export function BasePicker({
   return (
     <TableScroll>
       <table className="w-full min-w-[40rem] text-left text-sm" aria-label="Base images">
-        <thead className="text-[0.7rem] uppercase tracking-[0.08em] text-fg-faint">
+        <thead className={smallLabelClass}>
           <tr>
             <th className="py-2 pr-3">Image</th>
             <th className="py-2 pr-3">Calibration</th>

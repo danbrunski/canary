@@ -16,11 +16,7 @@ function RecentLog({ recent, orphans, onClearOrphans }: RecentLogProps) {
       title="Recent events"
       actions={
         orphans > 0 && (
-          <button
-            type="button"
-            onClick={onClearOrphans}
-            className="text-[0.74rem] text-bad underline"
-          >
+          <button type="button" onClick={onClearOrphans} className="text-small text-bad underline">
             clear {orphans} orphaned
           </button>
         )
@@ -33,13 +29,13 @@ function RecentLog({ recent, orphans, onClearOrphans }: RecentLogProps) {
           {recent.map((r) => (
             <li
               key={r.id}
-              className="grid grid-cols-[5rem_1fr_auto] items-baseline gap-2 border-b border-border pb-1 text-[0.84rem] last:border-b-0"
+              className="grid grid-cols-[5rem_1fr_auto] items-baseline gap-2 border-b border-border pb-1 text-lead last:border-b-0"
             >
               <time className="font-num tabular-nums text-fg-dim">{formatClockTime(r.t)}</time>
               <b className="text-fg">{r.label}</b>
               <span
                 className={cn(
-                  "text-[0.72rem] font-bold uppercase tracking-[0.06em]",
+                  "text-small font-bold uppercase tracking-[0.06em]",
                   r.status === "sent" && "text-ok",
                   r.status === "pending" && "text-fg-faint",
                   r.status === "failed" && "text-warn",
@@ -118,16 +114,14 @@ export function TestSessionSetupScreen({
               >
                 <div className="flex items-center justify-between gap-2">
                   <b className="text-fg">{p.label}</b>
-                  <span className="font-num text-[0.68rem] uppercase tracking-[0.08em] text-fg-faint">
+                  <span className="font-num text-caption uppercase tracking-[0.08em] text-fg-faint">
                     {p.vehicle_state}
                   </span>
                 </div>
                 {p.description && (
-                  <p className="mt-1 text-[0.82rem] leading-snug text-fg-dim">{p.description}</p>
+                  <p className="mt-1 text-body leading-snug text-fg-dim">{p.description}</p>
                 )}
-                <p className="mt-1.5 text-[0.72rem] text-fg-faint">
-                  {p.events.length} event buttons
-                </p>
+                <p className="mt-1.5 text-small text-fg-faint">{p.events.length} event buttons</p>
               </button>
             ))}
           </div>
@@ -140,7 +134,7 @@ export function TestSessionSetupScreen({
           actions={
             <span
               className={cn(
-                "text-[0.8rem] font-bold",
+                "text-body font-bold",
                 authRejected
                   ? "text-bad"
                   : preflight
@@ -165,7 +159,7 @@ export function TestSessionSetupScreen({
               {preflight.checks
                 .filter((c) => !c.ok)
                 .map((c) => (
-                  <li key={c.name} className="grid grid-cols-[9rem_1fr] gap-2 text-[0.82rem]">
+                  <li key={c.name} className="grid grid-cols-[9rem_1fr] gap-2 text-body">
                     <span className="text-fg-dim">{c.name.replaceAll("_", " ")}</span>
                     <b className={c.severity === "warning" ? "text-warn" : "text-bad"}>
                       {c.detail}
@@ -174,7 +168,7 @@ export function TestSessionSetupScreen({
                 ))}
             </ul>
           )}
-          <label className="mb-3 flex flex-col gap-1 text-[0.75rem] text-fg-dim">
+          <label className="mb-3 flex flex-col gap-1 text-body-sm text-fg-dim">
             Purpose (logged on the capture)
             <input
               className={cn(inputClass, "w-full")}
@@ -188,7 +182,7 @@ export function TestSessionSetupScreen({
             disabled={busy}
             className={cn(
               buttonClass,
-              "min-h-[3.5rem] w-full text-[1.05rem] font-bold",
+              "min-h-[3.5rem] w-full text-title font-bold",
               preflight?.ok
                 ? "border-ok bg-ok/15 text-ok"
                 : "border-accent-2 bg-accent-2/15 text-fg",
@@ -252,17 +246,17 @@ export function TestSessionRecordingScreen({
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-ok/40 bg-ok/10 px-4 py-3">
         <div className="flex flex-col">
           <b className="text-fg">{activeProfile?.label ?? "Test session"}</b>
-          <span className="text-[0.78rem] text-fg-dim">{capture.session_id}</span>
+          <span className="text-body-sm text-fg-dim">{capture.session_id}</span>
         </div>
         <div className="flex items-center gap-4">
           <div className="text-right">
-            <div className="text-[0.6rem] uppercase tracking-[0.16em] text-fg-faint">elapsed</div>
+            <div className="text-micro uppercase tracking-[0.16em] text-fg-faint">elapsed</div>
             <div className="font-num text-[1.4rem] tabular-nums text-fg">
               {formatElapsed(capture.started_at, now)}
             </div>
           </div>
           <div className="text-right">
-            <div className="text-[0.6rem] uppercase tracking-[0.16em] text-fg-faint">queued</div>
+            <div className="text-micro uppercase tracking-[0.16em] text-fg-faint">queued</div>
             <div
               className={cn(
                 "font-num text-[1.4rem] tabular-nums",
@@ -276,7 +270,7 @@ export function TestSessionRecordingScreen({
       </div>
 
       {pendingCount > 0 && (
-        <div className="rounded-[8px] border border-warn/45 bg-warn/10 px-3 py-2 text-[0.82rem] text-warn">
+        <div className="rounded-[8px] border border-warn/45 bg-warn/10 px-3 py-2 text-body text-warn">
           {pendingCount} event{pendingCount > 1 ? "s" : ""} waiting to send — taps are saved locally
           and retried automatically; they keep their real time even if signal is down.
         </div>
@@ -298,14 +292,12 @@ export function TestSessionRecordingScreen({
               )}
             >
               {tapCount > 0 && (
-                <span className="absolute right-2 top-2 min-w-[1.25rem] rounded-full bg-ok/25 px-1 text-center text-[0.65rem] font-bold leading-tight text-ok">
+                <span className="absolute right-2 top-2 min-w-[1.25rem] rounded-full bg-ok/25 px-1 text-center text-caption font-bold leading-tight text-ok">
                   {tapCount}
                 </span>
               )}
-              <span className="text-[1.05rem] font-bold leading-tight text-fg">{ev.label}</span>
-              {ev.hint && (
-                <span className="text-[0.72rem] leading-tight text-fg-dim">{ev.hint}</span>
-              )}
+              <span className="text-title font-bold leading-tight text-fg">{ev.label}</span>
+              {ev.hint && <span className="text-small leading-tight text-fg-dim">{ev.hint}</span>}
             </button>
           );
         })}
@@ -314,8 +306,8 @@ export function TestSessionRecordingScreen({
           onClick={onTapCustom}
           className="flex min-h-[5.5rem] flex-col items-center justify-center gap-1 rounded-[12px] border border-dashed border-border bg-transparent px-3 py-3 text-center transition-transform active:scale-[0.97] hover:border-fg-faint"
         >
-          <span className="text-[1.05rem] font-bold text-fg-dim">+ Custom…</span>
-          <span className="text-[0.72rem] text-fg-faint">Something unplanned</span>
+          <span className="text-title font-bold text-fg-dim">+ Custom…</span>
+          <span className="text-small text-fg-faint">Something unplanned</span>
         </button>
       </div>
 
@@ -325,7 +317,7 @@ export function TestSessionRecordingScreen({
         disabled={busy}
         className={cn(
           dangerButtonClass,
-          "min-h-[3.5rem] w-full text-[1.05rem] font-bold",
+          "min-h-[3.5rem] w-full text-title font-bold",
           endArmed && "bg-bad/20",
         )}
       >

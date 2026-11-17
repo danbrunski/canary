@@ -122,14 +122,14 @@ export function CustomDashboardPanel({ channels }: CustomDashboardPanelProps) {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className={cn(buttonClass, "px-2.5 py-1 text-[0.74rem]")}
+            className={cn(buttonClass, "px-2.5 py-1 text-small")}
             onClick={exportProfile}
           >
             Export
           </button>
           <button
             type="button"
-            className={cn(buttonClass, "px-2.5 py-1 text-[0.74rem]")}
+            className={cn(buttonClass, "px-2.5 py-1 text-small")}
             onClick={() => setImporting((v) => !v)}
           >
             Import
@@ -147,7 +147,7 @@ export function CustomDashboardPanel({ channels }: CustomDashboardPanelProps) {
       {importing && (
         <div className="mb-3 flex flex-col gap-2">
           <textarea
-            className={cn(inputClass, "h-28 w-full resize-y font-num text-[0.78rem]")}
+            className={cn(inputClass, "h-28 w-full resize-y font-num text-body-sm")}
             value={importText}
             placeholder="paste a dashboard profile JSON…"
             onChange={(e) => setImportText(e.target.value)}
@@ -189,20 +189,18 @@ export function CustomDashboardPanel({ channels }: CustomDashboardPanelProps) {
               >
                 <button
                   type="button"
-                  className="absolute right-1.5 top-1.5 text-[0.7rem] text-fg-faint hover:text-bad"
+                  className="absolute right-1.5 top-1.5 text-small text-fg-faint hover:text-bad"
                   onClick={() => removeTile(key)}
                   aria-label={`remove ${key}`}
                 >
                   ✕
                 </button>
-                <div className="truncate text-[0.62rem] uppercase tracking-[0.12em] text-fg-faint">
+                <div className="truncate text-micro uppercase tracking-[0.12em] text-fg-faint">
                   {key}
                 </div>
                 <div className="font-num text-2xl tabular-nums text-accent">
                   {typeof v === "number" ? v.toFixed(2) : (v ?? "—")}
-                  <span className="ml-1 text-[0.7rem] text-fg-faint">
-                    {snap?.latest.unit ?? ""}
-                  </span>
+                  <span className="ml-1 text-small text-fg-faint">{snap?.latest.unit ?? ""}</span>
                 </div>
                 {snap && snap.history.length > 1 && (
                   <Sparkline values={snap.history.slice(-60)} width={150} height={28} />
@@ -219,7 +217,7 @@ export function CustomDashboardPanel({ channels }: CustomDashboardPanelProps) {
             <button
               key={group.label}
               type="button"
-              className={cn(buttonClass, "px-2.5 py-1 text-[0.74rem]")}
+              className={cn(buttonClass, "px-2.5 py-1 text-small")}
               onClick={() => addPreset(group)}
             >
               + {group.label}
@@ -241,7 +239,7 @@ export function CustomDashboardPanel({ channels }: CustomDashboardPanelProps) {
                 key={key}
                 type="button"
                 className={cn(
-                  "truncate rounded border px-2 py-1 text-left text-[0.78rem]",
+                  "truncate rounded border px-2 py-1 text-left text-body-sm",
                   on
                     ? "border-accent bg-accent/10 text-fg"
                     : "border-border-soft text-fg-dim hover:border-border",

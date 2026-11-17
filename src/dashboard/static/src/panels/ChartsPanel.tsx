@@ -172,7 +172,7 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
       title="Charts"
       count={mode === "live" ? `${selected.length}/${MAX_SERIES} selected` : undefined}
       actions={
-        <div className="flex flex-wrap items-center gap-2 text-[0.76rem] text-fg-dim">
+        <div className="flex flex-wrap items-center gap-2 text-body-sm text-fg-dim">
           <div className="flex overflow-hidden rounded border border-border-soft">
             {(["live", "session"] as const).map((m) => (
               <button
@@ -231,7 +231,7 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
     >
       {mode === "session" && (
         <div className="mb-3 flex flex-wrap items-end gap-2">
-          <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+          <label className="flex flex-col gap-1 text-small text-fg-dim">
             session id
             <input
               className={inputClass}
@@ -240,7 +240,7 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
               placeholder="2026-07-19T000000"
             />
           </label>
-          <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+          <label className="flex flex-col gap-1 text-small text-fg-dim">
             channels (comma-separated)
             <input
               className={cn(inputClass, "w-64")}
@@ -249,7 +249,7 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
               placeholder="obd:RPM,obd:ENGINE_LOAD"
             />
           </label>
-          <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+          <label className="flex flex-col gap-1 text-small text-fg-dim">
             resample hz
             <input
               className={cn(inputClass, "w-20")}
@@ -299,7 +299,7 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
             <div className="flex flex-col gap-2" data-testid="chart-rows">
               {series.map((s) => (
                 <div key={s.key} className="flex flex-col gap-0.5">
-                  <div className="flex items-baseline gap-1.5 text-[0.78rem]">
+                  <div className="flex items-baseline gap-1.5 text-body-sm">
                     <span
                       className="inline-block h-2 w-3 shrink-0 rounded-sm"
                       style={{ background: s.color }}
@@ -338,7 +338,7 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
             </p>
           )}
 
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[0.78rem] max-[600px]:flex-col">
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-body-sm max-[600px]:flex-col">
             {series.map((s) => {
               const v = s.values.filter((x) => Number.isFinite(x));
               const last = v.at(-1);
@@ -380,7 +380,7 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
                       key={key}
                       type="button"
                       className={cn(
-                        "truncate rounded border px-2 py-1 text-left text-[0.78rem]",
+                        "truncate rounded border px-2 py-1 text-left text-body-sm",
                         on
                           ? "border-accent bg-accent/10 text-fg"
                           : "border-border-soft text-fg-dim hover:border-border",

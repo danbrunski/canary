@@ -11,6 +11,7 @@ import {
   inputClass,
   placeholderClass,
   selectClass,
+  smallLabelClass,
 } from "../styles";
 import type {
   PhysicalInterventionKind,
@@ -194,7 +195,7 @@ export function VehicleLedgerPage({ token }: VehicleLedgerPageProps) {
         >
           Add entry
         </button>
-        {actionError && <span className="text-[0.82rem] text-bad">{actionError}</span>}
+        {actionError && <span className="text-body text-bad">{actionError}</span>}
       </div>
       {form && !form.eventId && (
         <LedgerFormView
@@ -225,19 +226,16 @@ export function VehicleLedgerPage({ token }: VehicleLedgerPageProps) {
               key={event.id}
               className="flex items-start justify-between gap-3 border-b border-border pb-2"
             >
-              <div className="min-w-0 text-[0.86rem]">
+              <div className="min-w-0 text-lead">
                 <div>
                   <span className="font-num text-fg-dim">{event.occurred_at}</span>{" "}
-                  <span className="text-[0.72rem] uppercase tracking-[0.08em] text-fg-faint">
-                    {event.kind}
-                  </span>{" "}
-                  {event.title}
+                  <span className={smallLabelClass}>{event.kind}</span> {event.title}
                   {event.corpus_boundary && (
-                    <span className="text-[0.72rem] text-fg-faint"> · corpus boundary</span>
+                    <span className="text-small text-fg-faint"> · corpus boundary</span>
                   )}
                 </div>
                 {(event.details || event.tires || event.odometer_km !== null) && (
-                  <div className="text-[0.8rem] text-fg-dim">
+                  <div className="text-body text-fg-dim">
                     {[
                       tireFact(event.tires),
                       event.odometer_km !== null ? `${event.odometer_km} km` : null,
@@ -291,7 +289,7 @@ function LedgerFormView({ form, busy, onChange, onSave, onCancel }: LedgerFormVi
         ? "pressure (psi)"
         : null;
   return (
-    <div className="mb-3 grid gap-2 rounded border border-border p-2 text-[0.82rem]">
+    <div className="mb-3 grid gap-2 rounded border border-border p-2 text-body">
       <div className="flex flex-wrap gap-2">
         <input
           aria-label="date"

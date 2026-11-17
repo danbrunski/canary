@@ -25,12 +25,12 @@ export function TokenRequired({ purpose, className }: TokenRequiredProps) {
       <span>{`Locked — needs the control token to ${purpose}.`}</span>
       <button
         type="button"
-        className={cn(buttonClass, "min-h-6 px-2.5 py-0.5 text-[0.75rem] not-italic")}
+        className={cn(buttonClass, "min-h-6 px-2.5 py-0.5 text-body-sm not-italic")}
         onClick={requestTokenEntry}
       >
         Unlock
       </button>
-      <span className="text-[0.75rem] not-italic">
+      <span className="text-body-sm not-italic">
         <TokenHint />
       </span>
     </p>

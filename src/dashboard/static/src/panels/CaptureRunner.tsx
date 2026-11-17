@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { pauseProfileCapture, startProfileCapture, stopProfileCapture } from "../api/http";
+import { pauseProfileCapture, startProfileCapture, stopProfileCapture } from "../api/captures";
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { TableScroll } from "../components/TableScroll";
@@ -456,10 +456,10 @@ function RecordingReadout({
         <span className="text-fg-dim">{active.session_dir ?? "rotating storage"}</span>
         {/* Rows land on disk on the writer's own timer, so there is nothing
             to lose by pausing or navigating away. */}
-        <span className="text-[0.72rem] text-fg-dim">saved continuously</span>
+        <span className="text-small text-fg-dim">saved continuously</span>
       </div>
       {rows.length > 0 && (
-        <table className="mt-2 w-full font-num text-[0.78rem] tabular-nums">
+        <table className="mt-2 w-full font-num text-body-sm tabular-nums">
           <tbody>
             {rows.map((row) => (
               <tr key={row.channel} className="border-b border-border/40">
@@ -487,7 +487,7 @@ function RecordingReadout({
           )}
           {requestRows.length > 0 ? (
             <TableScroll className="mt-1">
-              <table className="w-full min-w-[30rem] font-num text-[0.72rem] tabular-nums">
+              <table className="w-full min-w-[30rem] font-num text-small tabular-nums">
                 <thead>
                   <tr className="text-fg-dim">
                     <th className="text-left">Channel</th>

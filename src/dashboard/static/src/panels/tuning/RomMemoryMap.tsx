@@ -15,7 +15,7 @@ import {
   regionsOverlapping,
   sortRegions,
 } from "../../lib/romLibrary";
-import { buttonClass, cn } from "../../styles";
+import { buttonClass, cn, smallLabelClass } from "../../styles";
 import type { RomBlock, RomBlockClass, RomEraseSector, RomRegion } from "../../types/romLibrary";
 import { ConfidenceChip, ConfidenceLegend, UpRevChip } from "./romLibraryParts";
 
@@ -197,7 +197,7 @@ function RowCells({
 }) {
   return (
     <>
-      <span className="pr-1.5 text-right font-num text-[0.68rem] text-fg-faint">
+      <span className="pr-1.5 text-right font-num text-caption text-fg-faint">
         {hexAddress(row[0].offset)}
       </span>
       {row.map((block, c) => {
@@ -264,7 +264,7 @@ export function RomRegionTable({
       )}
       <TableScroll className="rounded-lg border border-border">
         <table className="w-full min-w-[46rem] text-left text-sm" aria-label="Regions">
-          <thead className="text-[0.7rem] uppercase tracking-[0.08em] text-fg-faint">
+          <thead className={smallLabelClass}>
             <tr>
               <th className="px-3 py-2">Address</th>
               <th className="px-3 py-2">Size</th>

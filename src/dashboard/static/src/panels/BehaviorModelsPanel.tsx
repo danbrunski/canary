@@ -42,7 +42,7 @@ export function BehaviorModelsPanel({ data, error, live }: BehaviorModelsPanelPr
   if (error) {
     return (
       <Frame>
-        <p className="rounded-md bg-bad/12 px-2 py-1.5 text-[0.82rem] text-bad">
+        <p className="rounded-md bg-bad/12 px-2 py-1.5 text-body text-bad">
           /models/behavior unreachable: {error.message}
         </p>
       </Frame>
@@ -104,7 +104,7 @@ function Frame({
       actions={
         <div className="flex items-center gap-2">
           {mode && (
-            <span className="font-num text-[0.7rem] tabular-nums text-fg-dim">
+            <span className="font-num text-small tabular-nums text-fg-dim">
               mode <span className="text-fg">{mode}</span>
             </span>
           )}
@@ -159,9 +159,9 @@ function ModelCard({
     >
       <header className="mb-1 flex items-baseline justify-between gap-2">
         <h3 className="m-0 text-[0.92rem] font-semibold tracking-[0.02em] text-fg">{model.name}</h3>
-        <span className="font-num text-[0.7rem] tabular-nums text-fg-dim">v{model.version}</span>
+        <span className="font-num text-small tabular-nums text-fg-dim">v{model.version}</span>
       </header>
-      <div className="mb-2 flex flex-wrap gap-x-3.5 gap-y-2 font-num text-[0.75rem] tabular-nums text-fg-dim">
+      <div className="mb-2 flex flex-wrap gap-x-3.5 gap-y-2 font-num text-body-sm tabular-nums text-fg-dim">
         <span>
           <em className="mr-1 not-italic text-fg-dim">out</em> {model.output}{" "}
           {model.output_unit !== "unknown" && (
@@ -175,7 +175,7 @@ function ModelCard({
       </div>
       <ModelStatus model={model} />
       {(model.conditions ?? []).length > 0 && (
-        <p className="mb-2 text-[0.72rem] text-fg-dim">
+        <p className="mb-2 text-small text-fg-dim">
           Steady-state only:{" "}
           {(model.conditions ?? [])
             .map((condition) => `${condition.channel} ≤ ±${condition.max_abs_per_second}/s`)
@@ -199,7 +199,7 @@ function ModelCard({
         ineligibleReason={ineligibleReason}
       />
 
-      {model.notes && <p className="mt-2 mb-0 text-[0.75rem] text-fg-dim italic">{model.notes}</p>}
+      {model.notes && <p className="mt-2 mb-0 text-body-sm text-fg-dim italic">{model.notes}</p>}
     </article>
   );
 }
@@ -235,13 +235,13 @@ function ModelStatus({ model }: { model: BehaviorModel }) {
   const firstReason = status.reasons.find((r) => !r.startsWith("policy:"));
   return (
     <div
-      className="mb-2 flex flex-col gap-1 text-[0.72rem] text-fg-dim"
+      className="mb-2 flex flex-col gap-1 text-small text-fg-dim"
       data-testid={`behavior-status-${model.name}`}
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span
           className={cn(
-            "rounded px-1.5 py-0.5 text-[0.64rem] font-semibold tracking-[0.04em] uppercase",
+            "rounded px-1.5 py-0.5 text-caption font-semibold tracking-[0.04em] uppercase",
             LIFECYCLE_CLASS[lifecycle],
           )}
           title={LIFECYCLE_TITLE[lifecycle]}
@@ -311,7 +311,7 @@ function LiveReadout({
 }) {
   if (gated) {
     return (
-      <p className="mt-2 mb-0 text-[0.72rem] text-fg-dim italic">
+      <p className="mt-2 mb-0 text-small text-fg-dim italic">
         gated — evaluates in <span className="text-fg">{gatedMode}</span>, now{" "}
         <span className="text-fg">{currentMode ?? "—"}</span>
       </p>
@@ -320,7 +320,7 @@ function LiveReadout({
   if (!live) return null;
   if (offMap) {
     return (
-      <p className="mt-2 mb-0 text-[0.72rem] text-fg-dim italic">
+      <p className="mt-2 mb-0 text-small text-fg-dim italic">
         off-map — operating point outside the fitted envelope (deviation unavailable, anomaly
         scoring blind here)
       </p>
@@ -328,9 +328,7 @@ function LiveReadout({
   }
   if (ineligibleReason) {
     return (
-      <p className="mt-2 mb-0 text-[0.72rem] text-fg-dim italic">
-        no prediction — {ineligibleReason}
-      </p>
+      <p className="mt-2 mb-0 text-small text-fg-dim italic">no prediction — {ineligibleReason}</p>
     );
   }
 
@@ -341,7 +339,7 @@ function LiveReadout({
 
   return (
     <div className="mt-2 flex flex-col gap-1.5">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-num text-[0.74rem] tabular-nums">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-num text-small tabular-nums">
         <span className="text-fg-dim">
           exp <span className="text-fg">{formatReading(live.expected, READOUT)}</span>
         </span>
@@ -358,7 +356,7 @@ function LiveReadout({
         </span>
         <span
           className={cn(
-            "rounded px-1.5 py-0.5 text-[0.64rem] font-semibold tracking-[0.04em] uppercase",
+            "rounded px-1.5 py-0.5 text-caption font-semibold tracking-[0.04em] uppercase",
             live.severity === "ok" && "bg-ok/15 text-ok",
             live.severity === "warning" && "bg-warn/15 text-warn",
             live.severity === "critical" && "bg-bad/15 text-bad",
@@ -368,13 +366,11 @@ function LiveReadout({
         </span>
       </div>
       {live.abstain_reason && (
-        <span className="text-[0.68rem] text-fg-dim italic">
-          abstaining — {live.abstain_reason}
-        </span>
+        <span className="text-caption text-fg-dim italic">abstaining — {live.abstain_reason}</span>
       )}
       {devSeries.length >= 2 && (
         <div className="flex items-center gap-2">
-          <span className="font-num text-[0.64rem] text-fg-faint">Δ trail</span>
+          <span className="font-num text-caption text-fg-faint">Δ trail</span>
           <Sparkline
             values={devSeries}
             width={150}
@@ -415,7 +411,7 @@ function Surface1DView({
             : null
         }
       />
-      <div className="flex gap-3.5 font-num text-[0.7rem] tabular-nums text-fg-dim">
+      <div className="flex gap-3.5 font-num text-small tabular-nums text-fg-dim">
         {model.axis.name}{" "}
         <span className="text-fg-dim">
           ({model.axis.unit}) [{model.axis.domain[0].toFixed(0)}–{model.axis.domain[1].toFixed(0)}]
@@ -457,7 +453,7 @@ function Surface2DView({
         yEdges={yAxis.bin_edges}
         live={live ? { x: live.x, y: live.y, severity: live.severity } : null}
       />
-      <div className="flex justify-between gap-3.5 font-num text-[0.7rem] tabular-nums text-fg-dim">
+      <div className="flex justify-between gap-3.5 font-num text-small tabular-nums text-fg-dim">
         <span>
           ↑ {xAxis.name} <span className="text-fg-dim">({xAxis.unit})</span>
         </span>
@@ -468,7 +464,7 @@ function Surface2DView({
       {coverage !== null && (
         <div
           className={cn(
-            "font-num text-[0.68rem] tabular-nums",
+            "font-num text-caption tabular-nums",
             coverage < 10 ? "text-warn" : "text-fg-dim",
           )}
         >

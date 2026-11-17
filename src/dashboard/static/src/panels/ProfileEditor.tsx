@@ -256,7 +256,7 @@ export function ProfileEditor({
   );
 
   return (
-    <div className="mt-2 space-y-3 text-[0.82rem]" data-testid={`profile-editor-${profile.slug}`}>
+    <div className="mt-2 space-y-3 text-body" data-testid={`profile-editor-${profile.slug}`}>
       <div className="grid grid-cols-3 gap-2 max-[600px]:grid-cols-1">
         <label className="flex flex-col gap-1">
           Make

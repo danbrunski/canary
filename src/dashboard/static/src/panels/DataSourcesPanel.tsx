@@ -9,7 +9,7 @@ import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { useControlResource } from "../hooks/useControlResource";
 import { streamKey } from "../lib/romMaps";
 import { renderChannel } from "../lib/telemetryDisplay";
-import { cn, keyValueTableClass, placeholderClass } from "../styles";
+import { cn, eyebrowClass, keyValueTableClass, placeholderClass } from "../styles";
 import type {
   CanCoverageResponse,
   DidEntry,
@@ -58,7 +58,7 @@ export function DataSourcesPanel({ channels, status }: DataSourcesPanelProps) {
             type="button"
             onClick={() => setTab(t.id)}
             className={cn(
-              "rounded-md px-3 py-1 text-[0.82rem]",
+              "rounded-md px-3 py-1 text-body",
               tab === t.id
                 ? "bg-accent/20 text-accent ring-1 ring-accent/40"
                 : "text-fg-dim hover:text-fg",
@@ -70,7 +70,7 @@ export function DataSourcesPanel({ channels, status }: DataSourcesPanelProps) {
       </div>
 
       {tab !== "gps" && tab !== "memory" && (
-        <div className="mb-2 flex flex-wrap items-center gap-3 text-[0.74rem] text-fg-dim">
+        <div className="mb-2 flex flex-wrap items-center gap-3 text-small text-fg-dim">
           <Toggle
             label="hide unavailable"
             on={hideUnavailable}
@@ -105,9 +105,9 @@ interface ViewOpts {
 }
 
 const THEAD =
-  "sticky top-0 bg-elev text-left text-[0.66rem] uppercase tracking-[0.1em] text-fg-faint";
+  "sticky top-0 bg-elev text-left text-caption uppercase tracking-[0.1em] text-fg-faint";
 const SCROLL = "max-h-[30rem] overflow-y-auto";
-const TABLE = "w-full border-collapse text-[0.8rem]";
+const TABLE = "w-full border-collapse text-body";
 const ROW = "border-b border-border-soft last:border-0";
 const TD = "py-1 pr-2";
 
@@ -228,7 +228,7 @@ function ObdTab({ channels, view }: { channels: Map<string, ChannelSnapshot>; vi
 
           {data.custom_pids.length > 0 && (
             <>
-              <h3 className="mb-1 mt-3 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
+              <h3 className={cn(eyebrowClass, "mb-1 mt-3")}>
                 Custom PIDs ({data.custom_pids.length})
               </h3>
               <TableScroll className={SCROLL}>
@@ -636,5 +636,5 @@ function GpsTab({ status }: { status: StatusResponse | null }) {
 }
 
 function Summary({ text }: { text: string }) {
-  return <p className="mb-2 text-[0.74rem] text-fg-faint">{text}</p>;
+  return <p className="mb-2 text-small text-fg-faint">{text}</p>;
 }

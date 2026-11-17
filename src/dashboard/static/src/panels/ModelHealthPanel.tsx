@@ -27,7 +27,7 @@ export function ModelHealthPanel({ status, statusError }: ModelHealthPanelProps)
   return (
     <Panel title="Drift & Inference Health">
       {statusError && (
-        <div className="mb-2 rounded-[8px] border border-bad/40 bg-bad/10 px-2.5 py-1.5 text-[0.82rem] text-bad">
+        <div className="mb-2 rounded-[8px] border border-bad/40 bg-bad/10 px-2.5 py-1.5 text-body text-bad">
           /status unreachable: {describeError(statusError)}
         </div>
       )}
@@ -53,11 +53,11 @@ function HealthBody({ health }: { health: StatusHealth }) {
       {mismatches.length > 0 && (
         <div
           role="alert"
-          className="rounded-[8px] border border-bad/40 bg-bad/10 px-2.5 py-1.5 text-[0.82rem] text-bad"
+          className="rounded-[8px] border border-bad/40 bg-bad/10 px-2.5 py-1.5 text-body text-bad"
         >
           <strong>Serving a different model than its manifest names.</strong> A partial deploy: the
           manifest landed and the binary did not (or the reverse).
-          <ul className="m-0 mt-1 list-none p-0 font-num text-[0.78rem]">
+          <ul className="m-0 mt-1 list-none p-0 font-num text-body-sm">
             {mismatches.map(([manager, pair]) => (
               <li key={manager}>
                 {manager}: serving {pair.serving}, manifest {pair.manifest}
@@ -118,7 +118,7 @@ function HealthBody({ health }: { health: StatusHealth }) {
                   {featureDrift.missingFeatures.slice(0, 8).map((feature) => (
                     <span
                       key={feature}
-                      className="rounded-full border border-warn/40 px-2 py-0.5 text-[0.66rem] text-warn"
+                      className="rounded-full border border-warn/40 px-2 py-0.5 text-caption text-warn"
                     >
                       {feature}
                     </span>
@@ -187,7 +187,7 @@ function HealthBody({ health }: { health: StatusHealth }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="rounded-[8px] border border-border-soft bg-black/20 p-3">
-      <h3 className="mb-2 mt-0 text-[0.72rem] font-bold uppercase tracking-[0.12em] text-fg-dim">
+      <h3 className="mb-2 mt-0 text-small font-bold uppercase tracking-[0.12em] text-fg-dim">
         {title}
       </h3>
       {children}
@@ -228,7 +228,7 @@ function RankedBars({
       {values.slice(0, 8).map(([name, value]) => (
         <div key={name} className="grid grid-cols-[minmax(6rem,1fr)_5rem] gap-2">
           <div className="min-w-0">
-            <div className="mb-0.5 truncate text-[0.66rem] text-fg-dim" title={name}>
+            <div className="mb-0.5 truncate text-caption text-fg-dim" title={name}>
               {name}
             </div>
             <MeterBar
@@ -239,7 +239,7 @@ function RankedBars({
               }
             />
           </div>
-          <div className="self-end text-right font-num text-[0.66rem] text-fg-dim">
+          <div className="self-end text-right font-num text-caption text-fg-dim">
             {value.toFixed(2)} {valueSuffix}
           </div>
         </div>

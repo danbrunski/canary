@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { tagCapture } from "../api/http";
+import { tagCapture } from "../api/captures";
 import type { CaptureState } from "../types";
 import { readJson, writeJson } from "../util/storage";
 import { describeError } from "./useControlResource";

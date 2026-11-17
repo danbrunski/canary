@@ -7,7 +7,7 @@ import { describeError } from "../hooks/useControlResource";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
 import { usePolling } from "../hooks/usePolling";
 import { PI_SOURCE_LABEL, piDisplayName } from "../lib/piLink";
-import { badgeClass, buttonClass, inputClass, type NoticeState } from "../styles";
+import { badgeClass, buttonClass, inputClass, smallLabelClass, type NoticeState } from "../styles";
 import type { CompanionStatusResponse, DiscoveredPi } from "../types";
 import { formatDateTime } from "../util/time";
 import { TokenRequired } from "../components/TokenRequired";
@@ -92,18 +92,16 @@ export function CompanionConfigCard({ companion, token }: CompanionConfigCardPro
 
   return (
     <div className="flex flex-col gap-3 rounded-[8px] border border-border bg-elev p-3">
-      <p className="m-0 text-[0.8rem] text-fg-dim">{statusLine}</p>
+      <p className="m-0 text-body text-fg-dim">{statusLine}</p>
 
       {status && (
         <>
           <div className="flex flex-col gap-1.5">
-            <div className="text-[0.72rem] uppercase tracking-[0.08em] text-fg-faint">
-              Linked Pi
-            </div>
+            <div className={smallLabelClass}>Linked Pi</div>
             {pi === null ? (
-              <p className="m-0 text-[0.85rem] text-fg-dim">No Pi linked</p>
+              <p className="m-0 text-lead text-fg-dim">No Pi linked</p>
             ) : (
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.85rem]">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-lead">
                 <strong className="font-semibold">{piDisplayName(pi)}</strong>
                 {pi.identity?.profile && <span>{pi.identity.profile}</span>}
                 {pi.identity?.version && <span>{pi.identity.version}</span>}
@@ -131,7 +129,7 @@ export function CompanionConfigCard({ companion, token }: CompanionConfigCardPro
               >
                 Find Pi
               </button>
-              <label className="flex items-center gap-2 text-[0.75rem] text-fg-dim">
+              <label className="flex items-center gap-2 text-body-sm text-fg-dim">
                 <input
                   type="checkbox"
                   checked={sweep}
@@ -139,7 +137,7 @@ export function CompanionConfigCard({ companion, token }: CompanionConfigCardPro
                 />
                 scan the whole subnet (slower)
               </label>
-              <span className="text-[0.8rem] text-fg-dim">
+              <span className="text-body text-fg-dim">
                 {searching
                   ? "Searching the network…"
                   : status.discovery.ran_at
@@ -147,16 +145,16 @@ export function CompanionConfigCard({ companion, token }: CompanionConfigCardPro
                     : "No search yet"}
               </span>
             </div>
-            {needsToken && <TokenRequired purpose="find or link a Pi" className="text-[0.75rem]" />}
+            {needsToken && <TokenRequired purpose="find or link a Pi" className="text-body-sm" />}
             {status.discovery.error && (
-              <p className="m-0 text-[0.8rem]">Search failed: {status.discovery.error}</p>
+              <p className="m-0 text-body">Search failed: {status.discovery.error}</p>
             )}
             {list.length > 0 && (
               <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
                 {list.map((entry) => (
                   <li
                     key={entry.base_url}
-                    className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.85rem]"
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 text-lead"
                   >
                     <strong className="font-semibold">{entry.identity.hostname}</strong>
                     {entry.identity.profile && <span>{entry.identity.profile}</span>}
@@ -181,7 +179,7 @@ export function CompanionConfigCard({ companion, token }: CompanionConfigCardPro
       <Notice notice={notice} />
 
       <div className="grid grid-cols-[minmax(18rem,1fr)_minmax(12rem,0.45fr)] items-end gap-3 max-[1100px]:grid-cols-1">
-        <label className="flex flex-col gap-1 text-[0.75rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-body-sm text-fg-dim">
           Companion API (blank: this server)
           <input
             className={inputClass}
@@ -190,7 +188,7 @@ export function CompanionConfigCard({ companion, token }: CompanionConfigCardPro
             placeholder="blank: this server"
           />
         </label>
-        <label className="flex flex-col gap-1 text-[0.75rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-body-sm text-fg-dim">
           Local token (remote companion only)
           <input
             className={inputClass}

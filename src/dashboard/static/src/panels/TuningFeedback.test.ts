@@ -116,10 +116,7 @@ describe("AnomalyPanel feedback labelling", () => {
       "secret",
       expect.objectContaining({ model_version: "lstm_v1" }),
       "false_positive",
-      null,
-      null,
-      null,
-      null,
+      { hypothesis: null, clarifyingQuestion: null, clarifyingAnswer: null },
     );
   });
 
@@ -142,10 +139,7 @@ describe("AnomalyPanel feedback labelling", () => {
       "secret",
       expect.objectContaining({ model_version: "lstm_v1" }),
       "false_positive",
-      null,
-      "possible MAF sensor drift",
-      null,
-      null,
+      { hypothesis: "possible MAF sensor drift", clarifyingQuestion: null, clarifyingAnswer: null },
     );
   });
 

@@ -124,7 +124,7 @@ export function SessionsCard({
       {selectedSession && (
         <div className="mt-3 flex flex-col gap-2">
           <textarea
-            className={cn(inputClass, "min-h-20 w-full resize-y font-num text-[0.8rem]")}
+            className={cn(inputClass, "min-h-20 w-full resize-y font-num text-body")}
             value={metadataText}
             onChange={(event) => setMetadataText(event.target.value)}
             rows={3}
@@ -150,7 +150,7 @@ export function SessionsCard({
               Delete
             </button>
           </div>
-          <label className="flex min-h-9 flex-row items-center gap-2 text-[0.75rem] text-fg-dim">
+          <label className="flex min-h-9 flex-row items-center gap-2 text-body-sm text-fg-dim">
             <input
               type="checkbox"
               checked={syncPin}

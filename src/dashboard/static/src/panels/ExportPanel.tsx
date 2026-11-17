@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { getJobLogs, listJobs, submitJob } from "../api/http";
+import { getJobLogs, listJobs, submitJob } from "../api/jobs";
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { useAsyncAction } from "../hooks/useAsyncAction";
@@ -86,7 +86,7 @@ export function ExportPanel({ token }: { token: string }) {
   return (
     <Panel title="Export" count={job ? `job ${job.status}` : undefined}>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-2">
-        <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-small text-fg-dim">
           session ids (comma-separated)
           <input
             className={inputClass}
@@ -95,7 +95,7 @@ export function ExportPanel({ token }: { token: string }) {
             placeholder="2026-05-11T222447,2026-05-13T004818"
           />
         </label>
-        <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-small text-fg-dim">
           channels (optional, comma-separated)
           <input
             className={inputClass}
@@ -104,7 +104,7 @@ export function ExportPanel({ token }: { token: string }) {
             placeholder="all channels if blank"
           />
         </label>
-        <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-small text-fg-dim">
           resample hz (optional)
           <input
             className={inputClass}
@@ -113,7 +113,7 @@ export function ExportPanel({ token }: { token: string }) {
             placeholder="raw if blank"
           />
         </label>
-        <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-small text-fg-dim">
           include tags (optional)
           <input
             className={inputClass}
@@ -121,7 +121,7 @@ export function ExportPanel({ token }: { token: string }) {
             onChange={(e) => setIncludeTags(e.target.value)}
           />
         </label>
-        <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-small text-fg-dim">
           exclude tags (optional)
           <input
             className={inputClass}
@@ -129,7 +129,7 @@ export function ExportPanel({ token }: { token: string }) {
             onChange={(e) => setExcludeTags(e.target.value)}
           />
         </label>
-        <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-small text-fg-dim">
           purpose
           <input
             className={inputClass}
@@ -140,7 +140,7 @@ export function ExportPanel({ token }: { token: string }) {
         </label>
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-3 text-[0.78rem]">
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-body-sm">
         {FORMATS.map((fmt) => (
           <label key={fmt} className="flex items-center gap-1.5">
             <input
@@ -181,13 +181,13 @@ export function ExportPanel({ token }: { token: string }) {
       {notice && <Notice notice={notice} className="mt-2" />}
 
       {job && (
-        <div className="mt-3 text-[0.78rem]">
+        <div className="mt-3 text-body-sm">
           <p className="text-fg-dim">
             job <span className="text-fg">{job.job_id}</span> — status{" "}
             <span className="text-fg">{job.status}</span>
           </p>
           {log && (
-            <pre className="mt-1 max-h-56 overflow-auto rounded border border-border-soft bg-elev-2 p-2 text-[0.7rem]">
+            <pre className="mt-1 max-h-56 overflow-auto rounded border border-border-soft bg-elev-2 p-2 text-small">
               {log}
             </pre>
           )}

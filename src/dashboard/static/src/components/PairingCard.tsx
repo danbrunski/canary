@@ -32,7 +32,7 @@ function KeySteps({ status }: { status: PairingRequestStatus | null }) {
  *  approves the waiting request over SSH instead. */
 function BenchHint() {
   return (
-    <p className="m-0 mt-3 text-[0.8rem] text-fg-faint">
+    <p className="m-0 mt-3 text-body text-fg-faint">
       No truck connected (bench)? After pressing “Pair this device”, approve it on the Pi over SSH
       with <code>canary-token pair</code>.
     </p>

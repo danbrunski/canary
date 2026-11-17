@@ -17,7 +17,7 @@ import {
 } from "../../lib/romLibrary";
 import { extent } from "../../lib/framePlot";
 import { mapColor } from "../../lib/romMaps";
-import { cn, inputClass, mapCellClass, mapGridClass } from "../../styles";
+import { cn, inputClass, mapCellClass, mapGridClass, smallLabelClass } from "../../styles";
 import type {
   RomConfidence,
   RomMapSlots,
@@ -346,7 +346,7 @@ function SlotLayout({
           />
         ))}
       </div>
-      <div className="relative h-4 font-num text-[0.66rem] text-fg-faint">
+      <div className="relative h-4 font-num text-caption text-fg-faint">
         <span className="absolute left-0">+0x000</span>
         <span className="absolute right-0">+{hexAddress(mapSlots.stride - 1, 3)}</span>
       </div>
@@ -355,7 +355,7 @@ function SlotLayout({
           className="w-full min-w-[40rem] text-left text-sm"
           aria-label={`Map ${slot} contents`}
         >
-          <thead className="text-[0.7rem] uppercase tracking-[0.08em] text-fg-faint">
+          <thead className={smallLabelClass}>
             <tr>
               <th className="px-3 py-2">Offset</th>
               <th className="px-3 py-2">Size</th>

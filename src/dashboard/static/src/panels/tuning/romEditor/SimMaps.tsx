@@ -36,6 +36,7 @@ import {
   type ViewId,
 } from "../../../lib/romSimView";
 import type { SimCell, SimCellTable } from "../../../types/romEditor";
+import { smallLabelClass } from "../../../styles";
 
 const INK = "#111827";
 /** Black outline with a white inner line: visible on any fill. */
@@ -55,7 +56,7 @@ function Swatch({ mark, scale, extent }: { mark: Mark; scale: MapSpec["scale"]; 
   return (
     <span
       aria-hidden="true"
-      className="inline-flex h-5 w-9 shrink-0 items-center justify-center rounded-sm border border-border font-num text-[0.65rem]"
+      className="inline-flex h-5 w-9 shrink-0 items-center justify-center rounded-sm border border-border font-num text-caption"
       style={{ ...fill, color: INK }}
     >
       {sample}
@@ -116,7 +117,7 @@ function Legend({
           <li data-mark="changed_zero" className="flex items-center gap-1.5">
             <span
               aria-hidden="true"
-              className="inline-flex h-5 w-9 shrink-0 items-center justify-center rounded-sm border border-border font-num text-[0.65rem]"
+              className="inline-flex h-5 w-9 shrink-0 items-center justify-center rounded-sm border border-border font-num text-caption"
               style={{ backgroundColor: rampColour(map.scale, 0, extent), color: INK }}
             >
               {CHANGED_ZERO_LABEL}
@@ -258,9 +259,7 @@ const SimMap = memo(function SimMap({
                           {lines.map((line, k) => (
                             <span
                               key={k}
-                              className={
-                                lines.length === 2 && k === 1 ? "text-[0.6rem]" : undefined
-                              }
+                              className={lines.length === 2 && k === 1 ? "text-micro" : undefined}
                             >
                               {line}
                             </span>
@@ -330,7 +329,7 @@ function CellDetail({ table, cell }: { table: SimCellTable; cell: SimCell }) {
       {cell.pairs > 0 && (
         <TableScroll className="rounded-lg border border-border">
           <table aria-label="Cell outputs" className="w-full min-w-[32rem] text-left">
-            <thead className="text-[0.7rem] uppercase tracking-[0.08em] text-fg-faint">
+            <thead className={smallLabelClass}>
               <tr>
                 <th className="px-2 py-1.5">Output</th>
                 <th className="px-2 py-1.5">Status</th>

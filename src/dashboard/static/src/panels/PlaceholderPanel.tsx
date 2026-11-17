@@ -19,14 +19,14 @@ export function PlaceholderPanel({ title, summary, endpoint, task }: Placeholder
     <Panel
       title={title}
       actions={
-        <span className="rounded-full border border-border-soft bg-black/25 px-2 py-0.5 text-[0.62rem] font-bold uppercase tracking-[0.1em] text-fg-faint">
+        <span className="rounded-full border border-border-soft bg-black/25 px-2 py-0.5 text-micro font-bold uppercase tracking-[0.1em] text-fg-faint">
           {task}
         </span>
       }
     >
       <p className={placeholderClass}>{summary}</p>
       {endpoint && (
-        <p className="mt-2 font-num text-[0.78rem] text-fg-dim">
+        <p className="mt-2 font-num text-body-sm text-fg-dim">
           backend ready: <span className="text-accent-2">{endpoint}</span>
         </p>
       )}

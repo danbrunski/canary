@@ -98,7 +98,7 @@ export function DashboardShell({
   const connectivityBadge = (
     <span
       className={cn(
-        "inline-flex min-h-6 items-center rounded-full border bg-black/25 px-2 text-[0.68rem] uppercase tracking-[0.06em]",
+        "inline-flex min-h-6 items-center rounded-full border bg-black/25 px-2 text-caption uppercase tracking-[0.06em]",
         CONNECTIVITY_CLASS[connectivity],
       )}
       title="Task 6.35 — Live Pi / Desk / Local Library / Queued Offline"
@@ -121,7 +121,7 @@ export function DashboardShell({
       type="button"
       className={cn(
         buttonClass,
-        "rounded-full px-3 text-[0.78rem]",
+        "rounded-full px-3 text-body-sm",
         theme === "night" && "border-accent-2 text-accent-2",
       )}
       onClick={onToggleTheme}
@@ -135,10 +135,10 @@ export function DashboardShell({
   );
   const brand = (
     <div className="flex min-w-[6.5rem] flex-col max-[600px]:min-w-0">
-      <div className="bg-[linear-gradient(95deg,var(--color-accent),#ffd9a0_70%)] bg-clip-text text-[1.05rem] font-extrabold tracking-[0.14em] text-transparent">
+      <div className="bg-[linear-gradient(95deg,var(--color-accent),#ffd9a0_70%)] bg-clip-text text-title font-extrabold tracking-[0.14em] text-transparent">
         CANary
       </div>
-      <div className="text-[0.62rem] uppercase tracking-[0.16em] text-fg-faint">
+      <div className="text-micro uppercase tracking-[0.16em] text-fg-faint">
         {driving ? "drive" : "workbench"}
       </div>
     </div>
@@ -186,7 +186,7 @@ export function DashboardShell({
             <OperatingModeIndicator events={events} liveMode={liveMode} />
             <VehicleStateBadge vehicleState={status?.vehicle_state} />
             <TokenGate token={token} onTokenChange={onTokenChange} />
-            <div className="ml-auto flex gap-2 text-[0.78rem] text-fg-dim">
+            <div className="ml-auto flex gap-2 text-body-sm text-fg-dim">
               {connectivityBadge}
               {streams}
             </div>
@@ -195,7 +195,7 @@ export function DashboardShell({
               type="button"
               className={cn(
                 buttonClass,
-                "rounded-full px-4 text-[0.78rem] font-semibold uppercase tracking-[0.04em]",
+                "rounded-full px-4 text-body-sm font-semibold uppercase tracking-[0.04em]",
                 !driving && "border-accent bg-accent/15 text-accent",
               )}
               onClick={onToggleMode}
@@ -251,7 +251,7 @@ function ConnectionSummary({
   return (
     <span
       className={cn(
-        "inline-flex min-h-7 min-w-0 items-center gap-1.5 rounded-full border bg-black/25 px-2.5 text-[0.66rem] font-semibold uppercase tracking-[0.05em]",
+        "inline-flex min-h-7 min-w-0 items-center gap-1.5 rounded-full border bg-black/25 px-2.5 text-caption font-semibold uppercase tracking-[0.05em]",
         CONNECTIVITY_CLASS[connectivity],
       )}
       role="status"
@@ -301,7 +301,7 @@ function PhoneHeaderMenu({ summary, children }: { summary: ReactNode; children: 
 function MenuSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section aria-label={title} className="flex flex-col gap-2">
-      <h3 className="m-0 text-[0.62rem] font-bold uppercase tracking-[0.16em] text-fg-faint">
+      <h3 className="m-0 text-micro font-bold uppercase tracking-[0.16em] text-fg-faint">
         {title}
       </h3>
       {children}

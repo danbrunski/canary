@@ -125,7 +125,7 @@ export function Heatmap({
 
   return (
     <div className="flex flex-col gap-1">
-      {caption && <div className="text-[0.7rem] tracking-[0.04em] text-fg-dim">{caption}</div>}
+      {caption && <div className="text-small tracking-[0.04em] text-fg-dim">{caption}</div>}
       <div ref={frame} className="min-w-0 max-w-full" style={{ width: requestedWidth }}>
         <canvas ref={ref} className="block" width={width} height={height} />
       </div>

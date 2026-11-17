@@ -28,7 +28,7 @@ export function FrameVisual({ frame }: { frame: FrameResponse }) {
           const points = stripPoints(values, axis, range, STRIP_W, STRIP_H);
           return (
             <figure key={column.spec} className="m-0">
-              <figcaption className="text-[0.65rem] text-fg-dim">
+              <figcaption className="text-caption text-fg-dim">
                 {column.spec}
                 {column.unit ? ` (${column.unit})` : ""}
                 {range && ` · ${formatFrameValue(range[0])}–${formatFrameValue(range[1])}`}

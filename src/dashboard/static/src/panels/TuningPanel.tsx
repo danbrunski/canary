@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 
-import { estimateTuning, getTuning, revertTuning, updateTuning } from "../api/http";
+import { estimateTuning, getTuning, revertTuning, updateTuning } from "../api/tuning";
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
@@ -96,7 +96,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
         {() => (
           <>
             <textarea
-              className={cn(inputClass, "h-72 w-full resize-y font-num text-[0.78rem]")}
+              className={cn(inputClass, "h-72 w-full resize-y font-num text-body-sm")}
               value={draft}
               spellCheck={false}
               onChange={(e) => setDraft(e.target.value)}
@@ -145,7 +145,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
             </div>
 
             {estimate && (
-              <div className="mt-3 rounded-[8px] border border-accent-2/45 bg-accent-2/10 p-3 text-[0.84rem]">
+              <div className="mt-3 rounded-[8px] border border-accent-2/45 bg-accent-2/10 p-3 text-lead">
                 <b className="text-accent-2">Before / after estimate</b>
                 <div className="mt-1 font-num tabular-nums text-fg-dim">
                   evaluated {estimate.before.evaluated} · would-suppress{" "}
@@ -156,7 +156,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
                     {estimate.newly_suppressed} newly muted)
                   </span>
                 </div>
-                <p className="mt-1 text-[0.76rem] text-fg-faint">
+                <p className="mt-1 text-body-sm text-fg-faint">
                   Review this before Apply — tuning must not silently blind the alert detector (Risk
                   R11).
                 </p>

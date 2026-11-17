@@ -276,7 +276,7 @@ export function CellGrid({
                       {changed && (
                         <span
                           className={cn(
-                            "block text-[0.65rem]",
+                            "block text-caption",
                             filled ? "font-bold" : "text-accent-2",
                           )}
                         >

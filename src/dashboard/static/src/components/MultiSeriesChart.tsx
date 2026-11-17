@@ -219,8 +219,8 @@ export function MultiSeriesChart({
         {hoverIndex !== null && (
           <div
             className={cn(
-              "absolute top-1 right-1 rounded bg-elev-2/90 px-2 py-1 text-[0.68rem] tabular-nums text-fg-dim shadow",
-              "max-[600px]:text-[0.8rem]",
+              "absolute top-1 right-1 rounded bg-elev-2/90 px-2 py-1 text-caption tabular-nums text-fg-dim shadow",
+              "max-[600px]:text-body",
               touchHeld ? "pointer-events-auto" : "pointer-events-none",
             )}
             data-testid="chart-readout"
@@ -255,14 +255,14 @@ export function MultiSeriesChart({
         <div className="flex justify-end gap-2">
           <button
             type="button"
-            className={cn(buttonClass, "px-2 py-0.5 text-[0.7rem]")}
+            className={cn(buttonClass, "px-2 py-0.5 text-small")}
             onClick={exportPng}
           >
             export PNG
           </button>
           <button
             type="button"
-            className={cn(buttonClass, "px-2 py-0.5 text-[0.7rem]")}
+            className={cn(buttonClass, "px-2 py-0.5 text-small")}
             onClick={exportCsv}
           >
             export CSV

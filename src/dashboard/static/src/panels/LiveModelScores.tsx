@@ -36,19 +36,19 @@ function ModelCard({ source, msgs }: { source: ScoreSource; msgs: ScoreMessage[]
   return (
     <div className="flex-1 rounded border border-border bg-elev-2 p-2">
       <div className="mb-1 flex items-baseline justify-between">
-        <span className="text-[0.7rem] uppercase tracking-[0.08em] text-fg-dim">
+        <span className="text-small uppercase tracking-[0.08em] text-fg-dim">
           {SOURCE_LABEL[source]}
         </span>
         {latest?.operating_mode && (
-          <span className="text-[0.7rem] text-fg-dim">{latest.operating_mode}</span>
+          <span className="text-small text-fg-dim">{latest.operating_mode}</span>
         )}
       </div>
       {!latest ? (
-        <div className="py-2 text-[0.8rem] text-fg-faint">waiting for ticks…</div>
+        <div className="py-2 text-body text-fg-faint">waiting for ticks…</div>
       ) : !view ? (
         <div className="flex items-baseline gap-2">
           <span className="font-num text-2xl font-semibold tabular-nums text-fg-dim">—</span>
-          <span className="text-[0.7rem] uppercase tracking-[0.06em] text-warn">
+          <span className="text-small uppercase tracking-[0.06em] text-warn">
             degraded · missing features
           </span>
         </div>
@@ -60,10 +60,10 @@ function ModelCard({ source, msgs }: { source: ScoreSource; msgs: ScoreMessage[]
             {view.index}
             <span className="text-sm text-fg-dim">/100</span>
           </span>
-          <span className={cn("text-[0.7rem] uppercase tracking-[0.06em]", LEVEL_TONE[view.level])}>
+          <span className={cn("text-small uppercase tracking-[0.06em]", LEVEL_TONE[view.level])}>
             {view.level}
           </span>
-          <span className="font-num text-[0.72rem] tabular-nums text-fg-faint">
+          <span className="font-num text-small tabular-nums text-fg-faint">
             raw {latest.score?.toFixed(3) ?? "—"}
             {latest.threshold != null && ` / thr ${latest.threshold.toFixed(3)}`}
           </span>

@@ -1,7 +1,7 @@
 import { TableScroll } from "../../../components/TableScroll";
 import { coarseVerdict, formatCount, PRESET_DRAWS } from "../../../lib/romSimSize";
 import { g, pct } from "../../../lib/romSimView";
-import { buttonClass } from "../../../styles";
+import { buttonClass, smallLabelClass } from "../../../styles";
 import type { RomSimResult, SimRunContext } from "../../../types/romEditor";
 import type { RomTableValues } from "../../../types/romLibrary";
 import { SimCaveats } from "./SimCaveats";
@@ -136,7 +136,7 @@ function Provenance({
         <h4 className="text-sm font-semibold">Status counts (cells per output)</h4>
         <TableScroll className="rounded-lg border border-border">
           <table aria-label="Status counts" className="w-full min-w-[32rem] text-left text-xs">
-            <thead className="text-[0.7rem] uppercase tracking-[0.08em] text-fg-faint">
+            <thead className={smallLabelClass}>
               <tr>
                 <th className="px-2 py-1.5">Output</th>
                 {statuses.map((status) => (

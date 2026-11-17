@@ -11,6 +11,7 @@ import {
   definitionRowClass,
   definitionTermClass,
   definitionValueClass,
+  eyebrowClass,
   placeholderClass,
 } from "../styles";
 import type { SessionDigestResponse, StatusResponse, TripSummaryFields } from "../types";
@@ -117,9 +118,7 @@ export function TripPanel({ channels, status, token }: TripPanelProps) {
 
   return (
     <Panel title="Trip">
-      <h3 className="mb-1 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
-        Current drive
-      </h3>
+      <h3 className={cn(eyebrowClass, "mb-1")}>Current drive</h3>
       {!hasLiveData ? (
         <p className={placeholderClass}>no live drive data yet</p>
       ) : (
@@ -151,7 +150,7 @@ export function TripPanel({ channels, status, token }: TripPanelProps) {
         </dl>
       )}
 
-      <h3 className="mb-1 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">Last drive</h3>
+      <h3 className={cn(eyebrowClass, "mb-1")}>Last drive</h3>
       {!sessionId ? (
         <p className={placeholderClass}>no recorded session yet</p>
       ) : loading ? (
@@ -164,9 +163,7 @@ export function TripPanel({ channels, status, token }: TripPanelProps) {
 
       {sessionId && (
         <>
-          <h3 className="mb-1 mt-4 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
-            Last drive digest
-          </h3>
+          <h3 className={cn(eyebrowClass, "mb-1 mt-4")}>Last drive digest</h3>
           {!token ? (
             <TokenRequired purpose="view the last-drive digest" />
           ) : digest.loading ? (

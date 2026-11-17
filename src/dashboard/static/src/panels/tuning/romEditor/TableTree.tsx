@@ -35,7 +35,7 @@ const EMPTY_KIND: Record<Exclude<TableKinds, "all">, string> = {
 function itemClass(chosen: boolean): string {
   return cn(
     "flex w-full min-w-0 items-center gap-1.5 rounded-[6px] border border-transparent px-2 py-1",
-    "text-left text-[0.8rem] text-fg-dim transition-colors hover:text-fg",
+    "text-left text-body text-fg-dim transition-colors hover:text-fg",
     chosen && "border-border-soft bg-elev-2 text-fg",
   );
 }
@@ -75,7 +75,7 @@ function Marks({
       {pending > 0 && (
         <span
           aria-hidden="true"
-          className="rounded-full bg-accent/20 px-1.5 font-num text-[0.65rem] text-accent"
+          className="rounded-full bg-accent/20 px-1.5 font-num text-caption text-accent"
         >
           {pending}
         </span>
@@ -303,7 +303,7 @@ export function TableTree({
               aria-label={`${group.label}, ${group.entries.length} ${
                 group.entries.length === 1 ? "table" : "tables"
               }`}
-              className="flex items-center gap-1.5 px-1 text-[0.62rem] font-bold uppercase tracking-[0.14em] text-fg-faint hover:text-fg"
+              className="flex items-center gap-1.5 px-1 text-micro font-bold uppercase tracking-[0.14em] text-fg-faint hover:text-fg"
               onClick={() =>
                 setCollapsed((current) => {
                   const next = new Set(current);

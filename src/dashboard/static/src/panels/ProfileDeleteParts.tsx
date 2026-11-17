@@ -67,7 +67,7 @@ export function DeletedResult({
 }) {
   return (
     <div
-      className="mb-2 rounded-[8px] border border-border-soft px-3 py-2 text-[0.82rem]"
+      className="mb-2 rounded-[8px] border border-border-soft px-3 py-2 text-body"
       data-testid="profile-deleted-result"
     >
       <div className="flex items-start justify-between gap-2">
@@ -76,14 +76,14 @@ export function DeletedResult({
             ? `Deleted ${result.deleted} on this machine (still in git).`
             : `Deleted ${result.deleted} from this machine's registry.`}
         </strong>
-        <button type="button" className="text-[0.72rem] text-fg-dim underline" onClick={onDismiss}>
+        <button type="button" className="text-small text-fg-dim underline" onClick={onDismiss}>
           Dismiss
         </button>
       </div>
       {result.data_left.length > 0 ? (
         <>
           <p className="mt-1">Its recorded data was not deleted. It is still in:</p>
-          <ul className="mt-1 list-disc pl-5 font-num text-[0.76rem]">
+          <ul className="mt-1 list-disc pl-5 font-num text-body-sm">
             {result.data_left.map((path) => (
               <li key={path} className="break-all">
                 {path}
@@ -111,7 +111,7 @@ export function HiddenProfiles({
   if (profiles.length === 0) return null;
   return (
     <section className="mt-3" aria-label="Hidden on this machine" data-testid="profiles-hidden">
-      <h3 className="text-[0.72rem] uppercase tracking-[0.06em] text-fg-faint">
+      <h3 className="text-small uppercase tracking-[0.06em] text-fg-faint">
         Hidden on this machine
       </h3>
       <ul className="mt-1 space-y-1">
@@ -122,8 +122,8 @@ export function HiddenProfiles({
             data-testid={`hidden-${profile.slug}`}
           >
             <div className="min-w-0">
-              <div className="truncate text-[0.82rem]">{profile.name || profile.slug}</div>
-              <div className={cn(placeholderClass, "truncate font-num text-[0.72rem]")}>
+              <div className="truncate text-body">{profile.name || profile.slug}</div>
+              <div className={cn(placeholderClass, "truncate font-num text-small")}>
                 {[profile.year, profile.make, profile.model].filter(Boolean).join(" ") || "—"} ·{" "}
                 {profile.slug}
               </div>

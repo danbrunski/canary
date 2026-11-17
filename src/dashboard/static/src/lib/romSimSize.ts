@@ -346,14 +346,6 @@ export function recordTiming(run: TimedRun): void {
   }
 }
 
-export function forgetTimings(): void {
-  try {
-    window.localStorage.removeItem(TIMINGS_STORAGE_KEY);
-  } catch {
-    // Blocked: nothing to forget.
-  }
-}
-
 /** How much slower (or faster) this server ran than the dev-laptop fit, as
  *  the median of observed / modelled over its earlier runs. A ratio against
  *  the model, not seconds per point-draw, so a coarse run (mostly overhead)

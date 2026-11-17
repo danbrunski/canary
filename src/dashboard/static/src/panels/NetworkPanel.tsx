@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 
-import { getNetwork, setProvisioningWindow } from "../api/http";
+import { getNetwork, setProvisioningWindow } from "../api/network";
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { reloaded } from "../hooks/followUpRead";
@@ -103,7 +103,7 @@ function DashboardLink({ url }: { url: string }) {
   return (
     <div className="mt-3 flex flex-col gap-1.5">
       <span className={definitionTermClass}>Dashboard address</span>
-      <a href={url} className="font-num text-[1.05rem] break-all text-accent underline">
+      <a href={url} className="font-num text-title break-all text-accent underline">
         {url}
       </a>
       <div className="flex flex-wrap items-center gap-2">
@@ -119,8 +119,8 @@ function DashboardLink({ url }: { url: string }) {
           Copy
         </button>
       </div>
-      {copied && <span className={cn(placeholderClass, "text-[0.72rem]")}>{copied}</span>}
-      <p className={cn(placeholderClass, "text-[0.78rem]")}>
+      {copied && <span className={cn(placeholderClass, "text-small")}>{copied}</span>}
+      <p className={cn(placeholderClass, "text-body-sm")}>
         Bookmark this — Android cannot open canary.local.
       </p>
     </div>
@@ -130,9 +130,7 @@ function DashboardLink({ url }: { url: string }) {
 function NetworkFacts({ network }: { network: NetworkSummary }) {
   return (
     <>
-      {network.error && (
-        <p className={cn("mb-2 text-[0.82rem]", toneClass("warn"))}>{network.error}</p>
-      )}
+      {network.error && <p className={cn("mb-2 text-body", toneClass("warn"))}>{network.error}</p>}
       <dl className={definitionListClass}>
         <div className={definitionRowClass}>
           <dt className={definitionTermClass}>WiFi</dt>
@@ -204,7 +202,7 @@ export function NetworkPanel({ token, status }: NetworkPanelProps) {
         <h3 className={cn(definitionTermClass, "m-0 mb-2")}>Change WiFi from a phone</h3>
         {token ? (
           <>
-            <p className={cn("m-0 mb-2 text-[0.88rem]", remaining > 0 && toneClass("ok"))}>
+            <p className={cn("m-0 mb-2 text-lead", remaining > 0 && toneClass("ok"))}>
               {remaining > 0
                 ? `Open — ${formatDuration(remaining, { collapseZero: true })} left`
                 : "Closed"}
@@ -235,7 +233,7 @@ export function NetworkPanel({ token, status }: NetworkPanelProps) {
         ) : (
           <TokenRequired purpose="open the window" />
         )}
-        <p className={cn(placeholderClass, "mt-2 text-[0.78rem]")}>
+        <p className={cn(placeholderClass, "mt-2 text-body-sm")}>
           While it is open, a phone in Bluetooth range can give the Pi a new WiFi network (Android
           Chrome on improv-wifi.com). Turning the key ACC → ON → ACC with no pairing request waiting
           also opens it for 5 minutes.

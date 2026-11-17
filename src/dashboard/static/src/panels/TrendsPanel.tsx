@@ -99,8 +99,8 @@ function StatRow({ trend }: { trend: StatTrend }) {
       )}
     >
       <div className="min-w-0">
-        <div className="truncate text-[0.82rem] font-semibold text-fg">{trend.stat}</div>
-        <div className="text-[0.72rem] text-fg-faint">
+        <div className="truncate text-body font-semibold text-fg">{trend.stat}</div>
+        <div className="text-small text-fg-faint">
           latest {formatNumber(trend.latest_value)} · band [{formatNumber(bandLo)},{" "}
           {formatNumber(bandHi)}] · n={trend.n}
         </div>
@@ -112,7 +112,7 @@ function StatRow({ trend }: { trend: StatTrend }) {
         baseline={trend.reference_mean}
         stroke={alarm ? "bad" : "accent"}
       />
-      <div className="col-span-2 flex items-center gap-3 text-[0.72rem]">
+      <div className="col-span-2 flex items-center gap-3 text-small">
         <span className={mkTrend === "no trend" ? "text-fg-faint" : "text-fg-dim"}>
           trend: {mkTrend}
         </span>

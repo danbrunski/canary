@@ -154,13 +154,13 @@ export function TreadWearCard({ token }: TreadWearCardProps) {
         )}
       </dl>
       {data.caveats.length > 0 && (
-        <ul className="mt-2 list-disc pl-5 text-[0.8rem] text-fg-dim">
+        <ul className="mt-2 list-disc pl-5 text-body text-fg-dim">
           {data.caveats.map((caveat) => (
             <li key={caveat}>{caveat}</li>
           ))}
         </ul>
       )}
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-[0.82rem]">
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-body">
         <select
           aria-label="tire event"
           value={action}

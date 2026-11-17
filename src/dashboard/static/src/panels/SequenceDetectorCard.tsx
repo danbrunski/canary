@@ -29,9 +29,9 @@ export function SequenceDetectorCard({
   return (
     <Panel
       title="Sequence Detector"
-      actions={<span className="text-[0.8rem] text-fg-dim">{sequenceDetector?.active ?? "—"}</span>}
+      actions={<span className="text-body text-fg-dim">{sequenceDetector?.active ?? "—"}</span>}
     >
-      <p className="mb-2 text-[0.75rem] text-fg-dim">
+      <p className="mb-2 text-body-sm text-fg-dim">
         Live backbone for the sequence slot. A switch takes effect immediately and is not persisted
         — set the durable default via <code>models.sequence_detector</code>.
       </p>

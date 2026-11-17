@@ -170,7 +170,7 @@ function StatusView({ status }: { status: BrainStatus }) {
             .join(" · ") || "none"
         }
       />
-      <p className="m-0 text-[0.8rem] text-fg-dim">{status.ram_addresses.detail}</p>
+      <p className="m-0 text-body text-fg-dim">{status.ram_addresses.detail}</p>
     </dl>
   );
 }
@@ -180,7 +180,7 @@ function EvidenceList({ views, empty }: { views: EvidenceView[]; empty: string }
   return (
     <ul className="m-0 flex list-none flex-col gap-2 p-0">
       {views.map((view) => (
-        <li key={view.id} className="border-b border-border pb-2 text-[0.84rem]">
+        <li key={view.id} className="border-b border-border pb-2 text-lead">
           <div>
             <span className="font-num text-fg-dim">{view.id}</span> {view.tool} · {view.standing}
           </div>
@@ -206,7 +206,7 @@ function CardView({ response }: { response: InvestigationCardResponse }) {
   const { card } = response;
   const { ecu, engine } = explanationParts(response);
   return (
-    <div className="flex flex-col gap-3 text-[0.86rem]">
+    <div className="flex flex-col gap-3 text-lead">
       <div>
         <strong>{card.title}</strong> · {card.status} · evidence {card.evidence_state}
       </div>
@@ -255,7 +255,7 @@ function CardView({ response }: { response: InvestigationCardResponse }) {
         )}
       </section>
       {card.narrative && (
-        <p className="m-0 text-[0.8rem] text-fg-faint">
+        <p className="m-0 text-body text-fg-faint">
           {card.narrative_notice} {card.narrative}
         </p>
       )}
@@ -275,7 +275,7 @@ function TwinView({ response }: { response: TwinSessionResponse }) {
   const observed = (e: TwinEvaluation) =>
     e.trace.map((p) => p.observed_phi).filter((v): v is number => v !== null);
   return (
-    <div className="flex flex-col gap-3 text-[0.86rem]">
+    <div className="flex flex-col gap-3 text-lead">
       {response.currency && <div className="text-fg-dim">{response.currency.program_detail}</div>}
       {response.result.refusals.map((r) => (
         <div key={r.id} className="text-warn">
@@ -305,7 +305,7 @@ function TwinView({ response }: { response: TwinSessionResponse }) {
             </div>
             {predicted.length > 0 && (
               <TableScroll>
-                <table className="text-[0.8rem]">
+                <table className="text-body">
                   <thead>
                     <tr>
                       <th className="text-left">time</th>
@@ -472,7 +472,7 @@ export function BrainPage({ token }: BrainPageProps) {
             data.jobs.length === 0 ? (
               <p className={placeholderClass}>no jobs; they run when collection is inactive</p>
             ) : (
-              <ul className="m-0 flex list-none flex-col gap-1 p-0 text-[0.84rem]">
+              <ul className="m-0 flex list-none flex-col gap-1 p-0 text-lead">
                 {[...data.jobs].reverse().map((job) => {
                   const target = typeof job.params.session === "string" ? job.params.session : null;
                   return (
@@ -530,7 +530,7 @@ export function BrainPage({ token }: BrainPageProps) {
             data.records.length === 0 ? (
               <p className={placeholderClass}>no investigation matches</p>
             ) : (
-              <ul className="m-0 flex list-none flex-col gap-1 p-0 text-[0.84rem]">
+              <ul className="m-0 flex list-none flex-col gap-1 p-0 text-lead">
                 {data.records.map((row) => (
                   <li key={row.record.id}>
                     <button

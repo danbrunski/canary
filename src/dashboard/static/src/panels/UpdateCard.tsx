@@ -60,7 +60,7 @@ function Phases({ update }: { update: UpdateSnapshot }) {
   const phases = update.status.phases ?? [];
   if (phases.length === 0) return null;
   return (
-    <ol className="m-0 mt-2 flex list-none flex-col gap-1 p-0 text-[0.86rem]">
+    <ol className="m-0 mt-2 flex list-none flex-col gap-1 p-0 text-lead">
       {phases.map((phase, index) => {
         const current = index === phases.length - 1 && isRunning(update);
         return (
@@ -85,7 +85,7 @@ function CheckResult({ check }: { check: UpdateCheck }) {
     <div className="mt-3">
       <p className={cn("m-0 text-[0.9rem]", !check.ok && "text-bad")}>{checkSummary(check)}</p>
       {commits.length > 0 && (
-        <ul className="m-0 mt-2 flex max-h-60 list-none flex-col gap-1 overflow-y-auto p-0 text-[0.84rem]">
+        <ul className="m-0 mt-2 flex max-h-60 list-none flex-col gap-1 overflow-y-auto p-0 text-lead">
           {commits.map((commit) => (
             <li key={commit.sha} className="flex gap-2">
               <code className="shrink-0 text-fg-faint">{commit.sha}</code>
@@ -224,7 +224,7 @@ export function UpdateCard({ token }: UpdateCardProps) {
               {!running && (
                 <button
                   type="button"
-                  className="mt-1 text-[0.8rem] text-fg-dim underline"
+                  className="mt-1 text-body text-fg-dim underline"
                   onClick={() => setAwaited(null)}
                 >
                   Stop waiting
@@ -248,7 +248,7 @@ export function UpdateCard({ token }: UpdateCardProps) {
                   </button>
                 )}
               {outcome.kind === "error" && (update.status.log_tail ?? []).length > 0 && (
-                <details className="mt-2 text-[0.8rem]">
+                <details className="mt-2 text-body">
                   <summary className="cursor-pointer text-fg-dim">last output</summary>
                   <pre className="m-0 mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words text-fg-dim">
                     {(update.status.log_tail ?? []).join("\n")}
@@ -259,7 +259,7 @@ export function UpdateCard({ token }: UpdateCardProps) {
           )}
           {check && !inProgress && <CheckResult check={check} />}
           {update.blocked_by.length > 0 && !inProgress && (
-            <ul className="m-0 mt-2 list-none p-0 text-[0.84rem] text-warn">
+            <ul className="m-0 mt-2 list-none p-0 text-lead text-warn">
               {update.blocked_by.map((reason) => (
                 <li key={reason}>{reason}</li>
               ))}
@@ -308,7 +308,7 @@ export function UpdateCard({ token }: UpdateCardProps) {
             </div>
           )}
           {blocked && hasUpdate(update) && !inFlight && (
-            <p className="m-0 mt-2 text-[0.82rem] text-fg-dim">{blocked}</p>
+            <p className="m-0 mt-2 text-body text-fg-dim">{blocked}</p>
           )}
         </>
       )}

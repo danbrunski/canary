@@ -196,7 +196,7 @@ export function CellGrid({
   if (!cells.length) return <p className="m-0 text-sm text-fg-dim">No cells.</p>;
   return (
     <TableScroll>
-      <table aria-label={label} className="border-collapse text-[0.7rem]">
+      <table aria-label={label} className="border-collapse text-small">
         <thead>
           <tr>
             <th className="px-1 text-left text-fg-faint">rpm \ airflow</th>
@@ -236,7 +236,7 @@ export function CellGrid({
                     }
                   >
                     {numeric === null ? "—" : numeric.toFixed(1)}
-                    <span className="block text-[0.6rem] opacity-70">n {cell.n}</span>
+                    <span className="block text-micro opacity-70">n {cell.n}</span>
                   </td>
                 );
               })}
@@ -244,7 +244,7 @@ export function CellGrid({
           ))}
         </tbody>
       </table>
-      <p className="m-0 mt-1 text-[0.65rem] text-fg-faint">
+      <p className="m-0 mt-1 text-caption text-fg-faint">
         Values in {unit}; grey cells are below the minimum sample count and are not coloured.
       </p>
     </TableScroll>

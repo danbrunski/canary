@@ -55,7 +55,7 @@ export function Sheet({ title, onClose, children }: SheetProps) {
         className={cn(sheetClass, "text-fg outline-none")}
       >
         <div className={sheetHeaderClass}>
-          <h2 className="m-0 text-[0.82rem] font-bold uppercase tracking-[0.14em] text-fg-dim">
+          <h2 className="m-0 text-body font-bold uppercase tracking-[0.14em] text-fg-dim">
             {title}
           </h2>
           <button

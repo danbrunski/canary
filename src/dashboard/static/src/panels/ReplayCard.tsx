@@ -108,7 +108,7 @@ export function ReplayCard({ token, run, sessions, selectedSessionId }: ReplayCa
     <Panel
       title="Replay"
       actions={
-        <span className={replay?.running ? "text-[0.8rem] text-warn" : "text-fg-dim"}>
+        <span className={replay?.running ? "text-body text-warn" : "text-fg-dim"}>
           {replay?.running ? "running" : "idle"}
         </span>
       }
@@ -153,7 +153,7 @@ export function ReplayCard({ token, run, sessions, selectedSessionId }: ReplayCa
           </button>
         )}
       </div>
-      <label className="mt-2 flex min-h-9 flex-row items-center gap-2 text-[0.75rem] text-fg-dim">
+      <label className="mt-2 flex min-h-9 flex-row items-center gap-2 text-body-sm text-fg-dim">
         <input
           type="checkbox"
           checked={loop}
@@ -163,7 +163,7 @@ export function ReplayCard({ token, run, sessions, selectedSessionId }: ReplayCa
         loop
       </label>
       {replay?.running && (
-        <div className="mt-3 flex flex-col gap-1 rounded-[8px] border border-warn/35 bg-warn/10 p-2.5 text-[0.82rem]">
+        <div className="mt-3 flex flex-col gap-1 rounded-[8px] border border-warn/35 bg-warn/10 p-2.5 text-body">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <b>{replay.source_session_id}</b>
             {replay.started_at && (

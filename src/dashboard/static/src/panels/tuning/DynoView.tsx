@@ -196,7 +196,7 @@ export function tiresSentence(conditions: DynoRunOk["conditions"]): string {
 function TireReadingNote({ reading }: { reading: ReturnType<typeof readTirePsi> }) {
   if (reading.state !== "refused") return null;
   return (
-    <span role="alert" className="max-w-[16rem] text-[0.68rem] leading-snug text-bad">
+    <span role="alert" className="max-w-[16rem] text-caption leading-snug text-bad">
       {reading.message}
     </span>
   );
@@ -365,7 +365,7 @@ export function DynoView({ token, choice }: { token: string; choice: SessionChoi
             value={payload}
             onChange={(e) => setPayload(e.target.value)}
           />
-          <span className="max-w-[16rem] text-[0.68rem] leading-snug text-fg-faint">
+          <span className="max-w-[16rem] text-caption leading-snug text-fg-faint">
             {vehicleMass === null
               ? "Saved vehicle weight: not loaded. Payload is added to the weight in Profiles."
               : `Saved vehicle weight ${vehicleMass.toLocaleString()} kg (Profiles). Enter only what was aboard on top of it.`}

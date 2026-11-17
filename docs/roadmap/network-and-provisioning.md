@@ -300,7 +300,7 @@ hotspot (N6) lives in the same service.
   covers the add flow at 412 px.
   Done 2026-11-07 against the N5.3 HTTP contract, mocked (the backend landed
   separately): `WifiNetworksCard.tsx` on System -> Network, `getWifi`/`scanWifi`/
-  `addWifi`/`connectWifi`/`orderWifi`/`forgetWifi` in `api/http.ts`. A 503/504
+  `addWifi`/`connectWifi`/`orderWifi`/`forgetWifi` in `api/network.ts`. A 503/504
   shows the daemon's detail as the section's state; a failed join shows "The Pi
   could not join X: <detail>. Nothing was saved."; the passphrase field is
   cleared on every submit. The drop warning fires only when the page's host is

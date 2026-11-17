@@ -59,10 +59,10 @@ export function ModelEvidencePanel({ event, relatedEvents, token }: ModelEvidenc
     <section className="mb-3 rounded-[8px] border border-border-soft bg-black/20 p-3">
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h3 className="m-0 text-[0.78rem] font-bold uppercase tracking-[0.12em] text-fg-dim">
+          <h3 className="m-0 text-body-sm font-bold uppercase tracking-[0.12em] text-fg-dim">
             Model evidence
           </h3>
-          <div className="mt-1 flex flex-wrap gap-2 text-[0.72rem] text-fg-faint">
+          <div className="mt-1 flex flex-wrap gap-2 text-small text-fg-faint">
             <span>{formatTimestamp(event.timestamp)}</span>
             {event.operating_mode && <span>{event.operating_mode}</span>}
             {event.window_start_timestamp && event.window_end_timestamp && (
@@ -110,10 +110,10 @@ function SourceEvidenceCard({
   return (
     <div className="min-w-0 rounded-[8px] border border-border-soft bg-elev/70 p-2.5">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <b className="text-[0.78rem] uppercase tracking-[0.08em] text-fg">{SOURCE_LABEL[source]}</b>
+        <b className="text-body-sm uppercase tracking-[0.08em] text-fg">{SOURCE_LABEL[source]}</b>
         <span
           className={cn(
-            "font-num text-[0.68rem] uppercase tracking-[0.08em]",
+            "font-num text-caption uppercase tracking-[0.08em]",
             event ? "text-ok" : "text-fg-faint",
           )}
         >
@@ -124,7 +124,7 @@ function SourceEvidenceCard({
         <p className={placeholderClass}>no matching event in this window.</p>
       ) : (
         <>
-          <dl className="m-0 grid grid-cols-2 gap-x-3 gap-y-1 text-[0.74rem]">
+          <dl className="m-0 grid grid-cols-2 gap-x-3 gap-y-1 text-small">
             <dt className="text-fg-faint">score</dt>
             <dd className="m-0 text-right font-num tabular-nums">
               {formatNumber(event.score, EVIDENCE_DIGITS)}
@@ -145,7 +145,7 @@ function SourceEvidenceCard({
           {noveltyScreen(event) && (
             <p
               className={cn(
-                "mb-0 mt-2 text-[0.72rem]",
+                "mb-0 mt-2 text-small",
                 noveltyScreen(event)?.outside ? "text-warn" : "text-fg-dim",
               )}
             >
@@ -154,7 +154,7 @@ function SourceEvidenceCard({
           )}
           {event.affected_channels.length > 0 && channelRankingCaption(event) && (
             <p
-              className="mb-0 mt-2 text-[0.68rem] text-fg-faint"
+              className="mb-0 mt-2 text-caption text-fg-faint"
               title={channelRankingCaption(event)?.title}
             >
               {channelRankingCaption(event)?.caption} (not a cause)
@@ -185,10 +185,10 @@ function ResidualEvidenceCard({ residuals }: { residuals: ResidualEvidence[] }) 
   return (
     <div className="min-w-0 rounded-[8px] border border-border-soft bg-elev/70 p-2.5">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <b className="text-[0.78rem] uppercase tracking-[0.08em] text-fg">Residuals</b>
+        <b className="text-body-sm uppercase tracking-[0.08em] text-fg">Residuals</b>
         <span
           className={cn(
-            "font-num text-[0.68rem] uppercase tracking-[0.08em]",
+            "font-num text-caption uppercase tracking-[0.08em]",
             residuals.length > 0 ? "text-warn" : "text-fg-faint",
           )}
         >
@@ -200,7 +200,7 @@ function ResidualEvidenceCard({ residuals }: { residuals: ResidualEvidence[] }) 
       ) : (
         <div className="flex flex-col gap-1.5">
           {residuals.slice(0, 6).map((r) => (
-            <div key={r.name} className="rounded-[6px] bg-black/20 p-1.5 text-[0.73rem]">
+            <div key={r.name} className="rounded-[6px] bg-black/20 p-1.5 text-small">
               <div className="flex items-baseline justify-between gap-2">
                 <b className="truncate text-fg" title={r.name}>
                   {r.name}
@@ -265,7 +265,7 @@ function ChannelBars({ channels }: { channels: ChannelEvidence[] }) {
         return (
           <div key={c.channel} className="grid grid-cols-[minmax(5rem,1fr)_5rem] gap-2">
             <div className="min-w-0">
-              <div className="mb-0.5 truncate text-[0.68rem] text-fg-dim" title={c.channel}>
+              <div className="mb-0.5 truncate text-caption text-fg-dim" title={c.channel}>
                 {c.channel}
               </div>
               <MeterBar
@@ -274,7 +274,7 @@ function ChannelBars({ channels }: { channels: ChannelEvidence[] }) {
                 colorClass={value >= 1 ? "bg-bad" : value >= 0.75 ? "bg-warn" : "bg-accent-2"}
               />
             </div>
-            <div className="self-end text-right font-num text-[0.68rem] tabular-nums text-fg-dim">
+            <div className="self-end text-right font-num text-caption tabular-nums text-fg-dim">
               {c.ratio === null ? formatNumber(c.score, EVIDENCE_DIGITS) : `${c.ratio.toFixed(2)}x`}
             </div>
           </div>
@@ -293,7 +293,7 @@ function ChannelHeatmap({ heatmap }: { heatmap: HeatmapData }) {
         {heatmap.channels.map((channel) => (
           <div
             key={channel}
-            className="truncate text-[0.62rem] leading-4 text-fg-faint"
+            className="truncate text-micro leading-4 text-fg-faint"
             title={channel}
           >
             {channel}
@@ -337,7 +337,7 @@ function OverlayChart({ overlay }: { overlay: OverlaySeries }) {
 
   return (
     <div className="rounded-[6px] bg-black/20 p-1.5">
-      <div className="mb-1 truncate text-[0.64rem] text-fg-dim" title={overlay.channel}>
+      <div className="mb-1 truncate text-caption text-fg-dim" title={overlay.channel}>
         {overlay.channel}
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} className="h-11 w-full" role="img">

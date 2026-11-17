@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 
-import { getCurrentCapture } from "../../api/http";
+import { getCurrentCapture } from "../../api/captures";
 import { useControlResource } from "../../hooks/useControlResource";
 import { useTagQueue } from "../../hooks/useTagQueue";
 import { buttonClass, panelClass } from "../../styles";

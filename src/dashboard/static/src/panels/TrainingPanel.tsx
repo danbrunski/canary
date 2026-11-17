@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 
-import { approveTrainingRun, getTrainingRuns, submitJob } from "../api/http";
+import { approveTrainingRun, getTrainingRuns } from "../api/http";
+import { submitJob } from "../api/jobs";
 import { Notice } from "../components/Notice";
 import { MetricTile } from "../components/MetricTile";
 import { Panel } from "../components/Panel";
@@ -26,10 +27,11 @@ import {
 import {
   buttonClass,
   cn,
+  eyebrowClass,
   inputClass,
-  type NoticeState,
   placeholderClass,
   selectClass,
+  type NoticeState,
 } from "../styles";
 import type { TrainingRun } from "../types";
 import { formatNumber, formatPercent } from "../util/format";
@@ -117,7 +119,7 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
   return (
     <Panel title="Training" count={data ? `${data.count} runs` : undefined}>
       <div className="mb-3 grid grid-cols-[auto_1fr_auto_auto_auto] items-end gap-2 max-[1100px]:grid-cols-1">
-        <label className="flex flex-col gap-1 text-[0.75rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-body-sm text-fg-dim">
           Target
           <select
             className={selectClass}
@@ -129,7 +131,7 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
           </select>
         </label>
         {target === "local" ? (
-          <label className="flex flex-col gap-1 text-[0.75rem] text-fg-dim">
+          <label className="flex flex-col gap-1 text-body-sm text-fg-dim">
             Companion API (blank: this server)
             <input
               className={inputClass}
@@ -139,7 +141,7 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
             />
           </label>
         ) : (
-          <div className="min-h-9 text-[0.75rem] text-fg-dim">
+          <div className="min-h-9 text-body-sm text-fg-dim">
             {token ? "Pi control token present" : "Pi control token missing"}
           </div>
         )}
@@ -167,7 +169,7 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
         </button>
       </div>
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <label className="flex min-h-9 flex-row items-center gap-2 text-[0.75rem] text-fg-dim">
+        <label className="flex min-h-9 flex-row items-center gap-2 text-body-sm text-fg-dim">
           <input
             type="checkbox"
             checked={useAllSessions}
@@ -176,7 +178,7 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
           all sessions
         </label>
         {jobKind.includes("lstm") && (
-          <label className="flex items-center gap-2 text-[0.75rem] text-fg-dim">
+          <label className="flex items-center gap-2 text-body-sm text-fg-dim">
             device
             <input
               className={cn(inputClass, "w-24")}
@@ -188,7 +190,7 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
         )}
       </div>
       {target === "local" && !local.sameOrigin && (
-        <label className="mb-3 flex max-w-md flex-col gap-1 text-[0.75rem] text-fg-dim">
+        <label className="mb-3 flex max-w-md flex-col gap-1 text-body-sm text-fg-dim">
           Local token
           <input
             className={inputClass}
@@ -263,12 +265,12 @@ function RunCard({
   return (
     <div className="rounded-[8px] border border-border-soft bg-[linear-gradient(180deg,var(--color-elev-2),var(--color-elev))] p-2.5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <b className="font-num text-[0.85rem]">{run.run_id}</b>
+        <b className="font-num text-lead">{run.run_id}</b>
         <div className="flex items-center gap-2">
           <button
             type="button"
             className={cn(
-              "rounded-full border px-2 py-0.5 text-[0.66rem] uppercase tracking-[0.08em]",
+              "rounded-full border px-2 py-0.5 text-caption uppercase tracking-[0.08em]",
               run.approved
                 ? "border-ok/40 text-ok"
                 : "border-border-soft text-fg-faint hover:text-fg-dim",
@@ -281,7 +283,7 @@ function RunCard({
           </button>
           <span
             className={cn(
-              "text-[0.7rem] uppercase tracking-[0.08em]",
+              "text-small uppercase tracking-[0.08em]",
               PUBLISH_STYLE[run.publish_status] ?? "text-fg-dim",
             )}
           >
@@ -289,7 +291,7 @@ function RunCard({
           </span>
         </div>
       </div>
-      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[0.76rem] text-fg-dim">
+      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-body-sm text-fg-dim">
         <span>{run.model_type}</span>
         <span className={run.status === "failed" ? "text-bad" : "text-ok"}>{run.status}</span>
         {run.compute_target && <span title="compute target">{run.compute_target}</span>}
@@ -311,14 +313,12 @@ function RunCard({
       {quality.hasQuality && <RunQualityView quality={quality} comparison={comparison} />}
       {loss.length > 1 && (
         <div className="mt-2">
-          <span className="text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
-            loss curve ({loss.length} epochs)
-          </span>
+          <span className={eyebrowClass}>loss curve ({loss.length} epochs)</span>
           <Sparkline values={loss} width={420} height={56} stroke="accent-2" />
         </div>
       )}
       {threshold(run) !== null && (
-        <div className="mt-1 text-[0.74rem] text-fg-dim">
+        <div className="mt-1 text-small text-fg-dim">
           calibrated threshold: <b className="font-num text-fg">{threshold(run)?.toFixed(4)}</b>
         </div>
       )}
@@ -380,7 +380,7 @@ function ScoreDistributionStrip({
 
   return (
     <div className="rounded-[8px] border border-border-soft bg-black/20 p-2">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
+      <div className={cn(eyebrowClass, "mb-2 flex flex-wrap items-center justify-between gap-2")}>
         <span>score distribution</span>
         <span className="font-num normal-case tracking-normal text-fg-dim">
           {formatNumber(distribution.min)} - {formatNumber(distribution.max)}
@@ -412,7 +412,7 @@ function KSweepStrip({ points }: { points: KSweepPoint[] }) {
         <span
           key={point.k}
           className={cn(
-            "rounded-full border px-2 py-0.5 font-num text-[0.66rem] tabular-nums",
+            "rounded-full border px-2 py-0.5 font-num text-caption tabular-nums",
             point.meetsBudget ? "border-ok/40 text-ok" : "border-warn/40 text-warn",
           )}
           title={`${point.alertsPerHour.toFixed(2)} alerts/hr`}
@@ -430,7 +430,7 @@ function ValidationSlices({ rows }: { rows: ValidationSlice[] }) {
       {rows.slice(0, 6).map((row) => (
         <div
           key={row.label}
-          className="grid grid-cols-[minmax(5rem,1fr)_repeat(3,4rem)] gap-2 rounded-[6px] bg-black/20 px-2 py-1 text-[0.68rem]"
+          className="grid grid-cols-[minmax(5rem,1fr)_repeat(3,4rem)] gap-2 rounded-[6px] bg-black/20 px-2 py-1 text-caption"
         >
           <span className="truncate text-fg-dim" title={row.label}>
             {row.label}

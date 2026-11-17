@@ -5,6 +5,7 @@
 // never accidentally render an HTML 500 page as if it were valid JSON.
 
 import type {
+  AnomalyEvent,
   TireAction,
   TireStatus,
   VehicleLedgerDraft,
@@ -16,14 +17,6 @@ import type {
   BinnedAggregation,
   BinnedAnalysisResponse,
   CanCoverageResponse,
-  CaptureResponse,
-  CaptureProfile,
-  CaptureProfilesResponse,
-  CaptureProfileState,
-  CaptureQuality,
-  CaptureProfileWarning,
-  CaptureTagResponse,
-  CurrentCaptureResponse,
   CompanionDiscoverResponse,
   CompactStatusResponse,
   CompanionStatusResponse,
@@ -36,10 +29,6 @@ import type {
   FeedbackResponse,
   IdentityResponse,
   PiLink,
-  JobLogsResponse,
-  JobResponse,
-  JobResultResponse,
-  JobsResponse,
   LlmAssistCardsResponse,
   MonitorsResponse,
   ObdCoverageResponse,
@@ -59,9 +48,6 @@ import type {
   TrainingRunsResponse,
   TrendsResponse,
   TripSummaryResponse,
-  TuningConfig,
-  TuningEstimate,
-  TuningResponse,
   VehicleProfile,
   VehicleProfileDeleteResponse,
   VehicleProfileEditResponse,
@@ -75,13 +61,6 @@ import type {
   DiagnosticFunctionsResponse,
   ReadCodesResult,
 } from "../types/diagnostics";
-import type {
-  NetworkResponse,
-  ProvisioningWindowResponse,
-  WifiAddRequest,
-  WifiAddResponse,
-  WifiResponse,
-} from "../types/network";
 import { controlBlob, controlJson, fetchJson, jsonBody, queryString, requireFields } from "./core";
 
 export { HttpError, NetworkError, UnexpectedResponseError } from "./core";
@@ -227,13 +206,6 @@ export function getControlVersion(token: string, signal?: AbortSignal): Promise<
   return controlJson<VersionResponse>("/control/version", token, { signal });
 }
 
-export function getCurrentCapture(
-  token: string,
-  signal?: AbortSignal,
-): Promise<CurrentCaptureResponse> {
-  return controlJson<CurrentCaptureResponse>("/control/captures/current", token, { signal });
-}
-
 export function getSequenceDetector(
   token: string,
   signal?: AbortSignal,
@@ -254,49 +226,6 @@ export function switchSequenceDetector(
     token,
     { method: "POST", body: jsonBody({ backbone }) },
   );
-}
-
-export function startCapture(
-  token: string,
-  body: {
-    purpose?: string | null;
-    protocol?: string | null;
-    vehicle_state?: string | null;
-    fields?: Record<string, unknown>;
-  },
-): Promise<CaptureResponse> {
-  return controlJson<CaptureResponse>("/control/captures", token, {
-    method: "POST",
-    body: jsonBody(body),
-  });
-}
-
-export function tagCapture(
-  token: string,
-  body: {
-    label: string;
-    kind?: string;
-    // Unix seconds of the moment the event happened. Sent client-side so a
-    // slow/retried POST over flaky in-vehicle signal still lands the tag at
-    // the right time (the server otherwise stamps it on receipt).
-    timestamp?: number;
-    fields?: Record<string, unknown>;
-  },
-): Promise<CaptureTagResponse> {
-  return controlJson<CaptureTagResponse>("/control/captures/current/tags", token, {
-    method: "POST",
-    body: jsonBody(body),
-  });
-}
-
-export function stopCapture(
-  token: string,
-  body: { reason?: string | null; fields?: Record<string, unknown> },
-): Promise<CaptureResponse> {
-  return controlJson<CaptureResponse>("/control/captures/current/stop", token, {
-    method: "POST",
-    body: jsonBody(body),
-  });
 }
 
 /** `GET /control/replay` (Task 2.1) — current runtime-replay state; also
@@ -337,62 +266,6 @@ export async function listSessions(
   const path = `/control/sessions${captures ? "?captures=true" : ""}`;
   const body = await controlJson<SessionsResponse>(path, token, { signal }, baseUrl);
   return requireFields(path, body, ["sessions"]);
-}
-
-export function getCaptureProfiles(
-  token: string,
-  signal?: AbortSignal,
-): Promise<CaptureProfilesResponse> {
-  return controlJson("/control/capture/profiles", token, { signal });
-}
-
-export function saveCaptureProfile(
-  token: string,
-  profile: CaptureProfile,
-  previousName?: string,
-): Promise<{ profile: CaptureProfile; warnings: CaptureProfileWarning[] }> {
-  return controlJson("/control/capture/profiles", token, {
-    method: "PUT",
-    body: jsonBody({ profile, previous_name: previousName ?? null }),
-  });
-}
-
-export function deleteCaptureProfile(token: string, name: string): Promise<{ deleted: string }> {
-  return controlJson(`/control/capture/profiles/${encodeURIComponent(name)}`, token, {
-    method: "DELETE",
-  });
-}
-
-export function startProfileCapture(
-  token: string,
-  profile: string,
-  tuneRevision?: string,
-): Promise<{ capture_profile: CaptureProfileState }> {
-  return controlJson("/control/capture", token, {
-    method: "POST",
-    body: jsonBody({ profile, tune_revision: tuneRevision || null }),
-  });
-}
-
-export function pauseProfileCapture(
-  token: string,
-  paused: boolean,
-): Promise<{ capture_profile: CaptureProfileState }> {
-  return controlJson("/control/capture/pause", token, {
-    method: "POST",
-    body: JSON.stringify({ paused }),
-  });
-}
-
-/** Stopping returns the contract verdict for the capture that just ended.
- *  `capture_quality` is null when no sidecar could be written — unknown, not a
- *  pass, and the caller must render it that way. */
-export function stopProfileCapture(token: string): Promise<{
-  capture_profile: CaptureProfileState;
-  ended_capture_dir?: string;
-  capture_quality?: CaptureQuality | null;
-}> {
-  return controlJson("/control/capture", token, { method: "DELETE" });
 }
 
 export function updateSessionMetadata(
@@ -478,64 +351,6 @@ export function downloadSessionKml(
   baseUrl?: string,
 ): Promise<Blob> {
   return downloadSessionTrack(token, sessionId, "kml", baseUrl);
-}
-
-export function listJobs(
-  token: string,
-  signal?: AbortSignal,
-  baseUrl?: string,
-): Promise<JobsResponse> {
-  return controlJson<JobsResponse>("/control/jobs", token, { signal }, baseUrl);
-}
-
-export function submitJob(
-  token: string,
-  kind: string,
-  params: Record<string, unknown>,
-  baseUrl?: string,
-): Promise<JobResponse> {
-  return controlJson<JobResponse>(
-    "/control/jobs",
-    token,
-    {
-      method: "POST",
-      body: jsonBody({ kind, params }),
-    },
-    baseUrl,
-  );
-}
-
-export function cancelJob(token: string, jobId: string): Promise<JobResponse> {
-  return controlJson<JobResponse>(`/control/jobs/${encodeURIComponent(jobId)}/cancel`, token, {
-    method: "POST",
-    body: jsonBody({}),
-  });
-}
-
-export function getJob(token: string, jobId: string, signal?: AbortSignal): Promise<JobResponse> {
-  return controlJson<JobResponse>(`/control/jobs/${encodeURIComponent(jobId)}`, token, { signal });
-}
-
-export function getJobLogs(token: string, jobId: string): Promise<JobLogsResponse> {
-  return controlJson<JobLogsResponse>(`/control/jobs/${encodeURIComponent(jobId)}/logs`, token);
-}
-
-/** `GET /control/jobs/{id}/result` (Task 4.1) — the structured report a
- *  `replay_window` job writes on success; `result` reads `null` until the
- *  job's report file lands (still running/queued). 404s for any other job
- *  kind, same as `describeError` already renders. */
-export function getJobResult(
-  token: string,
-  jobId: string,
-  signal?: AbortSignal,
-): Promise<JobResultResponse> {
-  return controlJson<JobResultResponse>(
-    `/control/jobs/${encodeURIComponent(jobId)}/result`,
-    token,
-    {
-      signal,
-    },
-  );
 }
 
 export function uploadModelArtifact(
@@ -748,36 +563,6 @@ export function approveTrainingRun(
   );
 }
 
-export async function getTuning(token: string, signal?: AbortSignal): Promise<TuningResponse> {
-  const body = await controlJson<TuningResponse>("/control/tuning", token, { signal });
-  return requireFields("/control/tuning", body, ["tuning"]);
-}
-
-export function updateTuning(
-  token: string,
-  config: TuningConfig,
-  change: string,
-): Promise<TuningResponse> {
-  return controlJson("/control/tuning", token, {
-    method: "POST",
-    body: jsonBody({ config, change }),
-  });
-}
-
-export function estimateTuning(token: string, config: TuningConfig): Promise<TuningEstimate> {
-  return controlJson("/control/tuning/estimate", token, {
-    method: "POST",
-    body: jsonBody({ config }),
-  });
-}
-
-export function revertTuning(token: string, version: number): Promise<TuningResponse> {
-  return controlJson("/control/tuning/revert", token, {
-    method: "POST",
-    body: jsonBody({ version }),
-  });
-}
-
 export async function getProfiles(
   token: string,
   signal?: AbortSignal,
@@ -944,95 +729,37 @@ export function setKeepAlive(token: string, minutes: number): Promise<PowerKeepa
   });
 }
 
-/** What the Pi joined and its addresses, plus the BLE provisioning window (P2.3). */
-export async function getNetwork(token: string, signal?: AbortSignal): Promise<NetworkResponse> {
-  const body = await controlJson<NetworkResponse>("/control/network", token, { signal });
-  return requireFields("/control/network", body, ["network", "provisioning"]);
-}
-
-/** Open the BLE provisioning window for `minutes` (`0` closes it). */
-export function setProvisioningWindow(
-  token: string,
-  minutes: number,
-): Promise<ProvisioningWindowResponse> {
-  return controlJson<ProvisioningWindowResponse>("/control/network/provisioning/window", token, {
-    method: "POST",
-    body: jsonBody({ minutes }),
-  });
-}
-
-/** Saved WiFi networks and the last scan (N5). 503 means the Pi's WiFi control
- *  service is not reachable; the detail names why. */
-export async function getWifi(token: string, signal?: AbortSignal): Promise<WifiResponse> {
-  const body = await controlJson<WifiResponse>("/control/network/wifi", token, { signal });
-  return requireFields("/control/network/wifi", body, ["wifi"]);
-}
-
-/** Rescan, then the same payload (a few seconds). */
-export function scanWifi(token: string): Promise<WifiResponse> {
-  return controlJson<WifiResponse>("/control/network/wifi/scan", token, { method: "POST" });
-}
-
-/** Save a network, and with `join` switch to it (up to ~45 s; the Pi rolls
- *  back on failure with a 409). The passphrase travels in this body only. */
-export function addWifi(token: string, request: WifiAddRequest): Promise<WifiAddResponse> {
-  return controlJson<WifiAddResponse>("/control/network/wifi", token, {
-    method: "POST",
-    body: jsonBody(request),
-  });
-}
-
-/** Switch to a saved network now (up to ~30 s). */
-export function connectWifi(token: string, id: string): Promise<WifiResponse> {
-  return controlJson<WifiResponse>(
-    `/control/network/wifi/${encodeURIComponent(id)}/connect`,
-    token,
-    {
-      method: "POST",
-    },
-  );
-}
-
-/** `ids` is every saved id, highest priority first. */
-export function orderWifi(token: string, ids: string[]): Promise<WifiResponse> {
-  return controlJson<WifiResponse>("/control/network/wifi/order", token, {
-    method: "PUT",
-    body: jsonBody({ ids }),
-  });
-}
-
-export function forgetWifi(token: string, id: string): Promise<WifiResponse> {
-  return controlJson<WifiResponse>(`/control/network/wifi/${encodeURIComponent(id)}`, token, {
-    method: "DELETE",
-  });
-}
-
 export async function getFeedback(token: string, signal?: AbortSignal): Promise<FeedbackResponse> {
   const body = await controlJson<FeedbackResponse>("/control/feedback", token, { signal });
   return requireFields("/control/feedback", body, ["feedback", "summary"]);
 }
 
+/** What the operator attaches to a verdict besides its label. All optional:
+ *  an omitted field posts as `null`. `hypothesis` and the clarifying
+ *  question/answer pair are Task S.3 (llm-assist-and-compute-roadmap.md): the
+ *  operator's working theory plus an optional question and its answer. */
+export interface FeedbackOptions {
+  reason?: string | null;
+  hypothesis?: string | null;
+  clarifyingQuestion?: string | null;
+  clarifyingAnswer?: string | null;
+}
+
 export function postFeedback(
   token: string,
-  event: Record<string, unknown>,
+  event: AnomalyEvent,
   label: string,
-  reason: string | null,
-  // Task S.3 (llm-assist-and-compute-roadmap.md): the operator's working
-  // theory + an optional clarifying question/answer pair, attached
-  // alongside the verdict. All optional — omitted callers are unaffected.
-  hypothesis?: string | null,
-  clarifyingQuestion?: string | null,
-  clarifyingAnswer?: string | null,
+  options: FeedbackOptions = {},
 ): Promise<{ feedback: Record<string, unknown> }> {
   return controlJson("/control/feedback", token, {
     method: "POST",
     body: jsonBody({
       event,
       label,
-      reason,
-      hypothesis: hypothesis ?? null,
-      clarifying_question: clarifyingQuestion ?? null,
-      clarifying_answer: clarifyingAnswer ?? null,
+      reason: options.reason ?? null,
+      hypothesis: options.hypothesis ?? null,
+      clarifying_question: options.clarifyingQuestion ?? null,
+      clarifying_answer: options.clarifyingAnswer ?? null,
     }),
   });
 }

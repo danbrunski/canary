@@ -24,7 +24,7 @@ export function Field({
     <label className={`text-sm text-fg-dim ${className}`}>
       <span className="block">{label}</span>
       {children}
-      {hint && <span className="mt-0.5 block text-[0.68rem] text-fg-dim/80">{hint}</span>}
+      {hint && <span className="mt-0.5 block text-caption text-fg-dim/80">{hint}</span>}
     </label>
   );
 }
@@ -96,7 +96,7 @@ export function CapturePlanSummary({
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-semibold">Capture plan: {plan.name}</span>
         {plan.experimental && (
-          <span className="rounded border border-warn/60 bg-warn/10 px-1.5 py-0.5 text-[0.68rem] font-semibold uppercase text-warn">
+          <span className="rounded border border-warn/60 bg-warn/10 px-1.5 py-0.5 text-caption font-semibold uppercase text-warn">
             Experimental
           </span>
         )}

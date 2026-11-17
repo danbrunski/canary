@@ -61,7 +61,7 @@ export function ProposalsView({ block }: { block: LiveProposals }) {
   const { now, afterDrive } = splitProposals(block);
   const opened = block.opened ?? [];
   return (
-    <div className="flex flex-col gap-3 text-[0.86rem]">
+    <div className="flex flex-col gap-3 text-lead">
       <div className="text-fg-dim">
         investigation {block.investigation ?? "—"} · ranked {block.method ?? "—"} · vehicle{" "}
         {block.vehicle_state ?? "unknown"}
@@ -91,7 +91,7 @@ export function ProposalsView({ block }: { block: LiveProposals }) {
         </section>
       )}
       {block.method === "structural" && (block.missing_likelihoods ?? []).length > 0 && (
-        <p className="m-0 text-[0.8rem] text-fg-faint">
+        <p className="m-0 text-body text-fg-faint">
           ranked structurally; missing likelihoods: {(block.missing_likelihoods ?? []).join("; ")}
         </p>
       )}

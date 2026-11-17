@@ -229,7 +229,7 @@ const overridesDropdownClass = [
   "bg-elev",
   "px-3",
   "py-2",
-  "text-[0.78rem]",
+  "text-body-sm",
   "shadow-lg",
 ].join(" ");
 

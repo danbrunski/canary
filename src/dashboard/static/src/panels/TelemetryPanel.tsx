@@ -67,7 +67,7 @@ const DEFAULT_PIN_CANDIDATES = [
  *  finger-sized hit box. */
 const PHONE_TAP_TARGET =
   "max-[600px]:inline-flex max-[600px]:h-9 max-[600px]:w-9 max-[600px]:items-center " +
-  "max-[600px]:justify-center max-[600px]:text-[1.05rem]";
+  "max-[600px]:justify-center max-[600px]:text-title";
 
 const PIN_STORAGE_KEY = "canary.drive.pinned";
 const GRAPH_STORAGE_KEY = "canary.drive.graphs";
@@ -205,7 +205,7 @@ export function TelemetryPanel({
               type="button"
               className={cn(
                 buttonClass,
-                "px-2.5 py-1 text-[0.74rem]",
+                "px-2.5 py-1 text-small",
                 pinnedOnly && "border-accent text-accent",
               )}
               onClick={() => setPinnedOnly((v) => !v)}
@@ -245,7 +245,7 @@ export function TelemetryPanel({
             </div>
           )}
           {activePinned.length === 0 && displayChannels.length > 6 && (
-            <p className="mt-2 text-[0.74rem] text-fg-faint">
+            <p className="mt-2 text-small text-fg-faint">
               Tip: ☆ a channel to pin it to the top — then “pinned only” for a focused drive view.
               Multi-channel trends live in Live ▸ Charts.
             </p>
@@ -253,16 +253,16 @@ export function TelemetryPanel({
         </>
       ) : (
         <div className="mt-1">
-          <div className="mb-1.5 flex justify-between gap-2 text-[0.78rem] text-fg-dim">
+          <div className="mb-1.5 flex justify-between gap-2 text-body-sm text-fg-dim">
             <b className="text-fg">Gauge table</b>
             <span>{visibleChannels.length} visible</span>
           </div>
           <TableScroll className="max-h-[44rem] overflow-auto rounded-[8px] border border-border-soft bg-black/20">
             <table
               aria-label="Live telemetry values"
-              className="w-full min-w-[42rem] border-collapse font-console text-[0.78rem] tabular-nums"
+              className="w-full min-w-[42rem] border-collapse font-console text-body-sm tabular-nums"
             >
-              <thead className="sticky top-0 z-[1] bg-elev text-left text-[0.62rem] uppercase tracking-[0.12em] text-fg-faint">
+              <thead className="sticky top-0 z-[1] bg-elev text-left text-micro uppercase tracking-[0.12em] text-fg-faint">
                 <tr>
                   <th scope="col" className="py-1.5 pl-2.5 pr-3 font-semibold">
                     Signal
@@ -327,7 +327,7 @@ function ChannelTableRow({
       >
         {prettyChannel(channelKey)}
       </th>
-      <td className="py-1.5 pr-3 text-[0.72rem] uppercase text-fg-dim">{snapshot.latest.source}</td>
+      <td className="py-1.5 pr-3 text-small uppercase text-fg-dim">{snapshot.latest.source}</td>
       <td
         className={cn(
           "py-1.5 pr-3 text-right font-bold text-fg",
@@ -338,7 +338,7 @@ function ChannelTableRow({
         {rendered.text}
       </td>
       <td className="py-1.5 pr-3 text-fg-dim">{rendered.unit || "-"}</td>
-      <td className={cn("py-1.5 pr-3 text-[0.72rem] uppercase", status.className)}>
+      <td className={cn("py-1.5 pr-3 text-small uppercase", status.className)}>
         <span title={status.title}>{status.text}</span>
       </td>
       <td className="py-1.5 pr-2.5 text-right text-fg-dim">
@@ -390,7 +390,7 @@ function ChannelCard({
           <button
             type="button"
             className={cn(
-              "text-[0.78rem] leading-none transition-colors",
+              "text-body-sm leading-none transition-colors",
               PHONE_TAP_TARGET,
               graphOn ? "text-accent-2" : "text-fg-faint hover:text-fg-dim",
             )}
@@ -406,7 +406,7 @@ function ChannelCard({
           <button
             type="button"
             className={cn(
-              "text-[0.8rem] leading-none transition-colors",
+              "text-body leading-none transition-colors",
               PHONE_TAP_TARGET,
               pinned ? "text-accent" : "text-fg-faint hover:text-fg-dim",
             )}
@@ -418,7 +418,7 @@ function ChannelCard({
           </button>
         )}
       </div>
-      <div className="mb-1 pr-10 text-[0.62rem] uppercase tracking-[0.13em] text-fg-faint max-[600px]:truncate max-[600px]:pr-[4.5rem] max-[600px]:text-[0.66rem]">
+      <div className="mb-1 pr-10 text-micro uppercase tracking-[0.13em] text-fg-faint max-[600px]:truncate max-[600px]:pr-[4.5rem] max-[600px]:text-caption">
         {pretty}
       </div>
       <div
@@ -430,7 +430,7 @@ function ChannelCard({
       >
         {rendered.text}
         {rendered.unit && (
-          <span className="ml-1.5 inline-block font-num text-[0.7rem] font-medium text-fg-faint">
+          <span className="ml-1.5 inline-block font-num text-small font-medium text-fg-faint">
             {rendered.unit}
           </span>
         )}
@@ -449,11 +449,9 @@ function ChannelCard({
         {graphOn && canGraph && (
           <Sparkline values={sparkValues} width={150} height={GRAPH_SLOT_PX} />
         )}
-        {graphOn && !canGraph && (
-          <span className="text-[0.66rem] text-fg-faint">no history yet</span>
-        )}
+        {graphOn && !canGraph && <span className="text-caption text-fg-faint">no history yet</span>}
       </div>
-      <div className="mt-1 flex items-center justify-between gap-2 text-[0.62rem] uppercase tracking-[0.08em] text-fg-faint">
+      <div className="mt-1 flex items-center justify-between gap-2 text-micro uppercase tracking-[0.08em] text-fg-faint">
         <span className={cn(freshness.stale && "font-semibold text-warn")}>
           age {freshness.ageLabel}
           {freshness.stale && " stale"}

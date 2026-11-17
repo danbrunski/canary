@@ -4,7 +4,14 @@ import { Panel } from "../components/Panel";
 import { useLocalStorageJson } from "../hooks/useLocalStorage";
 import { useNow } from "../hooks/useNow";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
-import { buttonClass, cn, dangerButtonClass, inputClass, placeholderClass } from "../styles";
+import {
+  buttonClass,
+  cn,
+  dangerButtonClass,
+  eyebrowClass,
+  inputClass,
+  placeholderClass,
+} from "../styles";
 import { formatTimestamp } from "../util/time";
 
 interface AlarmsPanelProps {
@@ -153,21 +160,21 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
       title="Alarms"
       count={`${rules.length} rules`}
       actions={
-        <label className="flex items-center gap-1.5 text-[0.76rem] text-fg-dim">
+        <label className="flex items-center gap-1.5 text-body-sm text-fg-dim">
           <input type="checkbox" checked={audible} onChange={(e) => setAudible(e.target.checked)} />
           audible
         </label>
       }
     >
       {recent.length > 0 && (
-        <div className="mb-3 rounded-[8px] border border-warn/55 bg-warn/10 px-3 py-2 text-[0.85rem]">
+        <div className="mb-3 rounded-[8px] border border-warn/55 bg-warn/10 px-3 py-2 text-lead">
           <b className="text-warn">⚠ {recent.length} threshold alarm(s) firing</b>{" "}
           <span className="text-fg-dim">(operator-set, not an ML anomaly)</span>
         </div>
       )}
 
       <div className="mb-3 grid grid-cols-[1fr_auto_auto_auto_auto] items-end gap-2 max-[1100px]:grid-cols-1">
-        <label className="flex flex-col gap-0.5 text-[0.7rem] text-fg-faint">
+        <label className="flex flex-col gap-0.5 text-small text-fg-faint">
           channel
           <input
             className={inputClass}
@@ -182,7 +189,7 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
             ))}
           </datalist>
         </label>
-        <label className="flex flex-col gap-0.5 text-[0.7rem] text-fg-faint">
+        <label className="flex flex-col gap-0.5 text-small text-fg-faint">
           op
           <select
             className={inputClass}
@@ -195,7 +202,7 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
             <option>{"<="}</option>
           </select>
         </label>
-        <label className="flex flex-col gap-0.5 text-[0.7rem] text-fg-faint">
+        <label className="flex flex-col gap-0.5 text-small text-fg-faint">
           value
           <input
             className={cn(inputClass, "w-24")}
@@ -204,7 +211,7 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
             inputMode="decimal"
           />
         </label>
-        <label className="flex flex-col gap-0.5 text-[0.7rem] text-fg-faint">
+        <label className="flex flex-col gap-0.5 text-small text-fg-faint">
           severity
           <select
             className={inputClass}
@@ -234,7 +241,7 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
               <li
                 key={rule.id}
                 className={cn(
-                  "flex flex-wrap items-center gap-2 rounded-[8px] border px-2.5 py-1.5 text-[0.82rem]",
+                  "flex flex-wrap items-center gap-2 rounded-[8px] border px-2.5 py-1.5 text-body",
                   rule.enabled ? "border-border-soft" : "border-border-soft opacity-50",
                   breaching && rule.enabled && rule.severity === "critical" && "border-bad",
                   breaching && rule.enabled && rule.severity === "warn" && "border-warn",
@@ -242,7 +249,7 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
               >
                 <button
                   type="button"
-                  className="text-[0.7rem] uppercase tracking-[0.06em] text-fg-dim"
+                  className="text-small uppercase tracking-[0.06em] text-fg-dim"
                   onClick={() => toggleRule(rule.id)}
                   aria-label={rule.enabled ? "disable rule" : "enable rule"}
                 >
@@ -254,13 +261,13 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
                 </span>
                 <span
                   className={cn(
-                    "rounded px-1.5 text-[0.66rem] uppercase",
+                    "rounded px-1.5 text-caption uppercase",
                     rule.severity === "critical" ? "text-bad" : "text-warn",
                   )}
                 >
                   {rule.severity}
                 </span>
-                <span className="font-num text-[0.74rem] text-fg-faint">
+                <span className="font-num text-small text-fg-faint">
                   debounce {rule.debounce} · cooldown {rule.cooldownS}s
                 </span>
                 <span className="ml-auto font-num tabular-nums text-fg-dim">
@@ -269,7 +276,7 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
                 </span>
                 <button
                   type="button"
-                  className={cn(dangerButtonClass, "px-2 py-0.5 text-[0.7rem]")}
+                  className={cn(dangerButtonClass, "px-2 py-0.5 text-small")}
                   onClick={() => removeRule(rule.id)}
                 >
                   ✕
@@ -282,10 +289,8 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
 
       {history.length > 0 && (
         <>
-          <h3 className="mb-1 mt-3 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
-            History
-          </h3>
-          <ol className="m-0 flex max-h-40 list-none flex-col gap-0.5 overflow-y-auto p-0 text-[0.78rem]">
+          <h3 className={cn(eyebrowClass, "mb-1 mt-3")}>History</h3>
+          <ol className="m-0 flex max-h-40 list-none flex-col gap-0.5 overflow-y-auto p-0 text-body-sm">
             {history.slice(0, 20).map((e, i) => (
               <li
                 key={`${e.ruleId}-${e.at}-${i}`}

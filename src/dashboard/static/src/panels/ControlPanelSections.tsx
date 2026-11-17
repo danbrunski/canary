@@ -28,7 +28,7 @@ export function PreflightCard({
     <Panel
       title="Preflight"
       actions={
-        <span className={preflight?.ok ? "text-[0.8rem] text-ok" : "text-[0.8rem] text-bad"}>
+        <span className={preflight?.ok ? "text-body text-ok" : "text-body text-bad"}>
           {preflight ? (preflight.ok ? "ready" : "attention") : "locked"}
         </span>
       }
@@ -40,7 +40,7 @@ export function PreflightCard({
           {(preflight?.checks ?? []).map((check) => (
             <li
               key={check.name}
-              className="grid grid-cols-[9rem_1fr] items-baseline gap-2 border-b border-border pb-1.5 text-[0.82rem] text-fg-dim last:border-b-0"
+              className="grid grid-cols-[9rem_1fr] items-baseline gap-2 border-b border-border pb-1.5 text-body text-fg-dim last:border-b-0"
             >
               <span>{check.name.replaceAll("_", " ")}</span>
               <b className={checkClass(check.ok, check.severity)}>{check.detail}</b>
@@ -76,7 +76,7 @@ export function ControlEventsCard({
         {events.slice(0, 12).map((event, index) => (
           <li
             key={`${event.timestamp ?? event.type ?? "event"}-${index}`}
-            className="grid grid-cols-[4.8rem_1fr_auto] items-baseline gap-2 border-b border-border pb-1.5 text-[0.8rem]"
+            className="grid grid-cols-[4.8rem_1fr_auto] items-baseline gap-2 border-b border-border pb-1.5 text-body"
           >
             <time className="font-num text-fg-dim">
               {event.timestamp ? formatTimeOfDay(event.timestamp) : "live"}

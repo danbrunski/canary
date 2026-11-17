@@ -4,7 +4,7 @@ import { getLlmAssistCards } from "../api/http";
 import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
 import { useControlResource } from "../hooks/useControlResource";
-import { badgeClass, cn, placeholderClass } from "../styles";
+import { badgeClass, cn, eyebrowClass, placeholderClass } from "../styles";
 import type {
   CardView,
   DifferentialCard,
@@ -80,12 +80,12 @@ function CardFrame({ view }: { view: CardView }) {
       <div className="rounded border border-border-soft p-3">
         <div className="mb-2 flex items-center gap-2">
           <span className={badgeClass}>rejected</span>
-          <span className="text-[0.78rem] text-fg-dim">{view.card.generated_at}</span>
+          <span className="text-body-sm text-fg-dim">{view.card.generated_at}</span>
         </div>
-        <p className="text-[0.8rem] text-fg-dim">
+        <p className="text-body text-fg-dim">
           Not shown: this card cites evidence that does not resolve.
         </p>
-        <ul className="ml-4 mt-1 list-disc text-[0.76rem] text-fg-faint">
+        <ul className="ml-4 mt-1 list-disc text-body-sm text-fg-faint">
           {view.problems.map((problem, index) => (
             <li key={index}>{problem}</li>
           ))}
@@ -104,11 +104,11 @@ function CardFrame({ view }: { view: CardView }) {
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
           <span className={badgeClass}>retracted evidence</span>
-          <span className="text-[0.78rem] text-fg-dim">
+          <span className="text-body-sm text-fg-dim">
             This card rests on evidence that has since been retracted.
           </span>
         </div>
-        <ul className="ml-4 list-disc text-[0.76rem] text-fg-faint">
+        <ul className="ml-4 list-disc text-body-sm text-fg-faint">
           {view.problems.map((problem, index) => (
             <li key={index}>{problem}</li>
           ))}
@@ -125,9 +125,9 @@ function HistoricalCardView({ card }: { card: UnverifiedHistoricalCard }) {
     <div className="rounded border border-border-soft p-3">
       <div className="mb-2 flex items-center gap-2">
         <span className={badgeClass}>unverified historical</span>
-        <span className="text-[0.78rem] text-fg-dim">{card.generated_at ?? "undated"}</span>
+        <span className="text-body-sm text-fg-dim">{card.generated_at ?? "undated"}</span>
       </div>
-      <p className={cn(placeholderClass, "text-[0.72rem] italic")}>{card.notice}</p>
+      <p className={cn(placeholderClass, "text-small italic")}>{card.notice}</p>
     </div>
   );
 }
@@ -143,14 +143,14 @@ function DifferentialCardView({
     <div className="rounded border border-border-soft p-3">
       <div className="mb-2 flex items-center gap-2">
         <span className={badgeClass}>differential</span>
-        <span className="text-[0.78rem] text-fg-dim">{card.generated_at}</span>
+        <span className="text-body-sm text-fg-dim">{card.generated_at}</span>
       </div>
       <ol className="flex flex-col gap-2">
         {card.hypotheses.map((hypothesis) => (
           <HypothesisRow key={hypothesis.rank} hypothesis={hypothesis} evidence={evidence} />
         ))}
       </ol>
-      <p className={cn(placeholderClass, "mt-2 text-[0.72rem] italic")}>{card.framing}</p>
+      <p className={cn(placeholderClass, "mt-2 text-small italic")}>{card.framing}</p>
     </div>
   );
 }
@@ -163,7 +163,7 @@ function HypothesisRow({
   evidence: EvidenceMap;
 }) {
   return (
-    <li className="text-[0.85rem]">
+    <li className="text-lead">
       <span className="font-num text-fg-dim">#{hypothesis.rank}</span>{" "}
       <span className="text-fg">{hypothesis.label}</span>
       {hypothesis.confidence != null && (
@@ -200,7 +200,7 @@ function CitationList({
   evidence: EvidenceMap;
 }) {
   return (
-    <ul className="ml-4 mt-1 flex flex-col gap-0.5 text-[0.76rem] text-fg-dim">
+    <ul className="ml-4 mt-1 flex flex-col gap-0.5 text-body-sm text-fg-dim">
       {citations.map((citation, index) => (
         <li key={index}>
           {label}: {citation.note || citation.evidence_id}
@@ -245,16 +245,14 @@ function NarrativeCardView({ card, evidence }: { card: NarrativeCard; evidence: 
       </div>
       {card.sections.map((section) => (
         <div key={section.heading} className="mb-2">
-          <h3 className="mb-1 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
-            {section.heading}
-          </h3>
-          <p className="text-[0.85rem] text-fg">{section.body}</p>
+          <h3 className={cn(eyebrowClass, "mb-1")}>{section.heading}</h3>
+          <p className="text-lead text-fg">{section.body}</p>
           {section.evidence.length > 0 && (
             <CitationList label="Evidence" citations={section.evidence} evidence={evidence} />
           )}
         </div>
       ))}
-      <p className={cn(placeholderClass, "text-[0.72rem]")}>
+      <p className={cn(placeholderClass, "text-small")}>
         Sources: {card.source_sessions.join(", ")}
       </p>
     </div>

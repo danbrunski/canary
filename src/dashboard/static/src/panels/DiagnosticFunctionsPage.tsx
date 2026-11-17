@@ -64,7 +64,7 @@ export function DiagnosticFunctionsPage({ token }: DiagnosticFunctionsPageProps)
   return (
     <Panel title="Diagnostic functions">
       {unavailable && (
-        <p role="status" className="mb-3 text-[0.82rem] text-warn">
+        <p role="status" className="mb-3 text-body text-warn">
           {unavailable}
         </p>
       )}
@@ -135,7 +135,7 @@ function ModuleCard({
     <div className="rounded-[8px] border border-border-soft p-3">
       <div className="mb-2 flex items-baseline justify-between gap-2">
         <h3 className="text-[0.92rem] font-semibold text-fg">{name}</h3>
-        <span className="font-num text-[0.74rem] text-fg-faint">K-line {first.address}</span>
+        <span className="font-num text-small text-fg-faint">K-line {first.address}</span>
       </div>
       <div className="flex flex-col gap-3">
         {functions.map((fn) =>
@@ -165,7 +165,7 @@ function ModuleCard({
 function RawExchange({ raw }: { raw: DiagnosticExchange[] | undefined }) {
   if (!raw || raw.length === 0) return null;
   return (
-    <details className="mt-1 text-[0.74rem] text-fg-faint">
+    <details className="mt-1 text-small text-fg-faint">
       <summary>Raw exchange</summary>
       <pre className="font-num whitespace-pre-wrap">
         {raw.map((x) => `${x.request_hex} → ${x.reply_hex ?? "(no reply)"}`).join("\n")}
@@ -202,10 +202,10 @@ function ReadCodesAction({ fn, token, disabled, onDone }: ActionProps) {
   return (
     <div>
       <div className="mb-1 flex items-baseline justify-between gap-2">
-        <h4 className="text-[0.86rem] font-semibold text-fg">Read {name} codes</h4>
-        <span className="font-num text-[0.74rem] text-fg-faint">sends {fn.request_hex}</span>
+        <h4 className="text-lead font-semibold text-fg">Read {name} codes</h4>
+        <span className="font-num text-small text-fg-faint">sends {fn.request_hex}</span>
       </div>
-      <p className="mb-2 text-[0.8rem] text-fg-dim">
+      <p className="mb-2 text-body text-fg-dim">
         Reads the module&apos;s stored codes{statuses ? ` (${statuses})` : ""}.
         {inferred && " Whether a code is current or past is inferred, not confirmed."}
       </p>
@@ -218,8 +218,8 @@ function ReadCodesAction({ fn, token, disabled, onDone }: ActionProps) {
         {busy ? "Reading…" : "Read codes"}
       </button>
       {result && <ReadCodesOutcome result={result} />}
-      {failure && <p className="mt-2 text-[0.82rem] text-bad">{failure}</p>}
-      <details className="mt-2 text-[0.74rem] text-fg-faint">
+      {failure && <p className="mt-2 text-body text-bad">{failure}</p>}
+      <details className="mt-2 text-small text-fg-faint">
         <summary>Where this comes from</summary>
         {fn.evidence}
       </details>
@@ -231,7 +231,7 @@ function ReadCodesOutcome({ result }: { result: ReadCodesResult }) {
   if (!result.ok || result.codes === null) {
     return (
       <div className="mt-2">
-        <p role="status" className="text-[0.82rem] text-bad">
+        <p role="status" className="text-body text-bad">
           Not read: {result.detail}
         </p>
         <RawExchange raw={result.raw} />
@@ -241,11 +241,11 @@ function ReadCodesOutcome({ result }: { result: ReadCodesResult }) {
   return (
     <div className="mt-2">
       {result.codes.length === 0 ? (
-        <p role="status" className="text-[0.82rem] text-ok">
+        <p role="status" className="text-body text-ok">
           No codes stored ({result.module} read in {result.duration_s.toFixed(1)} s).
         </p>
       ) : (
-        <ul role="status" className="flex flex-col gap-0.5 text-[0.82rem]">
+        <ul role="status" className="flex flex-col gap-0.5 text-body">
           {result.codes.map((c) => (
             <li key={`${c.code}-${c.status}`} className="text-warn">
               <span className="font-num font-semibold">{c.code}</span>{" "}
@@ -289,10 +289,10 @@ function ClearCodesAction({ fn, token, disabled, onDone }: ActionProps) {
   return (
     <div>
       <div className="mb-1 flex items-baseline justify-between gap-2">
-        <h4 className="text-[0.86rem] font-semibold text-fg">Clear {name} codes</h4>
-        <span className="font-num text-[0.74rem] text-fg-faint">sends {fn.request_hex}</span>
+        <h4 className="text-lead font-semibold text-fg">Clear {name} codes</h4>
+        <span className="font-num text-small text-fg-faint">sends {fn.request_hex}</span>
       </div>
-      <p className="mb-2 text-[0.8rem] text-fg-dim">
+      <p className="mb-2 text-body text-fg-dim">
         Erases the module&apos;s stored codes. A fault that is still present sets its code again and
         keeps the warning lamp on.
       </p>
@@ -323,14 +323,14 @@ function ClearCodesAction({ fn, token, disabled, onDone }: ActionProps) {
         )}
       </div>
       {result && (
-        <p role="status" className={cn("mt-2 text-[0.82rem]", result.ok ? "text-ok" : "text-bad")}>
+        <p role="status" className={cn("mt-2 text-body", result.ok ? "text-ok" : "text-bad")}>
           {result.ok
             ? `Cleared: ${result.module} answered ${result.reply_hex ?? "positively"} in ${result.duration_s.toFixed(1)} s.`
             : `Not cleared: ${result.detail}`}
         </p>
       )}
-      {failure && <p className="mt-2 text-[0.82rem] text-bad">{failure}</p>}
-      <details className="mt-2 text-[0.74rem] text-fg-faint">
+      {failure && <p className="mt-2 text-body text-bad">{failure}</p>}
+      <details className="mt-2 text-small text-fg-faint">
         <summary>Where this comes from</summary>
         {fn.evidence}
       </details>

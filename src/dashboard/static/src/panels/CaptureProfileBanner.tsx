@@ -14,7 +14,7 @@ export function CaptureProfileBanner({ state }: { state?: CaptureProfileState | 
   const where = state.session_dir ?? "rotating storage";
   return (
     <div
-      className="border-b border-warn/50 bg-warn/15 px-4 py-2 text-center text-[0.78rem] font-semibold text-warn max-[600px]:truncate max-[600px]:px-3 max-[600px]:py-1 max-[600px]:text-left max-[600px]:text-[0.72rem]"
+      className="border-b border-warn/50 bg-warn/15 px-4 py-2 text-center text-body-sm font-semibold text-warn max-[600px]:truncate max-[600px]:px-3 max-[600px]:py-1 max-[600px]:text-left max-[600px]:text-small"
       role="status"
       title={[`CAPTURE: ${state.name}`, ...details, where].join(" · ")}
     >

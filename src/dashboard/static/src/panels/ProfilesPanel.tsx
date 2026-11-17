@@ -59,7 +59,7 @@ function ParameterRows({
 }) {
   const overrides = profile.overrides ?? [];
   return (
-    <dl className="mt-2 grid grid-cols-[auto_1fr_auto] items-baseline gap-x-3 gap-y-1 text-[0.8rem]">
+    <dl className="mt-2 grid grid-cols-[auto_1fr_auto] items-baseline gap-x-3 gap-y-1 text-body">
       {fields.map((field) => {
         const key = `parameters.${field.name}`;
         const overridden = overrides.includes(key);
@@ -68,19 +68,14 @@ function ParameterRows({
         const evidence = field.kind === "evidence";
         return (
           <div key={field.name} className="contents" data-testid={`param-${field.name}`}>
-            <dt className="text-[0.72rem] uppercase tracking-[0.06em] text-fg-faint">
-              {field.label}
-            </dt>
+            <dt className="text-small uppercase tracking-[0.06em] text-fg-faint">{field.label}</dt>
             <dd
-              className={cn(
-                "m-0",
-                evidence ? "text-[0.76rem] text-fg-dim" : "font-num tabular-nums",
-              )}
+              className={cn("m-0", evidence ? "text-body-sm text-fg-dim" : "font-num tabular-nums")}
             >
               {text || "—"}
               {!evidence && text && field.unit ? ` ${field.unit}` : ""}
             </dd>
-            <dd className="m-0 flex items-center gap-1 justify-self-end text-[0.68rem]">
+            <dd className="m-0 flex items-center gap-1 justify-self-end text-caption">
               {profile.tracked !== false && (
                 <span className={overridden ? "text-accent" : "text-fg-faint"}>
                   {overridden ? "this machine" : "tracked"}
@@ -90,7 +85,7 @@ function ParameterRows({
               {overridden && profile.tracked !== false && (
                 <button
                   type="button"
-                  className="text-[0.68rem] text-fg-dim underline"
+                  className="text-caption text-fg-dim underline"
                   onClick={() => onRevert(key)}
                   disabled={busy}
                   aria-label={`Revert ${field.label}`}
@@ -217,7 +212,7 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
               )}
               {data.restart_required && (
                 <div
-                  className="mb-2 rounded-[8px] border border-warn/50 bg-warn/10 px-3 py-2 text-[0.82rem]"
+                  className="mb-2 rounded-[8px] border border-warn/50 bg-warn/10 px-3 py-2 text-body"
                   data-testid="profiles-restart-pending"
                 >
                   <strong>Saved, not yet running:</strong> {pending.join(", ")}. {data.applies}
@@ -252,35 +247,29 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
                                 )}
                               </span>
                               {active && (
-                                <span className="rounded bg-ok/20 px-1 text-[0.7rem] text-ok">
+                                <span className="rounded bg-ok/20 px-1 text-small text-ok">
                                   active
                                 </span>
                               )}
                               {profile.tracked === false && (
-                                <span className="rounded bg-accent/15 px-1 text-[0.7rem] text-accent">
+                                <span className="rounded bg-accent/15 px-1 text-small text-accent">
                                   this machine only
                                 </span>
                               )}
                             </div>
-                            <div
-                              className={cn(placeholderClass, "truncate font-num text-[0.72rem]")}
-                            >
+                            <div className={cn(placeholderClass, "truncate font-num text-small")}>
                               {[profile.year, profile.make, profile.model]
                                 .filter(Boolean)
                                 .join(" ") || "—"}
                             </div>
-                            <div
-                              className={cn(placeholderClass, "truncate font-num text-[0.72rem]")}
-                            >
+                            <div className={cn(placeholderClass, "truncate font-num text-small")}>
                               VIN {profile.vin || "—"} · {profile.slug}
                             </div>
-                            <div
-                              className={cn(placeholderClass, "truncate font-num text-[0.72rem]")}
-                            >
+                            <div className={cn(placeholderClass, "truncate font-num text-small")}>
                               Cal ID {profile.calibration_id || "—"} · CVN {profile.cvn || "—"}
                             </div>
                             {resolution && data.resolution && (
-                              <div className={cn(placeholderClass, "text-[0.72rem]")}>
+                              <div className={cn(placeholderClass, "text-small")}>
                                 Active because {resolution(data.resolution)}.
                               </div>
                             )}

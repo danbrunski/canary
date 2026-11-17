@@ -48,7 +48,7 @@ export class PanelErrorBoundary extends Component<
       return (
         <div role="alert" className={cn(noticeClass("error"), "m-3")}>
           <p className="m-0">{error.message}</p>
-          <p className="mt-1 mb-0 text-[0.8rem]">
+          <p className="mt-1 mb-0 text-body">
             The dashboard was probably updated since this tab was opened, or the Pi is not
             reachable. Reload to fetch the current version.
           </p>
@@ -65,7 +65,7 @@ export class PanelErrorBoundary extends Component<
     return (
       <div role="alert" className={cn(noticeClass("error"), "m-3")}>
         <p className="m-0">This page hit an error and was stopped: {error.message}</p>
-        <p className="mt-1 mb-0 text-[0.8rem]">The rest of the dashboard still works.</p>
+        <p className="mt-1 mb-0 text-body">The rest of the dashboard still works.</p>
         <button
           type="button"
           className={cn(buttonClass, "mt-2")}

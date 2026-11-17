@@ -22,7 +22,7 @@ export function ReplayBanner({ replay }: ReplayBannerProps) {
   return (
     <div
       role="alert"
-      className="flex flex-wrap items-center justify-center gap-3 border-b border-warn/50 bg-warn/15 px-4 py-2 text-center text-[0.82rem] font-bold uppercase tracking-[0.08em] text-warn"
+      className="flex flex-wrap items-center justify-center gap-3 border-b border-warn/50 bg-warn/15 px-4 py-2 text-center text-body font-bold uppercase tracking-[0.08em] text-warn"
     >
       <span>REPLAY — session {replay.source_session_id ?? replay.replay_id ?? "unknown"}</span>
       {replay.started_at && (

@@ -4,7 +4,7 @@ import { getDatasetHealth } from "../api/http";
 import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
 import { useControlResource } from "../hooks/useControlResource";
-import { cn } from "../styles";
+import { cn, eyebrowClass } from "../styles";
 import type { DatasetSessionHealth } from "../types";
 
 interface DatasetHealthPanelProps {
@@ -47,7 +47,7 @@ export function DatasetHealthPanel({ token }: DatasetHealthPanelProps) {
               >
                 {ready ? "✓ Ready to retrain" : "✗ Not ready to retrain"}
                 {!ready && (
-                  <ul className="mt-1.5 ml-4 list-disc text-[0.8rem] font-normal text-fg-dim">
+                  <ul className="mt-1.5 ml-4 list-disc text-body font-normal text-fg-dim">
                     {data.readiness.reasons.map((r) => (
                       <li key={r}>{r}</li>
                     ))}
@@ -56,7 +56,7 @@ export function DatasetHealthPanel({ token }: DatasetHealthPanelProps) {
               </div>
 
               {Object.keys(data.mode_coverage).length > 0 && (
-                <p className="mb-3 text-[0.8rem] text-fg-dim">
+                <p className="mb-3 text-body text-fg-dim">
                   modes:{" "}
                   {Object.entries(data.mode_coverage)
                     .map(([m, n]) => `${m} ${n}`)
@@ -64,21 +64,19 @@ export function DatasetHealthPanel({ token }: DatasetHealthPanelProps) {
                 </p>
               )}
 
-              <h3 className="mb-1 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
-                Sessions
-              </h3>
+              <h3 className={cn(eyebrowClass, "mb-1")}>Sessions</h3>
               <div className="mb-3 flex max-h-56 flex-col gap-1 overflow-y-auto">
                 {data.sessions.map((s: DatasetSessionHealth) => (
                   <div
                     key={s.session_id}
-                    className="grid grid-cols-[1fr_auto] items-baseline gap-2 border-b border-border-soft pb-1 text-[0.82rem] last:border-0"
+                    className="grid grid-cols-[1fr_auto] items-baseline gap-2 border-b border-border-soft pb-1 text-body last:border-0"
                   >
                     <span className="truncate">
                       {s.pinned && <span title="pinned">📌 </span>}
                       {s.training_candidate && <span className="text-accent">★ </span>}
                       {s.session_id}
                       {s.warnings.length > 0 && (
-                        <span className="ml-2 text-[0.74rem] text-warn">
+                        <span className="ml-2 text-small text-warn">
                           ⚠ {s.warnings[0]}
                           {s.warnings.length > 1 && ` (+${s.warnings.length - 1})`}
                         </span>
@@ -89,12 +87,10 @@ export function DatasetHealthPanel({ token }: DatasetHealthPanelProps) {
                 ))}
               </div>
 
-              <h3 className="mb-1 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
-                Channel availability
-              </h3>
+              <h3 className={cn(eyebrowClass, "mb-1")}>Channel availability</h3>
               <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
                 {channels.map(([ch, frac]) => (
-                  <div key={ch} className="flex items-center gap-2 text-[0.78rem]">
+                  <div key={ch} className="flex items-center gap-2 text-body-sm">
                     <span className="w-44 shrink-0 truncate text-fg-dim">{ch}</span>
                     <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-elev-2">
                       <span

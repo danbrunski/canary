@@ -11,13 +11,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import {
-  getCurrentCapture,
-  getPreflight,
-  getTestProfiles,
-  startCapture,
-  stopCapture,
-} from "../api/http";
+import { getPreflight, getTestProfiles } from "../api/http";
+import { getCurrentCapture, startCapture, stopCapture } from "../api/captures";
 import { combineOutcomes } from "../hooks/followUpRead";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { describeError, useControlResource } from "../hooks/useControlResource";

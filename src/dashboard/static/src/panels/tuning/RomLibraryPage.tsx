@@ -33,6 +33,7 @@ import {
   definitionTermClass,
   definitionValueClass,
   inputClass,
+  smallLabelClass,
 } from "../../styles";
 import type { StatusResponse } from "../../types";
 import type { RomLibraryEntry } from "../../types/romLibrary";
@@ -230,7 +231,7 @@ export function RomLibraryPage({
           {entries.length > 0 && (
             <TableScroll>
               <table className="w-full min-w-[48rem] text-left text-sm" aria-label="ROM images">
-                <thead className="text-[0.7rem] uppercase tracking-[0.08em] text-fg-faint">
+                <thead className={smallLabelClass}>
                   <tr>
                     <th className="py-2 pr-3">Label</th>
                     <th className="py-2 pr-3">Source</th>

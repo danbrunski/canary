@@ -603,23 +603,96 @@ neither earlier review covered.
     passed.
   - The renderers themselves stay separate (R08, "looked at and fine").
 
-- [ ] **R28.8 The type scale is ad hoc.** 392 arbitrary `text-[0.NNrem]`
+- [x] **R28.8 The type scale is ad hoc.** 392 arbitrary `text-[0.NNrem]`
   classes in 25 sizes; the same eyebrow-label string appears nine times and a
   near-twin seven. `styles.ts` already holds shared class tokens.
-  - [ ] `eyebrowClass` plus four or five `--text-*` tokens in `index.css`
+  - [x] `eyebrowClass` plus four or five `--text-*` tokens in `index.css`
     `@theme`; sweep the repeated strings; a `themeClasses.test.ts`-style check
     that fails on a new arbitrary rem size.
+    Measured first (`grep -rhoE 'text-\[[0-9.]+rem\]'`): 430 uses in 30 sizes
+    at the time of the sweep (the 392 / 25 above date from the review
+    snapshot), plus three `text-[10px]`. Tailwind 4.3: an `@theme` `--text-NAME`
+    becomes the `text-NAME` utility and emits `font-size` only (no
+    line-height unless `--text-NAME--line-height` exists; the built CSS
+    carries `.text-body{font-size:var(--text-body)}`), so the sweep changes no
+    line-height. Seven tokens, not five: sizes within 0.02rem of a token need
+    seven windows to span 0.60-0.88rem. `--text-micro` 0.62, `caption` 0.66,
+    `small` 0.72, `body-sm` 0.76, `body` 0.82, `lead` 0.86, `title` 1.05.
+    Mapped (old -> token, delta rem, uses): 0.6 -> micro -0.02 (9); 0.62 ->
+    micro 0 (11); 0.64 -> caption +0.02 (4); 0.65 -> caption +0.01 (12); 0.66
+    -> caption 0 (31); 0.68 -> caption -0.02 (19); 0.7 -> small +0.02 (37);
+    0.72 -> small 0 (63); 0.73 -> small -0.01 (1); 0.74 -> small -0.02 (23);
+    0.75 -> body-sm +0.01 (20); 0.76 -> body-sm 0 (9); 0.78 -> body-sm -0.02
+    (48); 0.8 -> body +0.02 (38); 0.82 -> body 0 (38); 0.84 -> lead +0.02 (8);
+    0.85 -> lead +0.01 (15); 0.86 -> lead 0 (13); 0.88 -> lead -0.02 (3); 1.05
+    -> title 0 (7). 409 of 430 swept; none moved by more than 0.02rem (0.32px).
+    Left, with exact counts in the test's `EXCEPTIONS` (more than 0.02rem from
+    every token): 0.5 (1), 0.55 (2), 0.56 (2), 0.9 (6), 0.92 (2), 0.95 (2),
+    1.1 (2), 1.25 (1), 1.4 (2), 1.75 (1), and `10px` (3): 24 uses (21 rem, 3 px). The test
+    compares exactly, so using a token means lowering the number.
+    `eyebrowClass` (`text-caption uppercase tracking-[0.12em] text-fg-faint`,
+    no margin; callers add `cn(eyebrowClass, "mb-1")`) replaced the nine
+    `mb-1` copies and four others with their own margins (`mb-1.5` x2, `mb-1
+    mt-3` x2, `mb-1 mt-4`, a bare span, one flex row). The seven-copy near-twin
+    (`text-[0.7rem] uppercase tracking-[0.08em] text-fg-faint`, all on a
+    `<thead>`) is a different role, not folded into it: it labels table
+    columns, is 0.70 not 0.66rem, tracks 0.08 not 0.12em, and takes no
+    margin. It is `smallLabelClass` (with `definitionTermClass`, the
+    `0.72rem` copy of the same string, now an alias, and three more spans and
+    divs); ten uses. `themeClasses.test.ts` gains "sets font sizes from the
+    type scale" (fails on a new arbitrary rem/px/em size or a count that
+    drifted from `EXCEPTIONS`, and on a changed token list) and "writes the
+    eyebrow and the small label once, in styles.ts".
+    Before/after: `pnpm build` CSS 66.55 kB -> 66.32 kB (gzip 11.71 both);
+    entry JS gzip 72.90 -> 72.42 kB, under the 90 kB budget. Playwright, nine
+    pages (Drive, System Info, Model health, Calibration, Logs, ROM Library,
+    ROM Editor, Anomalies, Capture Profiles; 1280x900, stubbed daemon): same
+    DOM (every element matched), largest font-size change 0.32px (0.02rem),
+    element heights move at most 0.5px, and 0-5px of vertical drift further
+    down a page where a line wraps differently (ROM Library, System Info);
+    1-4.6% of pixels differ at a threshold of 24/255, all anti-aliasing and
+    sub-pixel shifts. Screenshots and DOM dumps are scratch, not committed.
 
-- [ ] **R28.9 Small items.**
-  - `postFeedback` takes seven positional arguments and `AnomalyPanel` casts
+- [x] **R28.9 Small items.**
+  - [x] `postFeedback` takes seven positional arguments and `AnomalyPanel` casts
     its event `as unknown as Record<string, unknown>` to call it. Take an
     `AnomalyEvent` and an options object.
-  - `lib/romSimSize.ts` `forgetTimings` has no callers.
-  - `api/http.ts` is 1,087 lines; five domains are already split out. Split
+    `postFeedback(token, event: AnomalyEvent, label, options?: FeedbackOptions)`
+    with `{ reason, hypothesis, clarifyingQuestion, clarifyingAnswer }`, each
+    posting `null` when left out; `AnomalyPanel` passes its event and the
+    three it sets, no cast. The one other caller is `TuningFeedback.test`
+    (updated). `api/feedback.test.ts` asserts the body is
+    `JSON.stringify({event, label, reason, hypothesis, clarifying_question,
+    clarifying_answer})` in that key order, so the wire is unchanged.
+  - [x] `lib/romSimSize.ts` `forgetTimings` has no callers.
+    `grep -rn forgetTimings` over `src`, `e2e` and the docs: only its
+    definition; deleted. `TIMINGS_STORAGE_KEY` is still read and written by
+    `loadTimings`/`recordTiming`.
+  - [x] `api/http.ts` is 1,087 lines; five domains are already split out. Split
     captures, jobs, network and tuning the same way when next touched.
-  - `AGENTS.md` still says ESLint's pre-existing violations "are
+    `api/captures.ts` (current capture, start/tag/stop, the capture profiles),
+    `api/jobs.ts`, `api/network.ts` (network, provisioning window, Wi-Fi) and
+    `api/tuning.ts`, 28 functions moved verbatim (`git diff` of `http.ts` is
+    279 deleted lines and no added ones but `postFeedback` and a type import);
+    `http.ts` 1,108 -> 829 lines. The five existing modules are not behind a
+    barrel (callers import `../api/<module>`), so these are not either: 15
+    files' imports updated. `test/harness.ts` `mockHttp` mocks a name on the
+    split module that defines it, so the 30 panel tests that name these
+    functions are unchanged. `layering.test.ts` unchanged and green. Stale
+    path in `docs/roadmap/network-and-provisioning.md` fixed.
+  - [x] `AGENTS.md` still says ESLint's pre-existing violations "are
     bulk-suppressed in `eslint-suppressions.json`". The file is empty; say so,
     and keep the `pnpm lint:prune` rule only if the mechanism is still wired.
+    Still wired: a probe file with one `no-explicit-any` fails `eslint` against
+    the empty file and passes with the entry written by `--suppress-all
+    --suppressions-location <scratch>` (probe and scratch file removed);
+    `eslint.config.js` and `lint:prune` still describe it. `AGENTS.md` now
+    says the baseline is empty (since 26948452, 2026-09-25) and any violation
+    fails, that a stale entry would fail `pnpm lint` until `pnpm lint:prune`,
+    and keeps "never run `--suppress-all`". Only that sentence changed.
+  - Gate (`src/dashboard/static`): `pnpm typecheck`, `pnpm format:check`,
+    `pnpm lint` (no suppressions; the file still empty), `pnpm test` 154 files
+    / 1613 passed, `pnpm build`, `pnpm e2e`.
 
 ## Looked at and fine
 

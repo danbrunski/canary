@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 
-import { getCaptureProfiles, getDids, getObdCoverage } from "../api/http";
+import { getDids, getObdCoverage } from "../api/http";
+import { getCaptureProfiles } from "../api/captures";
 import type { CaptureProfile, ResolvedPollingPlan } from "../types";
 import { useControlResource } from "./useControlResource";
 

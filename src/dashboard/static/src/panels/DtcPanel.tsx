@@ -3,7 +3,7 @@ import { useCallback } from "react";
 import { getDtc } from "../api/http";
 import { Panel } from "../components/Panel";
 import { useControlResource } from "../hooks/useControlResource";
-import { cn, placeholderClass } from "../styles";
+import { cn, eyebrowClass, placeholderClass } from "../styles";
 import type { DtcCodeEntry } from "../types";
 import { formatTimestamp } from "../util/time";
 
@@ -51,7 +51,7 @@ export function DtcPanel() {
         {milOn == null ? "MIL / CEL state unknown" : milOn ? "MIL / CEL ON" : "MIL / CEL off"}
       </div>
 
-      <p className="mb-3 text-[0.78rem] text-fg-dim">
+      <p className="mb-3 text-body-sm text-fg-dim">
         {data.captured_at ? `captured ${formatTimestamp(data.captured_at)}` : "never polled"}
         {data.stale && (
           <span className="ml-2 text-warn" role="status">
@@ -75,10 +75,8 @@ function FreezeFrame({ freezeFrame }: { freezeFrame: Record<string, number | str
   if (!freezeFrame || Object.keys(freezeFrame).length === 0) return null;
   return (
     <div>
-      <h3 className="mb-1 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
-        Freeze Frame
-      </h3>
-      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[0.82rem]">
+      <h3 className={cn(eyebrowClass, "mb-1")}>Freeze Frame</h3>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-body">
         {Object.entries(freezeFrame).map(([channel, value]) => (
           <div key={channel} className="flex justify-between gap-2">
             <span className="text-fg-dim">{channel}</span>
@@ -93,7 +91,7 @@ function FreezeFrame({ freezeFrame }: { freezeFrame: Record<string, number | str
 function CodeList({ title, codes }: { title: string; codes: DtcCodeEntry[] }) {
   return (
     <div className="mb-3">
-      <h3 className="mb-1 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
+      <h3 className={cn(eyebrowClass, "mb-1")}>
         {title} ({codes.length})
       </h3>
       {codes.length === 0 ? (
@@ -103,11 +101,11 @@ function CodeList({ title, codes }: { title: string; codes: DtcCodeEntry[] }) {
           {codes.map((c) => (
             <div
               key={c.code}
-              className="grid grid-cols-[5rem_1fr_auto] items-baseline gap-2 border-b border-border-soft pb-1 text-[0.82rem] last:border-0"
+              className="grid grid-cols-[5rem_1fr_auto] items-baseline gap-2 border-b border-border-soft pb-1 text-body last:border-0"
             >
               <span className="font-num font-bold text-fg">{c.code}</span>
               <span className="truncate text-fg-dim">{c.description}</span>
-              <span className="text-[0.74rem] text-fg-faint">{c.system}</span>
+              <span className="text-small text-fg-faint">{c.system}</span>
             </div>
           ))}
         </div>

@@ -54,7 +54,7 @@ export function ExplorePanel() {
   return (
     <Panel title="Explore" count={result?.available ? `n=${result.sample_count}` : undefined}>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-2">
-        <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-small text-fg-dim">
           value channel
           <input
             className={inputClass}
@@ -63,7 +63,7 @@ export function ExplorePanel() {
             placeholder="obd:SHORT_FUEL_TRIM_1"
           />
         </label>
-        <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-small text-fg-dim">
           x channel
           <input
             className={inputClass}
@@ -72,7 +72,7 @@ export function ExplorePanel() {
             placeholder="obd:RPM"
           />
         </label>
-        <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-small text-fg-dim">
           y channel (optional)
           <input
             className={inputClass}
@@ -81,7 +81,7 @@ export function ExplorePanel() {
             placeholder="obd:ENGINE_LOAD"
           />
         </label>
-        <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-small text-fg-dim">
           x bins
           <input
             className={inputClass}
@@ -93,7 +93,7 @@ export function ExplorePanel() {
           />
         </label>
         {y.trim() && (
-          <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+          <label className="flex flex-col gap-1 text-small text-fg-dim">
             y bins
             <input
               className={inputClass}
@@ -105,7 +105,7 @@ export function ExplorePanel() {
             />
           </label>
         )}
-        <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-small text-fg-dim">
           aggregation
           <select
             className={selectClass}
@@ -119,7 +119,7 @@ export function ExplorePanel() {
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-small text-fg-dim">
           session (optional)
           <input
             className={inputClass}
@@ -128,7 +128,7 @@ export function ExplorePanel() {
             placeholder="2026-07-19T000000"
           />
         </label>
-        <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-small text-fg-dim">
           since (optional)
           <input
             className={inputClass}
@@ -137,7 +137,7 @@ export function ExplorePanel() {
             placeholder="2026-07-01"
           />
         </label>
-        <label className="flex flex-col gap-1 text-[0.72rem] text-fg-dim">
+        <label className="flex flex-col gap-1 text-small text-fg-dim">
           until (optional)
           <input
             className={inputClass}
@@ -176,7 +176,7 @@ export function ExplorePanel() {
         )}
         {result && result.available && result.kind === "1d" && (
           <div className="flex flex-col gap-1">
-            <p className="text-[0.72rem] text-fg-dim">
+            <p className="text-small text-fg-dim">
               {result.value_channel} ({result.agg}) by {result.x_channel}
             </p>
             <div className="flex items-end gap-1" style={{ height: 140 }}>

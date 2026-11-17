@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { Panel } from "../components/Panel";
-import { cancelJob, getJobLogs, submitJob } from "../api/http";
+import { cancelJob, getJobLogs, submitJob } from "../api/jobs";
 import type { RunAction } from "../hooks/useAsyncAction";
 import { JOB_KINDS } from "../lib/jobKinds";
 import { buttonClass, cn, inputClass, selectClass } from "../styles";
@@ -71,7 +71,7 @@ export function JobsCard({ token, busy, run, jobs }: JobsCardProps) {
           inputMode="numeric"
           placeholder="days"
         />
-        <label className="flex min-h-9 flex-row items-center justify-center gap-2 text-[0.75rem] text-fg-dim">
+        <label className="flex min-h-9 flex-row items-center justify-center gap-2 text-body-sm text-fg-dim">
           <input
             type="checkbox"
             checked={useAllSessions}
@@ -114,7 +114,7 @@ export function JobsCard({ token, busy, run, jobs }: JobsCardProps) {
         ))}
       </div>
       {jobLog && (
-        <pre className="mt-3 max-h-64 overflow-auto rounded-[8px] border border-border bg-bg p-2.5 text-[0.78rem] text-fg">
+        <pre className="mt-3 max-h-64 overflow-auto rounded-[8px] border border-border bg-bg p-2.5 text-body-sm text-fg">
           {jobLog}
         </pre>
       )}

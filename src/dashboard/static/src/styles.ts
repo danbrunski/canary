@@ -86,9 +86,12 @@ export const panelHeaderClass =
   "mb-3 flex items-baseline justify-between gap-4 max-[600px]:flex-wrap max-[600px]:gap-2";
 export const panelHeaderCenterClass =
   "mb-3 flex items-center justify-between gap-4 max-[600px]:flex-wrap max-[600px]:gap-2";
-export const panelTitleClass =
-  "m-0 text-[0.82rem] font-bold uppercase tracking-[0.14em] text-fg-dim";
-export const panelCountClass = "font-num text-[0.74rem] tracking-[0.03em] text-fg-faint";
+export const panelTitleClass = "m-0 text-body font-bold uppercase tracking-[0.14em] text-fg-dim";
+export const panelCountClass = "font-num text-small tracking-[0.03em] text-fg-faint";
+/** The eyebrow: the small uppercase heading over a block of rows or a group of
+ *  fields. No margin of its own; add it with `cn(eyebrowClass, "mb-1")`, the
+ *  space differs by what sits under it. */
+export const eyebrowClass = "text-caption uppercase tracking-[0.12em] text-fg-faint";
 export const placeholderClass = "m-0 text-fg-faint italic";
 
 export const inputClass = [
@@ -146,7 +149,7 @@ export const badgeClass = [
   "bg-black/25",
   "px-2",
   "py-0.5",
-  "text-[0.68rem]",
+  "text-caption",
   "font-bold",
   "uppercase",
   "tracking-[0.06em]",
@@ -157,11 +160,14 @@ export const definitionListClass = "m-0 flex flex-col gap-1.5";
  *  term above value — so a long value (a storage path, a revision string)
  *  wraps under its label instead of squeezing it off the row. */
 export const definitionRowClass =
-  "flex items-baseline justify-between gap-3 text-[0.88rem] " +
+  "flex items-baseline justify-between gap-3 text-lead " +
   "max-[600px]:flex-col max-[600px]:items-stretch max-[600px]:gap-0.5 " +
   "max-[600px]:rounded-tile max-[600px]:border max-[600px]:border-border-soft " +
   "max-[600px]:bg-black/15 max-[600px]:px-2.5 max-[600px]:py-1.5";
-export const definitionTermClass = "text-[0.72rem] uppercase tracking-[0.08em] text-fg-faint";
+/** A small uppercase label: a table's column headings, a key's name. Quieter
+ *  than `eyebrowClass` (smaller, tighter tracking). */
+export const smallLabelClass = "text-small uppercase tracking-[0.08em] text-fg-faint";
+export const definitionTermClass = smallLabelClass;
 export const definitionValueClass =
   "m-0 min-w-0 break-words font-num tabular-nums max-[600px]:text-left";
 
@@ -215,7 +221,7 @@ export interface NoticeState {
 
 export function noticeClass(kind: NoticeKind): string {
   return cn(
-    "rounded-[8px] border bg-elev px-3 py-2 text-[0.86rem] text-fg",
+    "rounded-[8px] border bg-elev px-3 py-2 text-lead text-fg",
     kind === "ok" && "border-ok/45",
     kind === "error" && "border-bad/55 text-bad",
     kind === "busy" && "border-accent/55 text-accent",
@@ -239,12 +245,12 @@ export const statusStripClass = [
   "bg-black/20",
   "px-[1.15rem]",
   "py-2",
-  "text-[0.74rem]",
+  "text-small",
   "text-fg-dim",
 ].join(" ");
 
 export const statusItemClass = "inline-flex items-center gap-1.5";
-export const statusLabelClass = "text-[0.6rem] uppercase tracking-[0.16em] text-fg-faint";
+export const statusLabelClass = "text-micro uppercase tracking-[0.16em] text-fg-faint";
 export const statusValueClass = "font-num tabular-nums text-fg";
 
 /** Workbench: the area bar (W10), then the sidebar and the panel column. */
@@ -257,7 +263,7 @@ export const areaBarClass =
 export function areaTabClass(active: boolean): string {
   return cn(
     "relative inline-flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap px-3",
-    "text-[0.85rem] font-semibold text-fg-dim transition-colors hover:text-fg",
+    "text-lead font-semibold text-fg-dim transition-colors hover:text-fg",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-2",
     active &&
       "text-accent after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-accent",
@@ -295,12 +301,12 @@ export const workbenchContentClass =
 
 /** The sidebar's collapse / expand toggle; the strip below 900px has none. */
 export const sidebarToggleClass =
-  "mt-auto min-h-9 rounded-[8px] px-2 text-left text-[0.8rem] text-fg-faint transition-colors " +
+  "mt-auto min-h-9 rounded-[8px] px-2 text-left text-body text-fg-faint transition-colors " +
   "hover:text-fg max-[900px]:hidden";
 
 export function navItemClass(active: boolean): string {
   return cn(
-    "min-h-9 rounded-[8px] border border-transparent px-3 py-1.5 text-left text-[0.85rem]",
+    "min-h-9 rounded-[8px] border border-transparent px-3 py-1.5 text-left text-lead",
     "font-medium text-fg-dim transition-colors hover:text-fg",
     "max-[900px]:whitespace-nowrap",
     active &&
@@ -332,7 +338,7 @@ export const bottomBarClass = [
 export function bottomTabClass(active: boolean): string {
   return cn(
     "relative flex min-h-14 min-w-0 flex-col items-center justify-center px-1",
-    "text-[0.7rem] font-semibold uppercase tracking-[0.05em] text-fg-dim",
+    "text-small font-semibold uppercase tracking-[0.05em] text-fg-dim",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-2",
     active &&
       "text-accent before:absolute before:inset-x-3 before:top-0 before:h-0.5 before:rounded-full before:bg-accent",
@@ -376,7 +382,7 @@ export const pageStripClass =
 
 export function pageChipClass(active: boolean): string {
   return cn(
-    "min-h-9 shrink-0 whitespace-nowrap rounded-full border px-3 text-[0.8rem]",
+    "min-h-9 shrink-0 whitespace-nowrap rounded-full border px-3 text-body",
     active ? "border-accent bg-accent/15 text-accent" : "border-border-soft text-fg-dim",
   );
 }

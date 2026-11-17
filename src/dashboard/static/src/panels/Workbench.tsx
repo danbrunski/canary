@@ -252,12 +252,8 @@ export function Workbench({ active, onNavigate, data, phone = false }: Workbench
                 onClick={() => onNavigate(item.id)}
               >
                 {item.label}
-                {item.placeholder && (
-                  <span className="ml-1.5 text-[0.6rem] text-fg-faint">soon</span>
-                )}
-                {item.planned && (
-                  <span className="ml-1.5 text-[0.6rem] text-fg-faint">planned</span>
-                )}
+                {item.placeholder && <span className="ml-1.5 text-micro text-fg-faint">soon</span>}
+                {item.planned && <span className="ml-1.5 text-micro text-fg-faint">planned</span>}
               </button>
             ))}
           <button

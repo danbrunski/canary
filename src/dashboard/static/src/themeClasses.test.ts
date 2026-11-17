@@ -92,4 +92,49 @@ describe("theme classes", () => {
       .map(([path]) => path);
     expect(hits).toEqual([]);
   });
+
+  it("sets font sizes from the type scale, not arbitrary values (R28.8)", () => {
+    // A size is a `--text-*` token in index.css's @theme (`text-body`). A fresh
+    // `text-[0.74rem]` is a 26th size nobody chose; the sweep that cut 25 sizes
+    // to seven tokens had to undo 392 of them. The exceptions below are the
+    // sizes that sit more than 0.02rem from every token, with how often each
+    // is used. It is an exact count, so the list can only shrink: use a token
+    // and lower the number here, or delete the line when it reaches zero.
+    const scale = [...css.matchAll(/--text-([a-z0-9-]+)\s*:\s*[0-9.]+rem/g)].map((m) => m[1]);
+    expect(scale).toEqual(["micro", "caption", "small", "body-sm", "body", "lead", "title"]);
+
+    const arbitrary: Record<string, number> = {};
+    for (const text of Object.values(sources)) {
+      for (const m of text.matchAll(/\btext-\[([0-9.]+(?:rem|px|em))\]/g)) {
+        arbitrary[m[1]] = (arbitrary[m[1]] ?? 0) + 1;
+      }
+    }
+    const EXCEPTIONS: Record<string, number> = {
+      "0.5rem": 1,
+      "0.55rem": 2,
+      "0.56rem": 2,
+      "0.9rem": 6,
+      "0.92rem": 2,
+      "0.95rem": 2,
+      "1.1rem": 2,
+      "1.25rem": 1,
+      "1.4rem": 2,
+      "1.75rem": 1,
+      "10px": 3,
+    };
+    expect(
+      arbitrary,
+      "a new arbitrary font size: use a --text-* token from index.css; a count went down: lower it in EXCEPTIONS",
+    ).toEqual(EXCEPTIONS);
+  });
+
+  it("writes the eyebrow and the small label once, in styles.ts (R28.8)", () => {
+    // `eyebrowClass` and `smallLabelClass` were nine and ten copies of one string.
+    const copy =
+      /text-(?:caption uppercase tracking-\[0\.12em\]|small uppercase tracking-\[0\.08em\]) text-fg-faint/;
+    const hits = Object.entries(sources)
+      .filter(([path, text]) => path !== "./styles.ts" && copy.test(text))
+      .map(([path]) => path);
+    expect(hits).toEqual([]);
+  });
 });

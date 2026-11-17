@@ -91,7 +91,7 @@ export function TokenGate({ token, onTokenChange }: TokenGateProps) {
     <div className="relative">
       <button
         type="button"
-        className="inline-flex min-h-6 items-center gap-1.5 rounded-full border border-border-soft bg-black/25 px-2.5 py-1 text-[0.66rem] font-semibold uppercase tracking-[0.04em] text-fg-dim"
+        className="inline-flex min-h-6 items-center gap-1.5 rounded-full border border-border-soft bg-black/25 px-2.5 py-1 text-caption font-semibold uppercase tracking-[0.04em] text-fg-dim"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-label="control token"
@@ -105,7 +105,7 @@ export function TokenGate({ token, onTokenChange }: TokenGateProps) {
         {LABEL[state]}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-10 mt-1 w-72 rounded-[8px] border border-border-soft bg-elev p-3 text-[0.78rem] shadow-lg">
+        <div className="absolute right-0 top-full z-10 mt-1 w-72 rounded-[8px] border border-border-soft bg-elev p-3 text-body-sm shadow-lg">
           <p className="m-0 mb-2 text-fg-dim">{HELP[state]}</p>
           <TokenField
             value={token}

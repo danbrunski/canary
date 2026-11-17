@@ -9,6 +9,7 @@ import {
   buttonClass,
   cn,
   dangerButtonClass,
+  eyebrowClass,
   inputClass,
   placeholderClass,
   selectClass,
@@ -157,12 +158,12 @@ export function CustomPidsPanel({ token }: CustomPidsPanelProps) {
           {data.custom_pids.map((p) => (
             <li
               key={p.name}
-              className="flex items-center justify-between gap-2 rounded border border-border-soft px-2.5 py-1.5 text-[0.84rem]"
+              className="flex items-center justify-between gap-2 rounded border border-border-soft px-2.5 py-1.5 text-lead"
               data-testid={`custom-pid-${p.name}`}
             >
               <div className="min-w-0">
                 <div className="truncate font-semibold text-fg">{p.display_name}</div>
-                <div className="truncate font-num text-[0.72rem] text-fg-faint">
+                <div className="truncate font-num text-small text-fg-faint">
                   {p.name} · mode 0x{p.mode.toString(16).toUpperCase()} pid 0x
                   {p.pid.toString(16).toUpperCase()} · {p.formula}
                   {p.unit ? ` (${p.unit})` : ""}
@@ -170,7 +171,7 @@ export function CustomPidsPanel({ token }: CustomPidsPanelProps) {
               </div>
               <button
                 type="button"
-                className={cn(dangerButtonClass, "shrink-0 px-2.5 py-1 text-[0.74rem]")}
+                className={cn(dangerButtonClass, "shrink-0 px-2.5 py-1 text-small")}
                 onClick={() => removePid(p.name)}
                 disabled={busy !== null}
               >
@@ -181,9 +182,7 @@ export function CustomPidsPanel({ token }: CustomPidsPanelProps) {
         </ul>
       )}
 
-      <h3 className="mb-1.5 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
-        Add a custom PID
-      </h3>
+      <h3 className={cn(eyebrowClass, "mb-1.5")}>Add a custom PID</h3>
       <div className="mb-4 grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-2">
         <input
           className={inputClass}
@@ -251,9 +250,7 @@ export function CustomPidsPanel({ token }: CustomPidsPanelProps) {
         {busy === "add custom PID" ? "Adding…" : "Add custom PID"}
       </button>
 
-      <h3 className="mb-1.5 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
-        Torque Pro CSV import
-      </h3>
+      <h3 className={cn(eyebrowClass, "mb-1.5")}>Torque Pro CSV import</h3>
       {!importing ? (
         <button type="button" className={buttonClass} onClick={() => setImporting(true)}>
           Import CSV…
@@ -261,7 +258,7 @@ export function CustomPidsPanel({ token }: CustomPidsPanelProps) {
       ) : (
         <div className="flex flex-col gap-2">
           <textarea
-            className={cn(inputClass, "h-28 w-full resize-y font-num text-[0.78rem]")}
+            className={cn(inputClass, "h-28 w-full resize-y font-num text-body-sm")}
             value={importText}
             placeholder="paste a Torque Pro custom-PID CSV export…"
             onChange={(e) => setImportText(e.target.value)}

@@ -1,15 +1,8 @@
 import { useCallback, useState } from "react";
 
-import {
-  getControlVersion,
-  getCurrentCapture,
-  getPreflight,
-  getSequenceDetector,
-  listJobs,
-  startCapture,
-  stopCapture,
-  tagCapture,
-} from "../api/http";
+import { getControlVersion, getPreflight, getSequenceDetector } from "../api/http";
+import { getCurrentCapture, startCapture, stopCapture, tagCapture } from "../api/captures";
+import { listJobs } from "../api/jobs";
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { useAsyncAction } from "../hooks/useAsyncAction";
@@ -122,7 +115,7 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
           Refresh
         </button>
         {version && (
-          <div className="font-num text-[0.82rem] tabular-nums text-fg-dim">
+          <div className="font-num text-body tabular-nums text-fg-dim">
             API v{version.api_version}
             {version.git_sha ? ` / ${version.git_sha}` : ""}
           </div>
@@ -131,7 +124,7 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
 
       <div
         className={cn(
-          "flex items-center gap-2 rounded-[8px] border px-3 py-1.5 text-[0.8rem]",
+          "flex items-center gap-2 rounded-[8px] border px-3 py-1.5 text-body",
           token ? "border-ok/45 bg-ok/10 text-ok" : "border-border-soft bg-elev text-fg-dim",
         )}
       >
@@ -156,7 +149,7 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
         <Panel
           title="Capture"
           actions={
-            <span className={capture ? "text-[0.8rem] text-ok" : "text-fg-dim"}>
+            <span className={capture ? "text-body text-ok" : "text-fg-dim"}>
               {capture ? "active" : "idle"}
             </span>
           }
@@ -190,7 +183,7 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
             </button>
           </div>
           {capture && (
-            <div className="mt-3 grid grid-cols-[1fr_auto_auto] gap-3 rounded-[8px] border border-ok/35 bg-ok/10 p-2.5 text-[0.85rem] max-[1100px]:grid-cols-1">
+            <div className="mt-3 grid grid-cols-[1fr_auto_auto] gap-3 rounded-[8px] border border-ok/35 bg-ok/10 p-2.5 text-lead max-[1100px]:grid-cols-1">
               <b>{capture.purpose || capture.protocol || "capture"}</b>
               <span className="text-fg-dim">{capture.session_id}</span>
               <time className="font-num text-fg-dim">{formatTimeOfDay(capture.started_at)}</time>

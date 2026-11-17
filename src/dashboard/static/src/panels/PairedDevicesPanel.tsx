@@ -25,6 +25,7 @@ import {
   dangerButtonClass,
   inputClass,
   placeholderClass,
+  smallLabelClass,
 } from "../styles";
 
 interface PairedDevicesPanelProps {
@@ -47,7 +48,7 @@ async function fetchSnapshot(token: string, signal: AbortSignal): Promise<Snapsh
 }
 
 const smallButton = cn(buttonClass, "text-xs");
-const sectionTitle = "mb-2 mt-0 text-[0.72rem] uppercase tracking-[0.08em] text-fg-faint";
+const sectionTitle = cn(smallLabelClass, "mb-2 mt-0");
 const rowClass = "flex flex-col gap-1.5 border-t border-border-soft py-2.5 first:border-t-0";
 
 type Act = (label: string, action: () => Promise<unknown>, okText: string) => void;
@@ -67,7 +68,7 @@ function WaitingList({
     <section className="mb-4">
       <h3 className={sectionTitle}>Waiting to pair</h3>
       {requests.length === 0 ? (
-        <p className={cn(placeholderClass, "text-[0.86rem]")}>
+        <p className={cn(placeholderClass, "text-lead")}>
           No device is waiting. On the new device, open the dashboard and tap “Pair this device”.
         </p>
       ) : (
@@ -75,9 +76,7 @@ function WaitingList({
           {requests.map((r) => (
             <li key={r.id} className={cn(rowClass, "flex-row flex-wrap items-center")}>
               <span className="min-w-0 flex-1 break-words font-semibold">{r.name}</span>
-              <span className="text-[0.78rem] text-fg-faint">
-                asked {Math.round(r.age_s)} s ago
-              </span>
+              <span className="text-body-sm text-fg-faint">asked {Math.round(r.age_s)} s ago</span>
               <button
                 type="button"
                 className={smallButton}
@@ -126,7 +125,7 @@ function DeviceRow({
         <span className="min-w-0 break-words font-semibold">{device.name}</span>
         {isMe && <span className={cn(badgeClass, "text-accent")}>this device</span>}
       </div>
-      <div className="text-[0.78rem] text-fg-dim">
+      <div className="text-body-sm text-fg-dim">
         {methodLabel(device.method, devices)} · paired {formatWhen(device.paired_at)} · last seen{" "}
         {formatWhen(device.last_seen)}
       </div>
@@ -184,7 +183,7 @@ function DeviceRow({
       )}
       {mode === "remove" && (
         <div className="flex flex-wrap items-center gap-2" role="alert">
-          <span className="min-w-0 flex-1 basis-48 text-[0.86rem] text-bad">
+          <span className="min-w-0 flex-1 basis-48 text-lead text-bad">
             {isMe
               ? "This is the device you are using. It loses access until it pairs again."
               : `Remove ${device.name}? It loses access until it pairs again.`}
@@ -246,12 +245,12 @@ export function PairedDevicesPanel({ token }: PairedDevicesPanelProps) {
             <section>
               <h3 className={sectionTitle}>Paired</h3>
               {snap.me.shared_token && (
-                <p className={cn(placeholderClass, "mb-2 text-[0.86rem]")}>
+                <p className={cn(placeholderClass, "mb-2 text-lead")}>
                   This browser uses the shared control token, not a paired device’s own.
                 </p>
               )}
               {snap.devices.length === 0 ? (
-                <p className={cn(placeholderClass, "text-[0.86rem]")}>No device is paired yet.</p>
+                <p className={cn(placeholderClass, "text-lead")}>No device is paired yet.</p>
               ) : (
                 <ul className="m-0 list-none p-0">
                   {snap.devices.map((device) => (

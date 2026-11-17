@@ -185,10 +185,11 @@ to direct HTTP.
   `tests/conftest.py`). While iterating, run the test files you are working on. For dashboard
   changes, `pnpm typecheck`, `pnpm format`, `pnpm lint` and the vitest files you
   touched (re-run `TuningFeedback.test.ts` once on flake before treating it as a
-  regression). ESLint is type-aware, and its pre-existing violations are
-  bulk-suppressed in `eslint-suppressions.json`. A new violation fails, and
-  so does a fixed one until you run `pnpm lint:prune`. Fix a new violation;
-  never re-run `--suppress-all` to hide it.
+  regression). ESLint is type-aware, and its baseline is clear:
+  `eslint-suppressions.json` is empty (cleared 2026-09-25), so any violation
+  fails. The bulk-suppression mechanism is still wired, and an entry that no
+  longer matches fails `pnpm lint` until `pnpm lint:prune` drops it. Fix a new
+  violation; never run `--suppress-all` to hide it.
 - **CI is the same gate, on the same versions.** CI installs
   `constraints-dev.txt`, the exact dev toolchain, and `scripts/check.sh`
   refuses to run on a venv that has drifted from it (`scripts/check_dev_env.py`

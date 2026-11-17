@@ -88,7 +88,7 @@ export function PairingApprovalPrompt({ token }: { token: string }) {
           className={cardClass}
         >
           <p className="m-0 break-words font-semibold text-fg">{request.name} wants to pair</p>
-          <p className="m-0 mt-1 text-[0.8rem] text-fg-dim">
+          <p className="m-0 mt-1 text-body text-fg-dim">
             Approve only if it is yours: it gets its own control token for this Pi.
           </p>
           <div className="mt-2 flex flex-wrap justify-end gap-2">

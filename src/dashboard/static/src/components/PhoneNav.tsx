@@ -60,7 +60,7 @@ export function PhoneNav({ mode, item, onDrive, onNavigate, groups }: PhoneNavPr
           <div className="flex flex-col gap-4">
             {sheetGroups.map((group) => (
               <section key={group.id} aria-label={group.label} className="flex flex-col gap-0.5">
-                <h3 className="m-0 px-3 pb-1 text-[0.62rem] font-bold uppercase tracking-[0.16em] text-fg-faint">
+                <h3 className="m-0 px-3 pb-1 text-micro font-bold uppercase tracking-[0.16em] text-fg-faint">
                   {group.label}
                 </h3>
                 {group.items.map((entry) => {
@@ -78,10 +78,10 @@ export function PhoneNav({ mode, item, onDrive, onNavigate, groups }: PhoneNavPr
                     >
                       {entry.label}
                       {entry.placeholder && (
-                        <span className="ml-1.5 text-[0.65rem] text-fg-faint">soon</span>
+                        <span className="ml-1.5 text-caption text-fg-faint">soon</span>
                       )}
                       {entry.planned && (
-                        <span className="ml-1.5 text-[0.65rem] text-fg-faint">planned</span>
+                        <span className="ml-1.5 text-caption text-fg-faint">planned</span>
                       )}
                     </button>
                   );

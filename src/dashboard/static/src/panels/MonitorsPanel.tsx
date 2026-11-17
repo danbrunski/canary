@@ -3,7 +3,7 @@ import { useCallback, useState } from "react";
 import { getMonitors } from "../api/http";
 import { Panel } from "../components/Panel";
 import { useControlResource } from "../hooks/useControlResource";
-import { cn, placeholderClass } from "../styles";
+import { cn, eyebrowClass, placeholderClass } from "../styles";
 import type { MonitorTestResultEntry } from "../types";
 import { formatTimestamp } from "../util/time";
 
@@ -82,7 +82,7 @@ export function MonitorsPanel() {
       title="Monitors"
       count={`${data.results.length} test${data.results.length === 1 ? "" : "s"}`}
     >
-      <p className="mb-3 text-[0.78rem] text-fg-dim">
+      <p className="mb-3 text-body-sm text-fg-dim">
         {data.captured_at ? `captured ${formatTimestamp(data.captured_at)}` : "never polled"}
         {data.stale && (
           <span className="ml-2 text-warn" role="status">
@@ -91,15 +91,13 @@ export function MonitorsPanel() {
         )}
       </p>
 
-      <h3 className="mb-1 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
-        Misfire Counts
-      </h3>
+      <h3 className={cn(eyebrowClass, "mb-1")}>Misfire Counts</h3>
       {cylinders.length === 0 ? (
         <p className={cn(placeholderClass, "mb-3")}>none</p>
       ) : (
         <div className="mb-3 flex flex-col gap-1">
           {cylinders.map(({ cylinder, count, delta }) => (
-            <div key={cylinder} className="flex items-center gap-2 text-[0.8rem]">
+            <div key={cylinder} className="flex items-center gap-2 text-body">
               <span className="w-14 shrink-0 font-num text-fg-dim">Cyl {cylinder}</span>
               <div className="h-3 flex-1 overflow-hidden rounded bg-border-soft">
                 <div
@@ -121,9 +119,7 @@ export function MonitorsPanel() {
         </div>
       )}
 
-      <h3 className="mb-1 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
-        Monitor Test Results
-      </h3>
+      <h3 className={cn(eyebrowClass, "mb-1")}>Monitor Test Results</h3>
       {data.results.length === 0 ? (
         <p className={placeholderClass}>none</p>
       ) : (
@@ -145,7 +141,7 @@ function MonitorResultRow({ result }: { result: MonitorTestResultEntry }) {
   const fraction =
     span > 0 ? Math.min(1, Math.max(0, (result.test_value - result.min_limit) / span)) : 0.5;
   return (
-    <div className="grid grid-cols-[6rem_1fr_auto] items-center gap-2 border-b border-border-soft pb-1 text-[0.78rem] last:border-0">
+    <div className="grid grid-cols-[6rem_1fr_auto] items-center gap-2 border-b border-border-soft pb-1 text-body-sm last:border-0">
       <span className="font-num text-fg-dim">
         MID {result.monitor_id} / TID {result.test_id}
       </span>

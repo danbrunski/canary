@@ -8,7 +8,7 @@
 
 import { useCallback, useState } from "react";
 
-import { getCaptureProfiles } from "../api/http";
+import { getCaptureProfiles } from "../api/captures";
 import { useLiveFullStatus } from "./statusDemand";
 import { useNow } from "./useNow";
 import type { GridOverlay } from "../panels/cellOverlay";
