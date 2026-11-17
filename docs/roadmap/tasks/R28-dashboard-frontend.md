@@ -206,8 +206,9 @@ neither earlier review covered.
     starters in `data/capture_profiles.yaml` (`fuel-map`, `tuning-did`) set
     `true` and 3 (`default`, `broadcast-every-frame`, `fuel-pulsation`) set
     `false`, and the editor has no control for the flag, so a new profile
-    made there is round-stamped only if blank says so. Operator may want
-    `true` for tuning-style profiles; a blank profile is not one.
+    made there is round-stamped only if blank says so. **Operator decision
+    2026-11-16: keep `false`** (a blank profile is not a tuning profile; the
+    tuning starters set `true` themselves).
   - [x] Confirm a saved profile that carries `kline` round-trips through
     `CaptureProfileEditor` (it clones and spreads, so it should; unverified).
     `CaptureProfileEditor.test.ts` "keeps the fields it has no control for
