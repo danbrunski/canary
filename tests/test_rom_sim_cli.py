@@ -57,6 +57,9 @@ from tests.sim_builders import world as world  # noqa: F401 - fixture
 from tools import rom_sim
 
 REPO = Path(__file__).resolve().parents[1]
+#: The tests that run against the committed Xterra slice name that vehicle; the
+#: tool has no default slug (R30.4).
+REAL_PROFILE = ["--profile", "nissan-xterra-2008"]
 FIXTURE_SLICE = REPO / "tests" / "fixtures" / "fuel_plant" / "_capture-tuning-2026-09-23T142926"
 
 
@@ -328,7 +331,8 @@ def test_a_declared_map_slot_2_is_the_slot_both_drivers_run(
     profile = slot_2["profile"]
     assert rom_editor.declared_slot(profile) == rom_editor.editor_slot(profile) == 2
     args = cli_run_args(world, grid_design, tmp_path, "--edits", str(slot_2["spec"]))
-    args[args.index("--profile") + 1] = str(profile)
+    args[args.index("--profile") + 1] = profile.name
+    args[args.index("--data-dir") + 1] = str(profile.parent)
     code, payload, _ = _cli(capsys, *args)
     assert code == 0, payload
     cli = json.loads((tmp_path / "result.json").read_text())
@@ -874,17 +878,17 @@ def test_a_drive_design_refuses_by_the_librarys_names(
 ) -> None:
     # The committed slice ran on ZS44A-20260920, not on its predecessor.
     _refused(
-        capsys, "drive_not_on_base_revision", "design", "drives",
+        capsys, "drive_not_on_base_revision", "design", "drives", *REAL_PROFILE,
         "--base-revision", "ZS44A-k106", "--sessions", FIXTURE_SLICE,
         "--out", tmp_path,
     )  # fmt: skip
     _refused(
-        capsys, "session_missing", "design", "drives",
+        capsys, "session_missing", "design", "drives", *REAL_PROFILE,
         "--base-revision", "ZS44A-20260920", "--sessions", tmp_path / "nope",
         "--out", tmp_path,
     )  # fmt: skip
     _refused(
-        capsys, "base_revision_unknown", "design", "drives",
+        capsys, "base_revision_unknown", "design", "drives", *REAL_PROFILE,
         "--base-revision", "no-such-revision", "--sessions", FIXTURE_SLICE,
         "--out", tmp_path,
     )  # fmt: skip
@@ -924,7 +928,8 @@ def test_every_writing_subcommand_checks_out_before_it_does_any_work(
         "--base-revision", CLI_BASE, *GRID_ARGS, "--out", out,
     )  # fmt: skip
     _refused(
-        capsys, "inside_checkout", "design", "drives", "--base-revision", "ZS44A-20260920",
+        capsys, "inside_checkout", "design", "drives", *REAL_PROFILE,
+        "--base-revision", "ZS44A-20260920",
         "--sessions", FIXTURE_SLICE, "--out", out,
     )  # fmt: skip
     # A parent of the checkout is refused too: the run would write around it.
@@ -942,7 +947,8 @@ def test_a_run_refuses_a_design_built_on_another_image(
     other = tmp_path / "designs"
     code = rom_sim.main(
         [
-            "design", "grid", "--base-revision", "ZS44A-20260920", *GRID_ARGS, "--out", str(other)
+            "design", "grid", *REAL_PROFILE, "--base-revision", "ZS44A-20260920", *GRID_ARGS,
+            "--out", str(other),
         ]
     )  # fmt: skip
     assert code == 0
@@ -1044,7 +1050,9 @@ def test_the_librarys_refusals_surface_by_their_own_reasons(
         "profile_not_found",
         "inspect",
         "--profile",
-        tmp_path / "none",
+        "none",
+        "--data-dir",
+        tmp_path,
         "--edits",
         world["spec"],
     )
@@ -1104,7 +1112,7 @@ def test_the_command_line_imports_nothing_that_talks_to_the_ecu(
         ["inspect", *prof, "--candidate-rom", str(world["root"] / "candidate.bin"), *base],
         # design drives, on the committed slice and the real profile.
         [
-            "design", "drives", "--base-revision", "ZS44A-20260920",
+            "design", "drives", *REAL_PROFILE, "--base-revision", "ZS44A-20260920",
             "--sessions", str(FIXTURE_SLICE),
             "--battery-v-when-unmeasured", "14.0", "--out", str(tmp_path / "drive_designs"),
         ],

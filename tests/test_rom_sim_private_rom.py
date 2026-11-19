@@ -77,7 +77,7 @@ pytestmark = pytest.mark.slow
 def _cli(*argv: str | Path) -> dict[str, Any]:
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        code = rom_sim.main([str(a) for a in argv])
+        code = rom_sim.main([str(a) for a in (*argv, "--profile", PROFILE.name)])
     payload: dict[str, Any] = json.loads(out.getvalue())
     assert code == 0, payload
     return payload

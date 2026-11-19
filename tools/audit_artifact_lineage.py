@@ -33,6 +33,11 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+try:
+    from _cli import ProfileDataError, load_profile_data  # type: ignore[import-not-found]
+except ImportError:  # loaded as `tools.<name>`: repo root on path
+    from tools._cli import ProfileDataError, load_profile_data
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: The CAN DID ids corrected on 2026-10-04 (c897a62). Raw replies for these are
@@ -48,7 +53,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--profile", default="nissan-xterra-2008", help="Vehicle profile slug.")
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help="Vehicle profile slug (the directory name under data/); required.",
+    )
     parser.add_argument("--repo", type=Path, default=REPO_ROOT)
     parser.add_argument(
         "--sessions-root",
@@ -341,6 +350,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     repo = args.repo.resolve()
+    try:  # the slug names a directory under <repo>/data: refuse a path or a typo
+        load_profile_data(
+            argparse.Namespace(
+                profile=args.profile, config=None, data_dir=repo / "data", sessions_root=None
+            )
+        )
+    except ProfileDataError as exc:
+        raise SystemExit(f"refused: {exc}") from exc
     ctx = LineageContext(
         history=load_catalog_history(repo),
         renames=load_renames(repo / "tools" / "channel_renames"),

@@ -21,7 +21,7 @@ exported.
 
 Usage::
 
-    .venv/bin/python -m tools.fuel_comp_restore_reproduction \\
+    .venv/bin/python -m tools.fuel_comp_restore_reproduction --profile nissan-xterra-2008 \\
         --session tests/fixtures/fuel_comp/_capture-ram-study-2026-10-04T204557 \\
         --rom-dir "/mnt/c/Users/thebo/Desktop/Uprev/Tuned ROMs" \\
         --out <scratch>/fuel_comp_restore.json
@@ -58,18 +58,21 @@ from src.analysis.rom_map import load_rom_map
 from src.signals.afr import load_afr_calibration
 from src.vehicle.tune_revisions import load_tune_revisions
 
-REPO = Path(__file__).resolve().parents[1]
+try:
+    from _cli import (  # type: ignore[import-not-found]
+        ProfileData,
+        ProfileDataError,
+        add_profile_dir_args,
+        profile_data_or_exit,
+    )
+except ImportError:  # loaded as `tools.<name>`: repo root on path
+    from tools._cli import ProfileData, ProfileDataError, add_profile_dir_args, profile_data_or_exit
 
 
 def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--profile", type=Path, default=REPO / "data" / "nissan-xterra-2008")
+    add_profile_dir_args(parser)
     parser.add_argument("--case", default="fuel-comp-restore-2026-10-04")
-    parser.add_argument(
-        "--sessions-root",
-        type=Path,
-        default=Path.home() / "canary-data" / "sessions" / "nissan-xterra-2008",
-    )
     parser.add_argument("--session", action="append", required=True, help="name or path")
     parser.add_argument(
         "--rom-dir",
@@ -88,14 +91,20 @@ def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _session_path(name: str, root: Path) -> Path:
+def _session_path(name: str, data: ProfileData) -> Path:
     as_path = Path(name)
-    return as_path if as_path.is_dir() else root / name
+    if as_path.is_dir():
+        return as_path
+    try:
+        return Path(data.require_sessions_root()) / name
+    except ProfileDataError as exc:
+        raise SystemExit(f"refused: {name} is not a directory, and {exc}") from exc
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse(argv)
-    profile = args.profile
+    data = profile_data_or_exit(args)
+    profile = data.directory
     declaration = load_fuel_comp_declaration(profile)
     registry = load_tune_revisions(profile / "tune_revisions.yaml")
     if registry is None:
@@ -121,7 +130,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     points: list[InputPoint] = []
     sessions: dict[str, str] = {}
     for name in args.session:
-        session = _session_path(name, args.sessions_root)
+        session = _session_path(name, data)
         long = read_channels(
             session, [case.load_input, declaration.inputs.rpm.channel], acquired_time=True
         )

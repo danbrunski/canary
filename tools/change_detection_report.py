@@ -20,6 +20,7 @@ is recording (AGENTS.md, "No analysis on the Pi while it collects").
 
 Usage:
   .venv/bin/python tools/change_detection_report.py \\
+      --profile nissan-xterra-2008 \\
       --sessions-dir ~/canary-data/sessions/nissan-xterra-2008 --candidate
 """
 
@@ -33,9 +34,13 @@ from collections.abc import Sequence
 from pathlib import Path
 
 try:
-    from _cli import load_scoped  # type: ignore[import-not-found]
+    from _cli import (  # type: ignore[import-not-found]
+        add_profile_dir_args,
+        profile_data_or_exit,
+        refusal_for_unscoped,
+    )
 except ImportError:  # loaded as `tools.change_detection_report`: repo root on path
-    from tools._cli import load_scoped
+    from tools._cli import add_profile_dir_args, profile_data_or_exit, refusal_for_unscoped
 
 from src.analysis.change_evaluation import (
     CHANGE_RESIDUALS_FILE,
@@ -53,7 +58,6 @@ from src.analysis.change_evaluation import (
 from src.evidence.ledger import MemoryLedger
 from src.evidence.records import VehicleIdentity
 from src.models.change_detection import blocks_of
-from src.paths import DATA_DIR
 from src.vehicle.tune_revisions import load_tune_revisions
 
 
@@ -61,8 +65,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--profile", default="nissan-xterra-2008")
-    parser.add_argument("--sessions-dir", type=Path, default=None)
+    add_profile_dir_args(
+        parser,
+        sessions_flag="--sessions-dir",
+        sessions_help="Directory holding the vehicle's session folders (default: --config's "
+        "storage path).",
+    )
     parser.add_argument("--from-fixture", type=Path, default=None, help="samples.csv + meta.json")
     parser.add_argument("--dump-fixture", type=Path, default=None)
     parser.add_argument("--residual", default="stft_bank_balance")
@@ -73,9 +81,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--candidate", action="store_true")
     parser.add_argument("--ledger", type=Path, default=None, help="Persistent memory ledger.")
-    parser.add_argument(
-        "--config", type=Path, default=None, help="canary.yaml: use its vehicle memory ledger."
-    )
     parser.add_argument("--json", action="store_true")
     return parser.parse_args(argv)
 
@@ -84,23 +89,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     import pandas as pd
 
-    profile_dir = DATA_DIR / args.profile
+    data = profile_data_or_exit(args)
+    profile_dir = data.directory
     residuals, residuals_sha = load_change_residuals(profile_dir / CHANGE_RESIDUALS_FILE)
     definition = residuals.residual(args.residual)
     if args.from_fixture is not None:
         frame = pd.read_csv(args.from_fixture / "samples.csv")
         meta = json.loads((args.from_fixture / "meta.json").read_text())
         sessions = samples_from_frame(frame, meta)
-    elif args.sessions_dir is not None:
+    elif data.sessions_root is not None:
         registry = load_tune_revisions(profile_dir / "tune_revisions.yaml")
         dirs = sorted(
             p
-            for p in Path(args.sessions_dir).expanduser().iterdir()
+            for p in data.sessions_root.iterdir()
             if p.is_dir() and not p.name.startswith("_archive") and any(p.glob("telemetry-*"))
         )
         sessions = [read_session_samples(d, definition, registry=registry) for d in dirs]
     else:
-        print("--sessions-dir or --from-fixture is required", file=sys.stderr)
+        print("--sessions-dir, --config or --from-fixture is required", file=sys.stderr)
         return 2
     calibration = args.calibration
     if calibration is None:
@@ -129,15 +135,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if prep.reference is None:
         print(json.dumps({"refusal": prep.refusal, "tuning": [vars(r) for r in prep.tuning]}))
         return 1
-    vehicle = VehicleIdentity(
-        profile=args.profile, vin=None, program_id=None, calibration=calibration
-    )
+    vehicle = VehicleIdentity(profile=data.slug, vin=None, program_id=None, calibration=calibration)
     if args.ledger is not None:
-        ledger = MemoryLedger(args.ledger, vehicle=args.profile)
-    elif args.config is not None:
+        ledger = MemoryLedger(args.ledger, vehicle=data.slug)
+    elif data.config is not None:
         from src.evidence.ledger import memory_ledger_for
 
-        ledger = memory_ledger_for(load_scoped(args, per_vehicle=True))
+        if data.config.scoped_profile is None:  # a per-vehicle ledger needs a vehicle
+            raise SystemExit(refusal_for_unscoped(args.config))
+        ledger = memory_ledger_for(data.config)
     else:
         print(
             json.dumps(
@@ -164,7 +170,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ]
             # A replay of the whole history must not inherit the test-run
             # alarms just minted: it gets its own scratch ledger.
-            replay_ledger = MemoryLedger(Path(scratch) / "replay.jsonl", vehicle=args.profile)
+            replay_ledger = MemoryLedger(Path(scratch) / "replay.jsonl", vehicle=data.slug)
             traces, candidate = replay_candidate(
                 ordered,
                 prep.reference,

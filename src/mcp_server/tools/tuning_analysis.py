@@ -20,12 +20,12 @@ from src.analysis.tuning_context import TuningContext
 from src.analysis.tuning_frame import build_tuning_frame, section_capabilities
 from src.config import CanaryConfig
 from src.storage.sessions import resolve_session
-from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
+from src.vehicle.profiles import scoped_config_for_tooling
 
 
 def _scoped(config_path: Path, profile: str | None) -> CanaryConfig:
-    config = CanaryConfig.from_yaml(config_path)
-    return scope_config(config, resolve_profile_for_tooling(config, profile))
+    """The config at ``config_path`` scoped as the scripts scope theirs (R30.3)."""
+    return scoped_config_for_tooling(CanaryConfig.from_yaml(config_path), profile)
 
 
 def _capability_payload(session_dir: Path, context: TuningContext) -> dict[str, Any] | None:

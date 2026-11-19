@@ -4,9 +4,11 @@ corpus breathing bound, and every plant stage's derived standing.
 
 Offline only: reads the profile and stored sessions, prints JSON, writes nothing.
 
-    .venv/bin/python -m tools.manifold_check study [--method fixed_step_euler|rk4]
-    .venv/bin/python -m tools.manifold_check breathing-bound [--sessions NAME ...]
-    .venv/bin/python -m tools.manifold_check standing [--fuel-plant-version fuel-mv-2]
+    .venv/bin/python -m tools.manifold_check --profile <slug> study [--method rk4]
+    .venv/bin/python -m tools.manifold_check --profile <slug> breathing-bound \\
+        [--sessions-root DIR] [--sessions NAME ...]
+    .venv/bin/python -m tools.manifold_check --profile <slug> standing \\
+        [--fuel-plant-version fuel-mv-2]
 
 ``study`` runs the contract's step-size refinement ladder at every
 applicability corner (``--method`` shows another method against the same
@@ -38,19 +40,25 @@ from src.analysis.engine_dynamics import (
 )
 from src.jsonable import jsonable
 
-REPO = Path(__file__).resolve().parents[1]
-DEFAULT_PROFILE = REPO / "data" / "nissan-xterra-2008"
-DEFAULT_SESSIONS = Path.home() / "canary-data" / "sessions" / "nissan-xterra-2008"
+try:
+    from _cli import add_profile_dir_args, profile_data_or_exit  # type: ignore[import-not-found]
+except ImportError:  # loaded as `tools.<name>`: repo root on path
+    from tools._cli import add_profile_dir_args, profile_data_or_exit
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
+    add_profile_dir_args(ap, sessions_flag=None)
     sub = ap.add_subparsers(dest="cmd", required=True)
     study = sub.add_parser("study")
     study.add_argument("--method", choices=("fixed_step_euler", "rk4"), default=None)
     bound = sub.add_parser("breathing-bound")
-    bound.add_argument("--sessions-root", type=Path, default=DEFAULT_SESSIONS)
+    bound.add_argument(
+        "--sessions-root",
+        type=Path,
+        default=None,
+        help="Directory holding this vehicle's session folders (default: --config's storage).",
+    )
     bound.add_argument("--sessions", nargs="*", default=None)
     standing = sub.add_parser("standing")
     standing.add_argument(
@@ -63,7 +71,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    contract, manifold, fuel = load_kit(args.profile)
+    data = profile_data_or_exit(args, need_sessions=args.cmd == "breathing-bound")
+    contract, manifold, fuel = load_kit(data.directory)
     out: dict[str, Any]
     if args.cmd == "study":
         out = convergence_study(contract, manifold, fuel, method=args.method).to_dict()
@@ -72,7 +81,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         frames = []
         missing = []
         for name in names:
-            path = args.sessions_root / name
+            path = data.require_sessions_root() / name
             if not path.is_dir():
                 missing.append(name)
                 continue
@@ -84,7 +93,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         out["missing_sessions"] = missing
     else:
         versions = {"fuel_delivery": args.fuel_plant_version} if args.fuel_plant_version else None
-        st = standings(contract, args.profile, versions=versions)
+        st = standings(contract, data.directory, versions=versions)
         out = {
             "standings": {
                 k: {

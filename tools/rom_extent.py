@@ -9,12 +9,15 @@ ECU. Plain images (an ECU read, a library download) and ``.OsirisROM`` files
 
 Usage::
 
-    .venv/bin/python -m tools.rom_extent IMAGE [IMAGE ...]
+    .venv/bin/python -m tools.rom_extent --config canary.yaml --profile <slug> IMAGE [IMAGE ...]
     .venv/bin/python -m tools.rom_extent --recipe data/<slug>/rom_backup.yaml IMAGE
-    .venv/bin/python -m tools.rom_extent --json IMAGE
+    .venv/bin/python -m tools.rom_extent --config canary.yaml --json IMAGE
 
-The recipe's ``extent`` section names the vector tables to read; the default is
-the N50 Xterra platform's. Exit status 0 when every file was read (whatever
+The recipe's ``extent`` section names the vector tables to read. ``--recipe``
+names a file; otherwise ``--profile`` (or ``--config``'s profile) finds the
+vehicle's ``rom_backup.yaml``, its own or its generation's platform one
+(``data/platforms/<id>/``, chosen by the config's make, model and year). There
+is no default vehicle. Exit status 0 when every file was read (whatever
 its verdict), 1 when a file could not be read, 2 when the recipe has no
 ``extent``.
 """
@@ -31,9 +34,17 @@ from typing import Any
 from src.analysis.osiris import SIGNATURE, Container
 from src.analysis.rom_extent import ExtentSpec, read_extent
 from src.control.rom_backup import load_backup_recipe
-from src.paths import PLATFORMS_DIR
 
-DEFAULT_RECIPE = PLATFORMS_DIR / "nissan-xterra-n50" / "rom_backup.yaml"
+try:
+    from _cli import (  # type: ignore[import-not-found]
+        ProfileDataError,
+        add_profile_dir_args,
+        load_profile_data,
+    )
+except ImportError:  # loaded as `tools.<name>`: repo root on path
+    from tools._cli import ProfileDataError, add_profile_dir_args, load_profile_data
+
+RECIPE_FILE = "rom_backup.yaml"
 
 
 def plain_image(data: bytes) -> bytes:
@@ -55,11 +66,13 @@ def read_file(path: Path, spec: ExtentSpec) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     parser.add_argument("images", nargs="+", type=Path, metavar="IMAGE")
+    add_profile_dir_args(parser, sessions_flag=None)
     parser.add_argument(
         "--recipe",
         type=Path,
-        default=DEFAULT_RECIPE,
-        help="a rom_backup.yaml with an extent section (default: the N50 Xterra platform's)",
+        default=None,
+        help="a rom_backup.yaml with an extent section (else the --profile vehicle's, "
+        "found through its platform)",
     )
     parser.add_argument("--json", action="store_true", help="one JSON object per file")
     return parser
@@ -67,9 +80,15 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    spec = load_backup_recipe(args.recipe, None).extent
+    recipe = args.recipe
+    if recipe is None:
+        try:
+            recipe = load_profile_data(args, require_directory=False).file(RECIPE_FILE)
+        except ProfileDataError as exc:
+            raise SystemExit(f"refused: {exc}") from exc
+    spec = load_backup_recipe(recipe, None).extent
     if spec is None:
-        print(f"{args.recipe} has no extent section: nothing names a vector table to read")
+        print(f"{recipe} has no extent section: nothing names a vector table to read")
         return 2
     status = 0
     for path in args.images:

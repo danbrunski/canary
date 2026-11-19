@@ -55,7 +55,6 @@ REPO = Path(__file__).resolve().parents[1]
 EXTENSION = "canary_ecu_twin"
 #: The committed real capture the stored twin's tuples come from (E02.3).
 GROUND_TRUTH = REPO / "tests" / "fixtures" / "ground_truth" / "target_phi.yaml"
-PROFILE = REPO / "data" / "nissan-xterra-2008"
 
 #: E04.3's proposed first-slice budget for the twin, per 1 Hz inference tick.
 BUDGET_P99_US = 1_000.0
@@ -185,12 +184,14 @@ def real_twin() -> tuple[Any, Any, str, Json, Json]:
     from src.yaml_load import load_yaml
 
     expect = load_yaml(GROUND_TRUTH.read_text())
-    definition, sha = load_twin_definition(PROFILE)
+    # The vehicle the capture was recorded on, named by the fixture (R30.4).
+    profile = REPO / "data" / expect["vehicle"]
+    definition, sha = load_twin_definition(profile)
     table = table_from_calibration(
-        load_afr_calibration(PROFILE / "afr_calibration.yaml"),
+        load_afr_calibration(profile / "afr_calibration.yaml"),
         definition,
-        viewer=load_viewer_definition(PROFILE),
-        application_model=load_application_model(PROFILE),
+        viewer=load_viewer_definition(profile),
+        application_model=load_application_model(profile),
         revision=expect["calibration"]["revision"],
         image_sha256=expect["calibration"]["image_sha256"],
         slot=expect["calibration"]["slot"],

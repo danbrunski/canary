@@ -20,7 +20,8 @@ fitted, published or written but ``--out``.
 
 Usage::
 
-    .venv/bin/python -m tools.timing_lookup_coverage \\
+    .venv/bin/python -m tools.timing_lookup_coverage --profile nissan-xterra-2008 \\
+        --sessions-root ~/canary-data/sessions/nissan-xterra-2008 \\
         --session _capture-rom-trace-2026-09-21T142926 \\
         --session _capture-ram-study-2026-10-04T204557 \\
         --image "/mnt/c/Users/thebo/Desktop/Uprev/Tuned ROMs/ZS44A-Tuned-20260920.OsirisROM" \\
@@ -65,21 +66,18 @@ from src.behavior.behavior_models import BehaviorModel2D, load_behavior_models
 from src.signals.pairing import PairingPolicy
 from src.vehicle.tune_revisions import load_tune_revisions
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PROFILE = REPO_ROOT / "data" / "nissan-xterra-2008"
+try:
+    from _cli import add_profile_dir_args, profile_data_or_exit  # type: ignore[import-not-found]
+except ImportError:  # loaded as `tools.<name>`: repo root on path
+    from tools._cli import add_profile_dir_args, profile_data_or_exit
 BARO = "obd:BAROMETRIC_PRESSURE"
 COOLANT = "obd:COOLANT_TEMP"
 
 
 def _args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument(
-        "--sessions-root",
-        type=Path,
-        default=Path.home() / "canary-data" / "sessions" / "nissan-xterra-2008",
-    )
+    add_profile_dir_args(parser)
     parser.add_argument("--session", action="append", required=True, help="session name(s)")
-    parser.add_argument("--profile-dir", type=Path, default=DEFAULT_PROFILE)
     parser.add_argument("--image", type=Path, action="append", default=[])
     parser.add_argument("--model", default="timing_advance_vs_rpm_load")
     parser.add_argument(
@@ -110,7 +108,9 @@ def _span(long: pd.DataFrame, spec: str) -> list[float] | None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _args(argv)
-    profile = args.profile_dir
+    data = profile_data_or_exit(args, need_sessions=True)
+    profile = data.directory
+    args.sessions_root = data.sessions_root
     definition, _sha = load_context_definition(profile)
     limit_ms = definition.timing_trim.max_acquisition_skew_s * 1000.0
     if args.pairing_ms > limit_ms:

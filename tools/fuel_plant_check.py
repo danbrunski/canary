@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """E07.3 fuel plant: the pulse-chain known answer, identification, held-out evaluation.
 
-Offline only: reads stored sessions, prints JSON.
+Offline only: reads stored sessions, prints JSON. Every command takes
+``--profile <slug>`` (the directory name under ``data/``; no default vehicle)
+and the sessions root as ``--sessions-root DIR`` or ``--config canary.yaml``
+(``tools._cli.add_profile_dir_args``), left out of the lines below.
 
     .venv/bin/python -m tools.fuel_plant_check chain --rom <plain image> [--sessions ...]
     .venv/bin/python -m tools.fuel_plant_check identify [--plant-version fuel-mv-2]
@@ -56,40 +59,43 @@ from src.analysis.fuel_plant_eval import (
 )
 from src.jsonable import jsonable
 
-REPO = Path(__file__).resolve().parents[1]
-DEFAULT_PROFILE = REPO / "data" / "nissan-xterra-2008"
-DEFAULT_SESSIONS = Path.home() / "canary-data" / "sessions" / "nissan-xterra-2008"
+try:
+    from _cli import add_profile_dir_args, profile_data_or_exit  # type: ignore[import-not-found]
+except ImportError:  # loaded as `tools.<name>`: repo root on path
+    from tools._cli import add_profile_dir_args, profile_data_or_exit
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["chain", "identify", "evaluate", "compare"])
-    parser.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
+    add_profile_dir_args(parser)
     parser.add_argument(
         "--plant-version",
         nargs="*",
         default=None,
         help="plant version(s) (default fuel_plant.yaml's); compare takes two or more",
     )
-    parser.add_argument("--sessions-root", type=Path, default=DEFAULT_SESSIONS)
-    parser.add_argument("--sessions", nargs="*", default=None)
+    parser.add_argument("--sessions", nargs="*", default=None, help="session names under the root")
     parser.add_argument("--rom", type=Path, default=None, help="plain image (chain only)")
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    data = profile_data_or_exit(args, need_sessions=True)
+    args.profile_dir = data.directory
+    args.sessions_root = data.sessions_root
     versions = args.plant_version or [None]
     if args.command == "compare":
         if len(versions) < 2:
             print("compare needs --plant-version A B [...]", file=sys.stderr)
             return 2
-        return _compare(args, [load_fuel_plant(args.profile, v)[0] for v in versions])
+        return _compare(args, [load_fuel_plant(args.profile_dir, v)[0] for v in versions])
     if len(versions) != 1:
         print(f"{args.command} takes one --plant-version", file=sys.stderr)
         return 2
-    profile, _sha = load_fuel_plant(args.profile, versions[0])
-    delay = load_b06(args.profile, profile.delay)
+    profile, _sha = load_fuel_plant(args.profile_dir, versions[0])
+    delay = load_b06(args.profile_dir, profile.delay)
     if args.command == "identify":
         names = profile.split.identification
     elif args.command == "evaluate":
@@ -111,9 +117,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = identify(frames, profile, delay, sessions_root=args.sessions_root)
     elif args.command == "evaluate":
         result = evaluate(
-            frames, profile, delay, sessions_root=args.sessions_root, profile_dir=args.profile
+            frames, profile, delay, sessions_root=args.sessions_root, profile_dir=args.profile_dir
         )
-        result["recorded"] = record_spent(args.profile, profile, result["spent_records"])
+        result["recorded"] = record_spent(args.profile_dir, profile, result["spent_records"])
     else:
         if args.rom is None:
             print("chain needs --rom <plain image>", file=sys.stderr)
@@ -143,7 +149,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _compare(args: argparse.Namespace, profiles: list[FuelPlantProfile]) -> int:
     """Per-sample comparison of frozen versions on in-sample and spent drives."""
-    delay = load_b06(args.profile, profiles[0].delay)
+    delay = load_b06(args.profile_dir, profiles[0].delay)
     names = args.sessions or list(
         dict.fromkeys(n for p in profiles for n in [*p.split.identification, *p.spent()])
     )

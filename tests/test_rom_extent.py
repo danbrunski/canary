@@ -266,12 +266,62 @@ def test_the_cli_reads_each_file_and_names_what_it_cannot(
     struct.pack_into(">IIII", image, 0x020004, 0x21000, STACK, 0x21000, STACK)
     good = tmp_path / "good.bin"
     good.write_bytes(bytes(image))
-    assert cli.main([str(good), "--json"]) == 0
+    assert cli.main(["--recipe", str(N50_RECIPE), str(good), "--json"]) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["verdict"] == "no_sign"
     assert result["sha256"] == hashlib.sha256(image).hexdigest()
-    assert cli.main([str(good), str(tmp_path / "missing.bin")]) == 1
+    assert cli.main(["--recipe", str(N50_RECIPE), str(good), str(tmp_path / "missing.bin")]) == 1
     captured = capsys.readouterr()
     assert "verdict no_sign: nothing points past 0x0FFFFF" in captured.out
     assert "missing.bin: could not read" in captured.err
     assert cli.main(["--recipe", str(_recipe(tmp_path, extent=False)), str(good)]) == 2
+
+
+def test_the_cli_finds_the_recipe_from_the_profile_through_its_platform(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """R30.4: no default vehicle. ``--profile`` plus ``--config`` (whose make, model
+    and year choose the platform) finds the N50 platform's recipe for a profile
+    with no ``rom_backup.yaml`` of its own; without either the tool refuses."""
+    from src.config import CanaryConfig
+    from src.vehicle.profiles import resolve_profile_for_tooling
+    from tests.configs import write_isolated_config
+
+    image = _image([0x400, STACK, 0x400, STACK], at=0, size=0x100000)
+    struct.pack_into(">IIII", image, 0x020004, 0x21000, STACK, 0x21000, STACK)
+    good = tmp_path / "good.bin"
+    good.write_bytes(bytes(image))
+    config = write_isolated_config(tmp_path, "example")
+    flags = ["--config", str(config), "--profile", "nissan-xterra-2008"]
+    assert cli.main([*flags, "--json", str(good)]) == 0
+    assert json.loads(capsys.readouterr().out)["verdict"] == "no_sign"
+    with pytest.raises(SystemExit, match=r"^refused: --profile SLUG is required"):
+        cli.main([str(good)])
+    with pytest.raises(SystemExit, match=r"^refused: --profile takes a slug, not a path"):
+        cli.main(["--profile", "data/nissan-xterra-2008", str(good)])
+    # A typo'd slug must not fall through to the platform's recipe, which would
+    # hide a vehicle's own override: the config's own vehicle is the only slug
+    # accepted without a directory.
+    own = resolve_profile_for_tooling(CanaryConfig.from_yaml(config), None).slug
+    with pytest.raises(
+        SystemExit, match=rf"^refused: no profile directory .* --profile nope .*\({own}\)"
+    ):
+        cli.main(["--config", str(config), "--profile", "nope", str(good)])
+    assert (
+        cli.main(
+            [
+                "--config",
+                str(config),
+                "--profile",
+                own,
+                "--data-dir",
+                str(tmp_path / "none"),
+                "--json",
+                str(good),
+            ]
+        )
+        == 0
+    )
+    # A slug with no directory and no --config has no platform to ask.
+    with pytest.raises(SystemExit, match=r"^refused: .*only with --config"):
+        cli.main(["--profile", "nissan-xterra-2013", str(good)])

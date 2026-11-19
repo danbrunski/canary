@@ -99,7 +99,7 @@ they started.
     re-imported); `ruff check .`, `ruff format --check .`, bare `mypy`
     ("no issues found in 1444 source files"). `grep` for `from tests.test_`
     outside strings finds nothing.
-- [~] **R30.3 "Scope the config to the tooling profile" is spelled at about
+- [x] **R30.3 "Scope the config to the tooling profile" is spelled at about
   25 call sites.** `scripts/_cli.py` has `scoped_config` and
   `load_scoped_config`. `scripts/catalog.py`, `fingerprint.py` and
   `trip_report.py` carry identical `_scoped_config` copies;
@@ -142,8 +142,8 @@ they started.
     `src/features/feature_policy.py` (training/evaluation tooling, not daemon
     paths). Left on `scope_config` on purpose: `src/main.py` (the daemon,
     scoping with the profile the VIN probe resolved),
-    `src/mcp_server/tools/behavior.py` and `tuning_analysis.py` (the MCP
-    service; `tuning_analysis._scoped` is unguarded too),
+    ~~`src/mcp_server/tools/behavior.py` and `tuning_analysis.py`~~ (moved
+    onto the function 2026-11-16, below),
     `src/validation/harness.py` (`harness_config` builds the config
     `run_daemon` runs on, scoped "like the daemon") and
     `scripts/migrate_to_profiles.py` (plans the move to one named profile, the
@@ -168,10 +168,10 @@ they started.
     which finds every `tools/*.py` that calls `memory_ledger_for` and fails if
     any `load_scoped` call there omits `per_vehicle=True` (fails on
     `mint_comparison` with the flag removed). `record()`'s assert stays as an
-    internal invariant; the CLI refuses before reaching it. Also new: on a profiles-disabled config
-    `scripts/analyze_session.py` reads base paths while its MCP twin
-    (`mcp_server/tools/behavior.py`, and `tuning_analysis._scoped`) still
-    nests under the default slug.
+    internal invariant; the CLI refuses before reaching it. Also found: on a profiles-disabled config
+    `scripts/analyze_session.py` read base paths while its MCP twin
+    (`mcp_server/tools/behavior.py`, and `tuning_analysis._scoped`) nested
+    under the default slug; fixed by the last sub-item below (2026-11-16).
     Guard:
     `tests/test_source_rules.py` row `tooling-scopes-its-own-config` (no
     `scope_config(` in `scripts/` or `tools/`, `.py` by AST and `.sh` by line;
@@ -181,9 +181,31 @@ they started.
     `::test_a_profiles_disabled_config_is_left_alone`,
     `::test_the_scripts_scope_through_the_same_function`;
     `test_tire_wear.py` now stubs `scoped_config_for_tooling` in the backfill.
-  - [ ] Move the two MCP `_scoped` paths (`mcp_server/tools/behavior.py`,
+  - [x] Move the two MCP `_scoped` paths (`mcp_server/tools/behavior.py`,
     `tuning_analysis.py`) onto `scoped_config_for_tooling` so the MCP tools and
     their script twins scope alike. Found verifying R30.3, 2026-11-15.
+    **Done 2026-11-16.** Same semantics as the twins, checked before replacing:
+    both MCP tools take a config *file* path (`CanaryConfig.from_yaml(config_path)`)
+    exactly as `scripts/analyze_session.py` / `tuning_report` load theirs, and
+    both resolved the profile through `resolve_profile_for_tooling(config, None |
+    profile)`, so they agree with `scoped_config_for_tooling` on a profiles-enabled
+    config. The one difference was the `profiles.enabled` guard: on a
+    profiles-disabled config `scope_config` nested the session root under the
+    default slug (`<storage>/nissan-xterra-2008`, measured) where the script reads
+    `<storage>`. No different input is needed: the daemon's live config is not
+    involved, these are the local read tools. `behavior.get_behavior_deviations`
+    scopes with `scoped_config_for_tooling(CanaryConfig.from_yaml(path), None)`;
+    `tuning_analysis._scoped(path, profile)` (used by `get_delivery_error` and
+    `compare_tuning_sessions`) is now a one-line wrapper over it. Behavior change:
+    a profiles-disabled config now reads its base session root from the MCP
+    tools too (it read a directory nothing writes). Guard: the
+    `tooling-scopes-its-own-config` row of `tests/test_source_rules.py` now also
+    covers `src/mcp_server/tools`. Pinned by
+    `tests/test_tooling_config_scope.py::test_the_mcp_read_tools_scope_as_their_script_twins_do[enabled|disabled]`
+    (stubs each tool's `resolve_session`, compares the session root it is handed
+    with `scripts._cli.scoped_config`; the `disabled` case fails on `scope_config`)
+    and `::test_the_mcp_tuning_tools_take_a_profile_slug_as_the_scripts_do`.
+    That was the last open R30.3 sub-item: R30.3 is ticked below.
   - [x] A pandas-free `tools/_cli.py` with `add_config_profile_args` and
     `load_scoped`.
     **Done 2026-11-15.** `tools/_cli.py` imports `src.config` and
@@ -195,9 +217,8 @@ they started.
     `add_config_profile_args` (`check_manifest_producibility`,
     `inventory_behavior_artifacts`, `mint_comparison`, `record_command_change`,
     `memory`, `investigate_delivery`, `migrate_channel_names`, whose config is
-    optional and whose help is its own); `change_detection_report` keeps its
-    own pair (its `--profile` defaults to the Xterra slug: R30.4's to remove)
-    and scopes through `load_scoped`. The `sys.path.insert(0, str(REPO_ROOT))`
+    optional and whose help is its own); `change_detection_report` kept its
+    own pair until R30.4 moved it onto `add_profile_dir_args`. The `sys.path.insert(0, str(REPO_ROOT))`
     in `main()` is gone from nine tools (the seven above plus
     `make_investigation_cases` and `audit_artifact_lineage`, which import
     `src` only, installed editable) and from `change_detection_report`'s module
@@ -236,7 +257,7 @@ they started.
     `test_bus_tool.py` (all three pass unchanged), and
     `tests/test_tooling_config_scope.py`.
 
-- [ ] **R30.4 `--profile` means a slug in some tools and a directory in
+- [x] **R30.4 `--profile` means a slug in some tools and a directory in
   others, and ten tools default to the Xterra and one operator's home.**
   Slug: `_cli.add_profile_arg`, `tools/memory`, `mint_comparison`,
   `investigate_delivery` and five more. Directory path:
@@ -247,10 +268,124 @@ they started.
   `Path.home()/"canary-data"/"sessions"/"nissan-xterra-2008"`. `AGENTS.md`:
   "Don't bake Xterra-isms into shared code paths". A second Pi on a 2013
   Xterra exists.
-  - [ ] One `add_profile_dir_args` that takes a slug, resolves `data/<slug>`
+  - [x] One `add_profile_dir_args` that takes a slug, resolves `data/<slug>`
     through `vehicle_data_file` (so platform files are found), and takes the
     sessions root from the config or `--sessions`. No default slug.
-  - Regenerate the CLI snapshot on purpose.
+    **Done 2026-11-16.** `tools/_cli.py` (still pandas-free) has
+    `add_profile_dir_args(parser, sessions_flag="--sessions-root" | None)`,
+    `load_profile_data(args) -> ProfileData` (`slug`, `directory`,
+    `sessions_root`, `config`, `.file(name)`, `.require_sessions_root()`) and
+    `profile_data_or_exit(args, need_sessions=)`. Flags: `--profile SLUG`,
+    `--config`, the sessions flag, `--data-dir` (where `<slug>/` directories
+    live; default the checkout's `data/`, there for a synthetic profile in a
+    test). `--profile` wins, else the scoped `--config`'s profile, else the
+    refusal `refused: --profile SLUG is required (the directory name under
+    data/); there is no default vehicle ...`, one line, exit 1. A value with a
+    separator is refused by name (`--profile takes a slug, not a path (got
+    'data/nissan-xterra-2008'); use ... --profile nissan-xterra-2008`), so a
+    stale invocation says what to write; an unknown slug is `no profile
+    directory <path> for --profile <slug>`. Sessions root: the sessions flag,
+    else the scoped `--config`'s `collection.storage_path`, else
+    `require_sessions_root()` refuses naming `--sessions-root` and `--config`.
+    `ProfileData.file(name)` is `vehicle_data_file` through the config's make,
+    model and year (a profile's own file wins; a platform file is refused
+    without `--config`, naming that). The tools' library loaders
+    (`load_fuel_plant`, `load_kit`, ...) still take the directory, so none of
+    them yet reads a platform file; `.file` is there for the first that
+    needs one. Converted (flags are `--profile SLUG --config --sessions-root
+    --data-dir`): `fuel_plant_check`, `manifold_check` (flags before the
+    subcommand; `--sessions-root` stays on `breathing-bound`), `plant_validation`,
+    `fuel_comp_samples`, `fuel_comp_restore_reproduction` (sessions may be paths,
+    so the root is needed only for a bare name), `fuel_comp_fit`,
+    `timing_lookup_coverage` (its `--profile-dir` is now `--profile`),
+    `change_detection_report` (own `--profile`/`--config`/`--sessions-dir` pair
+    replaced; `--sessions-dir` is the sessions flag), `rom_sim` (a slug, not a
+    directory: no documented procedure used the directory form; `design drives`
+    takes `--sessions-root`/`--config` for a bare session name). Made
+    required: `audit_artifact_lineage --profile`, `scripts/timing_compare.py
+    --sessions-root` (a refusal when `--*-sessions` are given without it).
+    `bench_ecu_twin` has no vehicle flag: its profile belongs to the committed
+    ground-truth capture it replays, so `tests/fixtures/ground_truth/target_phi.yaml`
+    now states `vehicle: nissan-xterra-2008` and the tool reads it there.
+    Pinned by `tests/test_tooling_config_scope.py`:
+    `::test_the_profile_flags_have_no_default_vehicle`,
+    `::test_a_missing_profile_refuses_in_one_line`,
+    `::test_a_profile_path_is_refused_by_name_not_looked_up`,
+    `::test_a_slug_resolves_under_the_data_dir_and_an_unknown_one_refuses`,
+    `::test_the_config_gives_the_profile_and_the_sessions_root`,
+    `::test_a_profiles_disabled_config_cannot_name_the_profile`,
+    `::test_a_platform_file_is_found_through_the_configs_vehicle`,
+    `::test_a_vehicle_data_tool_refuses_without_a_profile_and_takes_no_path[x8]`
+    (every converted tool but `rom_sim`), `::test_rom_sim_refuses_a_missing_profile_by_name`,
+    `::test_a_drive_design_needs_a_sessions_root_only_for_a_bare_session_name`;
+    the seven new tools join `SCOPING_TOOLS` (run as files, no `sys.path` edit
+    in a function). Tests of the converted tools pass `--profile` explicitly:
+    `tests/sim_builders.profile_flags` (a synthetic profile is its directory
+    name plus `--data-dir <parent>`), `REAL_PROFILE` in `test_rom_sim_cli.py`
+    (the committed Xterra slice), `test_change_evaluation.py`,
+    `test_timing_lookup.py`, `test_rom_sim_private_rom.py`, `test_twin_runner.py` (the slow `fuel_plant_check identify` check, passed). Not converted, on
+    purpose, with the reason in each place: `scripts/canary_desk.py`
+    (`DEFAULT_PROFILE`, `DEFAULT_STATE_DIR=~/canary-data/desk`: the desk app's
+    own default vehicle and state, a product decision) and
+    `scripts/e06_pi_bench.sh` (`E06_SESSION` names the October-4 capture the
+    E06 trial replays, on the Pi).
+  - [x] Regenerate the CLI snapshot on purpose.
+    **Done 2026-11-16.** `CANARY_UPDATE_CLI_SNAPSHOT=1 .venv/bin/python -m
+    pytest -n0 tests/test_script_cli_snapshot.py`; the snapshot covers
+    `scripts/` only, so the diff is one line: `timing_compare.py
+    --sessions-root` default `"/data/canary/sessions/nissan-xterra-2008"` ->
+    `null`. (The `tools/` CLIs are not snapshotted.)
+  - [x] A guard: `tests/test_source_rules.py` row `tooling-defaults-no-vehicle`
+    refuses, in `scripts/` and `tools/` `.py`, a default naming a vehicle
+    slug (a `data/*/` with an `afr_calibration.yaml`), a platform id
+    (`data/platforms/*/`) or `canary-data`, in these forms: argparse `default=`
+    and `set_defaults(...)`, a function parameter or keyword-only default, a
+    class-body (dataclass) field, a plain or annotated `DEFAULT_*` / `PROFILE*` /
+    `SESSION*` assignment, and any module constant holding such a value when it
+    is used as one of those. Pinned by `::test_the_vehicle_default_rule_catches_every_form`
+    (11 forms, each with a clean twin) beside the row's own bad/good pair.
+    Known blind spots, in `_vehicle_default`'s docstring and the rule's `why`: string
+    concatenation or an f-string over the slug's parts, an `os.environ` fallback,
+    and `.sh` files (`e06_pi_bench.sh`). One allowlisted file:
+    `scripts/canary_desk.py` (4 hits: the two constants and the two argparse
+    defaults spelled through them).
+  - [x] Verifier follow-up, 2026-11-17. `tools/audit_artifact_lineage.py` took
+    `--profile nope` and `--profile data/nissan-xterra-2008` and exited 0 with a
+    report (`discover()` builds `<repo>/data/<slug>` unchecked); it now runs the
+    slug through `load_profile_data` (data dir `<--repo>/data`) and refuses in one
+    `refused:` line, exit 1, and joins
+    `::test_a_vehicle_data_tool_refuses_without_a_profile_and_takes_no_path`
+    (`--profile` is no longer argparse-required, so a missing one is the same
+    one-line refusal). Two more live Xterra defaults:
+    - `tools/rom_extent.py` `DEFAULT_RECIPE = PLATFORMS_DIR/"nissan-xterra-n50"/...`
+      is gone. `--recipe PATH` still names a file; otherwise `--profile` / `--config`
+      (`add_profile_dir_args`, no sessions flag) find `rom_backup.yaml` through
+      `ProfileData.file` (the profile's own, else its platform's by the config's make,
+      model and year). `load_profile_data` / `profile_data_or_exit` gained
+      `require_directory=False` for it: a vehicle of a covered generation need not
+      have a `data/<slug>/`, but only for the vehicle the config itself describes
+      (`resolve_profile_for_tooling(config, None).slug`): any other slug with no
+      directory refuses (`no profile directory <path> and --profile <slug> is not the
+      config's vehicle (<own>)`), so a typo cannot fall through to the platform's
+      recipe and hide a vehicle's own override. Without `--recipe` and `--config` it
+      refuses naming `--config`. Verified with `canary.dev.example.yaml --profile nissan-xterra-2008`.
+      Pinned by `tests/test_rom_extent.py::test_the_cli_finds_the_recipe_from_the_profile_through_its_platform`;
+      the three existing CLI calls pass `--recipe`.
+    - `tools/emit_dbc.py` `--out` is required (was `data/dbc/xterra_2008.dbc`). Not
+      derived from a profile: its input `data/bindings.yaml` is repo-wide, not per
+      vehicle, so no profile or config names the output. The shipped file is named in
+      the help and the usage lines; the documented regeneration is now
+      `tools/emit_dbc.py --out data/dbc/xterra_2008.dbc` (docstring updated; no other
+      doc or `.claude` file invokes it).
+    The widened rule did not flag `emit_dbc` (`xterra_2008` is not a slug string);
+    `rom_extent` is covered by the new platform-id form.
+  - [x] Operator decision: whether `scripts/canary_desk.py` should lose its
+    Xterra default profile and `~/canary-data/desk` state dir, and whether
+    `scripts/e06_pi_bench.sh` should take its session through a required env var.
+    **Decided 2026-11-16: keep both.** The desk is an app with its own state,
+    and requiring the flags would break a fresh desk start (its allowlist row
+    in `tooling-defaults-no-vehicle` stays); `E06_SESSION` names the fixed
+    capture the E06 trial replays.
 
 - [x] **R30.5 `tools/rom_sim.py` runs a second copy of the ROM-edit
   simulation.** 1,080 lines: `_World`, `_template`, `_compare`, `_trace`,

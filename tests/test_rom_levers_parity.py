@@ -129,7 +129,9 @@ def _inspect(
         [
             "inspect",
             "--profile",
-            str(world["profile"]),
+            world["profile"].name,
+            "--data-dir",
+            str(world["profile"].parent),
             *map(str, selector),
             "--rom",
             str(world["root"] / "base.bin"),

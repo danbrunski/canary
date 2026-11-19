@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """E07.4: the plant's channel inventory and the intervention test, offline.
 
-    .venv/bin/python -m tools.plant_validation inventory [--sessions-root DIR]
-    .venv/bin/python -m tools.plant_validation case [--case fuel-comp-restore-2026-10-04]
+    .venv/bin/python -m tools.plant_validation inventory --profile <slug> [--sessions-root DIR]
+    .venv/bin/python -m tools.plant_validation case --profile <slug> --sessions-root DIR \\
+        [--case fuel-comp-restore-2026-10-04]
 
 ``inventory`` lists every recording under the sessions root with each plant
 need's read count and acquisition clock (median/p90 interval of the per-read
@@ -18,7 +19,6 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Any
 
 from src.analysis.fuel_plant import load_b06, load_fuel_plant
@@ -34,29 +34,32 @@ from src.analysis.plant_validation import (
 from src.jsonable import jsonable
 from src.vehicle.tune_revisions import load_tune_revisions
 
-REPO = Path(__file__).resolve().parents[1]
-DEFAULT_PROFILE = REPO / "data" / "nissan-xterra-2008"
-DEFAULT_SESSIONS = Path.home() / "canary-data" / "sessions" / "nissan-xterra-2008"
+try:
+    from _cli import add_profile_dir_args, profile_data_or_exit  # type: ignore[import-not-found]
+except ImportError:  # loaded as `tools.<name>`: repo root on path
+    from tools._cli import add_profile_dir_args, profile_data_or_exit
 DEFAULT_CASE = "fuel-comp-restore-2026-10-04"
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["inventory", "case"])
-    parser.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
-    parser.add_argument("--sessions-root", type=Path, default=DEFAULT_SESSIONS)
+    add_profile_dir_args(parser)
     parser.add_argument("--case", default=DEFAULT_CASE)
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    profile, _ = load_fuel_plant(args.profile)
-    registry = load_tune_revisions(args.profile / "tune_revisions.yaml")
+    data = profile_data_or_exit(args, need_sessions=True)
+    args.profile_dir = data.directory
+    args.sessions_root = data.sessions_root
+    profile, _ = load_fuel_plant(args.profile_dir)
+    registry = load_tune_revisions(args.profile_dir / "tune_revisions.yaml")
     if registry is None:
         print("no tune_revisions.yaml for this profile", file=sys.stderr)
         return 2
-    case = load_interventions(args.profile).case(args.case)
+    case = load_interventions(args.profile_dir).case(args.case)
     result: dict[str, Any]
     if args.command == "inventory":
         rows = [
@@ -78,7 +81,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "per_session": rows,
         }
     else:
-        delay = load_b06(args.profile, profile.delay)
+        delay = load_b06(args.profile_dir, profile.delay)
         boundary = resolve_boundary(case, registry)
         names = [*case.split.pre, *case.split.post]
         frames = [build_case_samples(args.sessions_root / n, profile, delay, case) for n in names]

@@ -53,7 +53,14 @@ from src.analysis.sim_design import load_design, write_design
 from src.decode.air_charge import TP_SCALE, TP_SCALE_SHIFT
 from src.yaml_load import load_yaml
 from tests.rom_fixtures import PROFILE
-from tests.sim_builders import LEARNED, WOT, build_kit_and_image, paired_edit_all, paired_scenario
+from tests.sim_builders import (
+    LEARNED,
+    WOT,
+    build_kit_and_image,
+    paired_edit_all,
+    paired_scenario,
+    profile_flags,
+)
 from tools import rom_sim
 
 BASE = "SYNTH-base"
@@ -164,7 +171,7 @@ def _spec(world: dict[str, Any], name: str, revision: str, edits: list[dict[str,
 
 def _grid(world: dict[str, Any], revision: str, out: Path) -> Path:
     code, payload = _cli(
-        "design", "grid", "--profile", world["profile"], "--base-revision", revision,
+        "design", "grid", *profile_flags(world["profile"]), "--base-revision", revision,
         "--rpm-edges", *GRID_RPM, "--load-edges", *GRID_LOAD, *ENVIRONMENT, "--out", out,
     )  # fmt: skip
     assert code == 0, payload
@@ -182,7 +189,7 @@ def _run(
     seed: int = 7,
 ) -> tuple[dict[str, Any], pd.DataFrame]:
     code, payload = _cli(
-        "run", "--profile", world["profile"], "--base", "--rom", world["files"][revision],
+        "run", *profile_flags(world["profile"]), "--base", "--rom", world["files"][revision],
         "--sha256", _sha(world, revision), *candidate, "--design", design,
         "--draws", str(draws), "--seed", str(seed), *E076_LEARNED, "--out", out,
     )  # fmt: skip
@@ -265,7 +272,7 @@ def test_the_spec_route_cannot_express_an_identical_candidate(
         [{"table": "fuel_compensation", "slot": 1, "cells": [[4, 4]], "set_raw": 128}],
     )
     code, payload = _cli(
-        "run", "--profile", world["profile"], "--edits", spec, "--design", grid_design,
+        "run", *profile_flags(world["profile"]), "--edits", spec, "--design", grid_design,
         "--draws", "2", "--seed", "1", *E076_LEARNED, "--out", tmp_path / "noop",
     )  # fmt: skip
     assert (code, payload["refused"]) == (2, "no_op_edit")

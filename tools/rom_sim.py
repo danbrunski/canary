@@ -24,11 +24,14 @@ Subcommands::
 
 Usage::
 
-    .venv/bin/python -m tools.rom_sim design drives --base-revision ZS44A-20260920 \\
-        --sessions _capture-tuning-2026-09-23T142926 \\
+    .venv/bin/python -m tools.rom_sim design drives --profile nissan-xterra-2008 \\
+        --base-revision ZS44A-20260920 --sessions _capture-tuning-2026-09-23T142926 \\
+        --sessions-root ~/canary-data/sessions/nissan-xterra-2008 \\
         --battery-v-when-unmeasured 14.0 --rom-dir "<ROM dir>" --out <scratch>/designs
-    .venv/bin/python -m tools.rom_sim inspect --edits spec.yaml --rom-dir "<ROM dir>"
-    .venv/bin/python -m tools.rom_sim run --base --revision ZS44A-20260920 \\
+    .venv/bin/python -m tools.rom_sim inspect --profile nissan-xterra-2008 --edits spec.yaml \\
+        --rom-dir "<ROM dir>"
+    .venv/bin/python -m tools.rom_sim run --profile nissan-xterra-2008 --base \\
+        --revision ZS44A-20260920 \\
         --candidate-rom <edited.OsirisROM> --design <scratch>/designs/<sha> \\
         --draws 200 --seed 1 --stft-pct 0 --ltft-pct 0 --candidate-events ecu_reflash \\
         --rom-dir "<ROM dir>" --out <scratch>/run
@@ -113,6 +116,16 @@ from src.analysis.sim_report import TOOL_VERSION as REPORT_TOOL_VERSION
 from src.analysis.sim_report import render_report
 from src.paths import REPO_ROOT
 
+try:
+    from _cli import (  # type: ignore[import-not-found]
+        ProfileData,
+        ProfileDataError,
+        add_profile_dir_args,
+        load_profile_data,
+    )
+except ImportError:  # loaded as `tools.<name>`: repo root on path
+    from tools._cli import ProfileData, ProfileDataError, add_profile_dir_args, load_profile_data
+
 TOOL = "rom_sim"
 #: Bump when the result file's shape or meaning changes. 2: runs the
 #: simulator's declared plant (sim_kit.yaml, fuel-mv-2) by default, with that
@@ -123,9 +136,6 @@ TOOL = "rom_sim"
 #: tables give a timing change, a range across the swept 0xFFFF1B24), 279A
 #: held only where justified, fallback with HI DET clear refused (E09.7 part B).
 TOOL_VERSION = "4"
-
-DEFAULT_PROFILE = REPO_ROOT / "data" / "nissan-xterra-2008"
-DEFAULT_SESSIONS = Path.home() / "canary-data" / "sessions" / "nissan-xterra-2008"
 
 RESULT_JSON = "result.json"
 TRACES_PARQUET = "traces.parquet"
@@ -202,11 +212,17 @@ def _out_dir(out: Path | None, rom_dirs: Sequence[Path] = ()) -> Path:
     return resolved
 
 
+def _data(args: argparse.Namespace) -> ProfileData:
+    """The vehicle ``--profile`` (a slug) names: its ``data/<slug>/`` directory, and
+    the sessions root when ``--sessions-root`` or ``--config`` gave one (R30.4)."""
+    try:
+        return load_profile_data(args)
+    except ProfileDataError as exc:
+        raise CliRefusalError("profile_not_found", str(exc)) from exc
+
+
 def _profile(args: argparse.Namespace) -> Path:
-    profile = Path(args.profile).expanduser()
-    if not profile.is_dir():
-        raise CliRefusalError("profile_not_found", f"{profile} is not a vehicle profile directory")
-    return profile
+    return Path(_data(args).directory)
 
 
 def _rom_dirs(args: argparse.Namespace) -> list[Path]:
@@ -220,22 +236,29 @@ def _all_rom_dirs(args: argparse.Namespace) -> list[Path]:
     return [*flagged, *rom_dirs_from_env()]
 
 
-def _session_path(name: str, root: Path) -> Path:
-    """A path (absolute, or with a separator) is itself; a bare name is under ``root``."""
+def _session_path(name: str, data: ProfileData) -> Path:
+    """A path (absolute, or with a separator) is itself; a bare name is under the
+    sessions root (``--sessions-root``, else ``--config``'s storage path)."""
     as_path = Path(name).expanduser()
-    return as_path if as_path.is_absolute() or len(as_path.parts) > 1 else root / name
+    if as_path.is_absolute() or len(as_path.parts) > 1:
+        return as_path
+    try:
+        return Path(data.require_sessions_root()) / name
+    except ProfileDataError as exc:
+        raise CliRefusalError(
+            "sessions_root_unstated", f"{name} is a bare session name: {exc}"
+        ) from exc
 
 
 def _json(payload: Mapping[str, Any]) -> str:
     return json.dumps(payload, indent=2, sort_keys=True, default=str, allow_nan=False)
 
 
-def _add_common(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--profile",
-        type=Path,
-        default=DEFAULT_PROFILE,
-        help="vehicle profile directory (default: the Xterra's, data/nissan-xterra-2008)",
+def _add_common(parser: argparse.ArgumentParser, *, sessions: bool = False) -> None:
+    add_profile_dir_args(
+        parser,
+        sessions_flag="--sessions-root" if sessions else None,
+        sessions_help="where bare session names are found (default: --config's storage path)",
     )
     parser.add_argument(
         "--rom-dir",
@@ -363,10 +386,10 @@ def _design_payload(command: str, design: SimDesign, directory: Path) -> dict[st
 def cmd_design_drives(args: argparse.Namespace) -> dict[str, Any]:
     _need(args, "base_revision", "sessions", "out")
     out = _out_dir(args.out, _all_rom_dirs(args))
-    root = Path(args.sessions_root).expanduser()
+    data = _data(args)
     design = build_drive_design(
-        [_session_path(name, root) for name in args.sessions],
-        _profile(args),
+        [_session_path(name, data) for name in args.sessions],
+        data.directory,
         args.base_revision,
         rom_dirs=_rom_dirs(args),
         plant_version=args.plant_version,
@@ -797,18 +820,12 @@ def _parser() -> argparse.ArgumentParser:
         description="Warm steady reads from drives recorded on --base-revision become design "
         "points, weighted by dwell time. Writes <out>/<sha256>/design.json + design.parquet.",
     )
-    _add_common(drives)
+    _add_common(drives, sessions=True)
     drives.add_argument("--base-revision", help="the tune_revisions.yaml revision (required)")
     drives.add_argument(
         "--sessions",
         nargs="+",
         help="session names under --sessions-root, or paths with a separator (required)",
-    )
-    drives.add_argument(
-        "--sessions-root",
-        type=Path,
-        default=DEFAULT_SESSIONS,
-        help="where bare session names are found (default: the laptop's ~/canary-data copy)",
     )
     drives.add_argument(
         "--battery-v-when-unmeasured",

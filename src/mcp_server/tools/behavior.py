@@ -10,7 +10,7 @@ from src.behavior.behavior_models import load_behavior_models
 from src.config import CanaryConfig
 from src.mcp_server.client import DaemonClient
 from src.storage.sessions import resolve_session
-from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
+from src.vehicle.profiles import scoped_config_for_tooling
 
 
 async def get_behavior_live(
@@ -80,9 +80,7 @@ def get_behavior_deviations(
     behavior_models.yaml rather than raising, matching ``query_telemetry``'s
     validation-error convention.
     """
-    config = CanaryConfig.from_yaml(config_path)
-    profile = resolve_profile_for_tooling(config, None)
-    scoped = scope_config(config, profile)
+    scoped = scoped_config_for_tooling(CanaryConfig.from_yaml(config_path), None)
 
     try:
         session_dir = resolve_session(scoped.collection.storage_path, session)

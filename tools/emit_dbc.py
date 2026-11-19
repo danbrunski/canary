@@ -11,9 +11,9 @@ DBC still loads and shows the byte field. Confidence is written into each
 signal's comment so a DBC consumer can see how trustworthy it is.
 
 Usage:
-  tools/emit_dbc.py
+  tools/emit_dbc.py --out data/dbc/xterra_2008.dbc
   tools/emit_dbc.py --bindings data/bindings.yaml --out data/dbc/xterra_2008.dbc
-  tools/emit_dbc.py --min-confidence high
+  tools/emit_dbc.py --out /tmp/high.dbc --min-confidence high
 """
 
 from __future__ import annotations
@@ -120,7 +120,13 @@ def build_database(bindings_path: Path, min_rank: int = 0) -> Database:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="emit_dbc", description="bindings.yaml → draft DBC.")
     p.add_argument("--bindings", type=Path, default=BINDINGS_YAML)
-    p.add_argument("--out", type=Path, default=Path("data/dbc/xterra_2008.dbc"))
+    p.add_argument(
+        "--out",
+        type=Path,
+        required=True,
+        help="DBC file to write (the shipped one is data/dbc/xterra_2008.dbc; no default "
+        "file, so a run never overwrites one vehicle's DBC by omission).",
+    )
     p.add_argument(
         "--min-confidence",
         choices=list(_CONF_RANK),

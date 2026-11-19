@@ -331,6 +331,88 @@ def _scope_config_call(rel: str, text: str) -> list[Hit]:
     return sorted(hits)
 
 
+#: The slugs a tool must never default to: the directories under ``data/`` that are
+#: vehicle profiles (they hold the vehicle's AFR calibration), and the platform
+#: ids under ``data/platforms/`` (a generation, e.g. ``nissan-xterra-n50``).
+def _vehicle_slugs() -> frozenset[str]:
+    data = REPO_ROOT / "data"
+    profiles = {d.name for d in data.iterdir() if (d / "afr_calibration.yaml").is_file()}
+    platforms = {d.name for d in (data / "platforms").iterdir() if d.is_dir()}
+    return frozenset(profiles | platforms)
+
+
+_DEFAULT_NAME = re.compile(r"^(DEFAULT|PROFILE|SESSION)", re.IGNORECASE)
+
+
+def _names_a_vehicle(node: ast.AST, constants: frozenset[str] = frozenset()) -> str | None:
+    """The first string constant under ``node`` that is a vehicle slug or reads from
+    the operator's ``canary-data`` home, or a module constant (``constants``) that
+    holds one: ``default=DEFAULT_PROFILE`` is as much a default as the literal."""
+    slugs = _vehicle_slugs()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and child.id in constants:
+            return child.id
+        if isinstance(child, ast.Constant) and isinstance(child.value, str):
+            value = child.value
+            if "canary-data" in value or any(slug in value for slug in slugs):
+                return value
+    return None
+
+
+def _vehicle_default(rel: str, text: str) -> list[Hit]:
+    """A tool or script's default naming a vehicle slug, a platform id or the
+    operator's ``canary-data`` directory (R30.4), in any of these forms: an
+    argparse ``default=`` or ``set_defaults(...)``; a function parameter default;
+    a class-body field default (a dataclass); an assignment to a ``DEFAULT_*`` /
+    ``PROFILE*`` / ``SESSION*`` name, plain or annotated; and a use of any
+    module-level constant that holds one of those values as one of the above.
+
+    Known blind spots, left on purpose: a value built by string concatenation or
+    an f-string over the slug's parts, an ``os.environ`` fallback, and ``.sh``
+    files (``scripts/e06_pi_bench.sh``'s ``E06_SESSION``)."""
+    tree = _parse(text)
+    if tree is None:
+        return []
+    constants = frozenset(
+        target.id
+        for node in tree.body
+        if isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name) and _names_a_vehicle(node.value) is not None
+    )
+    hits: list[Hit] = []
+
+    def hit(node: ast.AST, what: str, found: str) -> None:
+        hits.append((getattr(node, "lineno", 0), f"{what}...{found}..."))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", None) in {
+            "add_argument",
+            "set_defaults",
+        }:
+            for keyword in node.keywords:
+                if node.func.attr == "add_argument" and keyword.arg != "default":  # type: ignore[attr-defined]
+                    continue
+                if found := _names_a_vehicle(keyword.value, constants):
+                    hit(node, f"{node.func.attr}({keyword.arg}=", found)  # type: ignore[attr-defined]
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            for default in [*node.args.defaults, *filter(None, node.args.kw_defaults)]:
+                if found := _names_a_vehicle(default, constants):
+                    hit(default, f"def {node.name}(default=", found)
+        elif isinstance(node, ast.ClassDef):
+            for member in node.body:
+                value = getattr(member, "value", None)
+                if isinstance(member, ast.Assign | ast.AnnAssign) and value is not None:
+                    if found := _names_a_vehicle(value, constants):
+                        hit(member, f"class {node.name} field = ", found)
+        elif isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(t, ast.Name) and _DEFAULT_NAME.match(t.id) for t in targets):
+                if found := _names_a_vehicle(node.value):
+                    hit(node, f"{ast.unparse(targets[0])} = ", found)
+    return sorted(set(hits))
+
+
 # --- the rules ------------------------------------------------------------
 
 RULES: tuple[Rule, ...] = (
@@ -898,9 +980,11 @@ RULES: tuple[Rule, ...] = (
             "(R30.3): twenty-five call sites each spelled the P02.11 rule (refuse an unscoped "
             "config while profiles are enabled; leave a profiles-disabled one alone) and "
             "tuning_report's copy had dropped the profiles.enabled guard. The daemon's own "
-            "scoping (src.main, the MCP tools) is in src/, outside this rule"
+            "scoping (src.main) is in src/, outside this rule; the MCP read tools "
+            "(src/mcp_server/tools) load a config file as the scripts do and scope it the "
+            "same way, so their twins agree on a profiles-disabled config"
         ),
-        roots=("scripts", "tools"),
+        roots=("scripts", "tools", "src/mcp_server/tools"),
         suffixes=(".py", ".sh"),
         find=_scope_config_call,
         allowed={
@@ -917,7 +1001,92 @@ RULES: tuple[Rule, ...] = (
             "# scope_config(config, profile) in a comment\n"
         ),
     ),
+    Rule(
+        name="tooling-defaults-no-vehicle",
+        why=(
+            "a tool's --profile is a slug the caller names, and a tool never defaults to one "
+            "vehicle or to one operator's ~/canary-data (R30.4): ten tools defaulted to "
+            "data/nissan-xterra-2008 and ~/canary-data/sessions/nissan-xterra-2008, so a second "
+            "vehicle's data read as the Xterra's unless every call remembered the flag. Take "
+            "the flags from tools._cli.add_profile_dir_args (or require --profile) and let "
+            "the caller say. Blind spots (docstring of _vehicle_default): string concatenation, "
+            "an os.environ fallback, .sh files"
+        ),
+        roots=("scripts", "tools"),
+        suffixes=(".py",),
+        find=_vehicle_default,
+        allowed={
+            "scripts/canary_desk.py": (
+                4,
+                "DEFAULT_PROFILE and DEFAULT_STATE_DIR, and the two argparse defaults spelled "
+                "through them; the desk daemon is an app with its own state "
+                "(~/canary-data/desk) and a default vehicle for a fresh desk; keeping them is "
+                "the operator's decision (R30.4, 2026-11-16)",
+            ),
+        },
+        bad=(
+            'parser.add_argument("--profile", default="nissan-xterra-2008")\n'
+            'DEFAULT_PROFILE: str = "nissan-xterra-2008"\n'
+            "def run(profile=DEFAULT_PROFILE): ...\n"
+        ),
+        good=(
+            'parser.add_argument("--profile", required=True)\n'
+            'MESSAGE = "e.g. nissan-xterra-2008"  # not a default name\n'
+            "def run(profile): ...\n"
+        ),
+    ),
 )
+
+
+#: Each form the vehicle-default rule must catch, with a twin it must leave alone.
+VEHICLE_DEFAULT_FORMS: tuple[tuple[str, str, str], ...] = (
+    ("argparse literal", 'p.add_argument("--profile", default="nissan-xterra-2008")\n', "ok"),
+    ("plain assignment", 'DEFAULT_PROFILE = "nissan-xterra-2008"\n', "ok"),
+    ("annotated assignment", 'DEFAULT_PROFILE: str = "nissan-xterra-2008"\n', "ok"),
+    ("function default", 'def run(profile="nissan-xterra-2008"): ...\n', "def run(profile): ...\n"),
+    (
+        "keyword-only default",
+        'def run(*, profile="nissan-xterra-2008"): ...\n',
+        "def run(*, profile): ...\n",
+    ),
+    (
+        "dataclass field default",
+        'class C:\n    profile: str = "nissan-xterra-2008"\n',
+        "class C:\n    profile: str\n",
+    ),
+    (
+        "set_defaults",
+        'p.set_defaults(profile="nissan-xterra-2008")\n',
+        "p.set_defaults(handler=run)\n",
+    ),
+    (
+        "default through a module constant",
+        'ROOT = Path.home() / "canary-data"\np.add_argument("--root", default=ROOT)\n',
+        'p.add_argument("--root", default=None)\n',
+    ),
+    (
+        "constant in a function default",
+        'X = "nissan-xterra-2008"\ndef run(profile=X): ...\n',
+        "X = 1\ndef run(profile=X): ...\n",
+    ),
+    (
+        "platform id",
+        'p.add_argument("--recipe", default=PLATFORMS_DIR / "nissan-xterra-n50" / "r.yaml")\n',
+        'p.add_argument("--recipe", default=None)\n',
+    ),
+    ("home directory", 'p.add_argument("--root", default=Path("~/canary-data/x"))\n', "ok"),
+)
+
+
+@pytest.mark.parametrize(("form", "bad", "good"), VEHICLE_DEFAULT_FORMS, ids=lambda v: v[:30])
+def test_the_vehicle_default_rule_catches_every_form(form: str, bad: str, good: str) -> None:
+    assert _vehicle_default("tools/x.py", bad), f"{form}: missed"
+    if good != "ok":
+        assert not _vehicle_default("tools/x.py", good), f"{form}: its twin was flagged"
+    # Names that merely mention a vehicle are not defaults.
+    assert not _vehicle_default(
+        "tools/x.py", '"""Run on nissan-xterra-2008."""\nMSG = "nissan-xterra-n50"\n'
+    )
 
 
 # --- machinery ------------------------------------------------------------

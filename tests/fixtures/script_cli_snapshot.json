@@ -6103,7 +6103,7 @@
       "--sessions-root": {
         "action": "_StoreAction",
         "choices": null,
-        "default": "/data/canary/sessions/nissan-xterra-2008",
+        "default": null,
         "dest": "sessions_root",
         "nargs": null,
         "option_strings": [

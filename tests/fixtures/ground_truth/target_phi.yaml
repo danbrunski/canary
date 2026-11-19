@@ -12,6 +12,10 @@ source_session: _capture-ram-study-2026-10-04T204557
 # ordinary lookup vector and all 194 BFS/X pairs are retained.
 window: {start: '2026-10-04T20:45:56Z', end: '2026-10-04T21:12:50Z'}
 profile: ram-study
+# The vehicle (the data/<slug>/ profile) this capture was recorded on: the twin's
+# calibration, viewer and application model for it are that vehicle's, so a tool
+# that rebuilds the twin for this capture reads the slug here, never a default.
+vehicle: nissan-xterra-2008
 # Two real slices, read together (both written by the production parquet
 # writer, rows unmodified). The ROM-trace slice already held the X trace, the
 # rpm word and the BFS word for the whole capture, so they are referenced, not

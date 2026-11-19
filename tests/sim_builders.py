@@ -829,8 +829,14 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     }
 
 
+def profile_flags(profile: Path) -> list[str]:
+    """``rom_sim``'s ``--profile`` is a slug (R30.4): a test's synthetic profile
+    directory is named by its directory name, found under its parent."""
+    return ["--profile", profile.name, "--data-dir", str(profile.parent)]
+
+
 def cli_profile_args(world: dict[str, Any]) -> list[str]:
-    return ["--profile", str(world["profile"])]
+    return profile_flags(world["profile"])
 
 
 @pytest.fixture(scope="module")

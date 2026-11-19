@@ -24,7 +24,8 @@ Reads the private ROM images from directories you name (``--rom-dir``, or
 Usage::
 
     CANARY_ROM_DIRS="/mnt/c/Users/thebo/Desktop/Uprev/Tuned ROMs:..." \\
-    .venv/bin/python -m tools.fuel_comp_fit --since 2026-08-03 --out <dir>
+    .venv/bin/python -m tools.fuel_comp_fit --profile nissan-xterra-2008 \\
+        --sessions-root ~/canary-data/sessions/nissan-xterra-2008 --since 2026-08-03 --out <dir>
 """
 
 from __future__ import annotations
@@ -72,17 +73,17 @@ from src.signals.afr import load_afr_calibration
 from src.storage.sessions import recorded_sessions, session_started_at
 from src.vehicle.tune_revisions import load_tune_revisions
 
+try:
+    from _cli import add_profile_dir_args, profile_data_or_exit  # type: ignore[import-not-found]
+except ImportError:  # loaded as `tools.<name>`: repo root on path
+    from tools._cli import add_profile_dir_args, profile_data_or_exit
+
 REPO = Path(__file__).resolve().parents[1]
 
 
 def _parse(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--profile", type=Path, default=REPO / "data" / "nissan-xterra-2008")
-    parser.add_argument(
-        "--sessions-root",
-        type=Path,
-        default=Path.home() / "canary-data" / "sessions" / "nissan-xterra-2008",
-    )
+    add_profile_dir_args(parser)
     parser.add_argument(
         "--rom-dir",
         type=Path,
@@ -229,7 +230,9 @@ def _known_answer(
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse(argv)
-    profile = args.profile
+    data = profile_data_or_exit(args, need_sessions=True)
+    profile = data.directory
+    args.sessions_root = data.sessions_root
     declaration = load_fuel_comp_declaration(profile)
     registry = load_tune_revisions(profile / "tune_revisions.yaml")
     if registry is None:

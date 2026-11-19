@@ -290,7 +290,7 @@ def test_real_idle_only_drives_fix_one_combination_not_each_parameter(real, defi
 def test_the_report_tool_reports_the_real_refusal(capsys):
     from tools.change_detection_report import main
 
-    assert main(["--from-fixture", str(FIXTURE)]) == 1
+    assert main(["--profile", "nissan-xterra-2008", "--from-fixture", str(FIXTURE)]) == 1
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert out["refusal"].startswith("every tuning candidate")
 
@@ -389,10 +389,22 @@ def test_the_tool_refuses_to_monitor_test_drives_without_a_persistent_ledger(tmp
     fixture.mkdir()
     pd.concat(rows).to_csv(fixture / "samples.csv", index=False)
     (fixture / "meta.json").write_text(json.dumps(meta))
-    assert main(["--from-fixture", str(fixture)]) == 2
+    assert main(["--profile", "nissan-xterra-2008", "--from-fixture", str(fixture)]) == 2
     assert "persistent memory ledger" in capsys.readouterr().out
     ledger = tmp_path / "memory.jsonl"
-    assert main(["--from-fixture", str(fixture), "--ledger", str(ledger)]) == 0
+    assert (
+        main(
+            [
+                "--profile",
+                "nissan-xterra-2008",
+                "--from-fixture",
+                str(fixture),
+                "--ledger",
+                str(ledger),
+            ]
+        )
+        == 0
+    )
     assert '"policy_frozen"' in ledger.read_text()
 
 

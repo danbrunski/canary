@@ -1117,7 +1117,15 @@ def test_the_identification_numbers_through_the_runner_and_the_cli(
     # Handed in any order: the runner concatenates in the split's order.
     result = twin_runner.identify_plant(ident[::-1], kit_v, sessions_root=SESSIONS)
     ours = json.dumps(jsonable(result, ndigits=6), indent=2)
-    argv = ["identify", "--plant-version", version, "--sessions-root", str(SESSIONS)]
+    argv = [
+        "identify",
+        "--profile",
+        PROFILE.name,
+        "--plant-version",
+        version,
+        "--sessions-root",
+        str(SESSIONS),
+    ]
     assert fuel_plant_check.main(argv) == 0
     assert ours == capsys.readouterr().out.rstrip("\n")  # byte for byte
     pinned, expected = json.loads(ours), IDENTIFICATION[version]

@@ -2,7 +2,7 @@
 """Compare ignition-timing surfaces between two runs, for incremental tuning.
 
     # two CANary session sets (run on the Pi, where the parquet lives)
-    scripts/timing_compare.py \
+    scripts/timing_compare.py --sessions-root ~/canary-data/sessions/nissan-xterra-2008 \
         --before-sessions 2026-07-22T161632 2026-07-18T215941 \
         --after-sessions  2026-07-26T225058
 
@@ -57,8 +57,6 @@ from pathlib import Path
 from typing import cast
 
 import pandas as pd
-
-SESSION_ROOT = "/data/canary/sessions/nissan-xterra-2008"
 
 #: Raw 0xFF on PID 0x0E. The decoder rejects this as of the sentinel fix, but
 #: historical parquet still stores it as a real 63.5 degBTDC reading.
@@ -324,7 +322,12 @@ def main() -> int:
     p.add_argument("--after-sessions", nargs="+")
     p.add_argument("--before-csv", type=Path)
     p.add_argument("--after-csv", type=Path)
-    p.add_argument("--sessions-root", default=SESSION_ROOT)
+    p.add_argument(
+        "--sessions-root",
+        default=None,
+        help="Directory holding the vehicle's session folders; required with "
+        "--before-sessions / --after-sessions (no default vehicle).",
+    )
     p.add_argument("--load-floor", type=float, default=DEFAULT_LOAD_FLOOR)
     p.add_argument("--sigma", type=float, default=2.0)
     p.add_argument("--iat-tolerance", type=float, default=DEFAULT_IAT_TOLERANCE_C)
@@ -356,6 +359,8 @@ def main() -> int:
         if csv is not None:
             return load_uprev(csv, label)
         if sessions:
+            if args.sessions_root is None:
+                raise SystemExit(f"--{label}-sessions needs --sessions-root (no default vehicle)")
             return load_sessions(sessions, label, args.sessions_root, args.max_join_age)
         raise SystemExit(f"provide --{label}-sessions or --{label}-csv")
 

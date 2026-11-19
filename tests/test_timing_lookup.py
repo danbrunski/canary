@@ -514,7 +514,20 @@ def test_the_tool_refuses_a_pairing_looser_than_the_lookup_skew(tmp_path: Path) 
     from tools.timing_lookup_coverage import main
 
     with pytest.raises(SystemExit, match="exceeds the timing lookup's skew limit"):
-        main(["--session", "x", "--pairing-ms", "5000", "--out", str(tmp_path / "o.json")])
+        main(
+            [
+                "--profile",
+                "nissan-xterra-2008",
+                "--sessions-root",
+                str(tmp_path),
+                "--session",
+                "x",
+                "--pairing-ms",
+                "5000",
+                "--out",
+                str(tmp_path / "o.json"),
+            ]
+        )
 
 
 def test_an_axis_read_on_a_logical_clock_is_named_clock_unacquired(
