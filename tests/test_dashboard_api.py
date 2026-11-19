@@ -482,7 +482,7 @@ def test_behavior_models_endpoint_returns_yaml_content(
 
 
 def _write_accepted_baselines(
-    path: Path, *, review_by: str = "2026-11-17", reason: str = "known weak #3 injector"
+    path: Path, *, review_by: str = "2099-01-01", reason: str = "known weak #3 injector"
 ) -> None:
     from src.behavior.accepted_baselines import (
         AcceptedBaselineOverride,

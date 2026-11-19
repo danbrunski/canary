@@ -35,7 +35,7 @@ def _override(
         provenance=Provenance(
             declared_by="dan",
             declared_at=date(2026, 5, 17),
-            review_by=date(2026, 11, 17),
+            review_by=date(2099, 1, 1),  # active: never a date the clock reaches
             reason="test",
         ),
     )

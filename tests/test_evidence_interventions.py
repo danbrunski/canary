@@ -472,7 +472,7 @@ def test_accepted_baselines_link_to_their_investigation(tmp_path: Path) -> None:
     provenance = OverrideProvenance(
         declared_by="operator",
         declared_at=date(2026, 9, 2),
-        review_by=date(2026, 12, 2),
+        review_by=date(2099, 1, 1),
         reason="known weak injector",
     )
     band = DirectionalBand(

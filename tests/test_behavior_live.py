@@ -311,7 +311,7 @@ def _behavior_model_override(**overrides: object) -> AcceptedBaselineOverride:
         "provenance": Provenance(
             declared_by="dan",
             declared_at=date(2026, 5, 17),
-            review_by=date(2026, 11, 17),
+            review_by=date(2099, 1, 1),  # active: never a date the clock reaches
             reason="known thermostat lag; owner not replacing",
         ),
     }
@@ -358,7 +358,7 @@ def _channel_override(**overrides: object) -> AcceptedBaselineOverride:
         "provenance": Provenance(
             declared_by="dan",
             declared_at=date(2026, 5, 17),
-            review_by=date(2026, 11, 17),
+            review_by=date(2099, 1, 1),  # active: never a date the clock reaches
             reason="~190k mi, known weak #3 injector; owner not replacing",
         ),
     }

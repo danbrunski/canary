@@ -2328,7 +2328,7 @@ async def test_build_live_feature_source_loads_accepted_baselines_when_present(
         "    provenance:\n"
         "      declared_by: dan\n"
         "      declared_at: '2026-05-17'\n"
-        "      review_by: '2026-11-17'\n"
+        "      review_by: '2099-01-01'\n"
         "      reason: test override\n"
     )
     components = build_components(config)
