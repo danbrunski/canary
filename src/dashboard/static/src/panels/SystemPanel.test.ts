@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ImuStatus } from "../types";
-import { imuHealth } from "./SystemPanel";
+import type { HatStatus, ImuStatus } from "../types";
+import { hatSummary, imuHealth } from "./SystemPanel";
 
 const healthy: ImuStatus = {
   fresh: true,
@@ -36,5 +36,34 @@ describe("imuHealth (H02.5)", () => {
       "no samples",
     );
     expect(imuHealth({ ...healthy, achieved_hz: null }).label).toBe("rate —");
+  });
+});
+
+const fitted: HatStatus = {
+  revision: "2.1",
+  source: "eeprom",
+  eeprom_product: "CANary-HAT rev 2.1",
+  probe: null,
+  overlay: "canary-hat-r21",
+  overlay_loaded: true,
+  power_board: null,
+  problems: [],
+};
+
+describe("hatSummary", () => {
+  it("names the revision and how it was told", () => {
+    expect(hatSummary(fitted)).toEqual({ label: "rev 2.1 · eeprom", tone: "ok" });
+    expect(hatSummary({ ...fitted, power_board: "1.0" }).label).toBe("rev 2.1 · eeprom · PWR 1.0");
+  });
+
+  it("warns on any problem, such as a blank EEPROM", () => {
+    const blank = { ...fitted, source: "probed" as const, problems: ["no CANary-HAT ID EEPROM"] };
+    expect(hatSummary(blank)).toEqual({ label: "rev 2.1 · probed", tone: "warn" });
+  });
+
+  it("says none rather than guessing a revision", () => {
+    const none = { ...fitted, revision: null, source: "none" as const, overlay: null };
+    expect(hatSummary(none)).toEqual({ label: "none identified", tone: undefined });
+    expect(hatSummary({ ...none, problems: ["hardware.kline enabled"] }).tone).toBe("warn");
   });
 });

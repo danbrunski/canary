@@ -13,8 +13,13 @@ directory:
 
 The firmware publishes the ID EEPROM under ``/proc/device-tree/hat``
 (``CANARY_HAT_DIR`` overrides it; ``CANARY_HAT_REV`` names a revision outright).
-A Pi with no CANary-HAT EEPROM gets the table's ``unidentified`` revision,
-rev 2.0. Exit 2: an unknown revision name, or a CANary-HAT EEPROM reporting a
+With no CANary-HAT EEPROM (a new board's is blank), the revision whose own ADC
+answers is ``probed``: the daemon's probe, ``src/collection/hat_probe.py``
+(standard library only), when this file runs from a checkout. Failing that it
+is the table's ``unidentified`` revision, rev 2.0, which these scripts print as
+such for a person to read; the daemon never guesses one.
+
+Exit 2: an unknown revision name, or a CANary-HAT EEPROM reporting a
 product_ver the table does not list (a checkout older than the board).
 """
 
@@ -25,12 +30,15 @@ import json
 import os
 import shlex
 import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 HERE = Path(__file__).resolve().parent
 TABLE = HERE / "hat_revisions.json"
 PRODUCT_PREFIX = "CANary-HAT"
+#: ``rows -> (revisions whose ADC answered, what was seen)``.
+Probe = Callable[[Mapping[str, Mapping[str, Any]]], tuple[tuple[str, ...], str]]
 
 
 class HatRevisionError(Exception):
@@ -75,13 +83,30 @@ def _read(path: Path) -> str:
         return ""
 
 
+def repo_probe() -> Probe | None:
+    """The daemon's ADC probe, when this file is in a checkout; ``None`` from a
+    bare copy of this directory."""
+    root = HERE.parent.parent
+    if not (root / "src" / "collection" / "hat_probe.py").is_file():
+        return None
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    try:
+        from src.collection.hat_probe import probe_adcs
+    except ImportError:
+        return None
+    return probe_adcs
+
+
 def detect(
     rev: str | None = None,
     *,
     hat_dir: Path | None = None,
     table: dict[str, Any] | None = None,
+    probe: Probe | None = None,
 ) -> tuple[dict[str, Any], str]:
-    """``(revision, how)``; ``how`` is ``named``, ``eeprom`` or ``unidentified``."""
+    """``(revision, how)``; ``how`` is ``named``, ``eeprom``, ``probed`` or
+    ``unidentified``. ``probe`` defaults to :func:`repo_probe`'s."""
     table = table or load_table()
     rev = rev or os.environ.get("CANARY_HAT_REV") or None
     if rev:
@@ -91,6 +116,11 @@ def detect(
     product_ver = _read(hat_dir / "product_ver")
     if product.startswith(PRODUCT_PREFIX) and product_ver:
         return by_product_ver(product_ver, table), "eeprom"
+    probe = probe or repo_probe()
+    if probe is not None:
+        found, _seen = probe({r["name"]: r for r in table["revisions"]})
+        if len(found) == 1:
+            return by_name(found[0], table), "probed"
     return by_name(table["unidentified"], table), "unidentified"
 
 

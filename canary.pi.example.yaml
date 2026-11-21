@@ -36,9 +36,13 @@ hardware:
   #   sample_rate_hz: 104
   # CANary-HAT revision. `auto` (the default) reads the board's ID EEPROM:
   # rev 2.0 and rev 2.1 wire the K-line pull-up and the 12 V sense differently
-  # (hardware/canary-hat-firmware/hat_revisions.json). Name one only for a
-  # board whose EEPROM is blank.
+  # (hardware/canary-hat-firmware/hat_revisions.json). A blank EEPROM (every
+  # new board's) is answered by the board's own ADC, and with neither no HAT
+  # pin is driven; /status.hat says which. Name one only to override both.
   # hat_revision: auto
+  # CANary-PWR under the HAT (docs/CANary-PWR-Spec.md): it has no ID EEPROM,
+  # so name it here. "1.0" keeps the daemon off its GPIO24/GPIO27.
+  # power_board: none
   # CANary-HAT rev 2.1's ADC (ADS8688A): the AEM fuel gauge on J2 pins 12-13
   # (sensor:FUEL_PRESSURE, as the USB ADC records it: enable one or the other)
   # and the generic sensor ports V1 / R1 (sensor:PORT_V1_*, PORT_R1_RESISTANCE).

@@ -21,6 +21,7 @@ import pytest
 from src.collection.hat_revision import (
     SETTING_NAMES,
     HatRevisionError,
+    detect_hat,
     kline_pins,
     resolve_hat_revision,
 )
@@ -162,14 +163,21 @@ def test_a_rev_2_0_eeprom_keeps_the_rev_2_0_pins(tmp_path: Path) -> None:
     )
 
 
-def test_no_eeprom_is_the_unidentified_revision(tmp_path: Path) -> None:
-    rev = resolve_hat_revision("auto", hat_dir=tmp_path / "absent")
-    assert (rev.name, rev.source) == (TABLE["unidentified"], "unidentified")
+def _nothing_answers(rows: Any) -> tuple[tuple[str, ...], str]:
+    return (), "no ADC answered"
+
+
+def test_no_eeprom_and_no_adc_is_no_revision_for_the_daemon(tmp_path: Path) -> None:
+    """The table's ``unidentified`` row is the scripts' default, never the daemon's."""
+    hat = detect_hat("auto", hat_dir=tmp_path / "absent", probe=_nothing_answers)
+    assert (hat.revision, hat.source) == (None, "none")
 
 
 def test_another_vendors_hat_is_not_read_as_a_canary_hat(tmp_path: Path) -> None:
-    rev = resolve_hat_revision("auto", hat_dir=_eeprom(tmp_path, "Some Other HAT", "0x0201"))
-    assert rev.source == "unidentified"
+    hat = detect_hat(
+        "auto", hat_dir=_eeprom(tmp_path, "Some Other HAT", "0x0201"), probe=_nothing_answers
+    )
+    assert (hat.revision, hat.source) == (None, "none")
 
 
 def test_an_unlisted_canary_hat_revision_is_refused(tmp_path: Path) -> None:
@@ -184,10 +192,12 @@ def test_the_config_setting_beats_the_eeprom(tmp_path: Path) -> None:
 
 def test_kline_pins_come_from_the_revision_unless_the_config_pins_them() -> None:
     rev21 = resolve_hat_revision("2.1")
-    assert kline_pins(KlineConfig(), rev21).pullup == 21
-    assert kline_pins(KlineConfig(), resolve_hat_revision("2.0")).pullup == 24
-    pinned = kline_pins(KlineConfig(enable_gpio=5, pullup_gpio=7), rev21)
-    assert (pinned.enable, pinned.pullup) == (5, 7)
+    pins = [
+        kline_pins(KlineConfig(), rev21),
+        kline_pins(KlineConfig(), resolve_hat_revision("2.0")),
+        kline_pins(KlineConfig(enable_gpio=5, pullup_gpio=7), rev21),
+    ]
+    assert [(p.enable, p.pullup) if p else None for p in pins] == [(26, 21), (26, 24), (5, 7)]
 
 
 # --------------------------------------------------------------------------
@@ -200,7 +210,6 @@ def test_kline_pins_come_from_the_revision_unless_the_config_pins_them() -> None
     [
         ("CANary-HAT rev 2.0", "0x0200"),
         ("CANary-HAT rev 2.1", "0x0201"),
-        ("Some Other HAT", "0x0201"),
     ],
 )
 def test_hat_rev_py_reads_the_eeprom_as_the_daemon_does(
@@ -219,6 +228,24 @@ def test_hat_rev_py_reads_the_eeprom_as_the_daemon_does(
         daemon.adc_spi_device,
         daemon.sensor_power_gpio,
     )
+
+
+@pytest.mark.parametrize("product", ["", "Some Other HAT"])
+def test_hat_rev_py_probes_a_blank_eeprom_as_the_daemon_does(tmp_path: Path, product: str) -> None:
+    hat = _eeprom(tmp_path, product, "") if product else tmp_path / "absent"
+
+    def rev_2_1(rows: Any) -> tuple[tuple[str, ...], str]:
+        return ("2.1",), "ADS8688A answered"
+
+    script, how = _hat_rev().detect(hat_dir=hat, probe=rev_2_1)
+    daemon = detect_hat("auto", hat_dir=hat, probe=rev_2_1)
+    assert daemon.revision is not None
+    assert (script["name"], how) == (daemon.revision.name, daemon.source) == ("2.1", "probed")
+    # With nothing answering, the scripts print rev 2.0 as "unidentified" for a
+    # person to read; the daemon, unattended, drives no pin at all.
+    script, how = _hat_rev().detect(hat_dir=hat, probe=_nothing_answers)
+    assert (script["name"], how) == (TABLE["unidentified"], "unidentified")
+    assert detect_hat("auto", hat_dir=hat, probe=_nothing_answers).revision is None
 
 
 def test_hat_rev_py_refuses_an_unlisted_revision(tmp_path: Path) -> None:

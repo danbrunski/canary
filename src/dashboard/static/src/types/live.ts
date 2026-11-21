@@ -265,6 +265,28 @@ export interface StatusResponse {
   /** The address a phone should bookmark (P2.3); a cached read, null until
    *  the first one. Absent on an older daemon. */
   network?: NetworkSummary | null;
+  /** The CANary-HAT on the header and how it was identified. Absent on an
+   *  older daemon. */
+  hat?: HatStatus | null;
+}
+
+/** `/status.hat` — `src.collection.hat_revision.hat_status`: the CANary-HAT
+ *  on the header, how it was identified, the power board the config names, and
+ *  what is wrong with the pair. A blank ID EEPROM reads `source: "probed"`
+ *  (the board's own ADC answered); `none` drives no HAT pin at all. */
+export interface HatStatus {
+  /** `null`: no CANary-HAT identified. */
+  revision: string | null;
+  source: "config" | "eeprom" | "probed" | "none";
+  eeprom_product: string | null;
+  /** What the ADC probe saw; `null` when the config or the EEPROM decided. */
+  probe: string | null;
+  /** The revision's device-tree overlay, and whether the kernel shows it. */
+  overlay: string | null;
+  overlay_loaded: boolean | null;
+  /** The CANary-PWR revision `hardware.power_board` names, or `null`. */
+  power_board: string | null;
+  problems: string[];
 }
 
 /** `/status.bus_budget` — `bus_budget.snapshot()`. */

@@ -12,6 +12,7 @@ from src.alerts.emitter import AnomalyEventEmitter
 from src.analysis.gps_tracker import GpsTracker
 from src.collection import bus_budget as bus_budget_gate
 from src.collection import tuning_profile, tx_gate
+from src.collection.hat_revision import hat_status
 from src.collection.imu_collector import ImuHealth
 from src.config import CanaryConfig
 from src.control.replay_control import ReplayController
@@ -139,6 +140,11 @@ class StatusSnapshot:
     #: ``first_record_stored`` (marked by the storage sink). ``None`` when no
     #: health monitor is wired.
     startup: dict[str, Any] | None = None
+    #: The CANary-HAT on the header and how it was identified, the power board
+    #: the config names, and what is wrong with the pair
+    #: (:func:`src.collection.hat_revision.hat_status`). ``None`` only on a
+    #: snapshot built without a config.
+    hat: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         calibration = self.calibration or {}
@@ -174,6 +180,7 @@ class StatusSnapshot:
             "calibration_alert_reason": calibration.get("calibration_alert_reason"),
             "tuning_readiness": self.tuning_readiness,
             "startup": self.startup,
+            "hat": self.hat,
         }
 
 
@@ -705,6 +712,7 @@ def build_status(
         calibration=calibration,
         tuning_readiness=tuning_readiness,
         startup=sources.startup,
+        hat=hat_status(config.hardware),
     )
 
 

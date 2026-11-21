@@ -9,7 +9,14 @@ import {
   definitionValueClass,
   placeholderClass,
 } from "../styles";
-import type { GpsStatus, ImuStatus, PowerStatus, StatusResponse, WorkbenchItem } from "../types";
+import type {
+  GpsStatus,
+  HatStatus,
+  ImuStatus,
+  PowerStatus,
+  StatusResponse,
+  WorkbenchItem,
+} from "../types";
 import { STALE_THRESHOLD_MS, computeFreshness } from "../util/freshness";
 import {
   type Tone,
@@ -84,6 +91,15 @@ function gpsFix(g: GpsStatus): { label: string; tone: Tone | undefined } {
 /** IMU collector → label + tone (H02.5). Like GPS, the IMU is optional, so a
  *  missing or stale stream warns rather than errs. FIFO overruns and queue
  *  drops are lost samples, so any since start also warns. */
+/** The HAT row: which revision, how it was told, and the power board. Any
+ *  problem (a blank ID EEPROM, an overlay not loaded) turns it amber. */
+export function hatSummary(hat: HatStatus): { label: string; tone: Tone | undefined } {
+  const pwr = hat.power_board ? ` · PWR ${hat.power_board}` : "";
+  const warn = hat.problems.length > 0 ? "warn" : undefined;
+  if (hat.revision == null) return { label: `none identified${pwr}`, tone: warn };
+  return { label: `rev ${hat.revision} · ${hat.source}${pwr}`, tone: warn ?? "ok" };
+}
+
 export function imuHealth(imu: ImuStatus): { label: string; tone: Tone | undefined } {
   if (imu.age_seconds == null) return { label: "no samples", tone: "warn" };
   if (!imu.fresh) return { label: `stale · ${imu.age_seconds.toFixed(1)} s`, tone: "warn" };
@@ -117,6 +133,8 @@ export function SystemPanel({ status, channels, statusError, onNavigate }: Syste
   const gpsFixState = gps ? gpsFix(gps) : null;
   const imu = status?.imu ?? null;
   const imuState = imu ? imuHealth(imu) : null;
+  const hat = status?.hat ?? null;
+  const hatState = hat ? hatSummary(hat) : null;
   const blindModes = status?.detectors?.isolation_forest.blind_modes ?? [];
   const can0 = status?.health?.can0 ?? null;
   const can0Growth = can0 ? can0.since_start.rx_over_errors + can0.since_start.rx_dropped : 0;
@@ -194,6 +212,19 @@ export function SystemPanel({ status, channels, statusError, onNavigate }: Syste
                   {" "}
                   (+{can0.since_start.rx_over_errors} / +{can0.since_start.rx_dropped} since start)
                 </span>
+              </dd>
+            </div>
+          )}
+          {hat && hatState && (
+            <div className={definitionRowClass}>
+              <dt className={definitionTermClass}>hat</dt>
+              <dd className={cn(definitionValueClass, toneClass(hatState.tone))}>
+                {hatState.label}
+                {hat.problems.map((problem) => (
+                  <span key={problem} className="block text-caption text-warn">
+                    {problem}
+                  </span>
+                ))}
               </dd>
             </div>
           )}

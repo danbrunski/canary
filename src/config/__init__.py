@@ -68,6 +68,7 @@ from src.config.hardware import HatAdcConfig as HatAdcConfig
 from src.config.hardware import HatRevisionSetting as HatRevisionSetting
 from src.config.hardware import ImuConfig as ImuConfig
 from src.config.hardware import KlineConfig as KlineConfig
+from src.config.hardware import PowerBoardSetting as PowerBoardSetting
 from src.config.hardware import SensorCanConfig as SensorCanConfig
 from src.config.hardware import SupplyVoltageConfig as SupplyVoltageConfig
 from src.config.hardware import UsbAdcConfig as UsbAdcConfig

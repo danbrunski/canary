@@ -991,7 +991,13 @@ def test_a_spawned_interpreter_unpickles_a_scoped_config(tmp_path: Path) -> None
 def main() -> None:
     if "--write" not in sys.argv:
         raise SystemExit("pass --write to regenerate tests/fixtures/config_golden.json")
-    GOLDEN.write_text(json.dumps(capture(), indent=1, sort_keys=True) + "\n")
+    captured = capture()
+    # ``imports`` is R21's pre-split baseline, what the single file loaded: the
+    # fresh-interpreter test measures a capture against it, so a capture must
+    # never replace it (a regeneration on 2026-11-20 did, and failed that test).
+    if GOLDEN.exists():
+        captured["imports"] = json.loads(GOLDEN.read_text(encoding="utf-8"))["imports"]
+    GOLDEN.write_text(json.dumps(captured, indent=1, sort_keys=True) + "\n")
     print(f"wrote {GOLDEN} ({GOLDEN.stat().st_size} bytes)")
 
 

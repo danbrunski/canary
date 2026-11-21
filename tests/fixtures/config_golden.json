@@ -4306,6 +4306,20 @@
     },
     {
      "alias": null,
+     "annotation": "Literal['none', '1.0']",
+     "constraints": [],
+     "default": "none",
+     "description": null,
+     "exclude": null,
+     "frozen": null,
+     "json_schema_extra": null,
+     "name": "power_board",
+     "serialization_alias": null,
+     "title": null,
+     "validation_alias": null
+    },
+    {
+     "alias": null,
      "annotation": "CanBusConfig",
      "constraints": [],
      "description": null,
@@ -8956,6 +8970,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -9460,6 +9475,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -9809,6 +9825,7 @@
      "hat_revision",
      "imu",
      "kline",
+     "power_board",
      "sensor_can",
      "supply_voltage",
      "usb_adc"
@@ -10079,6 +10096,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -10467,6 +10485,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -10816,6 +10835,7 @@
      "hat_revision",
      "imu",
      "kline",
+     "power_board",
      "sensor_can",
      "supply_voltage",
      "usb_adc"
@@ -11086,6 +11106,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -11488,6 +11509,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -12144,6 +12166,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -13027,6 +13050,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -13963,6 +13987,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -14843,6 +14868,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -15192,6 +15218,7 @@
      "hat_revision",
      "imu",
      "kline",
+     "power_board",
      "sensor_can",
      "supply_voltage",
      "usb_adc"
@@ -15462,6 +15489,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -15873,6 +15901,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -16366,6 +16395,7 @@
      "hat_revision",
      "imu",
      "kline",
+     "power_board",
      "sensor_can",
      "supply_voltage",
      "usb_adc"
@@ -16645,6 +16675,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -17191,6 +17222,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -17523,6 +17555,7 @@
      "hat_revision",
      "imu",
      "kline",
+     "power_board",
      "sensor_can",
      "supply_voltage",
      "usb_adc"
@@ -17793,6 +17826,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -18178,6 +18212,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -18668,6 +18703,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -19453,6 +19489,7 @@
       "sniff": true,
       "tty": "/dev/ttyAMA0"
      },
+     "power_board": "none",
      "sensor_can": {
       "bitrate": 500000,
       "channel": "can1",
@@ -21873,6 +21910,7 @@
        "hat_revision",
        "imu",
        "kline",
+       "power_board",
        "sensor_can",
        "supply_voltage",
        "usb_adc"
@@ -22293,7 +22331,7 @@
    "AlertsConfig": "40d2a25efded30311c3a2781c21f2d566f7c0c729af3e365be5c783a60281588",
    "AutoTagConfig": "854532402701043c94e3fbcbeabfcb4c55bf4dbe98e490628def8a6eddbf6879",
    "CanBusConfig": "bd87c3879adcff6ddc4a06b2ed1ae7f1a20625abca1fa40bf2b60e631c36053f",
-   "CanaryConfig": "930813c6054babea649b905e5d8712524e347ab2bc6eb05b292b4233d3f43c11",
+   "CanaryConfig": "2d9e37cdee6a9de9c52611ad6e61d872746c2711c1f13d270bf26e1bd5376433",
    "CollectionConfig": "98e6c84db424d868397ad5603fb9ae205cdc9d715bb6eca63d8fb498a1d38f80",
    "CommitteesConfig": "9eb7046514943dd0444615e211830127965478958085f3db5e1691964eab8cbc",
    "CompanionConfig": "8002ff2c0312e9cc9801f7b06f1928332bfec8e3df86d0e4cebded3ea1f5f9f9",
@@ -22302,7 +22340,7 @@
    "DetectorRolesConfig": "80deb54664d9d9d899849465171c0cac85d06427c5c9839a53118cec8885ea75",
    "FusionConfig": "64ff6779ffadcdd5a69151de887585f0b81a3b618c5f33d405c487724e6848ec",
    "GpsConfig": "f6fb1ecdfeda60fd1f9e36aa57d14068fa3ae74bc973b69fcad0815d2f19e0d7",
-   "HardwareConfig": "1222901222a40cd9fef47026c5eba59bcfacb50b0639f3a53eb2dea8b9551620",
+   "HardwareConfig": "c5fc5808913e9d7a47093b36653a7b9bc83e0974ee97ca038796367f9062fb82",
    "HatAdcConfig": "82b9b12e1a43f473bc0db97dde65ed369c7a633300fd964f735b811bc0e66f4d",
    "IdleShutdownConfig": "c964ea9dc2e1a947bd3ff309bbcd097093db05dbbb075f5967414d1efd2b8b75",
    "ImuConfig": "63608cdc6cb108a5fec8255ce066c85c8eb29925e26bfa4433cbabf70d76a096",
@@ -23286,6 +23324,15 @@
         "sniff": true,
         "tty": "/dev/ttyAMA0"
        }
+      },
+      "power_board": {
+       "default": "none",
+       "enum": [
+        "none",
+        "1.0"
+       ],
+       "title": "Power Board",
+       "type": "string"
       },
       "sensor_can": {
        "$ref": "#/$defs/SensorCanConfig",
@@ -26033,6 +26080,15 @@
         "sniff": true,
         "tty": "/dev/ttyAMA0"
        }
+      },
+      "power_board": {
+       "default": "none",
+       "enum": [
+        "none",
+        "1.0"
+       ],
+       "title": "Power Board",
+       "type": "string"
       },
       "sensor_can": {
        "$ref": "#/$defs/SensorCanConfig",

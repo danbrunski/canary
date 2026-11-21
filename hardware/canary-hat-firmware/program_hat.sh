@@ -43,7 +43,10 @@ if [[ -n "$REV" ]]; then
 else
     facts="$(python3 "$HERE/hat_rev.py" --shell)" || exit 1
     if ! grep -q '^HAT_HOW=eeprom$' <<<"$facts"; then
-        echo "which board is this? run with --rev 2.0 or --rev 2.1 (printed on the board)" >&2
+        # A probed revision is only a hint: the revision printed on the board decides.
+        hint="$(sed -n 's/^HAT_HOW=probed$/x/p' <<<"$facts")"
+        [[ -n "$hint" ]] && hint=" (its ADC answers as rev $(sed -n 's/^HAT_REV=//p' <<<"$facts"))"
+        echo "which board is this?${hint} run with --rev 2.0 or --rev 2.1 (printed on the board)" >&2
         exit 1
     fi
 fi

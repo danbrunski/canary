@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 
 from src.collection import hat_adc_collector, supply_voltage_collector
-from src.collection.hat_revision import HatRevisionError, resolve_hat_revision
+from src.collection.hat_revision import fitted_hat
 from src.config import HardwareConfig
 
 log = logging.getLogger(__name__)
@@ -24,11 +24,9 @@ def read_supply_once(hardware: HardwareConfig) -> float | None:
         # No revision lookup for a Pi without the sense: it would log a
         # missing ID EEPROM at every start.
         return supply_voltage_collector.read_supply_once(supply)
-    try:
-        revision = resolve_hat_revision(hardware.hat_revision)
-    except HatRevisionError:
-        log.warning("12 V sense not read at startup", exc_info=True)
-        return None
+    revision = fitted_hat(hardware.hat_revision).revision
+    if revision is None:
+        return None  # no HAT identified; fitted_hat logged why, /status.hat says it
     if revision.supply_adc == "ads8688a":
         return hat_adc_collector.read_supply_once(hardware.hat_adc, revision)
     return supply_voltage_collector.read_supply_once(supply)

@@ -275,12 +275,21 @@ class KlineConfig(_Strict):
 #: ``hardware/canary-hat-firmware/hat_revisions.json`` (a test keeps them equal).
 HatRevisionSetting = Literal["auto", "2.0", "2.1"]
 
+#: Which CANary-PWR is stacked under the HAT (``docs/CANary-PWR-Spec.md``), or
+#: ``none``. It has no ID EEPROM by design (§P5), so only the config can say.
+#: PWR rev 1.0 owns GPIO24 (its supervisor's reset) and GPIO27 (its BOOT0):
+#: nothing the daemon drives may use them, which rules out HAT rev 2.0's
+#: K-line pull-up (§P8). ``src.collection.hat_revision.POWER_BOARD_GPIOS``.
+PowerBoardSetting = Literal["none", "1.0"]
+
 
 class HardwareConfig(_Strict):
     elm327_port: str
     #: Rev 2.0 and rev 2.1 wire the K-line pull-up and the 12 V sense
-    #: differently (``src.collection.hat_revision``).
+    #: differently (``src.collection.hat_revision``). ``auto`` takes the ID
+    #: EEPROM's revision, or with none the one whose ADC answers; never a guess.
     hat_revision: HatRevisionSetting = "auto"
+    power_board: PowerBoardSetting = "none"
     can: CanBusConfig
     gps: GpsConfig = GpsConfig()
     imu: ImuConfig = ImuConfig()

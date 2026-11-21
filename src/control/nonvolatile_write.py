@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol, TypeVar
 
-from src.collection.hat_revision import HatRevisionError, resolve_hat_revision
+from src.collection.hat_revision import fitted_hat
 from src.config import HardwareConfig, NonvolatileWriteConfig
 from src.control.audit import ControlAuditLogger
 from src.decode.hat_adc_board import load_hat_adc_board
@@ -85,10 +85,11 @@ def supply_voltage_sources(hardware: HardwareConfig) -> SupplyVoltageSources:
     others = tuple(s for s in SUPPLY_VOLTAGE_SOURCES if s != sense)
     if not hardware.supply_voltage.enabled:
         return SupplyVoltageSources(SUPPLY_VOLTAGE_SOURCES)
-    try:
-        revision = resolve_hat_revision(hardware.hat_revision)
-    except HatRevisionError as exc:
-        return SupplyVoltageSources(others, (f"sensor:SUPPLY_VOLTAGE: {exc}",))
+    hat = fitted_hat(hardware.hat_revision)
+    revision = hat.revision
+    if revision is None:
+        why = "; ".join(hat.problems) or "no CANary-HAT identified"
+        return SupplyVoltageSources(others, (f"sensor:SUPPLY_VOLTAGE: {why}",))
     if revision.supply_adc == "ads8688a":
         board = load_hat_adc_board(hardware.hat_adc.board)
         if board.supply.gain_trim is None:

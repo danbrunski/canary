@@ -24,7 +24,12 @@ Rev 2.0 and rev 2.1 are both in service, and rev 2.1 moved pins
 `hat_revisions.json` is the table. `hat_rev.py` reads it for the scripts here
 and for `install_pi.sh`; the daemon reads the same file
 (`src/collection/hat_revision.py`). The fitted revision is the EEPROM's
-product_ver. A Pi with no CANary-HAT EEPROM is treated as rev 2.0. To name one
+product_ver. A new board's EEPROM is blank, so with no CANary-HAT EEPROM the
+revision whose own ADC answers is `probed` (`src/collection/hat_probe.py`,
+read-only: rev 2.0's ADS1015 on I2C1, rev 2.1's ADS8688A on CE1);
+`checkout_hat.sh` fails that until `program_hat.sh` has written the EEPROM.
+With neither, the scripts print rev 2.0 as `unidentified` and the daemon names
+no revision and drives no HAT pin (`/status.hat` says so). To name one
 instead, set `CANARY_HAT_REV=2.1` for the scripts and
 `hardware.hat_revision: "2.1"` for the daemon. `python3 hat_rev.py --shell`
 prints everything it knows about the fitted board.

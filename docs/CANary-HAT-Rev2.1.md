@@ -1798,9 +1798,16 @@ software follows whichever board is fitted.
   fitted board's overlay changed.
 - **Which revision:** the EEPROM's product_ver. In the daemon,
   `hardware.hat_revision` (default `auto`) overrides it; the bring-up scripts
-  take `CANARY_HAT_REV`. A Pi with no CANary-HAT EEPROM is treated as rev 2.0,
-  the only revision that has run without one. An EEPROM naming a revision the
-  table does not list is refused rather than guessed at.
+  take `CANARY_HAT_REV`. With no CANary-HAT EEPROM (a new board's is blank),
+  the revision whose own ADC answers a read-only known answer is `probed`
+  (`src/collection/hat_probe.py`): rev 2.0's ADS1015 thresholds, rev 2.1's
+  ADS8688A power-up registers. With neither, the daemon names no revision and
+  drives no HAT pin; the scripts still print rev 2.0 as `unidentified` for the
+  person running them. Until 2026-11-20 the daemon also took a missing EEPROM
+  for rev 2.0, which on the first rev 2.1 board put the K-line pull-up on
+  CANary-PWR's supervisor reset (GPIO24). An EEPROM naming a revision the
+  table does not list is refused rather than guessed at. `/status.hat` reports
+  the verdict, whether the revision's overlay is loaded, and every problem.
 - **Daemon:**
   - The K-line pull-up line comes from the revision: GPIO24 on rev 2.0,
     GPIO21 on rev 2.1. `hardware.kline.enable_gpio` and `pullup_gpio` now

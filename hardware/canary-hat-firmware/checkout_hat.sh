@@ -29,7 +29,9 @@ eval "$facts"
 case "$HAT_HOW" in
     eeprom) ok "rev $HAT_REV (from the EEPROM)" ;;
     named) note "rev $HAT_REV (CANARY_HAT_REV), whatever the EEPROM says" ;;
-    *) note "checking as rev $HAT_REV, the default for a board with no CANary-HAT EEPROM" ;;
+    probed) bad "rev $HAT_REV by its ADC, but the ID EEPROM is blank: the firmware loads no overlay"
+        note "program it: sudo bash $HERE/program_hat.sh --rev $HAT_REV, then reboot" ;;
+    *) note "checking as rev $HAT_REV, the default for a board with no CANary-HAT EEPROM and no ADC that answered" ;;
 esac
 
 echo "== CAN (MCP2518FD + TCAN1042)"
@@ -130,8 +132,10 @@ if [[ "$HAT_SUPPLY_ADC" == "ads8688a" ]]; then
             else
                 bad "ADS8688A did not answer as configured (above)"
             fi
-            note "no vehicle: SUPPLY_VOLTAGE ~0 V; SENSOR_SUPPLY_VOLTAGE ~5.0 V (GPIO$HAT_SENSOR_POWER_GPIO driven high);"
-            note "nothing on the ports: PORT_V1_VOLTAGE ~0 V, PORT_R1_RESISTANCE_FAULT open; no gauge: FUEL_PRESSURE_FAULT"
+            note "no 12 V on J2: SUPPLY_VOLTAGE and SENSOR_SUPPLY_VOLTAGE both under 1 V -- U9 runs from +12V and"
+            note "GPIO$HAT_SENSOR_POWER_GPIO only enables it -- so the port faults read sensor_supply_low (first board, 2026-11-20: 0.37 V, 0.72 V)"
+            note "with 12 V: SENSOR_SUPPLY_VOLTAGE ~5.0 V; nothing on the ports: PORT_V1_VOLTAGE ~0 V, PORT_R1_RESISTANCE_FAULT open"
+            note "no gauge: FUEL_PRESSURE_FAULT"
         else
             note "no $repo/.venv: run install_pi.sh, then python -m src.collection.hat_adc_collector"
         fi

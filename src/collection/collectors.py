@@ -28,7 +28,7 @@ from src.collection.capture_profiles import CaptureProfileSources, CaptureProfil
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
 from src.collection.hat_adc_collector import Plan, collect_hat_adc_from_config
-from src.collection.hat_revision import kline_pins, resolve_hat_revision
+from src.collection.hat_revision import fitted_hat, kline_pins, power_board_conflicts
 from src.collection.imu_collector import ImuHealth, collect_imu_from_config
 from src.collection.kline_collector import KlineCollector
 from src.collection.obd_scheduler import (
@@ -311,7 +311,11 @@ def _supply_voltage_collectors(
     supply = config.hardware.supply_voltage
     if not supply.enabled:
         return []
-    revision = resolve_hat_revision(config.hardware.hat_revision)
+    revision = fitted_hat(config.hardware.hat_revision).revision
+    if revision is None:
+        # /status.hat names it; the vehicle state reads no_data without a sense.
+        log.error("hardware.supply_voltage is enabled, but no CANary-HAT was identified: off")
+        return []
     if revision.supply_adc != "ads1015":
         return []
     # Before any collector starts, so the OBD collector knows to wait for
@@ -343,7 +347,11 @@ def _hat_adc_collectors(
     supply = config.hardware.supply_voltage
     if not (hat_adc.enabled or supply.enabled):
         return []
-    revision = resolve_hat_revision(config.hardware.hat_revision)
+    revision = fitted_hat(config.hardware.hat_revision).revision
+    if revision is None:
+        if hat_adc.enabled:
+            log.error("hardware.hat_adc is enabled, but no CANary-HAT was identified: off")
+        return []
     if revision.supply_adc != "ads8688a":
         if hat_adc.enabled:
             log.error(
@@ -436,7 +444,19 @@ def _kline_collectors(config: CanaryConfig) -> list[CollectorStarter]:
         return []
     from src.paths import DIDS_YAML
 
-    pins = kline_pins(kline, resolve_hat_revision(config.hardware.hat_revision))
+    pins = kline_pins(kline, fitted_hat(config.hardware.hat_revision).revision)
+    if pins is None:
+        log.error(
+            "hardware.kline is enabled, but no CANary-HAT was identified and "
+            "hardware.kline names no enable_gpio/pullup_gpio: off"
+        )
+        return []
+    clashes = power_board_conflicts(
+        config.hardware.power_board, {"EN": pins.enable, "pull-up": pins.pullup}
+    )
+    if clashes:
+        log.error("K-line off: %s", "; ".join(clashes))
+        return []
     log.info("K-line on %s: EN GPIO%d, pull-up GPIO%d", pins.tty, pins.enable, pins.pullup)
     collector = KlineCollector(kline, config.daemon.kline_profile, DIDS_YAML, pins=pins)
 
