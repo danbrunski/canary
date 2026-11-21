@@ -76,6 +76,7 @@ from src.vehicle.tune_revisions import TuneRevisionRegistry, load_tune_revisions
 from tests.configs import isolated_config
 from tests.rom_editor_builders import AUTH, OCTET, CountingExecutor, make_app
 from tests.rom_fixtures import OPERATOR_ROMS, PROFILE, operator_image
+from tests.sim_builders import profile_flags
 from tools import rom_sim
 
 pytestmark = pytest.mark.slow
@@ -943,7 +944,7 @@ def test_the_fuel_comp_preview_says_what_a_number_can_be_given_for_and_what_bloc
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         code = rom_sim.main(
-            ["inspect", "--profile", str(PROFILE), "--edits", str(FIXTURE_SPEC)]
+            ["inspect", *profile_flags(PROFILE), "--edits", str(FIXTURE_SPEC)]
             + ["--rom-dir", str(OPERATOR_ROMS[IMAGE_KEY].parent)]
         )
     cli = json.loads(out.getvalue())

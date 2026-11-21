@@ -50,7 +50,7 @@ from src.analysis.sim_cells import ignition_timing_block
 from src.analysis.sim_contract import SimulationRefusalError
 from src.analysis.sim_montecarlo import load_sim_kit
 from tests.rom_fixtures import OPERATOR_ROMS, PROFILE, operator_image
-from tests.sim_builders import CALS, RETARD, TABLES
+from tests.sim_builders import CALS, RETARD, TABLES, profile_flags
 from tools import rom_sim
 
 RPM_AXIS = tuple(8 * (i + 1) for i in range(16))
@@ -601,9 +601,10 @@ def test_k106s_ten_trim_a_edits_move_timing_in_those_cells_and_only_with_hi_det_
 
 
 def _cli(*argv: str | Path) -> tuple[int, dict[str, Any]]:
+    """``rom_sim`` on the committed Xterra profile (``--profile`` is a slug, R30.4)."""
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        code = rom_sim.main([str(a) for a in argv])
+        code = rom_sim.main([*(str(a) for a in argv), *profile_flags(PROFILE)])
     return code, json.loads(out.getvalue())
 
 
