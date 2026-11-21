@@ -29,6 +29,7 @@ from src.collection import (
     capture_lifetime,
     capture_profiles,
     discovery,
+    hat_revision,
     private_traffic,
     queueing,
     tuning_profile,
@@ -50,6 +51,7 @@ COVERED_MODULES: frozenset[str] = frozenset(
         "capture_profile_files.py",
         "capture_profile_model.py",
         "discovery.py",
+        "hat_revision.py",
         "kline/actions.py",
         "kline/sessions.py",
         "private_traffic.py",
@@ -70,6 +72,7 @@ COVERED_GLOBALS: frozenset[tuple[str, str]] = frozenset(
         ("capture_lifetime.py", "_ledger"),
         ("capture_profile_files.py", "_SHADOW_WARNED"),
         ("discovery.py", "_remembered"),
+        ("hat_revision.py", "_fitted"),
         ("kline/actions.py", "KLINE_ACTIONS"),
         ("kline/sessions.py", "MODULE_SESSIONS"),
         ("private_traffic.py", "_dropped"),
@@ -107,6 +110,8 @@ def reset_process_state_for_tests() -> None:
     capture_generation._reset_for_tests()
     capture_profiles._reset_for_tests()
     vin_read.reset()
+    # Which HAT is fitted: a test's faked verdict must not outlive it.
+    hat_revision.forget_fitted_hat()
     # The profile-resolution record the dashboard's VIN edit rules read.
     record_resolution(None)
 

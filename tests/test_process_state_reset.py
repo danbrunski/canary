@@ -189,6 +189,9 @@ NOT_STATE: dict[tuple[str, str], str] = {
         [
             ("ads1015.py", "PGA_CODES"),
             ("ads8688a.py", "RANGES"),
+            ("hat_probe.py", "ADS1015_THRESHOLDS"),
+            ("hat_probe.py", "ADS8688A_ANSWERS"),
+            ("hat_revision.py", "POWER_BOARD_GPIOS"),
             ("custom_pids.py", "_ALLOWED_BINOPS"),
             ("custom_pids.py", "_ALLOWED_UNARYOPS"),
             ("custom_pids.py", "_ALLOWED_COMPARE"),

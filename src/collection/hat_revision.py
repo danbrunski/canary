@@ -281,7 +281,7 @@ def fitted_hat(setting: HatRevisionSetting) -> FittedHat:
 
 
 def forget_fitted_hat() -> None:
-    """Drop :func:`fitted_hat`'s verdicts (tests)."""
+    """Drop :func:`fitted_hat`'s verdicts; ``process_state`` calls it between tests."""
     with _fitted_lock:
         _fitted.clear()
 

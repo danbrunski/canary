@@ -10,10 +10,11 @@ EEPROM is answered by the board's own ADC, nothing answering means no HAT, and
 
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 import sys
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +38,6 @@ from src.collection.hat_revision import (
     HatRevisionError,
     detect_hat,
     fitted_hat,
-    forget_fitted_hat,
     hat_status,
     kline_pins,
     load_hat_revisions,
@@ -50,13 +50,6 @@ from src.paths import REPO_ROOT
 
 ROWS = load_hat_revisions()
 EXAMPLE = REPO_ROOT / "canary.example.yaml"
-
-
-@pytest.fixture(autouse=True)
-def _fresh_verdicts() -> Iterator[None]:
-    forget_fitted_hat()
-    yield
-    forget_fitted_hat()
 
 
 def _eeprom(tmp_path: Path, product: str, product_ver: str) -> Path:
@@ -218,16 +211,23 @@ def test_the_ads8688a_driver_never_writes_the_probed_registers() -> None:
 
 
 def test_the_probe_runs_on_the_standard_library_alone() -> None:
-    """hat_rev.py runs it with the Pi's system python3, before any venv."""
+    """hat_rev.py runs it with the Pi's system python3, before any venv: with
+    no site-packages (``-S``) the import must still succeed, and load only its
+    siblings."""
     code = (
-        f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r}); "
-        "import src.collection.hat_probe; "
-        "print(sorted(m for m in sys.modules if m.startswith('src')))"
+        "import json, sys; import src.collection.hat_probe; "
+        "print(json.dumps(sorted(m for m in sys.modules if m.split('.')[0] == 'src')))"
     )
     out = subprocess.run(
-        [sys.executable, "-I", "-S", "-c", code], capture_output=True, text=True, check=True
+        [sys.executable, "-S", "-E", "-c", code],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
-    assert "pydantic" not in out and "src.config" not in out
+    siblings = {"ads8688a", "hat_probe", "i2c_dev", "spi_dev"}
+    allowed = {"src", "src.collection"} | {f"src.collection.{name}" for name in siblings}
+    assert set(json.loads(out)) <= allowed
 
 
 # --------------------------------------------------------------------------
