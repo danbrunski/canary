@@ -556,11 +556,14 @@ the 38.9 V clamp.
 
 **Field reflash from the Pi.** The Pi holds GPIO27 (BOOT0) high and pulses
 GPIO24 (NRST); the MCU starts its system bootloader as an I²C target on I²C1 at
-0x56 (AN2606); the Pi writes the image (AN4221 protocol) and releases both. One
-SWD session at bring-up sets the option bytes: `nBOOT_SEL = 0` (honour the BOOT0
-pin — AN2606 "Pattern 11") and the hardware IWDG on (the bootloader refreshes
-it). During a reflash the 5 V stays on by the default-on rule, so the Pi cannot
-cut its own power by updating the supervisor.
+0x56 (AN2606); the Pi writes the image (AN4221 protocol) and releases both.
+Bring-up sets the option bytes once: `nBOOT_SEL = 0` (honour the BOOT0 pin —
+AN2606 "Pattern 11") and the hardware IWDG on (the bootloader refreshes it).
+No SWD session is needed: a blank chip starts its bootloader anyway, and a RAM
+helper loaded through it clears nBOOT_SEL
+(`hardware/canary-pwr-firmware/`, `pwr_tool.py boot-sel`; first board done
+2026-11-20, IWDG still owed). During a reflash the 5 V stays on by the
+default-on rule, so the Pi cannot cut its own power by updating the supervisor.
 
 **Wake.** A **TCAN1043H-Q1** on the CAN pass-through, TXD tied to VIO so it is
 **physically incapable of transmitting** (§13.3.5's receive-only rule, enforced
@@ -671,7 +674,9 @@ Nothing on this board changes for rev 3.0.
   runs, alarm thresholds; the bank-discharge command (§P4).
 - **Reflash tool**: drives GPIO27/GPIO24, talks the STM32 I²C bootloader
   protocol (AN4221), verifies, releases. Refuses while a capture is recording,
-  like `scripts/restart_canary.sh`.
+  like `scripts/restart_canary.sh`. **Done (2026-11-20):**
+  `hardware/canary-pwr-firmware/pwr_tool.py`, with stm32flash speaking AN4221,
+  and bring-up firmware that reports but switches nothing (its README).
 - **Pi config**: `usb_max_current_enable=1` (or `PSU_MAX_CURRENT=5000`) — no
   EEPROM sets it (§P5); `BOOT_ORDER=0xf416` once the NVMe base is fitted;
   `PCIE_PROBE=1` and `dtparam=pciex1` if the NVMe base has no HAT+ EEPROM.
